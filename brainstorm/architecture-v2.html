@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic Case Review — Architecture</title>
+<style>
+  :root {
+    --navy: #00175A;
+    --blue: #006FCF;
+    --white: #FFFFFF;
+    --gray-light: #F4F6F9;
+    --gray-text: #4A5568;
+    --gray-border: #E2E8F0;
+    --green: #1a7a4a;
+    --green-light: #e6f4ed;
+    --purple: #5B4DA8;
+    --purple-light: #EEEAF8;
+    --orange: #B45309;
+    --orange-light: #FEF3C7;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    background: #FFFFFF;
+    color: #1a1a2e;
+    min-height: 100vh;
+  }
+
+  /* ── HERO ── */
+  .hero {
+    background: var(--navy);
+    color: white;
+    padding: 36px 96px 32px;
+    position: relative;
+  }
+  .blue-stripe {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 4px;
+    background: var(--blue);
+  }
+  .hero-inner {
+    display: flex;
+    align-items: flex-start;
+    gap: 32px;
+  }
+  .amex-logo {
+    background: var(--blue);
+    padding: 6px 14px;
+    display: inline-flex;
+    flex-direction: column;
+    line-height: 1.1;
+    flex-shrink: 0;
+    margin-top: 4px;
+  }
+  .logo-american, .logo-express {
+    color: white;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .hero h1 {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    margin-bottom: 6px;
+  }
+  .hero-sub {
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.55);
+    font-weight: 600;
+  }
+
+  /* ── MAIN LAYOUT ── */
+  .page {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 48px 96px 80px;
+    background: #FFFFFF;
+  }
+
+  /* ── LEGEND ── */
+  .legend {
+    display: flex;
+    gap: 24px;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 14px 20px;
+    background: var(--gray-light);
+    border: 1px solid var(--gray-border);
+    border-radius: 2px;
+    margin-bottom: 40px;
+  }
+  .legend-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--gray-text);
+    margin-right: 4px;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 2px;
+    letter-spacing: 0.04em;
+  }
+  .badge-agent { background: #E8F0FC; color: var(--blue); border: 1px solid #b3d0f5; }
+  .badge-skill { background: var(--green-light); color: var(--green); border: 1px solid #a3d4bc; }
+  .badge-yaml  { background: var(--orange-light); color: var(--orange); border: 1px solid #e8c97a; }
+  .badge-gate  { background: #FEE2E2; color: #B91C1C; border: 1px solid #FECACA; }
+  .legend-divider { width: 1px; height: 20px; background: var(--gray-border); }
+
+  /* ── SECTION HEADERS ── */
+  .layer-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 16px;
+  }
+  .layer-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--gray-text);
+    white-space: nowrap;
+  }
+  .layer-line {
+    flex: 1;
+    height: 1px;
+    background: var(--gray-border);
+  }
+
+  /* ── LAYER SECTION ── */
+  .layer { margin-bottom: 12px; }
+
+  /* ── PILLAR LAYER ── */
+  .pillar-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-bottom: 0;
+  }
+
+  .pillar-card {
+    background: var(--white);
+    border: 1px solid var(--gray-border);
+    border-top: 3px solid var(--blue);
+    border-radius: 2px;
+    padding: 22px 22px 18px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    position: relative;
+  }
+  .pillar-card.credit  { border-top-color: var(--blue); }
+  .pillar-card.escalation { border-top-color: #C85250; }
+  .pillar-card.cbo     { border-top-color: #B45309; }
+
+  .pillar-name {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--gray-text);
+    margin-bottom: 14px;
+  }
+  .pillar-name .dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    margin-right: 7px;
+    position: relative;
+    top: -1px;
+  }
+  .dot-blue { background: var(--blue); }
+  .dot-red  { background: #C85250; }
+  .dot-amber { background: #B45309; }
+
+  .yaml-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--orange-light);
+    border: 1px solid #e8c97a;
+    border-radius: 2px;
+    padding: 3px 9px;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--orange);
+    letter-spacing: 0.06em;
+    margin-bottom: 12px;
+    font-family: 'Courier New', monospace;
+  }
+
+  .agent-block {
+    background: var(--gray-light);
+    border: 1px solid var(--gray-border);
+    border-left: 3px solid var(--blue);
+    border-radius: 2px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+  }
+  .agent-block.escalation-color { border-left-color: #C85250; }
+  .agent-block.cbo-color { border-left-color: #B45309; }
+
+  .agent-name {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--navy);
+    letter-spacing: 0.04em;
+    margin-bottom: 6px;
+  }
+  .skill-row {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+  .skill-chip {
+    background: var(--green-light);
+    border: 1px solid #a3d4bc;
+    border-radius: 2px;
+    padding: 2px 7px;
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--green);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .wiring-box {
+    margin-top: 12px;
+    padding: 8px 12px;
+    background: #EEF3FB;
+    border: 1px dashed var(--blue);
+    border-radius: 2px;
+    font-size: 10px;
+    color: var(--blue);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    line-height: 1.6;
+  }
+  .wiring-box .wiring-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--gray-text);
+    margin-bottom: 4px;
+    font-weight: 700;
+  }
+
+  /* ── CONNECTOR ── */
+  .connector {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 14px 0 12px;
+    color: var(--gray-text);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .connector-line {
+    flex: 1;
+    height: 1px;
+    border-top: 1.5px dashed var(--gray-border);
+  }
+  .connector-arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+  .arrow-shaft {
+    width: 1.5px;
+    height: 18px;
+    background: var(--blue);
+    margin: 0 auto;
+  }
+  .arrow-head {
+    width: 0; height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 7px solid var(--blue);
+    margin: 0 auto;
+  }
+
+  /* ── SPECIALIST LAYER ── */
+  .specialist-wrapper {
+    background: var(--white);
+    border: 1px solid var(--gray-border);
+    border-top: 3px solid var(--purple);
+    border-radius: 2px;
+    padding: 22px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    margin-bottom: 0;
+  }
+  .specialist-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 18px;
+    gap: 20px;
+  }
+  .specialist-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--purple);
+  }
+  .specialist-subtitle {
+    font-size: 11px;
+    color: var(--gray-text);
+    margin-top: 3px;
+    font-weight: 400;
+    line-height: 1.5;
+  }
+  .yaml-note {
+    background: var(--orange-light);
+    border: 1px solid #e8c97a;
+    border-radius: 2px;
+    padding: 10px 14px;
+    font-size: 10px;
+    color: var(--orange);
+    max-width: 360px;
+    line-height: 1.6;
+    flex-shrink: 0;
+  }
+  .yaml-note strong { color: #92400E; }
+
+  .specialist-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .specialist-card {
+    background: var(--gray-light);
+    border: 1px solid var(--gray-border);
+    border-top: 3px solid var(--purple);
+    border-radius: 2px;
+    padding: 12px 12px 10px;
+    position: relative;
+  }
+  .specialist-card-name {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--navy);
+    letter-spacing: 0.04em;
+    margin-bottom: 8px;
+  }
+  .specialist-skills {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  /* YAML diff table */
+  .yaml-diff {
+    background: var(--navy);
+    border-radius: 2px;
+    padding: 16px 20px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+  }
+  .yaml-col-header {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: rgba(255,255,255,0.45);
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid rgba(255,255,255,0.12);
+  }
+  .yaml-col-header .yaml-pillar-dot {
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    margin-right: 5px;
+    position: relative;
+    top: -1px;
+  }
+  .yaml-key { color: #79c0ff; font-size: 10px; font-family: 'Courier New', monospace; line-height: 1.9; }
+  .yaml-val { color: #a5d6a7; font-size: 10px; font-family: 'Courier New', monospace; }
+  .yaml-val-alt { color: #ffcc80; font-size: 10px; font-family: 'Courier New', monospace; }
+  .yaml-val-red { color: #ef9a9a; font-size: 10px; font-family: 'Courier New', monospace; }
+
+  .pairwise-note {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 14px;
+    background: #F0E6FF;
+    border: 1px solid #C4B5FD;
+    border-radius: 2px;
+    font-size: 10px;
+    color: var(--purple);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .pairwise-icon { font-size: 14px; }
+
+  /* ── DATA INFRA ── */
+  .data-infra {
+    background: var(--white);
+    border: 1px solid var(--gray-border);
+    border-top: 3px solid var(--green);
+    border-radius: 2px;
+    padding: 22px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  }
+  .data-infra-grid {
+    display: grid;
+    grid-template-columns: 260px auto 1fr;
+    gap: 24px;
+    align-items: start;
+  }
+  .repo-card {
+    background: var(--gray-light);
+    border: 1px solid var(--gray-border);
+    border-top: 3px solid #B91C1C;
+    border-radius: 2px;
+    padding: 14px 16px;
+  }
+  .repo-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #B91C1C;
+    margin-bottom: 10px;
+  }
+  .repo-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 7px;
+  }
+  .repo-step-num {
+    font-size: 9px;
+    font-weight: 700;
+    color: white;
+    background: #B91C1C;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .repo-step-text {
+    font-size: 10px;
+    color: var(--gray-text);
+    line-height: 1.5;
+  }
+  .repo-step-text strong { color: var(--navy); }
+
+  .arrow-horiz {
+    display: flex;
+    align-items: center;
+    color: var(--gray-text);
+    font-size: 20px;
+    padding-top: 40px;
+  }
+
+  .data-agent-pool {}
+  .data-agent-pool-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--green);
+    margin-bottom: 12px;
+  }
+  .data-agent-pool-subtitle {
+    font-size: 10px;
+    color: var(--gray-text);
+    margin-bottom: 12px;
+    line-height: 1.6;
+  }
+  .data-agents-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .da-card {
+    background: var(--gray-light);
+    border: 1px solid var(--gray-border);
+    border-top: 3px solid var(--green);
+    border-radius: 2px;
+    padding: 10px 14px;
+    min-width: 120px;
+  }
+  .da-card.ghost {
+    border-style: dashed;
+    border-top-style: dashed;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .da-name {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--navy);
+    letter-spacing: 0.04em;
+    margin-bottom: 6px;
+  }
+  .da-skills {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  /* ── FOOTER NOTE ── */
+  .footer-note {
+    margin-top: 32px;
+    padding: 16px 24px;
+    background: #EEF3FB;
+    border-left: 4px solid var(--blue);
+    border-radius: 0 2px 2px 0;
+    font-size: 11px;
+    color: var(--navy);
+    line-height: 1.7;
+  }
+  .footer-note strong { font-weight: 700; color: var(--blue); }
+
+  /* ── GLOBAL CONNECTOR ARROWS ── */
+  .big-arrow-wrapper {
+    display: flex;
+    justify-content: space-around;
+    padding: 0 40px;
+    margin: 0;
+  }
+  .big-arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .big-arrow-shaft {
+    width: 1px;
+    height: 24px;
+    background: #CBD5E0;
+  }
+  .big-arrow-head-down {
+    width: 0; height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 8px solid #CBD5E0;
+  }
+
+</style>
+</head>
+<body>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="blue-stripe"></div>
+  <div class="hero-inner">
+    <div class="amex-logo">
+      <span class="logo-american">American</span>
+      <span class="logo-express">Express</span>
+    </div>
+    <div>
+      <h1>Agentic Case Review — Architecture</h1>
+      <p class="hero-sub">Multi-Pillar · YAML-Controlled Specialists · Shared Data Infrastructure</p>
+    </div>
+  </div>
+</div>
+
+<div class="page">
+
+  <!-- LEGEND -->
+  <div class="legend">
+    <span class="legend-label">Legend</span>
+    <span class="badge badge-agent">Agent (LLM entity)</span>
+    <span class="badge badge-skill">Skill (prompt configuration)</span>
+    <span class="badge badge-yaml">YAML config (controls behavior)</span>
+    <span class="badge badge-gate">Compliance gate</span>
+    <div class="legend-divider"></div>
+    <span style="font-size:10px;color:var(--gray-text)">Each skill is a distinct prompt mode on the same agent class. YAML controls which specialists a pillar uses and how each specialist is focused.</span>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       LAYER 1 — PILLARS
+  ══════════════════════════════════════════ -->
+  <div class="layer">
+    <div class="layer-header">
+      <span class="layer-label">Pillar Layer — three independent orchestration stacks</span>
+      <div class="layer-line"></div>
+    </div>
+
+    <div class="pillar-grid">
+
+      <!-- Credit & Risk -->
+      <div class="pillar-card credit">
+        <div class="pillar-name"><span class="dot dot-blue"></span>Credit &amp; Risk</div>
+        <div class="yaml-chip">📄 credit_risk.yaml</div>
+        <div class="agent-block">
+          <div class="agent-name">Chat Agent</div>
+          <div class="skill-row">
+            <span class="skill-chip">converse</span>
+            <span class="skill-chip">stream</span>
+          </div>
+        </div>
+        <div style="text-align:center;font-size:14px;color:var(--gray-border);line-height:1">↓</div>
+        <div class="agent-block" style="margin-top:8px">
+          <div class="agent-name">Orchestrator Agent</div>
+          <div class="skill-row">
+            <span class="skill-chip">route_question</span>
+            <span class="skill-chip">summarize</span>
+            <span class="skill-chip">pairwise_review</span>
+          </div>
+        </div>
+        <div class="wiring-box">
+          <div class="wiring-label">Calls specialists (from YAML)</div>
+          Bureau · CrossBU · Modeling<br>Spend &amp; Payments · WCC
+        </div>
+      </div>
+
+      <!-- Escalation -->
+      <div class="pillar-card escalation">
+        <div class="pillar-name"><span class="dot dot-red"></span>Escalation</div>
+        <div class="yaml-chip">📄 escalation.yaml</div>
+        <div class="agent-block escalation-color" style="border-left-color:#C85250">
+          <div class="agent-name">Chat Agent</div>
+          <div class="skill-row">
+            <span class="skill-chip">converse</span>
+            <span class="skill-chip">stream</span>
+          </div>
+        </div>
+        <div style="text-align:center;font-size:14px;color:var(--gray-border);line-height:1">↓</div>
+        <div class="agent-block escalation-color" style="margin-top:8px;border-left-color:#C85250">
+          <div class="agent-name">Orchestrator Agent</div>
+          <div class="skill-row">
+            <span class="skill-chip">route_question</span>
+            <span class="skill-chip">summarize</span>
+            <span class="skill-chip">pairwise_review</span>
+          </div>
+        </div>
+        <div class="wiring-box" style="border-color:#C85250;background:#FEF2F2;color:#C85250">
+          <div class="wiring-label" style="color:var(--gray-text)">Calls specialists (from YAML)</div>
+          May overlap with other pillars<br>
+          <span style="font-size:9px;opacity:0.7">(e.g. Bureau, Spend &amp; Pmts + others)</span>
+        </div>
+      </div>
+
+      <!-- CBO -->
+      <div class="pillar-card cbo">
+        <div class="pillar-name"><span class="dot dot-amber"></span>CBO — Credit Burst Out</div>
+        <div class="yaml-chip">📄 cbo.yaml</div>
+        <div class="agent-block cbo-color" style="border-left-color:#B45309">
+          <div class="agent-name">Chat Agent</div>
+          <div class="skill-row">
+            <span class="skill-chip">converse</span>
+            <span class="skill-chip">stream</span>
+          </div>
+        </div>
+        <div style="text-align:center;font-size:14px;color:var(--gray-border);line-height:1">↓</div>
+        <div class="agent-block cbo-color" style="margin-top:8px;border-left-color:#B45309">
+          <div class="agent-name">Orchestrator Agent</div>
+          <div class="skill-row">
+            <span class="skill-chip">route_question</span>
+            <span class="skill-chip">summarize</span>
+            <span class="skill-chip">pairwise_review</span>
+          </div>
+        </div>
+        <div class="wiring-box" style="border-color:#B45309;background:#FFFBEB;color:#B45309">
+          <div class="wiring-label" style="color:var(--gray-text)">Calls specialists (from YAML)</div>
+          May share Bureau, CrossBU<br>
+          <span style="font-size:9px;opacity:0.7">(different emphasis via YAML)</span>
+        </div>
+      </div>
+
+    </div>
+  </div><!-- /pillar layer -->
+
+  <!-- CONNECTOR -->
+  <div style="text-align:center;padding:12px 0 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:var(--gray-text)">
+    ↓ &nbsp; YAML-controlled specialist selection &nbsp;·&nbsp; pillar context + emphasis injected at call time &nbsp; ↓
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       LAYER 2 — SPECIALISTS
+  ══════════════════════════════════════════ -->
+  <div class="layer">
+    <div class="layer-header">
+      <span class="layer-label">Shared Specialist Layer — same agent class, YAML-differentiated behavior per pillar</span>
+      <div class="layer-line"></div>
+    </div>
+
+    <div class="specialist-wrapper">
+
+      <div class="specialist-header">
+        <div>
+          <div class="specialist-title">Shared Specialist Pool</div>
+          <div class="specialist-subtitle">
+            Each specialist is one agent class with three prompt-mode skills.<br>
+            Which specialists run, and how they are focused, is controlled by each pillar's YAML.
+          </div>
+        </div>
+        <div class="yaml-note">
+          <strong>How YAML controls the same specialist across pillars:</strong><br>
+          The Bureau specialist runs identically in Credit&amp;Risk and CBO — but its <code style="background:rgba(0,0,0,0.07);padding:1px 4px;border-radius:2px">focus</code>, <code style="background:rgba(0,0,0,0.07);padding:1px 4px;border-radius:2px">table_scope</code>, and <code style="background:rgba(0,0,0,0.07);padding:1px 4px;border-radius:2px">prompt_overlay</code> differ. Same class, different config = different analytical emphasis.
+        </div>
+      </div>
+
+      <!-- Specialist cards -->
+      <div class="specialist-grid">
+        <div class="specialist-card">
+          <div class="specialist-card-name">Bureau</div>
+          <div class="specialist-skills">
+            <span class="skill-chip">report</span>
+            <span class="skill-chip">answer</span>
+            <span class="skill-chip">data_request</span>
+          </div>
+        </div>
+        <div class="specialist-card">
+          <div class="specialist-card-name">CrossBU</div>
+          <div class="specialist-skills">
+            <span class="skill-chip">report</span>
+            <span class="skill-chip">answer</span>
+            <span class="skill-chip">data_request</span>
+          </div>
+        </div>
+        <div class="specialist-card">
+          <div class="specialist-card-name">Modeling</div>
+          <div class="specialist-skills">
+            <span class="skill-chip">report</span>
+            <span class="skill-chip">answer</span>
+            <span class="skill-chip">data_request</span>
+          </div>
+        </div>
+        <div class="specialist-card">
+          <div class="specialist-card-name">Spend &amp; Payments</div>
+          <div class="specialist-skills">
+            <span class="skill-chip">report</span>
+            <span class="skill-chip">answer</span>
+            <span class="skill-chip">data_request</span>
+          </div>
+        </div>
+        <div class="specialist-card">
+          <div class="specialist-card-name">WCC</div>
+          <div class="specialist-skills">
+            <span class="skill-chip">report</span>
+            <span class="skill-chip">answer</span>
+            <span class="skill-chip">data_request</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- YAML diff example -->
+      <div style="margin-bottom:14px">
+        <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:var(--gray-text);margin-bottom:7px">
+          Example — same Bureau specialist, three different YAML configs:
+        </div>
+        <div class="yaml-diff">
+          <div>
+            <div class="yaml-col-header">
+              <span class="yaml-pillar-dot" style="background:var(--blue)"></span>credit_risk.yaml → bureau
+            </div>
+            <div><span class="yaml-key">focus: </span><span class="yaml-val">"delinquency risk,<br>&nbsp;&nbsp;payment history"</span></div>
+            <div><span class="yaml-key">table_scope: </span><span class="yaml-val">["bureau_full"]</span></div>
+            <div><span class="yaml-key">prompt_overlay: </span><span class="yaml-val">"flag any 90d+<br>&nbsp;&nbsp;derogatory marks"</span></div>
+          </div>
+          <div>
+            <div class="yaml-col-header">
+              <span class="yaml-pillar-dot" style="background:#C85250"></span>escalation.yaml → bureau
+            </div>
+            <div><span class="yaml-key">focus: </span><span class="yaml-val-alt">"creditworthiness<br>&nbsp;&nbsp;summary only"</span></div>
+            <div><span class="yaml-key">table_scope: </span><span class="yaml-val-alt">["bureau_summary"]</span></div>
+            <div><span class="yaml-key">prompt_overlay: </span><span class="yaml-val-alt">"brief — escalation<br>&nbsp;&nbsp;reviewer context"</span></div>
+          </div>
+          <div>
+            <div class="yaml-col-header">
+              <span class="yaml-pillar-dot" style="background:#B45309"></span>cbo.yaml → bureau
+            </div>
+            <div><span class="yaml-key">focus: </span><span class="yaml-val-red">"credit limit<br>&nbsp;&nbsp;utilisation trends"</span></div>
+            <div><span class="yaml-key">table_scope: </span><span class="yaml-val-red">["bureau_full",<br>&nbsp;&nbsp;"bureau_trades"]</span></div>
+            <div><span class="yaml-key">prompt_overlay: </span><span class="yaml-val-red">"burst risk signals,<br>&nbsp;&nbsp;limit exposure"</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pairwise review note -->
+      <div class="pairwise-note">
+        <span class="pairwise-icon">⇄</span>
+        <span><strong>Pairwise review pass</strong> — after all specialists generate their first-pass output, each specialist receives a peer's section and flags contradictions or evidence gaps before synthesis.</span>
+      </div>
+
+    </div>
+  </div><!-- /specialist layer -->
+
+  <!-- CONNECTOR -->
+  <div style="text-align:center;padding:12px 0 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:var(--gray-text)">
+    ↓ &nbsp; data_request skill calls &nbsp; ↓
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       LAYER 3 — DATA INFRASTRUCTURE
+  ══════════════════════════════════════════ -->
+  <div class="layer">
+    <div class="layer-header">
+      <span class="layer-label">Data Infrastructure — shared across all pillars</span>
+      <div class="layer-line"></div>
+    </div>
+
+    <div class="data-infra">
+      <div class="data-infra-grid">
+
+        <!-- Repo Agent -->
+        <div class="repo-card">
+          <div class="repo-title">⚠ Repository Agent — Gatekeeper</div>
+          <div class="repo-step">
+            <div class="repo-step-num">1</div>
+            <div class="repo-step-text"><strong>Schema lookup</strong> — returns available tables &amp; columns for this pillar's access level</div>
+          </div>
+          <div class="repo-step">
+            <div class="repo-step-num">2</div>
+            <div class="repo-step-text"><strong>Access gating</strong> — validates request against pillar + user role permissions</div>
+          </div>
+          <div class="repo-step">
+            <div class="repo-step-num" style="background:#B91C1C">3</div>
+            <div class="repo-step-text"><strong style="color:#B91C1C">Compliance check</strong> — logs request, applies regulatory constraints</div>
+          </div>
+          <div class="repo-step">
+            <div class="repo-step-num">4</div>
+            <div class="repo-step-text"><strong>Redaction</strong> — strips PII and sensitive fields before forwarding</div>
+          </div>
+          <div style="margin-top:10px" class="skill-row">
+            <span class="skill-chip">schema_lookup</span>
+            <span class="skill-chip">validate_request</span>
+            <span class="skill-chip">redact_fields</span>
+          </div>
+        </div>
+
+        <!-- Arrow -->
+        <div class="arrow-horiz">→</div>
+
+        <!-- Data Agent Pool -->
+        <div class="data-agent-pool">
+          <div class="data-agent-pool-title">Data Agent Pool — general-purpose, stateless</div>
+          <div class="data-agent-pool-subtitle">
+            Each data agent is identical: it receives a validated, redacted data request from the repo agent and executes it.<br>
+            The repo agent routes across the pool. Multiple agents run in parallel for concurrent specialist requests.<br>
+            <strong style="color:var(--navy)">Pillar-awareness lives in the YAML config</strong>, not in the data agents themselves.
+          </div>
+          <div class="data-agents-row">
+            <div class="da-card">
+              <div class="da-name">Data Agent A</div>
+              <div class="da-skills">
+                <span class="skill-chip">codegen</span>
+                <span class="skill-chip">execute</span>
+                <span class="skill-chip">retrieve</span>
+                <span class="skill-chip">analyze</span>
+              </div>
+            </div>
+            <div class="da-card">
+              <div class="da-name">Data Agent B</div>
+              <div class="da-skills">
+                <span class="skill-chip">codegen</span>
+                <span class="skill-chip">execute</span>
+                <span class="skill-chip">retrieve</span>
+                <span class="skill-chip">analyze</span>
+              </div>
+            </div>
+            <div class="da-card">
+              <div class="da-name">Data Agent C</div>
+              <div class="da-skills">
+                <span class="skill-chip">codegen</span>
+                <span class="skill-chip">execute</span>
+                <span class="skill-chip">retrieve</span>
+                <span class="skill-chip">analyze</span>
+              </div>
+            </div>
+            <div class="da-card ghost">
+              <span style="font-size:10px;color:#CBD5E0;text-align:center">+ scale as<br>needed</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div><!-- /data infra layer -->
+
+  <!-- FOOTER NOTE -->
+  <div class="footer-note">
+    <strong>YAML is the single control plane.</strong>
+    A pillar config declares which specialists to call, their analytical focus, table scope, and prompt overlays.
+    Adding a new pillar = one new YAML file. Changing how Bureau analyses a case for CBO vs Credit &amp; Risk = edit a YAML field.
+    No Python changes required. The specialist agent class, orchestrator agent class, and data agents are all reusable as-is.
+  </div>
+
+</div><!-- /page -->
+</body>
+</html>

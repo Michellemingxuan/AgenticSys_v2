@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Case Review — Intelligent Analysis Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Helvetica+Neue:wght@300;400;500;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy:        #00175A;
+    --blue:        #006FCF;
+    --blue-hover:  #0059A8;
+    --blue-light:  #EBF4FB;
+    --blue-pale:   #F5F9FE;
+    --blue-mid:    #B3D4EF;
+    --white:       #FFFFFF;
+    --gray-100:    #F7F8FA;
+    --gray-200:    #EAECEF;
+    --gray-300:    #D0D5DC;
+    --gray-500:    #6B7480;
+    --gray-700:    #3D4550;
+    --black:       #1A1A1A;
+    --green:       #007A5E;
+    --green-light: #EAF5F1;
+    --green-border:#8FCBBE;
+    --amber:       #A85800;
+    --amber-light: #FEF3E2;
+    --amber-border:#E8B97A;
+    --shadow-sm:   0 1px 4px rgba(0,23,90,0.08), 0 0 1px rgba(0,23,90,0.04);
+    --shadow-md:   0 4px 16px rgba(0,23,90,0.10), 0 1px 4px rgba(0,23,90,0.06);
+    --sans:        'DM Sans', 'Helvetica Neue', Arial, sans-serif;
+    --mono:        'DM Mono', 'Courier New', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--gray-100);
+    color: var(--black);
+    font-family: var(--sans);
+    font-size: 20px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ─── TOP BAR (AmEx blue stripe) ─────────────────────── */
+  .top-bar {
+    background: var(--blue);
+    height: 4px;
+    width: 100%;
+  }
+
+  /* ─── NAV ─────────────────────────────────────────────── */
+  nav {
+    background: var(--navy);
+    padding: 0 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 60px;
+  }
+
+  .nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .amex-logo {
+    width: 64px;
+    height: 44px;
+    background: var(--blue);
+    border-radius: 5px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    padding: 5px 7px;
+    gap: 1px;
+  }
+
+  .amex-logo-text-top {
+    font-family: var(--sans);
+    font-size: 7.5px;
+    font-weight: 700;
+    color: white;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .amex-logo-text-bottom {
+    font-family: var(--sans);
+    font-size: 7.5px;
+    font-weight: 700;
+    color: white;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .nav-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--white);
+    letter-spacing: 0.01em;
+  }
+
+  .nav-subtitle {
+    font-size: 12px;
+    color: rgba(255,255,255,0.5);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+
+  .nav-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .nav-pill {
+    font-size: 11px;
+    font-family: var(--mono);
+    color: rgba(255,255,255,0.5);
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    padding: 4px 10px;
+    border-radius: 20px;
+    letter-spacing: 0.04em;
+  }
+
+  .nav-pill.active {
+    color: rgba(255,255,255,0.9);
+    background: rgba(0,111,207,0.4);
+    border-color: rgba(0,111,207,0.6);
+  }
+
+  /* ─── HERO ────────────────────────────────────────────── */
+  .hero {
+    background: var(--navy);
+    padding: 22px 96px 26px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    width: 45%;
+    background: linear-gradient(135deg, transparent 30%, rgba(0,111,207,0.18) 100%);
+    pointer-events: none;
+  }
+
+  .hero-eyebrow {
+    font-size: 13px;
+    font-family: var(--mono);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--blue);
+    margin-bottom: 8px;
+    background: rgba(0,111,207,0.15);
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 3px;
+    border: 1px solid rgba(0,111,207,0.3);
+  }
+
+  .hero h1 {
+    font-size: 48px;
+    font-weight: 700;
+    color: var(--white);
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    max-width: 900px;
+    margin-bottom: 8px;
+  }
+
+  .hero h1 span {
+    color: #7DC4F5;
+    font-weight: 300;
+    display: inline;
+    font-size: 48px;
+  }
+
+  .hero-meta {
+    display: flex;
+    gap: 32px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+  }
+
+  .hero-meta-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 16px;
+    color: rgba(255,255,255,0.6);
+  }
+
+  .hero-meta-item::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    background: var(--blue);
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ─── MODE TABS ───────────────────────────────────────── */
+  .tabs-bar {
+    background: var(--white);
+    border-bottom: 1px solid var(--gray-200);
+    padding: 0 96px;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .tab-btn {
+    padding: 14px 32px;
+    border: none;
+    background: transparent;
+    font-family: var(--sans);
+    font-size: 18px;
+    font-weight: 500;
+    color: var(--gray-500);
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -1px;
+    transition: color 0.15s, border-color 0.15s;
+    letter-spacing: 0.005em;
+  }
+
+  .tab-btn:hover { color: var(--blue); }
+
+  .tab-btn.active {
+    color: var(--blue);
+    border-bottom-color: var(--blue);
+    font-weight: 600;
+  }
+
+  .tabs-desc {
+    margin-left: auto;
+    font-size: 15px;
+    color: var(--gray-500);
+    font-style: italic;
+    padding: 0 0 0 16px;
+  }
+
+  /* ─── PAGE BODY ───────────────────────────────────────── */
+  .page-body {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 20px 96px 52px;
+  }
+
+  /* ─── SECTION LABEL ───────────────────────────────────── */
+  .section-label {
+    font-size: 14px;
+    font-family: var(--mono);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--gray-500);
+    margin: 18px 0 8px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .section-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--gray-200);
+  }
+
+  .section-label:first-child { margin-top: 0; }
+
+  /* ─── CARD ────────────────────────────────────────────── */
+  .card {
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: 10px;
+    padding: 14px 22px;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .card-title {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--black);
+    margin-bottom: 5px;
+  }
+
+  .card-desc {
+    font-size: 17px;
+    color: var(--gray-500);
+    line-height: 1.6;
+  }
+
+  .card.card-blue {
+    border-color: var(--blue-mid);
+    background: var(--blue-pale);
+  }
+
+  .card.card-navy {
+    background: var(--navy);
+    border-color: var(--navy);
+    color: var(--white);
+  }
+
+  .card.card-navy .card-title { color: var(--white); }
+  .card.card-navy .card-desc  { color: rgba(255,255,255,0.65); }
+
+  .card.card-green {
+    border-color: var(--green-border);
+    background: var(--green-light);
+  }
+
+  /* ─── BADGE ───────────────────────────────────────────── */
+  .badge {
+    display: inline-block;
+    font-size: 13px;
+    font-family: var(--mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 4px 12px;
+    border-radius: 4px;
+    margin-top: 8px;
+  }
+
+  .badge-blue   { background: var(--blue-light); color: var(--blue);   border: 1px solid var(--blue-mid); }
+  .badge-green  { background: var(--green-light); color: var(--green); border: 1px solid var(--green-border); }
+  .badge-amber  { background: var(--amber-light); color: var(--amber); border: 1px solid var(--amber-border); }
+  .badge-gray   { background: var(--gray-100);   color: var(--gray-500); border: 1px solid var(--gray-300); }
+  .badge-navy   { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.8); border: 1px solid rgba(255,255,255,0.2); }
+
+  /* ─── TABLE CHIP ──────────────────────────────────────── */
+  .chip {
+    display: inline-block;
+    font-size: 14px;
+    font-family: var(--mono);
+    padding: 4px 11px;
+    border-radius: 4px;
+    background: var(--blue-light);
+    border: 1px solid var(--blue-mid);
+    color: var(--blue);
+    margin: 2px;
+    letter-spacing: 0.02em;
+  }
+
+  /* ─── ARROW ───────────────────────────────────────────── */
+  .arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2px 0;
+    gap: 0;
+  }
+
+  .arrow-line {
+    width: 1.5px;
+    height: 10px;
+    background: var(--gray-300);
+  }
+
+  .arrow-head {
+    width: 0; height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 8px solid var(--blue);
+  }
+
+  /* ─── AGENT GRID ──────────────────────────────────────── */
+  .agent-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 18px;
+  }
+
+  .agent-card {
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    padding: 12px 16px;
+    box-shadow: var(--shadow-sm);
+    border-top: 3px solid var(--blue);
+  }
+
+  .agent-card-title {
+    font-size: 19px;
+    font-weight: 600;
+    color: var(--black);
+    margin-bottom: 4px;
+  }
+
+  .agent-card-desc {
+    font-size: 15px;
+    color: var(--gray-500);
+    line-height: 1.5;
+    margin-bottom: 6px;
+  }
+
+  .agent-tables {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    margin-top: 6px;
+  }
+
+  .agent-table-chip {
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 3px 8px;
+    background: var(--gray-100);
+    border: 1px solid var(--gray-200);
+    border-radius: 3px;
+    color: var(--gray-700);
+  }
+
+  /* ─── WRAPPER ─────────────────────────────────────────── */
+  .wrapper {
+    border: 1.5px dashed var(--blue-mid);
+    border-radius: 10px;
+    padding: 14px 16px 12px;
+    background: var(--blue-pale);
+    position: relative;
+  }
+
+  .wrapper-label {
+    position: absolute;
+    top: -12px;
+    left: 16px;
+    background: var(--blue-pale);
+    padding: 2px 10px;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--blue);
+    border: 1px solid var(--blue-mid);
+    border-radius: 3px;
+  }
+
+  /* ─── PROMPT SPLIT ────────────────────────────────────── */
+  .prompt-box {
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-top: 14px;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .prompt-box-header {
+    background: var(--navy);
+    padding: 9px 18px;
+    font-family: var(--mono);
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.7);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .prompt-box-header span { color: var(--blue); }
+
+  .prompt-cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .prompt-col {
+    padding: 12px 18px;
+    font-size: 16px;
+    color: var(--gray-700);
+    line-height: 1.6;
+  }
+
+  .prompt-col:first-child {
+    border-right: 1px solid var(--gray-200);
+    background: var(--blue-pale);
+  }
+
+  .prompt-col-label {
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+
+  .shared-col-label { color: var(--blue); }
+  .mode-col-label   { color: var(--amber); }
+
+  /* ─── ROUTING GRID ────────────────────────────────────── */
+  .routing-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+  }
+
+  .route-card {
+    border-radius: 10px;
+    padding: 14px 20px;
+    border: 1.5px solid;
+  }
+
+  .route-card-green {
+    background: var(--green-light);
+    border-color: var(--green-border);
+  }
+
+  .route-card-amber {
+    background: var(--amber-light);
+    border-color: var(--amber-border);
+  }
+
+  .route-header {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .route-card-green .route-header  { color: var(--green);  border-color: var(--green-border); }
+  .route-card-amber .route-header  { color: var(--amber);  border-color: var(--amber-border); }
+
+  .route-body {
+    font-size: 17px;
+    color: var(--gray-700);
+    line-height: 1.6;
+    margin-bottom: 10px;
+  }
+
+  .route-steps {
+    font-family: var(--mono);
+    font-size: 15px;
+    color: var(--gray-500);
+    line-height: 2;
+    padding-left: 4px;
+  }
+
+  /* ─── DECISION CARD ───────────────────────────────────── */
+  .decision-card {
+    background: var(--white);
+    border: 2px solid var(--blue);
+    border-radius: 10px;
+    padding: 16px 28px;
+    max-width: 860px;
+    margin: 0 auto;
+    box-shadow: var(--shadow-md);
+    text-align: center;
+  }
+
+  .decision-card .card-title { color: var(--navy); font-size: 22px; }
+
+  .decision-question {
+    font-size: 18px;
+    color: var(--gray-700);
+    font-style: italic;
+    margin: 10px 0 12px;
+    line-height: 1.55;
+    border-left: 3px solid var(--blue);
+    text-align: left;
+    padding: 10px 16px;
+    background: var(--blue-pale);
+    border-radius: 0 6px 6px 0;
+  }
+
+  .decision-tags {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 10px;
+  }
+
+  /* ─── SYNTHESIS CARD ──────────────────────────────────── */
+  .synthesis-card {
+    background: var(--navy);
+    border-radius: 10px;
+    padding: 14px 24px;
+    display: flex;
+    align-items: flex-start;
+    gap: 18px;
+    max-width: 860px;
+    margin: 0 auto;
+    box-shadow: var(--shadow-md);
+  }
+
+  .synthesis-icon {
+    width: 40px;
+    height: 40px;
+    background: var(--blue);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+
+  .synthesis-title {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--white);
+    margin-bottom: 4px;
+  }
+
+  .synthesis-desc {
+    font-size: 17px;
+    color: rgba(255,255,255,0.6);
+    line-height: 1.6;
+  }
+
+  /* ─── CENTERED WRAPPER ────────────────────────────────── */
+  .center { display: flex; flex-direction: column; align-items: center; }
+
+  /* ─── FOOTER ──────────────────────────────────────────── */
+  footer {
+    background: var(--navy);
+    padding: 14px 96px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .footer-left {
+    font-size: 13px;
+    color: rgba(255,255,255,0.45);
+    font-family: var(--mono);
+    line-height: 2;
+    letter-spacing: 0.02em;
+  }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    background: rgba(0,122,94,0.25);
+    border: 1px solid rgba(143,203,190,0.4);
+    color: #7DCFB8;
+    font-size: 13px;
+    font-family: var(--mono);
+    padding: 6px 16px;
+    border-radius: 20px;
+    letter-spacing: 0.04em;
+  }
+
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    background: #7DCFB8;
+    border-radius: 50%;
+    animation: pulse 2.2s ease infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.4; }
+  }
+
+  /* ─── TRANSITION ──────────────────────────────────────── */
+  .mode-panel {
+    animation: fade-in 0.25s ease;
+  }
+
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+</style>
+</head>
+<body>
+
+<!-- AMEX BLUE TOP STRIPE -->
+<div class="top-bar"></div>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-eyebrow">Agentic System · Architecture Overview</div>
+  <h1>Case Review <span> Intelligent Analysis Pipeline</span></h1>
+  <div class="hero-meta">
+    <div class="hero-meta-item">Credit Risk — Commercial Pillar</div>
+    <div class="hero-meta-item">Dual Mode: Report Generation + Q&amp;A</div>
+    <div class="hero-meta-item">5 Section Agents · Parallel Execution</div>
+    <div class="hero-meta-item">Chat Agent · Orchestrator · Synthesis</div>
+  </div>
+</div>
+
+<!-- MODE TABS -->
+<div class="tabs-bar">
+  <button class="tab-btn active" id="btn-report" onclick="switchMode('report')">Report Generation</button>
+  <button class="tab-btn" id="btn-qa" onclick="switchMode('qa')">Q&amp;A / Reviewer</button>
+  <span class="tabs-desc" id="tabs-desc">Parallel Agents Generate Each Section; Synthesis Agent Combines Into Full Case Summary</span>
+</div>
+
+<!-- PAGE BODY -->
+<div class="page-body">
+
+  <!-- ══════════════════════════════════════════════════
+       REPORT GENERATION MODE
+  ══════════════════════════════════════════════════ -->
+  <div id="mode-report" class="mode-panel">
+
+    <div class="section-label">Input</div>
+    <div class="card card-blue center" style="max-width:860px; margin:0 auto;">
+      <div class="card-title">Commercial Case</div>
+      <div class="card-desc">Structured Data Tables Per Case Entity — Accessed Via Pillar Config (YAML) and Redaction Layer</div>
+      <div style="margin-top:12px; display:flex; flex-wrap:wrap; gap:4px;">
+        <span class="chip">bureau_data</span>
+        <span class="chip">crossbu_merchants_data</span>
+        <span class="chip">crossbu_cards_data</span>
+        <span class="chip">score_drivers_data</span>
+        <span class="chip">modeling_data</span>
+        <span class="chip">payment_returns</span>
+        <span class="chip">payment_success</span>
+        <span class="chip">spends_data</span>
+        <span class="chip">wcc_data</span>
+      </div>
+    </div>
+
+    <div class="center"><div class="arrow"><div class="arrow-line"></div><div class="arrow-head"></div></div></div>
+
+    <div class="section-label">Section Agents <span style="font-family:var(--sans); letter-spacing:0; text-transform:none; font-weight:400; color:var(--blue);"> — Run in Parallel</span></div>
+
+    <div class="wrapper">
+      <div class="wrapper-label">Wave 1 — Parallel Execution</div>
+      <div class="agent-grid">
+
+        <div class="agent-card">
+          <div class="agent-card-title">Bureau</div>
+          <div class="agent-card-desc">Credit Bureau Profile, Scores, and History</div>
+          <div class="agent-tables">
+            <span class="agent-table-chip">bureau_data</span>
+          </div>
+        </div>
+
+        <div class="agent-card">
+          <div class="agent-card-title">Cross-BU</div>
+          <div class="agent-card-desc">Merchant &amp; Card Relationships Across Business Units</div>
+          <div class="agent-tables">
+            <span class="agent-table-chip">crossbu_merchants</span>
+            <span class="agent-table-chip">crossbu_cards</span>
+          </div>
+        </div>
+
+        <div class="agent-card">
+          <div class="agent-card-title">Modeling</div>
+          <div class="agent-card-desc">CDSS / TSR Score Drivers and Model Variables</div>
+          <div class="agent-tables">
+            <span class="agent-table-chip">score_drivers</span>
+            <span class="agent-table-chip">modeling_data</span>
+          </div>
+        </div>
+
+        <div class="agent-card">
+          <div class="agent-card-title">Spend &amp; Payments</div>
+          <div class="agent-card-desc">Spend Patterns, Return Rates, Payment Behaviour</div>
+          <div class="agent-tables">
+            <span class="agent-table-chip">payment_returns</span>
+            <span class="agent-table-chip">payment_success</span>
+            <span class="agent-table-chip">spends_data</span>
+          </div>
+        </div>
+
+        <div class="agent-card">
+          <div class="agent-card-title">WCC</div>
+          <div class="agent-card-desc">Working Capital &amp; Credit Utilisation</div>
+          <div class="agent-tables">
+            <span class="agent-table-chip">wcc_data</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- PROMPT ARCHITECTURE -->
+      <div class="prompt-box">
+        <div class="prompt-box-header"><span>⊕</span> Prompt Architecture — Each Section Agent</div>
+        <div class="prompt-cols">
+          <div class="prompt-col">
+            <div class="prompt-col-label shared-col-label">Shared Kernel</div>
+            Role Definition · Data Tables &amp; Schema · Output Format · Compliance Rules · Redaction Scope
+          </div>
+          <div class="prompt-col">
+            <div class="prompt-col-label mode-col-label">Report Mode Layer</div>
+            Generate Section Narrative. Structure: Key Findings → Evidence → Risk Implication.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="center"><div class="arrow"><div class="arrow-line"></div><div class="arrow-head"></div></div></div>
+
+    <div class="section-label">Synthesis</div>
+    <div class="synthesis-card">
+      <div class="synthesis-icon">◈</div>
+      <div>
+        <div class="synthesis-title">Synthesis Agent</div>
+        <div class="synthesis-desc">Combines All Section Outputs Into a Coherent, Non-Redundant Case Summary. Resolves Contradictions, Surfaces Cross-Section Risk Signals, and Writes the Executive Narrative.</div>
+      </div>
+    </div>
+
+    <div class="center"><div class="arrow"><div class="arrow-line"></div><div class="arrow-head"></div></div></div>
+
+    <div class="section-label">Output</div>
+    <div class="card card-green center" style="max-width:860px; margin:0 auto;">
+      <div class="card-title" style="color:var(--green);">Static Case Report</div>
+      <div class="card-desc">Full Structured Report — Persisted and Injected as Context for Q&amp;A Mode</div>
+      <span class="badge badge-green">Persisted · Reviewer Handoff · Reused in Q&amp;A</span>
+    </div>
+
+  </div><!-- end mode-report -->
+
+
+  <!-- ══════════════════════════════════════════════════
+       Q&A MODE
+  ══════════════════════════════════════════════════ -->
+  <div id="mode-qa" class="mode-panel" style="display:none;">
+
+    <div class="section-label">Interface</div>
+    <div class="card card-blue center" style="max-width:860px; margin:0 auto;">
+      <div class="card-title">Chat Agent</div>
+      <div class="card-desc">Manages the Reviewer Conversation: Receives Questions, Maintains Context, Formats and Streams Final Answers. Delegates Analysis to the Orchestrator.</div>
+      <span class="badge badge-blue">Conversational Layer</span>
+    </div>
+
+    <div class="center"><div class="arrow"><div class="arrow-line"></div><div class="arrow-head"></div></div></div>
+
+    <div class="section-label">Orchestrator</div>
+    <div class="decision-card">
+      <div class="card-title">Orchestrator Agent</div>
+      <div class="decision-question">
+        "Can the Static Report Sections — Possibly Combined — Fully Answer This Question?"
+      </div>
+      <div class="card-desc">Analyses the Question Against the Pre-Generated Report. Decides Whether Synthesis From Report Sections Is Sufficient, or Whether Fresh Agent Analysis Is Needed for Gaps.</div>
+      <div class="decision-tags">
+        <span class="badge badge-green">Report Sections Sufficient</span>
+        <span class="badge badge-amber">Agents Needed for Gaps</span>
+      </div>
+    </div>
+
+    <div class="center"><div class="arrow"><div class="arrow-line"></div><div class="arrow-head"></div></div></div>
+
+    <div class="section-label">Routing — Two Paths</div>
+    <div class="routing-grid">
+
+      <div class="route-card route-card-green">
+        <div class="route-header">✓ &nbsp;Report Sections Cover It</div>
+        <div class="route-body">The Static Report Already Contains the Relevant Information Across One or More Sections.</div>
+        <div class="route-steps">
+          → No Section Agents Invoked<br>
+          → Synthesis Agent Draws From Report Sections<br>
+          → Produces a Focused, Grounded Answer
+        </div>
+        <span class="badge badge-green" style="margin-top:14px;">Fast Path · No Extra LLM Calls</span>
+      </div>
+
+      <div class="route-card route-card-amber">
+        <div class="route-header">→ &nbsp;Gaps Require Fresh Analysis</div>
+        <div class="route-body">Parts of the Question Go Beyond What Is Covered in the Static Report.</div>
+        <div class="route-steps">
+          → Orchestrator Decomposes Into Sub-Questions<br>
+          → Routes Each Sub-Question to Relevant Agent(s)<br>
+          → Section Agents Run in Parallel
+        </div>
+
+        <div class="prompt-box" style="margin-top:14px;">
+          <div class="prompt-box-header" style="background:#5c3a0f20; color:var(--amber); border-bottom:1px solid var(--amber-border);">
+            <span style="color:var(--amber);">⊕</span> Agent Prompt in Q&amp;A Mode
+          </div>
+          <div class="prompt-cols">
+            <div class="prompt-col" style="background:var(--blue-pale);">
+              <div class="prompt-col-label shared-col-label">Shared Kernel</div>
+              Same Role, Data Schema, Compliance Rules as Report Mode
+            </div>
+            <div class="prompt-col">
+              <div class="prompt-col-label mode-col-label">Q&amp;A Mode Layer</div>
+              Sub-Question: <em>[text]</em>. Answer Concisely With Evidence From Data Tables.
+            </div>
+          </div>
+        </div>
+        <span class="badge badge-amber" style="margin-top:14px;">Parallel · Targeted · Grounded</span>
+      </div>
+
+    </div>
+
+    <div class="section-label">Synthesis — Both Paths Converge Here</div>
+    <div class="synthesis-card">
+      <div class="synthesis-icon">◈</div>
+      <div>
+        <div class="synthesis-title">Synthesis Agent</div>
+        <div class="synthesis-desc">Intelligently Merges Relevant Report Sections + Fresh Agent Answers (If Invoked). Not a Concatenation — Resolves Overlaps, Weights Evidence, Produces a Single Coherent Answer Grounded in Case Data.</div>
+      </div>
+    </div>
+
+    <div class="center"><div class="arrow"><div class="arrow-line"></div><div class="arrow-head"></div></div></div>
+
+    <div class="section-label">Output</div>
+    <div class="card card-green center" style="max-width:860px; margin:0 auto;">
+      <div class="card-title" style="color:var(--green);">Answer to Reviewer</div>
+      <div class="card-desc">Grounded Response Referencing Specific Data Tables and Report Sections. Streamed Back Through the Chat Agent.</div>
+      <span class="badge badge-green">Streamed · Cited · Reviewer-Ready</span>
+    </div>
+
+  </div><!-- end mode-qa -->
+
+</div><!-- end page-body -->
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-left">
+    <div>Credit Risk — Commercial Pillar · POC Scope</div>
+    <div>Gateways: LLM · Data · Pillar Config (YAML) · Redaction · Result Cache</div>
+  </div>
+  <span class="status-badge"><span class="status-dot"></span>POC In Progress</span>
+</footer>
+
+<script>
+  function switchMode(mode) {
+    const report = document.getElementById('mode-report');
+    const qa     = document.getElementById('mode-qa');
+    const btnR   = document.getElementById('btn-report');
+    const btnQ   = document.getElementById('btn-qa');
+    const desc   = document.getElementById('tabs-desc');
+
+    if (mode === 'report') {
+      report.style.display = 'block';
+      qa.style.display     = 'none';
+      btnR.classList.add('active');    btnQ.classList.remove('active');
+      desc.textContent = 'Parallel Agents Generate Each Section; Synthesis Agent Combines Into Full Case Summary';
+    } else {
+      report.style.display = 'none';
+      qa.style.display     = 'block';
+      btnQ.classList.add('active');    btnR.classList.remove('active');
+      desc.textContent = 'Reviewer Questions Routed Through Orchestrator — Static Report or Fresh Agents, Always Synthesised';
+    }
+  }
+</script>
+</body>
+</html>

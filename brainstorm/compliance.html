@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic Case Review — Compliance &amp; Data Gating</title>
+<style>
+:root {
+  --navy: #00175A; --blue: #006FCF; --white: #FFFFFF;
+  --gray-light: #F4F6F9; --gray-text: #4A5568; --gray-border: #E2E8F0;
+  --green: #166534; --green-bg: #DCFCE7; --green-border: #86EFAC;
+  --purple: #4C1D95; --purple-bg: #EDE9FE; --purple-border: #A78BFA;
+  --red: #991B1B; --red-bg: #FEE2E2; --red-border: #FCA5A5;
+  --amber: #92400E; --amber-bg: #FEF3C7; --amber-border: #FCD34D;
+  --slate: #334155;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #fff; color: var(--navy); }
+
+/* HERO */
+.hero { background:var(--navy);color:white;padding:26px 80px 22px;position:relative; }
+.blue-stripe { position:absolute;top:0;left:0;right:0;height:4px;background:var(--blue); }
+.hero-row { display:flex;align-items:center;gap:28px; }
+.amex-logo { background:var(--blue);padding:6px 12px;display:inline-flex;flex-direction:column;line-height:1.1;flex-shrink:0; }
+.logo-american,.logo-express { color:white;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase; }
+.hero h1 { font-family:Georgia,serif;font-size:26px;font-weight:700;letter-spacing:-0.01em; }
+.hero-sub { font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.5);font-weight:600;margin-top:4px; }
+
+/* PAGE */
+.page { max-width:1400px;margin:0 auto;padding:28px 80px 52px; }
+
+/* SECTION */
+.section { margin-bottom:28px; }
+.section-title { font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;color:var(--gray-text);margin-bottom:12px;display:flex;align-items:center;gap:12px; }
+.section-line { flex:1;height:1px;background:var(--gray-border); }
+
+/* TAGS */
+.tag { display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:2px;letter-spacing:0.02em;white-space:nowrap; }
+.tag-red  { background:var(--red-bg);color:var(--red);border:1px solid var(--red-border); }
+.tag-amber { background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border); }
+.tag-green { background:var(--green-bg);color:var(--green);border:1px solid var(--green-border); }
+.tag-blue  { background:#DBEAFE;color:var(--blue);border:1px solid #93C5FD; }
+
+/* INTRO */
+.intro-card { border:1px solid var(--red-border);border-top:3px solid var(--red);border-radius:2px;padding:20px 24px;background:white;margin-bottom:24px; }
+.intro-card h2 { font-family:Georgia,serif;font-size:20px;color:var(--navy);margin-bottom:8px; }
+.intro-card p { font-size:13px;color:var(--gray-text);line-height:1.6; }
+.intro-card strong { color:var(--navy); }
+
+/* DEFENSE-IN-DEPTH FLOW */
+.depth-flow { display:flex;flex-direction:column;gap:0; }
+.depth-layer { display:grid;grid-template-columns:140px 1fr 220px;gap:20px;align-items:start;padding:18px 20px;border:1px solid var(--gray-border);border-radius:2px;background:white; }
+.depth-layer.l1 { border-left:4px solid var(--blue); }
+.depth-layer.l2 { border-left:4px solid var(--purple); }
+.depth-layer.l3-repo { border-left:4px solid var(--red); }
+.depth-layer.l3-data { border-left:4px solid var(--green); }
+.dl-where { font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--gray-text);line-height:1.4; }
+.dl-where-agent { font-size:12px;font-weight:700;color:var(--navy);margin-top:3px; }
+.dl-what { font-size:12px;color:var(--slate);line-height:1.6; }
+.dl-what strong { color:var(--navy); }
+.dl-what code { background:var(--amber-bg);padding:1px 5px;border-radius:2px;font-family:'Courier New',monospace;font-size:11px;color:var(--amber);font-weight:600; }
+.dl-yaml { background:var(--gray-light);border:1px solid var(--gray-border);border-radius:2px;padding:10px 12px; }
+.dl-yaml-title { font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--gray-text);margin-bottom:6px; }
+.dl-yaml-line { font-family:'Courier New',monospace;font-size:10px;line-height:1.8; }
+.dl-yaml-key { color:#79c0ff; }
+.dl-yaml-val { color:var(--red); }
+.dl-yaml-val-g { color:var(--green); }
+.depth-arrow { text-align:center;font-size:16px;color:var(--gray-text);font-weight:700;padding:4px 0;line-height:1; }
+
+/* YAML CONTROL — blocked_fields comparison across pillars */
+.yaml-compare { border:1px solid var(--gray-border);border-top:3px solid var(--amber);border-radius:2px;background:white;overflow:hidden; }
+.yc-title { background:var(--navy);color:white;padding:10px 18px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em; }
+.yc-body { padding:18px; }
+table.yct { width:100%;border-collapse:collapse;font-size:11px; }
+table.yct th { text-align:left;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-text);padding:6px 10px;border-bottom:2px solid var(--gray-border);background:var(--gray-light); }
+table.yct td { padding:7px 10px;border-bottom:1px solid var(--gray-light);color:var(--slate);vertical-align:top;line-height:1.5; }
+table.yct td:first-child { font-weight:700;color:var(--navy);white-space:nowrap; }
+table.yct tbody tr:last-child td { border-bottom:none; }
+.yct-blocked { display:inline-flex;align-items:center;gap:3px;background:var(--red-bg);border:1px solid var(--red-border);border-radius:2px;padding:1px 6px;font-size:9px;font-weight:600;color:var(--red);font-family:'Courier New',monospace; }
+.yct-allowed { display:inline-flex;align-items:center;gap:3px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:2px;padding:1px 6px;font-size:9px;font-weight:600;color:var(--green);font-family:'Courier New',monospace; }
+
+/* EXAMPLE TRACE */
+.trace { border:1px solid var(--gray-border);border-top:3px solid var(--blue);border-radius:2px;background:white;overflow:hidden; }
+.trace-title { background:var(--navy);color:white;padding:10px 18px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em; }
+.trace-body { padding:18px;display:flex;flex-direction:column;gap:0; }
+.trace-step { display:grid;grid-template-columns:32px 1fr;gap:12px;padding:10px 0; }
+.trace-step + .trace-step { border-top:1px solid var(--gray-light); }
+.ts-num { width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-size:11px;font-weight:700;flex-shrink:0; }
+.ts-body {}
+.ts-label { font-size:11px;font-weight:700;color:var(--navy);margin-bottom:3px; }
+.ts-desc { font-size:11px;color:var(--gray-text);line-height:1.5; }
+.ts-desc strong { color:var(--navy); }
+.ts-desc code { background:var(--amber-bg);padding:1px 5px;border-radius:2px;font-family:'Courier New',monospace;font-size:10px;color:var(--amber);font-weight:600; }
+.ts-outcome { margin-top:5px;display:inline-flex;gap:4px;flex-wrap:wrap; }
+
+/* FOOTER */
+.footer-note { margin-top:20px;padding:14px 20px;background:var(--gray-light);border:1px solid var(--gray-border);border-radius:2px;font-size:11px;color:var(--gray-text);line-height:1.6; }
+.footer-note strong { color:var(--navy); }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="blue-stripe"></div>
+  <div class="hero-row">
+    <div class="amex-logo"><span class="logo-american">American</span><span class="logo-express">Express</span></div>
+    <div>
+      <h1>Compliance &amp; Data Gating</h1>
+      <div class="hero-sub">Agentic Case Review System — Defense In Depth</div>
+    </div>
+  </div>
+</div>
+
+<div class="page">
+
+  <!-- INTRO -->
+  <div class="intro-card">
+    <h2>Compliance Is Not a Single Gate</h2>
+    <p>Compliance is enforced at <strong>every layer</strong> of the system, creating defense in depth. All rules are driven by the <strong>pillar YAML</strong> — the same file that controls specialist focus, table scope, and prompt overlays also declares <code style="font-size:12px;background:var(--amber-bg);padding:1px 5px;border-radius:2px;font-family:'Courier New',monospace;color:var(--amber)">blocked_fields</code>. No code changes required to add, remove, or adjust compliance rules. Edit the YAML, and every layer enforces the new rule automatically.</p>
+  </div>
+
+  <!-- SECTION 1: DEFENSE IN DEPTH -->
+  <div class="section">
+    <div class="section-title">Defense In Depth — Four Enforcement Points<div class="section-line"></div></div>
+
+    <div class="depth-flow">
+
+      <div class="depth-layer l1">
+        <div>
+          <div class="dl-where">Layer 1 — Orchestrator</div>
+          <div class="dl-where-agent">Pre-Routing Filter</div>
+        </div>
+        <div class="dl-what">
+          <strong>Before any specialist is called.</strong> The Orchestrator reads <code>blocked_fields</code> from the pillar YAML and checks the reviewer's question. If the question requests blocked data, the Orchestrator <strong>rewrites or rejects</strong> the request before routing to any specialist. This is the first line of defense — no blocked data ever enters the specialist pipeline.
+        </div>
+        <div class="dl-yaml">
+          <div class="dl-yaml-title">YAML source</div>
+          <div class="dl-yaml-line"><span class="dl-yaml-key">blocked_fields:</span> <span class="dl-yaml-val">["bureau_raw_pii", "salary_data"]</span></div>
+        </div>
+      </div>
+
+      <div class="depth-arrow">↓</div>
+
+      <div class="depth-layer l2">
+        <div>
+          <div class="dl-where">Layer 2 — Specialists</div>
+          <div class="dl-where-agent">Data Request Construction</div>
+        </div>
+        <div class="dl-what">
+          <strong>When building a Data Request.</strong> Each specialist carries the <code>blocked_fields</code> and <code>table_scope</code> context from the pillar YAML (injected at call time by the Orchestrator). The specialist will <strong>not include</strong> prohibited fields in any Data Request it constructs — it self-censors based on the YAML context in its prompt.
+        </div>
+        <div class="dl-yaml">
+          <div class="dl-yaml-title">Injected at call time</div>
+          <div class="dl-yaml-line"><span class="dl-yaml-key">blocked_fields:</span> <span class="dl-yaml-val">["bureau_raw_pii", "salary_data"]</span></div>
+          <div class="dl-yaml-line"><span class="dl-yaml-key">table_scope:</span> <span class="dl-yaml-val-g">["bureau_full"]</span></div>
+        </div>
+      </div>
+
+      <div class="depth-arrow">↓</div>
+
+      <div class="depth-layer l3-repo">
+        <div>
+          <div class="dl-where">Layer 3 — Repository Agent</div>
+          <div class="dl-where-agent">Hard Enforcement + Audit</div>
+        </div>
+        <div class="dl-what">
+          <strong>Every request, no exceptions.</strong> The Repository Agent validates every field in every Data Request against the pillar YAML <code>blocked_fields</code>. It writes an <strong>audit log entry</strong> for every request — approved or rejected. It also enforces <code>table_scope</code> to ensure the specialist only accesses tables it's authorized for under this pillar. Finally, it <strong>redacts</strong> PII and sensitive fields from the data before forwarding to Data Agents.
+        </div>
+        <div class="dl-yaml">
+          <div class="dl-yaml-title">Enforced fields</div>
+          <div class="dl-yaml-line"><span class="dl-yaml-key">blocked_fields:</span> <span class="dl-yaml-val">✕ hard reject</span></div>
+          <div class="dl-yaml-line"><span class="dl-yaml-key">table_scope:</span> <span class="dl-yaml-val">✕ scope gate</span></div>
+          <div class="dl-yaml-line"><span class="dl-yaml-key">audit_log:</span> <span class="dl-yaml-val-g">✓ every request</span></div>
+        </div>
+      </div>
+
+      <div class="depth-arrow">↓</div>
+
+      <div class="depth-layer l3-data">
+        <div>
+          <div class="dl-where">Layer 3 — Data Agents</div>
+          <div class="dl-where-agent">Downstream Only</div>
+        </div>
+        <div class="dl-what">
+          <strong>No direct access to raw data.</strong> Data Agents only ever receive pre-validated, redacted requests from the Repository Agent. They have no knowledge of the pillar YAML, no access to raw schemas, and no visibility into which specialist made the request. They are stateless execution engines — compliance is not their concern because it has already been enforced upstream.
+        </div>
+        <div class="dl-yaml">
+          <div class="dl-yaml-title">Visibility</div>
+          <div class="dl-yaml-line" style="color:var(--gray-text);font-size:10px;font-style:italic">No YAML access.<br>No raw schemas.<br>Redacted data only.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- SECTION 2: YAML BLOCKED_FIELDS ACROSS PILLARS -->
+  <div class="section">
+    <div class="section-title">blocked_fields — YAML Controls What Each Pillar Cannot Access<div class="section-line"></div></div>
+
+    <div class="yaml-compare">
+      <div class="yc-title">blocked_fields Comparison Across Pillars</div>
+      <div class="yc-body">
+        <table class="yct">
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>credit_risk.yaml</th>
+              <th>escalation.yaml</th>
+              <th>cbo.yaml</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>bureau_raw_pii</td>
+              <td><span class="yct-blocked">✕ blocked</span></td>
+              <td><span class="yct-blocked">✕ blocked</span></td>
+              <td><span class="yct-blocked">✕ blocked</span></td>
+            </tr>
+            <tr>
+              <td>salary_data</td>
+              <td><span class="yct-blocked">✕ blocked</span></td>
+              <td><span class="yct-allowed">✓ allowed</span></td>
+              <td><span class="yct-blocked">✕ blocked</span></td>
+            </tr>
+            <tr>
+              <td>modeling_raw</td>
+              <td><span class="yct-allowed">✓ allowed</span></td>
+              <td><span class="yct-blocked">✕ blocked</span></td>
+              <td><span class="yct-allowed">✓ allowed</span></td>
+            </tr>
+            <tr>
+              <td>trade_detail</td>
+              <td><span class="yct-allowed">✓ allowed</span></td>
+              <td><span class="yct-blocked">✕ blocked</span></td>
+              <td><span class="yct-allowed">✓ allowed</span></td>
+            </tr>
+            <tr>
+              <td>income_verified</td>
+              <td><span class="yct-allowed">✓ allowed</span></td>
+              <td><span class="yct-allowed">✓ allowed</span></td>
+              <td><span class="yct-blocked">✕ blocked</span></td>
+            </tr>
+          </tbody>
+        </table>
+        <div style="margin-top:14px;padding:10px 14px;background:var(--amber-bg);border:1px solid var(--amber-border);border-radius:2px;font-size:11px;color:var(--amber);line-height:1.5">
+          <strong style="color:var(--navy)">Adding a new blocked field</strong> = add one line to the pillar YAML. Every layer (Orchestrator, Specialists, Repository Agent) enforces it automatically. No code changes, no redeployment — just a config change.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 3: EXAMPLE TRACE -->
+  <div class="section">
+    <div class="section-title">Example Trace — A Request Hitting a Blocked Field<div class="section-line"></div></div>
+
+    <div class="trace">
+      <div class="trace-title">Trace: Bureau Specialist Requests salary_data Under credit_risk Pillar</div>
+      <div class="trace-body">
+
+        <div class="trace-step">
+          <div class="ts-num" style="background:var(--blue)">1</div>
+          <div class="ts-body">
+            <div class="ts-label">Reviewer asks: "What is the customer's debt-to-income ratio including salary?"</div>
+            <div class="ts-desc">Chat Agent passes question to the Orchestrator under the <strong>credit_risk</strong> pillar.</div>
+          </div>
+        </div>
+
+        <div class="trace-step">
+          <div class="ts-num" style="background:var(--blue)">2</div>
+          <div class="ts-body">
+            <div class="ts-label">Orchestrator — Pre-Routing Filter</div>
+            <div class="ts-desc">Reads <code>blocked_fields</code> from <strong>credit_risk.yaml</strong>. Sees <code>salary_data</code> is blocked. Rewrites the question to remove the salary component: <em>"What is the customer's debt exposure based on available bureau and capacity data?"</em></div>
+            <div class="ts-outcome">
+              <span class="tag tag-amber" style="font-size:9px">Rewritten ↻</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="trace-step">
+          <div class="ts-num" style="background:var(--purple)">3</div>
+          <div class="ts-body">
+            <div class="ts-label">Bureau Specialist — Data Request Construction</div>
+            <div class="ts-desc">Specialist carries <code>blocked_fields: ["bureau_raw_pii", "salary_data"]</code> in its prompt context. Constructs a Data Request for <code>bureau_full</code> table — does <strong>not</strong> include <code>salary_data</code> in the requested columns because it's in its blocked list.</div>
+            <div class="ts-outcome">
+              <span class="tag tag-green" style="font-size:9px">Self-Censored ✓</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="trace-step">
+          <div class="ts-num" style="background:var(--red)">4</div>
+          <div class="ts-body">
+            <div class="ts-label">Repository Agent — Hard Enforcement</div>
+            <div class="ts-desc">Even if the specialist somehow included a blocked field (defense in depth), the Repository Agent cross-references every requested field against <code>blocked_fields</code>. In this case, the request is clean — but the audit log records the request regardless.</div>
+            <div class="ts-outcome">
+              <span class="tag tag-green" style="font-size:9px">Validated ✓</span>
+              <span class="tag tag-blue" style="font-size:9px">Audit Logged ✓</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="trace-step">
+          <div class="ts-num" style="background:var(--green)">5</div>
+          <div class="ts-body">
+            <div class="ts-label">Data Agent — Executes Clean Request</div>
+            <div class="ts-desc">Receives a redacted, validated request. Runs Code Gen → Execute → Retrieve. Returns structured results back through the Repository Agent to the Bureau specialist. <strong>No salary data ever touched.</strong></div>
+            <div class="ts-outcome">
+              <span class="tag tag-green" style="font-size:9px">Clean Data Returned ✓</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="footer-note">
+    <strong>Key principle:</strong> Compliance is not a checkbox at one gate — it is a <strong>YAML-driven thread</strong> that runs through every layer of the system. The Orchestrator filters before routing, Specialists self-censor during Data Request construction, the Repository Agent hard-enforces and audits, and Data Agents only ever see clean data. All rules come from one source: the pillar YAML file.
+  </div>
+
+</div>
+</body>
+</html>
