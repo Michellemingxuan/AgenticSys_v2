@@ -50,7 +50,13 @@ class DataGenerator:
     def _generate_table(
         self, profile: dict, row_count_override: int | None = None
     ) -> dict[str, list]:
-        n = row_count_override if row_count_override is not None else profile["row_count"]
+        if row_count_override is not None:
+            n = row_count_override
+        elif "rows_per_case" in profile:
+            # rows_per_case × number of cases = total rows
+            n = profile["rows_per_case"] * self._get_case_count()
+        else:
+            n = profile["row_count"]
         rng = np.random.default_rng(self.seed)
 
         columns: dict[str, list] = {}

@@ -21,13 +21,13 @@ def gen():
 
 class TestLoadProfiles:
     def test_loads_all_profiles(self, gen: DataGenerator):
-        assert len(gen.profiles) == 11
+        assert len(gen.profiles) == 10
 
     def test_profile_names(self, gen: DataGenerator):
         expected = {
             "bureau_full", "bureau_trades", "txn_monthly", "pmts_detail",
             "model_scores", "wcc_flags", "xbu_summary", "cust_tenure", "income_dti",
-            "payments", "cross_bu",
+            "cross_bu",
         }
         assert set(gen.profiles.keys()) == expected
 
@@ -35,10 +35,15 @@ class TestLoadProfiles:
 class TestGeneration:
     def test_correct_row_count(self, gen: DataGenerator):
         tables = gen.generate_all()
+        case_count = gen._get_case_count()
         for name, cols in tables.items():
-            expected = gen.profiles[name]["row_count"]
+            profile = gen.profiles[name]
+            if "rows_per_case" in profile:
+                expected = profile["rows_per_case"] * case_count
+            else:
+                expected = profile["row_count"]
             first_col = next(iter(cols.values()))
-            assert len(first_col) == expected, f"{name} row count mismatch"
+            assert len(first_col) == expected, f"{name} row count mismatch: got {len(first_col)}, expected {expected}"
 
     def test_respects_int_range(self, gen: DataGenerator):
         tables = gen.generate_all()
@@ -84,7 +89,7 @@ class TestDumpCSV:
         gen.generate_all()
         with tempfile.TemporaryDirectory() as tmpdir:
             paths = gen.dump_csv(tmpdir)
-            assert len(paths) == 11
+            assert len(paths) == 10
             for p in paths:
                 assert os.path.exists(p)
                 # Check file has header + data rows

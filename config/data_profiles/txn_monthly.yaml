@@ -1,6 +1,6 @@
 table: txn_monthly
 description: "Monthly transaction aggregates, multiple rows"
-row_count: 500
+rows_per_case: 10              # TUNE: number of monthly transaction rows per case
 one_row_per_case: false
 
 columns:

@@ -1,6 +1,6 @@
 table: xbu_summary
 description: "Cross-BU exposure, multiple rows"
-row_count: 120
+rows_per_case: 2               # TUNE: number of product exposure rows per case
 one_row_per_case: false
 
 columns:

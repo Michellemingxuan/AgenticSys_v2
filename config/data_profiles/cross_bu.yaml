@@ -1,6 +1,6 @@
 table: cross_bu
 description: "Cross-business-unit view — one row per card per case. Contains details about all cards held by the customer and their merchant relationship with Amex (if any), covering 12 months of history before default on business credit card."
-row_count: 150
+rows_per_case: 3               # TUNE: number of card rows per case
 one_row_per_case: false
 
 columns:

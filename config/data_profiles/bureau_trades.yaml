@@ -1,6 +1,6 @@
 table: bureau_trades
 description: "Individual tradeline detail from credit bureau — one row per external credit line per case. Covers revolving, installment, mortgage, and other trade types with balances, limits, and delinquency status."
-row_count: 200
+rows_per_case: 4               # TUNE: number of tradeline rows per case
 one_row_per_case: false
 
 columns:

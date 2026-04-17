@@ -1,6 +1,6 @@
 table: model_scores
 description: "Internal model scoring features — one row per scoring run per case. Contains 264 model input variables covering bureau scores, delinquency indicators, exposure ratios, payment behavior, spend patterns, and third-party risk scores."
-row_count: 100
+rows_per_case: 2               # TUNE: number of score rows per case
 one_row_per_case: false
 
 columns:

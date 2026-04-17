@@ -1,6 +1,6 @@
 table: wcc_flags
 description: "WCC flags, multiple rows"
-row_count: 60
+rows_per_case: 1               # TUNE: number of flag rows per case
 one_row_per_case: false
 
 columns:
