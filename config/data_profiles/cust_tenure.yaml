@@ -1,7 +1,7 @@
 table: cust_tenure
 description: "Customer relationship, one row per case"
-rows_per_case: 1
-one_row_per_case: true
+rows_per_case: 3
+one_row_per_case: false
 
 columns:
   case_id:

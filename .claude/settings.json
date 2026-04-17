@@ -36,7 +36,9 @@
       "Bash(grep \"dtype: object\" config/data_profiles/*.yaml)",
       "Bash(ls config/data_profiles/*.yaml)",
       "Bash(rm config/data_profiles/modeling.yaml config/data_profiles/score_drivers.yaml)",
-      "Bash(mv config/data_profiles/pmts.yaml config/data_profiles/pmts_detail.yaml)"
+      "Bash(mv config/data_profiles/pmts.yaml config/data_profiles/pmts_detail.yaml)",
+      "Bash(rm -rf data/simulated/)",
+      "Bash(venv/bin/python -m data --output data/simulated/ --seed 42 --cases 5)"
     ],
     "additionalDirectories": [
       "/Users/mingxuanliu/Library/CloudStorage/GoogleDrive-mingxuan99michelle@gmail.com/My\\ Drive/Projs/AgenticSys_v1"
