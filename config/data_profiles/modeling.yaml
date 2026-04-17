@@ -1,0 +1,90 @@
+table: modeling
+description: "Model output aggregates — one row per scoring run with max feature values"
+row_count: 20
+one_row_per_case: false
+
+columns:
+  case_id:
+    dtype: string
+    format: "CASE-{seq:05d}"
+    description: "Foreign key to case"
+
+  cdss:
+    dtype: float
+    distribution: normal
+    mean: 0.45
+    std: 0.2
+    min: 0.0
+    max: 1.0
+    description: "Internal model score (probability of event, 0-1)"
+
+  tsr:
+    dtype: float
+    distribution: normal
+    mean: 0.45
+    std: 0.2
+    min: 0.0
+    max: 1.0
+    description: "Internal model score (probability of event, 0-1)"
+
+  cust_lexis_nexis_tot_tax_assess_val_am_max:
+    dtype: int
+    distribution: normal
+    mean: 1590596
+    std: 200000
+    min: 1452300
+    max: 2074635
+    description: "Max tax assessed value across scoring runs"
+
+  cbr_score_max:
+    dtype: int
+    distribution: normal
+    mean: 768
+    std: 15
+    min: 733
+    max: 786
+    description: "Max credit bureau score across scoring runs"
+
+  max_agec_agel_dyldage_max:
+    dtype: int
+    distribution: normal
+    mean: 23
+    std: 4
+    min: 15
+    max: 27
+    description: "Max customer daily age across scoring runs"
+
+  cust_eff_se_cdss_5_180_day_score_max:
+    dtype: float
+    distribution: normal
+    mean: -1.44
+    std: 1.5
+    min: -5.395
+    max: -0.565
+    description: "Max merchant risk score across scoring runs"
+
+  cust_expsr_avg_rem_12m_ratio_max:
+    dtype: float
+    distribution: normal
+    mean: 2.13
+    std: 0.7
+    min: 0.64
+    max: 3.12
+    description: "Max customer exposure to average remit ratio"
+
+  se_no_norm_wtd_pd_unpaid_amt_max:
+    dtype: float
+    distribution: normal
+    mean: 0.47
+    std: 0.25
+    min: 0.0
+    max: 0.811
+    description: "Max normalised accum amount weighted by merchant percentage"
+
+  tpf_internal_delinq_idx_max:
+    dtype: int
+    distribution: poisson
+    lambda: 0.01
+    min: 0
+    max: 10
+    description: "Max internal delinquency index across scoring runs"

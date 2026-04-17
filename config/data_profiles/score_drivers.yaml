@@ -1,0 +1,294 @@
+table: score_drivers
+description: "Top and bottom score drivers per model run — one row per scoring run"
+row_count: 20
+one_row_per_case: false
+
+columns:
+  case_id:
+    dtype: string
+    format: "CASE-{seq:05d}"
+    description: "Foreign key to case"
+
+  month:
+    dtype: categorical
+    categories:
+      "January'2024": 0.083
+      "February'2024": 0.083
+      "March'2024": 0.083
+      "April'2024": 0.083
+      "May'2024": 0.083
+      "June'2024": 0.083
+      "July'2024": 0.084
+      "August'2024": 0.083
+      "September'2024": 0.083
+      "October'2024": 0.083
+      "November'2024": 0.083
+      "December'2024": 0.084
+    description: "Scoring month"
+
+  top_cdss1:
+    dtype: categorical
+    categories:
+      cbr_score: 0.25
+      cust_intr_rvlv_paydown_idx: 0.15
+      cust_experian_trans_union_inq_idx: 0.15
+      hcam_bal_trnd_indx: 0.15
+      credit_loss_prob: 0.10
+      cust_rnn_score: 0.10
+      tot_struct_risk_score: 0.10
+    description: "Top CDSS driver 1"
+
+  top_cdss2:
+    dtype: categorical
+    categories:
+      cbr_score: 0.15
+      cust_intr_rvlv_paydown_idx: 0.20
+      cust_experian_trans_union_inq_idx: 0.15
+      se_no_norm_wtd_pd_unpaid_cnt: 0.15
+      hcam_bal_trnd_indx: 0.10
+      cust_rnn_score: 0.15
+      cust_behav_ind: 0.10
+    description: "Top CDSS driver 2"
+
+  top_cdss3:
+    dtype: categorical
+    categories:
+      cust_experian_trans_union_inq_idx: 0.15
+      se_no_norm_wtd_pd_unpaid_cnt: 0.15
+      hcam_bal_trnd_indx: 0.15
+      credit_loss_prob: 0.10
+      cust_rnn_score: 0.10
+      cust_behav_ind: 0.10
+      cust_old_rec_age: 0.10
+      tpf_cu_sow_pay01: 0.05
+      cust_lend_acct_paydown: 0.05
+      cust_open_acct_paydown: 0.05
+    description: "Top CDSS driver 3"
+
+  top_cdss4:
+    dtype: categorical
+    categories:
+      se_no_norm_wtd_pd_unpaid_cnt: 0.15
+      hcam_bal_trnd_indx: 0.10
+      credit_loss_prob: 0.10
+      cust_rnn_score: 0.10
+      cust_behav_ind: 0.10
+      cust_old_rec_age: 0.10
+      tpf_cu_sow_pay01: 0.10
+      cust_lend_acct_paydown: 0.10
+      cust_open_acct_paydown: 0.05
+      cust_debt_pymcpty_tm_inc: 0.10
+    description: "Top CDSS driver 4"
+
+  top_cdss5:
+    dtype: categorical
+    categories:
+      hcam_bal_trnd_indx: 0.15
+      credit_loss_prob: 0.10
+      cust_rnn_score: 0.10
+      cust_behav_ind: 0.10
+      cust_old_rec_age: 0.10
+      tpf_cu_sow_pay01: 0.10
+      cust_lend_acct_paydown: 0.10
+      cust_open_acct_paydown: 0.10
+      cust_debt_pymcpty_tm_inc: 0.15
+    description: "Top CDSS driver 5"
+
+  bottom_cdss1:
+    dtype: categorical
+    categories:
+      cbr_score: 0.50
+      cust_intr_rvlv_paydown_idx: 0.30
+      cust_old_rec_age: 0.20
+    description: "Bottom CDSS driver 1"
+
+  bottom_cdss2:
+    dtype: categorical
+    categories:
+      cbr_score: 0.10
+      cust_rnn_score: 0.15
+      cust_behav_ind: 0.15
+      cust_old_rec_age: 0.15
+      tpf_cu_sow_pay01: 0.15
+      cust_lend_acct_paydown: 0.15
+      cust_open_acct_paydown: 0.15
+    description: "Bottom CDSS driver 2"
+
+  bottom_cdss3:
+    dtype: categorical
+    categories:
+      tpf_cu_sow_pay01: 0.15
+      cust_lend_acct_paydown: 0.10
+      cust_open_acct_paydown: 0.10
+      cust_debt_pymcpty_tm_inc: 0.10
+      cust_behav_ind: 0.10
+      credit_loss_prob: 0.10
+      hcam_bal_trnd_indx: 0.10
+      se_no_norm_wtd_pd_unpaid_cnt: 0.10
+      cust_rnn_score: 0.05
+      cust_old_rec_age: 0.10
+    description: "Bottom CDSS driver 3"
+
+  bottom_cdss4:
+    dtype: categorical
+    categories:
+      cust_final_prmry_sectr: 0.10
+      cust_behav_ind: 0.10
+      cust_old_rec_age: 0.10
+      tpf_cu_sow_pay01: 0.10
+      cust_lend_acct_paydown: 0.10
+      cust_open_acct_paydown: 0.10
+      cust_debt_pymcpty_tm_inc: 0.10
+      credit_loss_prob: 0.05
+      hcam_bal_trnd_indx: 0.05
+      se_no_norm_wtd_pd_unpaid_cnt: 0.10
+      cust_rnn_score: 0.10
+    description: "Bottom CDSS driver 4"
+
+  bottom_cdss5:
+    dtype: categorical
+    categories:
+      cust_behav_ind: 0.10
+      cust_old_rec_age: 0.10
+      tpf_cu_sow_pay01: 0.05
+      cust_lend_acct_paydown: 0.10
+      tpf_cust_hi_rvlv_line_am: 0.10
+      cust_debt_pymcpty_tm_inc: 0.10
+      credit_loss_prob: 0.10
+      hcam_bal_trnd_indx: 0.10
+      se_no_norm_wtd_pd_unpaid_cnt: 0.05
+      cust_rnn_score: 0.05
+      cust_open_acct_paydown: 0.05
+      cust_experian_trans_union_inq_idx: 0.10
+    description: "Bottom CDSS driver 5"
+
+  top_tsr1:
+    dtype: categorical
+    categories:
+      cbr_score: 0.40
+      cust_intr_rvlv_paydown_idx: 0.30
+      cust_old_rec_age: 0.30
+    description: "Top TSR driver 1"
+
+  top_tsr2:
+    dtype: categorical
+    categories:
+      cbr_score: 0.15
+      cust_intr_rvlv_paydown_idx: 0.20
+      cust_experian_trans_union_inq_idx: 0.15
+      hcam_bal_trnd_indx: 0.10
+      cust_rnn_score: 0.15
+      cust_behav_ind: 0.10
+      cust_old_rec_age: 0.15
+    description: "Top TSR driver 2"
+
+  top_tsr3:
+    dtype: categorical
+    categories:
+      se_no_norm_wtd_pd_unpaid_amt: 0.15
+      cust_old_rec_age: 0.10
+      cust_behav_ind: 0.10
+      hcam_bal_trnd_indx: 0.10
+      cust_rnn_score: 0.10
+      credit_loss_prob: 0.10
+      tpf_cu_sow_pay01: 0.10
+      cust_lend_acct_paydown: 0.15
+      cust_open_acct_paydown: 0.10
+    description: "Top TSR driver 3"
+
+  top_tsr4:
+    dtype: categorical
+    categories:
+      cust_old_rec_age: 0.10
+      cust_behav_ind: 0.10
+      hcam_bal_trnd_indx: 0.10
+      credit_loss_prob: 0.10
+      tpf_cu_sow_pay01: 0.10
+      cust_lend_acct_paydown: 0.10
+      cust_open_acct_paydown: 0.10
+      cust_debt_pymcpty_tm_inc: 0.10
+      se_no_norm_wtd_pd_unpaid_cnt: 0.05
+      cust_experian_trans_union_inq_idx: 0.10
+      cust_rnn_score: 0.05
+    description: "Top TSR driver 4"
+
+  top_tsr5:
+    dtype: categorical
+    categories:
+      cust_experian_trans_union_inq_idx: 0.15
+      cust_behav_ind: 0.10
+      hcam_bal_trnd_indx: 0.10
+      credit_loss_prob: 0.10
+      tpf_cu_sow_pay01: 0.15
+      cust_lend_acct_paydown: 0.10
+      cust_open_acct_paydown: 0.15
+      cust_debt_pymcpty_tm_inc: 0.10
+      cust_rnn_score: 0.05
+    description: "Top TSR driver 5"
+
+  bottom_tsr1:
+    dtype: categorical
+    categories:
+      cbr_score: 0.50
+      cust_intr_rvlv_paydown_idx: 0.30
+      cust_old_rec_age: 0.20
+    description: "Bottom TSR driver 1"
+
+  bottom_tsr2:
+    dtype: categorical
+    categories:
+      cust_eff_se_cdss_5_180_day_score: 0.20
+      cust_rnn_score: 0.15
+      cust_behav_ind: 0.15
+      cust_old_rec_age: 0.10
+      tpf_cu_sow_pay01: 0.10
+      cust_lend_acct_paydown: 0.15
+      cust_open_acct_paydown: 0.15
+    description: "Bottom TSR driver 2"
+
+  bottom_tsr3:
+    dtype: categorical
+    categories:
+      cust_rnn_score: 0.10
+      cust_behav_ind: 0.10
+      tpf_cu_sow_pay01: 0.10
+      cust_lend_acct_paydown: 0.10
+      cust_open_acct_paydown: 0.10
+      cust_debt_pymcpty_tm_inc: 0.10
+      credit_loss_prob: 0.10
+      hcam_bal_trnd_indx: 0.10
+      se_no_norm_wtd_pd_unpaid_cnt: 0.10
+      cust_old_rec_age: 0.10
+    description: "Bottom TSR driver 3"
+
+  bottom_tsr4:
+    dtype: categorical
+    categories:
+      cust_behav_ind: 0.10
+      cust_old_rec_age: 0.10
+      tpf_cu_sow_pay01: 0.10
+      cust_lend_acct_paydown: 0.10
+      cust_open_acct_paydown: 0.10
+      cust_debt_pymcpty_tm_inc: 0.10
+      credit_loss_prob: 0.10
+      hcam_bal_trnd_indx: 0.10
+      se_no_norm_wtd_pd_unpaid_cnt: 0.10
+      cust_rnn_score: 0.10
+    description: "Bottom TSR driver 4"
+
+  bottom_tsr5:
+    dtype: categorical
+    categories:
+      tpf_cust_hi_rvlv_line_am: 0.10
+      cust_behav_ind: 0.08
+      cust_old_rec_age: 0.08
+      tpf_cu_sow_pay01: 0.08
+      cust_lend_acct_paydown: 0.08
+      cust_open_acct_paydown: 0.08
+      cust_debt_pymcpty_tm_inc: 0.08
+      credit_loss_prob: 0.08
+      hcam_bal_trnd_indx: 0.08
+      se_no_norm_wtd_pd_unpaid_cnt: 0.08
+      cust_rnn_score: 0.08
+      cust_experian_trans_union_inq_idx: 0.10
+    description: "Bottom TSR driver 5"

@@ -1,5 +1,5 @@
 table: model_scores
-description: "Internal model outputs — one row per model per scoring run"
+description: "Internal model scoring features — one row per scoring run per case. Contains 264 model input variables covering bureau scores, delinquency indicators, exposure ratios, payment behavior, spend patterns, and third-party risk scores."
 row_count: 100
 one_row_per_case: false
 
@@ -9,36 +9,2592 @@ columns:
     format: "CASE-{seq:05d}"
     description: "Foreign key to case"
 
-  model_id:
-    dtype: categorical
-    categories:
-      risk_v3: 0.40
-      propensity_v2: 0.30
-      collections_v1: 0.30
-    description: "Model identifier — which internal model produced this score"
-
-  score:
+  # ── 1. last_cycle_cut_revolve_rate ──────────────────────────────
+  last_cycle_cut_revolve_rate:
     dtype: float
     distribution: normal
-    mean: 0.45                   # TUNE: average risk probability across cases
-    std: 0.2                     # TUNE: spread of risk scores
+    mean: 0.65                     # TUNE: most customers revolve above 0.46
+    std: 0.25
     min: 0.0
     max: 1.0
-    description: "Raw model score (probability of event, 0-1)"
+    description: "last cycle cut revolve rate. Values below 0.46 are risky"
 
-  percentile:
+  # ── 2. times_30_dpd ────────────────────────────────────────────
+  times_30_dpd:
     dtype: int
-    distribution: uniform
+    distribution: poisson
+    lambda: 0.3                    # TUNE: average times 30 DPD; values above 1 are risky
+    min: 0
+    max: 10
+    description: "No. of times 30 days past due. Values above 1 are risky."
+
+  # ── 3. cust_expsr_avg_rem_12m_ratio ────────────────────────────
+  cust_expsr_avg_rem_12m_ratio:
+    dtype: float
+    distribution: normal
+    mean: 2.0                      # TUNE: values above 3.15 are risky
+    std: 0.8
+    min: 0.0
+    max: 10.0
+    description: "Customer Exposure / (Average Remit In 2-12 Months). Values above 3.15 are risky."
+
+  # ── 4. cust_lndexpsr_minloc_6m_ratio ───────────────────────────
+  cust_lndexpsr_minloc_6m_ratio:
+    dtype: float
+    distribution: normal
+    mean: 0.5
+    std: 0.8
+    min: 0.0
+    max: 5.0
+    description: "customer lending exposure minloc 6 months ratio"
+
+  # ── 5. max_agec_agel_dyldage ───────────────────────────────────
+  max_agec_agel_dyldage:
+    dtype: int
+    distribution: normal
+    mean: 20
+    std: 8
     min: 1
+    max: 50
+    description: "Customer daily Age"
+
+  # ── 6. cb_ten_to_amex_tenure ───────────────────────────────────
+  cb_ten_to_amex_tenure:
+    dtype: int
+    distribution: normal
+    mean: 400
+    std: 100
+    min: 100
+    max: 600
+    description: "Credit bureau tenure to company tenure"
+
+  # ── 7. tpf_internal_delinq_idx ─────────────────────────────────
+  tpf_internal_delinq_idx:
+    dtype: float
+    distribution: normal
+    mean: 2.0                      # TUNE: values above 5.8 are risky
+    std: 3.0
+    min: 0.0
+    max: 20.0
+    description: "Internal Delinquency Index. Values above 5.8 are considered risky."
+
+  # ── 8. tpf_cust_mod_tenure ─────────────────────────────────────
+  tpf_cust_mod_tenure:
+    dtype: int
+    distribution: normal
+    mean: 80
+    std: 30
+    min: 1
+    max: 200
+    description: "Customer Tenure"
+
+  # ── 9. ratio_30_90dys_trig_amt ─────────────────────────────────
+  ratio_30_90dys_trig_amt:
+    dtype: float
+    distribution: normal
+    mean: 0.1                      # TUNE: values above 0 are risky
+    std: 0.5
+    min: 0.0
+    max: 5.0
+    description: "ratio of 30-90 days trigger amount. Values above 0 are considered risky."
+
+  # ── 10. avutil_exrvlv_balgt50 ──────────────────────────────────
+  avutil_exrvlv_balgt50:
+    dtype: float
+    distribution: normal
+    mean: 25.0                     # TUNE: values above 75 are risky
+    std: 20.0
+    min: 0.0
+    max: 100.0
+    description: "Average utilization in all the external consumer revolving trades with balance more than US$ 50. Values above 75 are risky."
+
+  # ── 11. calx_ratio_daily_max_age ───────────────────────────────
+  calx_ratio_daily_max_age:
+    dtype: float
+    distribution: normal
+    mean: 0.45
+    std: 0.15
+    min: 0.0
+    max: 1.0
+    description: "Ratio of Daily delinquency age by Max delinquency age in last 6 months"
+
+  # ── 12. hcam_src_trnd_indx ─────────────────────────────────────
+  hcam_src_trnd_indx:
+    dtype: float
+    distribution: normal
+    mean: 0.0                      # TUNE: values below -19 are risky
+    std: 15.0
+    min: -50.0
+    max: 50.0
+    description: "FICO Trend Index. Values below -19 are risky."
+
+  # ── 13. lvrg_debt_remit ────────────────────────────────────────
+  lvrg_debt_remit:
+    dtype: float
+    distribution: normal
+    mean: 2.0
+    std: 0.8
+    min: 0.0
+    max: 5.0
+    description: "leverage commercial debt"
+
+  # ── 14. sum_tot_rsky_evnt ──────────────────────────────────────
+  sum_tot_rsky_evnt:
+    dtype: int
+    distribution: poisson
+    lambda: 0.3
+    min: 0
+    max: 10
+    description: "total risky events"
+
+  # ── 15. delnqncy_ind_intrnl ────────────────────────────────────
+  delnqncy_ind_intrnl:
+    dtype: float
+    distribution: normal
+    mean: 0.1                      # TUNE: values above 0.5 are risky
+    std: 0.2
+    min: 0.0
+    max: 1.0
+    description: "internal delinquency indicator. Values above 0.5 are risky."
+
+  # ── 16. cust_debt_pymcpty_tm_inc ───────────────────────────────
+  cust_debt_pymcpty_tm_inc:
+    dtype: float
+    distribution: normal
+    mean: 0.25
+    std: 0.12
+    min: 0.0
+    max: 1.0
+    description: "debt to payment capacity"
+
+  # ── 17. cbr_score ──────────────────────────────────────────────
+  cbr_score:
+    dtype: int
+    distribution: normal
+    mean: 720                      # TUNE: typical FICO score
+    std: 60
+    min: 300
+    max: 850
+    description: "customer credit bureau score (FICO)"
+
+  # ── 18. credit_loss_prob ───────────────────────────────────────
+  credit_loss_prob:
+    dtype: float
+    distribution: normal
+    mean: 3.0                      # TUNE: scores 10-100 are risky
+    std: 5.0
+    min: 0.0
+    max: 100.0
+    description: "ML model score predicting likelihood of default in next 18 months. Scores from 10-100 are considered risky."
+
+  # ── 19. tot_struct_risk_score ──────────────────────────────────
+  tot_struct_risk_score:
+    dtype: float
+    distribution: normal
+    mean: 8.0                      # TUNE: scores 20-100 are risky
+    std: 10.0
+    min: 0.0
+    max: 100.0
+    description: "ML model score predicting likelihood of default on internal/external trades in next 18 months. Scores from 20-100 are considered risky."
+
+  # ── 20. avg_remit_minus_max ────────────────────────────────────
+  avg_remit_minus_max:
+    dtype: int
+    distribution: normal
+    mean: 100000
+    std: 40000
+    min: 0
+    max: 300000
+    description: "average remit"
+
+  # ── 21. positive_events ────────────────────────────────────────
+  positive_events:
+    dtype: int
+    distribution: poisson
+    lambda: 0.3
+    min: 0
+    max: 5
+    description: "positive events"
+
+  # ── 22. tpf_cust_hi_rvlv_line_am ──────────────────────────────
+  tpf_cust_hi_rvlv_line_am:
+    dtype: int
+    distribution: normal
+    mean: 5000                     # TUNE: values below 77 are risky
+    std: 10000
+    min: 0
+    max: 500000
+    description: "The amount of a customer's highest revolving lines. Values below 77 are risky."
+
+  # ── 23. oop_interaction ────────────────────────────────────────
+  oop_interaction:
+    dtype: float
+    distribution: normal
+    mean: 15.0                     # TUNE: values above 28 are risky
+    std: 10.0
+    min: 0.0
+    max: 50.0
+    description: "Out of Pattern Spend index wrt to Exposure. Values above 28 are risky."
+
+  # ── 24. sum_o30dn_o60dn_o90dn ─────────────────────────────────
+  sum_o30dn_o60dn_o90dn:
+    dtype: int
+    distribution: poisson
+    lambda: 0.1                    # TUNE: values >= 1 are risky
+    min: 0
+    max: 10
+    description: "No of triggers greater than 30 days with amount > $500. Values on or above 1 are risky"
+
+  # ── 25. ons_30_trd ─────────────────────────────────────────────
+  ons_30_trd:
+    dtype: int
+    distribution: poisson
+    lambda: 0.1
+    min: 0
+    max: 5
+    description: "ons 30 trades"
+
+  # ── 26. tot_cons_comm_trds_g75 ─────────────────────────────────
+  tot_cons_comm_trds_g75:
+    dtype: int
+    distribution: poisson
+    lambda: 0.2                    # TUNE: values above 1 are risky
+    min: 0
+    max: 10
+    description: "Total External Consumer and commercial trades utilized more than 75%. Values above 1 are risky."
+
+  # ── 27. hcam_bal_trnd_indx ─────────────────────────────────────
+  hcam_bal_trnd_indx:
+    dtype: float
+    distribution: normal
+    mean: 2.0                      # TUNE: values above 2.65 are risky
+    std: 4.0
+    min: -10.0
+    max: 20.0
+    description: "hcam balance trend index. Values above 2.65 are risky."
+
+  # ── 28. product_risk_attribute ─────────────────────────────────
+  product_risk_attribute:
+    dtype: float
+    distribution: normal
+    mean: 0.016
+    std: 0.005
+    min: 0.0
+    max: 0.1
+    description: "product risk attribute"
+
+  # ── 29. cust_ext_delinq_idx ────────────────────────────────────
+  cust_ext_delinq_idx:
+    dtype: float
+    distribution: normal
+    mean: 2.0                      # TUNE: values above 5 are risky
+    std: 3.0
+    min: 0.0
+    max: 20.0
+    description: "External Delinquency Index. Values above 5 are risky."
+
+  # ── 30. tm_wt_q_score ──────────────────────────────────────────
+  tm_wt_q_score:
+    dtype: float
+    distribution: normal
+    mean: 30.0
+    std: 20.0
+    min: 0.0
+    max: 100.0
+    description: "Time Weighted United Q Score (only for low tenure)"
+
+  # ── 31. cust_eff_se_cdss_5_180_day_score ───────────────────────
+  cust_eff_se_cdss_5_180_day_score:
+    dtype: float
+    distribution: normal
+    mean: -1.5                     # TUNE: values above 2 are risky
+    std: 1.5
+    min: -10.0
+    max: 5.0
+    description: "Merchant Risk Score. Values above 2 are risky."
+
+  # ── 32. cust_expr_to_arb_inc_ratio ─────────────────────────────
+  cust_expr_to_arb_inc_ratio:
+    dtype: float
+    distribution: normal
+    mean: 0.15                     # TUNE: values above 0.08 are risky
+    std: 0.06
+    min: 0.0
+    max: 0.5
+    description: "Total exposure to arbitrated income ratio. Values above 0.08 are risky."
+
+  # ── 33. cust_lend_acct_paydown ─────────────────────────────────
+  cust_lend_acct_paydown:
+    dtype: float
+    distribution: normal
+    mean: 0.5                      # TUNE: values below 0.1 are risky
+    std: 0.3
+    min: 0.0
+    max: 1.0
+    description: "customer level paydown on lending account. Values below 0.1 are risky."
+
+  # ── 34. cust_experian_trans_union_inq_idx ──────────────────────
+  cust_experian_trans_union_inq_idx:
+    dtype: float
+    distribution: normal
+    mean: 5.0                      # TUNE: values above 4.65 are risky
+    std: 3.0
+    min: 0.0
+    max: 30.0
+    description: "risk based index of inquiries from credit bureau. Values above 4.65 are considered risky."
+
+  # ── 35. cust_intr_extnl_unscr_tt_debt_srvc_rt1 ────────────────
+  cust_intr_extnl_unscr_tt_debt_srvc_rt1:
+    dtype: float
+    distribution: normal
+    mean: 0.12                     # TUNE: values above 0.15 are risky
+    std: 0.15
+    min: 0.0
+    max: 2.0
+    description: "Customer total debt servicing ratio. Values above 0.15 are considered risky."
+
+  # ── 36. cust_open_acct_paydown ─────────────────────────────────
+  cust_open_acct_paydown:
+    dtype: float
+    distribution: normal
+    mean: 0.7                      # TUNE: values below 0.3 are risky
+    std: 0.25
+    min: 0.0
+    max: 1.0
+    description: "customer level paydown on open account. Values below 0.3 are risky."
+
+  # ── 37. cust_old_rec_age ───────────────────────────────────────
+  cust_old_rec_age:
+    dtype: int
+    distribution: normal
+    mean: 470
+    std: 40
+    min: 1
+    max: 600
+    description: "time since the oldest recorded event for the card member"
+
+  # ── 38. cust_atp_arb_incom_am ──────────────────────────────────
+  cust_atp_arb_incom_am:
+    dtype: int
+    distribution: normal
+    mean: 5000
+    std: 5000
+    min: 100
+    max: 50000
+    description: "Arbitrated income"
+
+  # ── 39. exp_pif ────────────────────────────────────────────────
+  exp_pif:
+    dtype: float
+    distribution: normal
+    mean: 70000.0
+    std: 40000.0
+    min: 0.0
+    max: 300000.0
+    description: "pay in full exposure"
+
+  # ── 40. cust_cash_tot_liab_yr1_rt ──────────────────────────────
+  cust_cash_tot_liab_yr1_rt:
+    dtype: float
+    distribution: normal
+    mean: 0.3
+    std: 0.3
+    min: 0.0
+    max: 2.0
+    description: "ratio of cash to total liability corresponding to latest full year financial"
+
+  # ── 41. cust_pymt_chan_risk_score ───────────────────────────────
+  cust_pymt_chan_risk_score:
+    dtype: float
+    distribution: normal
+    mean: 0.04                     # TUNE: values above 0.05 are risky
+    std: 0.01
+    min: 0.0
+    max: 0.1
+    description: "Customer payment channel risk score. Values above 0.05 are considered risky."
+
+  # ── 42. cust_lexis_nexis_tot_tax_assess_val_am ─────────────────
+  cust_lexis_nexis_tot_tax_assess_val_am:
+    dtype: int
+    distribution: normal
+    mean: 1500000
+    std: 500000
+    min: 0
+    max: 5000000
+    description: "total tax assessed value of the input business address from lexis nexis"
+
+  # ── 43. cust_enhnc_one_way_spend_concentration_30day_rt1 ───────
+  cust_enhnc_one_way_spend_concentration_30day_rt1:
+    dtype: float
+    distribution: normal
+    mean: 1.5                      # TUNE: values above 2.4 are risky
+    std: 1.0
+    min: 0.0
+    max: 10.0
+    description: "one way spend concentration risk rate. Values above 2.4 are considered risky."
+
+  # ── 44. time_wtd_return_index ──────────────────────────────────
+  time_wtd_return_index:
+    dtype: float
+    distribution: normal
+    mean: 0.05                     # TUNE: values above 0.2 are risky
+    std: 0.1
+    min: 0.0
+    max: 1.0
+    description: "Internal Payment Return Index. Values above 0.2 are considered risky."
+
+  # ── 45. cust_rnn_score ─────────────────────────────────────────
+  cust_rnn_score:
+    dtype: float
+    distribution: normal
+    mean: 0.006                    # TUNE: values above 0.028 are risky
+    std: 0.005
+    min: 0.0
+    max: 0.1
+    description: "Timeseries Spend Variable. Values above 0.028 are considered risky."
+
+  # ── 46. cust_min_due_12mo_avg ──────────────────────────────────
+  cust_min_due_12mo_avg:
+    dtype: float
+    distribution: normal
+    mean: 0.02                     # TUNE: values above 0.08 are risky
+    std: 0.05
+    min: 0.0
+    max: 1.0
+    description: "average number of only minimum due paid in last 12 months. Values above 0.08 are considered risky."
+
+  # ── 47. gam_clr_erly_risk_score ────────────────────────────────
+  gam_clr_erly_risk_score:
+    dtype: float
+    distribution: normal
+    mean: 850.0                    # TUNE: values below 785 are risky
+    std: 80.0
+    min: 500.0
+    max: 1000.0
+    description: "clear early risk score. Values below 785 are risky."
+
+  # ── 48. gam_mtge_loan_actl_pymt_am ────────────────────────────
+  gam_mtge_loan_actl_pymt_am:
+    dtype: float
+    distribution: normal
+    mean: 2000.0
+    std: 5000.0
+    min: -99999999999.0
+    max: 500000.0
+    description: "Mortgage Loan (Actual Payment Amount). Sentinel -99999999999 = no mortgage on file"
+
+  # ── 49. se_no_norm_wtd_pd_unpaid_amt ───────────────────────────
+  se_no_norm_wtd_pd_unpaid_amt:
+    dtype: float
+    distribution: normal
+    mean: 0.1                      # TUNE: values above 0 are risky
+    std: 0.2
+    min: 0.0
+    max: 1.0
+    description: "normalised accum amount weighted by merchant percentage. Values above 0 are risky."
+
+  # ── 50. cust_net_pymt_unbl1 ────────────────────────────────────
+  cust_net_pymt_unbl1:
+    dtype: float
+    distribution: normal
+    mean: 60000.0
+    std: 40000.0
+    min: 0.0
+    max: 300000.0
+    description: "net remit done by a customer in the unbilled period"
+
+  # ── 51. cust_lexis_nexis_blended_score ─────────────────────────
+  cust_lexis_nexis_blended_score:
+    dtype: int
+    distribution: normal
+    mean: 720                      # TUNE: values below 693 are risky
+    std: 50
+    min: 400
+    max: 900
+    description: "score merges business and owner credit data. Values below 693 are risky."
+
+  # ── 52. cust_sbfe_score ────────────────────────────────────────
+  cust_sbfe_score:
+    dtype: int
+    distribution: normal
+    mean: 880                      # TUNE: values below 863 are risky
+    std: 30
+    min: 500
+    max: 950
+    description: "Business credit score. Values below 863 are risky."
+
+  # ── 53. cust_dnb_paydex_score ──────────────────────────────────
+  cust_dnb_paydex_score:
+    dtype: int
+    distribution: normal
+    mean: 72                       # TUNE: values below 61 are risky
+    std: 15
+    min: 0
     max: 100
-    description: "Population percentile rank (1=lowest risk, 100=highest risk)"
+    description: "Paydex score measures payment performance. Values below 61 are risky."
 
-  timestamp:
-    dtype: date
-    year: 2024
-    description: "Date when scoring run was executed"
+  # ── 54. csbs_tot_expsr ─────────────────────────────────────────
+  csbs_tot_expsr:
+    dtype: float
+    distribution: normal
+    mean: 50000.0
+    std: 40000.0
+    min: 0.0
+    max: 500000.0
+    description: "total exposure - charge and lend"
 
-correlations:
-  - columns: [score, percentile]
-    direction: positive
-    strength: 0.8
+  # ── 55. airline_30_180d_amt ────────────────────────────────────
+  airline_30_180d_amt:
+    dtype: float
+    distribution: normal
+    mean: 2000.0
+    std: 5000.0
+    min: 0.0
+    max: 50000.0
+    description: "airline 30-180 days amount"
+
+  # ── 56. cust_mnth_since_60d_cnt ────────────────────────────────
+  cust_mnth_since_60d_cnt:
+    dtype: int
+    distribution: normal
+    mean: 24
+    std: 20
+    min: 0
+    max: 120
+    description: "customer month since 60 days count"
+
+  # ── 57. csbs_lend_on_chrg_expsr ────────────────────────────────
+  csbs_lend_on_chrg_expsr:
+    dtype: float
+    distribution: normal
+    mean: 20000.0
+    std: 25000.0
+    min: 0.0
+    max: 200000.0
+    description: "csbs lend on charge exposure"
+
+  # ── 58. inquiry_30day_cnt ──────────────────────────────────────
+  inquiry_30day_cnt:
+    dtype: int
+    distribution: poisson
+    lambda: 0.5
+    min: 0
+    max: 10
+    description: "inquiry 30 days count"
+
+  # ── 59. csbs_key ───────────────────────────────────────────────
+  csbs_key:
+    dtype: int
+    distribution: normal
+    mean: 500000
+    std: 200000
+    min: 1
+    max: 999999
+    description: "csbs key"
+
+  # ── 60. bf_opn_rvtrd_utl75pct_ct ───────────────────────────────
+  bf_opn_rvtrd_utl75pct_ct:
+    dtype: int
+    distribution: poisson
+    lambda: 0.5
+    min: 0
+    max: 10
+    description: "bf open revolving trade utilization 75% count"
+
+  # ── 61. tpf_cus_no_acct_rvlv_1_12 ─────────────────────────────
+  tpf_cus_no_acct_rvlv_1_12:
+    dtype: int
+    distribution: poisson
+    lambda: 1.5
+    min: 0
+    max: 10
+    description: "triumph cus no account revolve in 1-12 months"
+
+  # ── 62. best_tenr_in_mnth ──────────────────────────────────────
+  best_tenr_in_mnth:
+    dtype: int
+    distribution: normal
+    mean: 120
+    std: 80
+    min: 1
+    max: 600
+    description: "best tenure in month"
+
+  # ── 63. lstpayamt_no_rtns_15dys ────────────────────────────────
+  lstpayamt_no_rtns_15dys:
+    dtype: float
+    distribution: normal
+    mean: 5000.0
+    std: 8000.0
+    min: 0.0
+    max: 50000.0
+    description: "last payment no returns 15 days"
+
+  # ── 64. accum_cash_txn_in_unpaid ───────────────────────────────
+  accum_cash_txn_in_unpaid:
+    dtype: float
+    distribution: normal
+    mean: 1000.0
+    std: 5000.0
+    min: 0.0
+    max: 100000.0
+    description: "accumulate cash transaction in unpaid"
+
+  # ── 65. tpf_cust_finchg_mx_1_6_rt ─────────────────────────────
+  tpf_cust_finchg_mx_1_6_rt:
+    dtype: float
+    distribution: normal
+    mean: 0.15
+    std: 0.15
+    min: 0.0
+    max: 1.0
+    description: "triumph customer finance charge max 1-6 rate"
+
+  # ── 66. tpf_cust_no_cons_rev_18 ────────────────────────────────
+  tpf_cust_no_cons_rev_18:
+    dtype: int
+    distribution: poisson
+    lambda: 3.0
+    min: 0
+    max: 18
+    description: "triumph customer no consecutive revenue 18"
+
+  # ── 67. tpf_cust_neg_pub_rec_ct ────────────────────────────────
+  tpf_cust_neg_pub_rec_ct:
+    dtype: int
+    distribution: poisson
+    lambda: 0.2
+    min: 0
+    max: 10
+    description: "triumph customer negative public record count"
+
+  # ── 68. tpf_cust_no_tl_util_75 ────────────────────────────────
+  tpf_cust_no_tl_util_75:
+    dtype: int
+    distribution: poisson
+    lambda: 1.0
+    min: 0
+    max: 20
+    description: "triumph customer no tradeline utilization 75"
+
+  # ── 69. hm_equity_loc_otb ──────────────────────────────────────
+  hm_equity_loc_otb:
+    dtype: float
+    distribution: normal
+    mean: 50000.0
+    std: 60000.0
+    min: 0.0
+    max: 500000.0
+    description: "home equity line of credit open to buy"
+
+  # ── 70. bal_xfr_lst_12_moct ────────────────────────────────────
+  bal_xfr_lst_12_moct:
+    dtype: int
+    distribution: poisson
+    lambda: 0.5
+    min: 0
+    max: 10
+    description: "balance cross reference last 12 months count"
+
+  # ── 71. nbr_mjr_derog_l12m ────────────────────────────────────
+  nbr_mjr_derog_l12m:
+    dtype: int
+    distribution: poisson
+    lambda: 0.15
+    min: 0
+    max: 5
+    description: "number of major derogatory in last 12 months"
+
+  # ── 72. tpf_cust_avg_bbal_30_cur ───────────────────────────────
+  tpf_cust_avg_bbal_30_cur:
+    dtype: float
+    distribution: normal
+    mean: 15000.0
+    std: 20000.0
+    min: 0.0
+    max: 200000.0
+    description: "triumph customer average billed balance 30 current"
+
+  # ── 73. risky_ev_hi_revol ──────────────────────────────────────
+  risky_ev_hi_revol:
+    dtype: int
+    distribution: poisson
+    lambda: 0.2
+    min: 0
+    max: 5
+    description: "risky event high revolve"
+
+  # ── 74. mr_index ───────────────────────────────────────────────
+  mr_index:
+    dtype: float
+    distribution: normal
+    mean: 30.0
+    std: 25.0
+    min: 0.0
+    max: 100.0
+    description: "membership rewards index"
+
+  # ── 75. lowdeb_to_income ───────────────────────────────────────
+  lowdeb_to_income:
+    dtype: float
+    distribution: normal
+    mean: 0.2
+    std: 0.15
+    min: 0.0
+    max: 1.0
+    description: "low debt to income"
+
+  # ── 76. calx_high_age_ratio ────────────────────────────────────
+  calx_high_age_ratio:
+    dtype: float
+    distribution: normal
+    mean: 0.5
+    std: 0.2
+    min: 0.0
+    max: 1.0
+    description: "calx high age ratio"
+
+  # ── 77. tot_cons_comm_trds_g30 ─────────────────────────────────
+  tot_cons_comm_trds_g30:
+    dtype: int
+    distribution: poisson
+    lambda: 1.0
+    min: 0
+    max: 15
+    description: "total consumer and commercial trades greater than 30"
+
+  # ── 78. rat_csbs_exps_smrt_rvn ─────────────────────────────────
+  rat_csbs_exps_smrt_rvn:
+    dtype: float
+    distribution: normal
+    mean: 1.0
+    std: 0.8
+    min: 0.0
+    max: 5.0
+    description: "ratio of csbs exposure and smart revenue"
+
+  # ── 79. tpf_cu_plum_rvlv_indx ─────────────────────────────────
+  tpf_cu_plum_rvlv_indx:
+    dtype: float
+    distribution: normal
+    mean: 20.0
+    std: 25.0
+    min: 0.0
+    max: 100.0
+    description: "tpf cu plum revolve index"
+
+  # ── 80. ext_rvlv_bhvr ─────────────────────────────────────────
+  ext_rvlv_bhvr:
+    dtype: float
+    distribution: normal
+    mean: 0.3
+    std: 0.25
+    min: 0.0
+    max: 1.0
+    description: "external revolve behavior"
+
+  # ── 81. commercial_utilization ─────────────────────────────────
+  commercial_utilization:
+    dtype: float
+    distribution: normal
+    mean: 0.35
+    std: 0.2
+    min: 0.0
+    max: 1.0
+    description: "commercial utilization"
+
+  # ── 82. tpf_cu_mths_snc_30 ────────────────────────────────────
+  tpf_cu_mths_snc_30:
+    dtype: int
+    distribution: normal
+    mean: 36
+    std: 30
+    min: 0
+    max: 120
+    description: "triumph cu months since 30"
+
+  # ── 83. dif_na_cbs_fico_low_ten ────────────────────────────────
+  dif_na_cbs_fico_low_ten:
+    dtype: float
+    distribution: normal
+    mean: 0.0
+    std: 30.0
+    min: -100.0
+    max: 100.0
+    description: "difference in na and dba fico for low tenure"
+
+  # ── 84. ratio_expr_rptd_incm_5yr ──────────────────────────────
+  ratio_expr_rptd_incm_5yr:
+    dtype: float
+    distribution: normal
+    mean: 0.3
+    std: 0.3
+    min: 0.0
+    max: 2.0
+    description: "ratio exposure reported income with tenure < 60 months"
+
+  # ── 85. cust_behav_ind ─────────────────────────────────────────
+  cust_behav_ind:
+    dtype: float
+    distribution: normal
+    mean: 0.5
+    std: 0.2
+    min: 0.0
+    max: 1.0
+    description: "customer behaviour indicator"
+
+  # ── 86. open_stdnt_tot_loan_bal_am ─────────────────────────────
+  open_stdnt_tot_loan_bal_am:
+    dtype: float
+    distribution: normal
+    mean: 15000.0
+    std: 25000.0
+    min: 0.0
+    max: 200000.0
+    description: "total balance amount for open student loan"
+
+  # ── 87. open_rcnt_auto_loan_trd_mo_ct ──────────────────────────
+  open_rcnt_auto_loan_trd_mo_ct:
+    dtype: int
+    distribution: normal
+    mean: 24
+    std: 20
+    min: 0
+    max: 120
+    description: "months since most recent open auto trade"
+
+  # ── 88. paydex_scr ─────────────────────────────────────────────
+  paydex_scr:
+    dtype: int
+    distribution: normal
+    mean: 72
+    std: 15
+    min: 0
+    max: 100
+    description: "paydex score"
+
+  # ── 89. delinq_trig_other_loc_30d_cnt ──────────────────────────
+  delinq_trig_other_loc_30d_cnt:
+    dtype: int
+    distribution: poisson
+    lambda: 0.1
+    min: 0
+    max: 5
+    description: "count of delinquency trigger other line of credit for 30 days"
+
+  # ── 90. csbs_chrg_expsr ────────────────────────────────────────
+  csbs_chrg_expsr:
+    dtype: float
+    distribution: normal
+    mean: 30000.0
+    std: 30000.0
+    min: 0.0
+    max: 200000.0
+    description: "csbs charge exposure"
+
+  # ── 91. amt_inst_atm_p14d ──────────────────────────────────────
+  amt_inst_atm_p14d:
+    dtype: float
+    distribution: normal
+    mean: 200.0
+    std: 500.0
+    min: 0.0
+    max: 10000.0
+    description: "amount in-state atm p14d"
+
+  # ── 92. crosbin_se_low_fico_sp ─────────────────────────────────
+  crosbin_se_low_fico_sp:
+    dtype: float
+    distribution: normal
+    mean: 10.0
+    std: 15.0
+    min: 0.0
+    max: 100.0
+    description: "cross bin service establishment low fico sp"
+
+  # ── 93. crosbin_seplt_spend ────────────────────────────────────
+  crosbin_seplt_spend:
+    dtype: float
+    distribution: normal
+    mean: 5000.0
+    std: 10000.0
+    min: 0.0
+    max: 100000.0
+    description: "cross bin seplt spend"
+
+  # ── 94. clav_se_pctlofico_g30p_zt ──────────────────────────────
+  clav_se_pctlofico_g30p_zt:
+    dtype: float
+    distribution: normal
+    mean: 0.1
+    std: 0.15
+    min: 0.0
+    max: 1.0
+    description: "clav service establishment percentage low fico g30 zt"
+
+  # ── 95. crosbin_amx_rev_bal ────────────────────────────────────
+  crosbin_amx_rev_bal:
+    dtype: float
+    distribution: normal
+    mean: 20000.0
+    std: 25000.0
+    min: 0.0
+    max: 200000.0
+    description: "cross bin amex revenue balance"
+
+  # ── 96. bf_tot_open_rvlv_trd_am ────────────────────────────────
+  bf_tot_open_rvlv_trd_am:
+    dtype: float
+    distribution: normal
+    mean: 30000.0
+    std: 40000.0
+    min: 0.0
+    max: 500000.0
+    description: "bf total open revolve trade amount"
+
+  # ── 97. tpf_cust_max_debits_1_6 ────────────────────────────────
+  tpf_cust_max_debits_1_6:
+    dtype: float
+    distribution: normal
+    mean: 5000.0
+    std: 10000.0
+    min: 0.0
+    max: 100000.0
+    description: "triumph customer max debits 1-6 months"
+
+  # ── 98. tpf_rvlv_idx ──────────────────────────────────────────
+  tpf_rvlv_idx:
+    dtype: float
+    distribution: normal
+    mean: 25.0
+    std: 20.0
+    min: 0.0
+    max: 100.0
+    description: "triumph revolve index"
+
+  # ── 99. day_sin_lst_derog_rtn ──────────────────────────────────
+  day_sin_lst_derog_rtn:
+    dtype: int
+    distribution: normal
+    mean: 200
+    std: 250
+    min: 0
+    max: 1000
+    description: "day since last derogatory return"
+
+  # ── 100. cb_sow_rev_util ───────────────────────────────────────
+  cb_sow_rev_util:
+    dtype: float
+    distribution: normal
+    mean: 0.35
+    std: 0.2
+    min: 0.0
+    max: 1.0
+    description: "credit bureau size of wallet revenue utilization"
+
+  # ── 101. amt_wwic_grp11_se_rat_u ───────────────────────────────
+  amt_wwic_grp11_se_rat_u:
+    dtype: float
+    distribution: normal
+    mean: 5.0
+    std: 8.0
+    min: 0.0
+    max: 50.0
+    description: "amount worldwide industry code group 11 service establishment rat u"
+
+  # ── 102. sbfe_term_loan_bal ────────────────────────────────────
+  sbfe_term_loan_bal:
+    dtype: float
+    distribution: normal
+    mean: 30000.0
+    std: 50000.0
+    min: 0.0
+    max: 500000.0
+    description: "sbfe term loan balance"
+
+  # ── 103. ttl_nonp_inq_ons_grms ─────────────────────────────────
+  ttl_nonp_inq_ons_grms:
+    dtype: int
+    distribution: poisson
+    lambda: 1.0
+    min: 0
+    max: 20
+    description: "total non-promotional inquiry ons grms"
+
+  # ── 104. tpf_cu_sow_pay01 ─────────────────────────────────────
+  tpf_cu_sow_pay01:
+    dtype: float
+    distribution: normal
+    mean: 0.4
+    std: 0.25
+    min: 0.0
+    max: 1.0
+    description: "triumph cu size of wallet pay01"
+
+  # ── 105. tpf_cb_mx_rt_cur_60_1_12 ─────────────────────────────
+  tpf_cb_mx_rt_cur_60_1_12:
+    dtype: float
+    distribution: normal
+    mean: 0.3
+    std: 0.25
+    min: 0.0
+    max: 1.0
+    description: "triumph credit bureau max rate current 60 1-12"
+
+  # ── 106. tot30dpd_totintextpay_rt ──────────────────────────────
+  tot30dpd_totintextpay_rt:
+    dtype: float
+    distribution: normal
+    mean: 0.05
+    std: 0.1
+    min: 0.0
+    max: 1.0
+    description: "total 30 days past due total intextpay rate"
+
+  # ── 107. share_plastic_debt ────────────────────────────────────
+  share_plastic_debt:
+    dtype: float
+    distribution: normal
+    mean: 0.3
+    std: 0.2
+    min: 0.0
+    max: 1.0
+    description: "share plastic debt"
+
+  # ── 108. nr_crds_accel_rev ─────────────────────────────────────
+  nr_crds_accel_rev:
+    dtype: int
+    distribution: poisson
+    lambda: 0.5
+    min: 0
+    max: 10
+    description: "# of cards with accelerated revolve"
+
+  # ── 109. sum_o30dt_o60dt_o90dt ─────────────────────────────────
+  sum_o30dt_o60dt_o90dt:
+    dtype: int
+    distribution: poisson
+    lambda: 0.2
+    min: 0
+    max: 10
+    description: "sum of o30dt o60dt o90dt"
+
+  # ── 110. auto_pay_trans ────────────────────────────────────────
+  auto_pay_trans:
+    dtype: int
+    distribution: poisson
+    lambda: 3.0
+    min: 0
+    max: 50
+    description: "auto pay transaction"
+
+  # ── 111. sudden_drop_in_fico1 ──────────────────────────────────
+  sudden_drop_in_fico1:
+    dtype: int
+    distribution: poisson
+    lambda: 0.1
+    min: 0
+    max: 1
+    description: "sudden drop in fico 1"
+
+  # ── 112. avgutl_comm_rev_trdb ──────────────────────────────────
+  avgutl_comm_rev_trdb:
+    dtype: float
+    distribution: normal
+    mean: 0.3
+    std: 0.2
+    min: 0.0
+    max: 1.0
+    description: "average utilization commercial revenue trdb"
+
+  # ── 113. ext_bal_low_tnur ──────────────────────────────────────
+  ext_bal_low_tnur:
+    dtype: float
+    distribution: normal
+    mean: 10000.0
+    std: 20000.0
+    min: 0.0
+    max: 200000.0
+    description: "external balance for low tenure"
+
+  # ── 114. sumatn_risky_evnt ─────────────────────────────────────
+  sumatn_risky_evnt:
+    dtype: int
+    distribution: poisson
+    lambda: 0.3
+    min: 0
+    max: 10
+    description: "summation of risky events"
+
+  # ── 115. tpf_ccm_tm_wt_pydw_1_12 ──────────────────────────────
+  tpf_ccm_tm_wt_pydw_1_12:
+    dtype: float
+    distribution: normal
+    mean: 0.5
+    std: 0.3
+    min: 0.0
+    max: 1.0
+    description: "tpf ccm time wtd paydown rate for 1-12 months"
+
+  # ── 116. spend_concentration ───────────────────────────────────
+  spend_concentration:
+    dtype: float
+    distribution: normal
+    mean: 0.3
+    std: 0.2
+    min: 0.0
+    max: 1.0
+    description: "spend concentration"
+
+  # ── 117. accm_wgtd_by_avsecdss ─────────────────────────────────
+  accm_wgtd_by_avsecdss:
+    dtype: float
+    distribution: normal
+    mean: 10.0
+    std: 15.0
+    min: 0.0
+    max: 100.0
+    description: "accum $ weighted by avsecdss for the accum"
+
+  # ── 118. accm_wgtd_by_mxsecdss ─────────────────────────────────
+  accm_wgtd_by_mxsecdss:
+    dtype: float
+    distribution: normal
+    mean: 10.0
+    std: 15.0
+    min: 0.0
+    max: 100.0
+    description: "accum $ weighted by mxsecdss for the accum"
+
+  # ── 119. open_auto_tot_trd_bal_am ──────────────────────────────
+  open_auto_tot_trd_bal_am:
+    dtype: float
+    distribution: normal
+    mean: 15000.0
+    std: 15000.0
+    min: 0.0
+    max: 100000.0
+    description: "total balance amount for all open auto tradelines"
+
+  # ── 120. open_rcnt_pers_loan_trd_mo_ct ─────────────────────────
+  open_rcnt_pers_loan_trd_mo_ct:
+    dtype: int
+    distribution: normal
+    mean: 18
+    std: 20
+    min: 0
+    max: 120
+    description: "months since most recent open personal loan trade"
+
+  # ── 121. open_rcnt_stdnt_loan_trd_mo_ct ────────────────────────
+  open_rcnt_stdnt_loan_trd_mo_ct:
+    dtype: int
+    distribution: normal
+    mean: 30
+    std: 25
+    min: 0
+    max: 120
+    description: "months since most recent open student loan trade"
+
+  # ── 122. open_stdnt_loan_trd_ct ────────────────────────────────
+  open_stdnt_loan_trd_ct:
+    dtype: int
+    distribution: poisson
+    lambda: 0.8
+    min: 0
+    max: 10
+    description: "total number of open student loan trades"
+
+  # ── 123. smart_revenue ─────────────────────────────────────────
+  smart_revenue:
+    dtype: float
+    distribution: normal
+    mean: 50000.0
+    std: 40000.0
+    min: 0.0
+    max: 500000.0
+    description: "smart revenue"
+
+  # ── 124. subj_addr_change_index ────────────────────────────────
+  subj_addr_change_index:
+    dtype: float
+    distribution: normal
+    mean: 2.0
+    std: 2.0
+    min: 0.0
+    max: 10.0
+    description: "index indicating how often subject has changed address"
+
+  # ── 125. cust_cbr_intr_inq_idx ─────────────────────────────────
+  cust_cbr_intr_inq_idx:
+    dtype: float
+    distribution: normal
+    mean: 3.0
+    std: 3.0
+    min: 0.0
+    max: 20.0
+    description: "customer credit bureau internal inquiry index"
+
+  # ── 126. cust_dumas_bal ────────────────────────────────────────
+  cust_dumas_bal:
+    dtype: float
+    distribution: normal
+    mean: 10000.0
+    std: 20000.0
+    min: 0.0
+    max: 200000.0
+    description: "dumas balance"
+
+  # ── 127. psa_tot_bal ───────────────────────────────────────────
+  psa_tot_bal:
+    dtype: float
+    distribution: normal
+    mean: 20000.0
+    std: 40000.0
+    min: 0.0
+    max: 500000.0
+    description: "total balance on all personal savings accounts"
+
+  # ── 128. cust_sbfe_rnn_score ───────────────────────────────────
+  cust_sbfe_rnn_score:
+    dtype: float
+    distribution: normal
+    mean: 0.1
+    std: 0.1
+    min: 0.0
+    max: 1.0
+    description: "recurrent neural network leveraging small business financial exchange"
+
+  # ── 129. cust_aggr_first_5trans_eff_se_risk_score ──────────────
+  cust_aggr_first_5trans_eff_se_risk_score:
+    dtype: float
+    distribution: normal
+    mean: 15.0
+    std: 15.0
+    min: 0.0
+    max: 100.0
+    description: "customer level aggregated effective se10 risk score using first 5 transactions"
+
+  # ── 130. cust_sic2_indus_lvl_risk ──────────────────────────────
+  cust_sic2_indus_lvl_risk:
+    dtype: float
+    distribution: normal
+    mean: 0.05
+    std: 0.05
+    min: 0.0
+    max: 1.0
+    description: "average external normalized default risk of sic 2 industry level peers"
+
+  # ── 131. cust_rcnt_mo_loc_paydown_rt ───────────────────────────
+  cust_rcnt_mo_loc_paydown_rt:
+    dtype: float
+    distribution: normal
+    mean: 0.5
+    std: 0.3
+    min: 0.0
+    max: 1.0
+    description: "customer level recent month loc paydown rate"
+
+  # ── 132. cust_avg_peer_set_apr ─────────────────────────────────
+  cust_avg_peer_set_apr:
+    dtype: float
+    distribution: normal
+    mean: 12.0
+    std: 5.0
+    min: 0.0
+    max: 30.0
+    description: "aggregated average annual percentage rate across sbfe term loan peers"
+
+  # ── 133. cust_sbfe_avg_term_loan_apr ───────────────────────────
+  cust_sbfe_avg_term_loan_apr:
+    dtype: float
+    distribution: normal
+    mean: 10.0
+    std: 5.0
+    min: 0.0
+    max: 30.0
+    description: "average annual percentage rate across all sbfe term loans"
+
+  # ── 134. cust_bkc_debt_to_arb_inc_ratio ────────────────────────
+  cust_bkc_debt_to_arb_inc_ratio:
+    dtype: float
+    distribution: normal
+    mean: 0.3
+    std: 0.25
+    min: 0.0
+    max: 2.0
+    description: "customer level total bank card debt to arbitrated income ratio"
+
+  # ── 135. cust_intr_extnl_unscr_tt_mo_due_am1 ──────────────────
+  cust_intr_extnl_unscr_tt_mo_due_am1:
+    dtype: float
+    distribution: normal
+    mean: 3000.0
+    std: 5000.0
+    min: 0.0
+    max: 50000.0
+    description: "customer total monthly due amount for all internal and external unsecured trades"
+
+  # ── 136. cust_experian_derog_liab_am1 ──────────────────────────
+  cust_experian_derog_liab_am1:
+    dtype: float
+    distribution: normal
+    mean: 5000.0
+    std: 20000.0
+    min: 0.0
+    max: 500000.0
+    description: "experian derogatory liability amount"
+
+  # ── 137. cust_extnl_plstc_excs_pymt_am1 ────────────────────────
+  cust_extnl_plstc_excs_pymt_am1:
+    dtype: float
+    distribution: normal
+    mean: 3000.0
+    std: 5000.0
+    min: 0.0
+    max: 100000.0
+    description: "customer amount paid over minimum due on external plastic trades"
+
+  # ── 138. cust_lexis_nexis_hi_risk_lien_judge_am1 ───────────────
+  cust_lexis_nexis_hi_risk_lien_judge_am1:
+    dtype: float
+    distribution: normal
+    mean: 5000.0
+    std: 30000.0
+    min: 0.0
+    max: 500000.0
+    description: "total amount of federal tax lien and civil judgement"
+
+  # ── 139. cust_experian_6mo_inq_ct1 ─────────────────────────────
+  cust_experian_6mo_inq_ct1:
+    dtype: int
+    distribution: poisson
+    lambda: 2.0
+    min: 0
+    max: 20
+    description: "experian total inquiry count in last 6 months"
+
+  # ── 140. cust_extnl_jnt_bankcard_tot_trd_bal_rt1 ───────────────
+  cust_extnl_jnt_bankcard_tot_trd_bal_rt1:
+    dtype: float
+    distribution: normal
+    mean: 0.3
+    std: 0.3
+    min: 0.0
+    max: 2.0
+    description: "customer external joint bankcard total trades balance ratio"
+
+  # ── 141. cust_experian_bal_delinq_idx1 ─────────────────────────
+  cust_experian_bal_delinq_idx1:
+    dtype: float
+    distribution: normal
+    mean: 2.0
+    std: 3.0
+    min: 0.0
+    max: 20.0
+    description: "experian risk weighted balance delinquency index"
+
+  # ── 142. cust_lexis_nexis_inq_12mo_ct1 ─────────────────────────
+  cust_lexis_nexis_inq_12mo_ct1:
+    dtype: int
+    distribution: poisson
+    lambda: 2.0
+    min: 0
+    max: 20
+    description: "count of all inquiries for the business within last 12 months"
+
+  # ── 143. cust_experian_comb_trd_ct1 ────────────────────────────
+  cust_experian_comb_trd_ct1:
+    dtype: int
+    distribution: poisson
+    lambda: 8.0
+    min: 0
+    max: 50
+    description: "experian total number of combined trades"
+
+  # ── 144. cust_glbl_home_equty_am1 ──────────────────────────────
+  cust_glbl_home_equty_am1:
+    dtype: float
+    distribution: normal
+    mean: 150000.0
+    std: 150000.0
+    min: 0.0
+    max: 1000000.0
+    description: "customer home equity amount in USD"
+
+  # ── 145. cust_experian_lgl_item_ct1 ────────────────────────────
+  cust_experian_lgl_item_ct1:
+    dtype: int
+    distribution: poisson
+    lambda: 0.3
+    min: 0
+    max: 10
+    description: "experian legal item count"
+
+  # ── 146. cust_experian_lst_pub_rec_ms1 ─────────────────────────
+  cust_experian_lst_pub_rec_ms1:
+    dtype: int
+    distribution: normal
+    mean: 12
+    std: 8
+    min: 0
+    max: 24
+    description: "experian public record most recent age in months"
+
+  # ── 147. cust_experian_comb_trd_bal1 ───────────────────────────
+  cust_experian_comb_trd_bal1:
+    dtype: float
+    distribution: normal
+    mean: 50000.0
+    std: 60000.0
+    min: 0.0
+    max: 500000.0
+    description: "experian total combined trade balance"
+
+  # ── 148. cust_experian_add_trd_bal1 ────────────────────────────
+  cust_experian_add_trd_bal1:
+    dtype: float
+    distribution: normal
+    mean: 5000.0
+    std: 10000.0
+    min: 0.0
+    max: 100000.0
+    description: "total balance for additional trades reported within last 4 months"
+
+  # ── 149. cust_extnl_bankcard_supp_tot_bal_rt1 ──────────────────
+  cust_extnl_bankcard_supp_tot_bal_rt1:
+    dtype: float
+    distribution: normal
+    mean: 0.2
+    std: 0.2
+    min: 0.0
+    max: 2.0
+    description: "customer external bankcard supplementary total balance ratio"
+
+  # ── 150. cust_intr_extnl_tt_debt_srvc_rt1 ──────────────────────
+  cust_intr_extnl_tt_debt_srvc_rt1:
+    dtype: float
+    distribution: normal
+    mean: 0.15
+    std: 0.15
+    min: 0.0
+    max: 2.0
+    description: "proportion of total monthly minimum due for all trades by income"
+
+  # ── 151. cust_auto_trd_close_lst_24mo_ctgy ─────────────────────
+  cust_auto_trd_close_lst_24mo_ctgy:
+    dtype: categorical
+    categories:
+      no_loan: 0.40
+      only_open: 0.25
+      single_good_closed: 0.15
+      multi_good_closed: 0.10
+      one_or_more_bad_closed: 0.05
+      both_good_and_bad: 0.05
+    description: "tag presence of closed autoloans"
+
+  # ── 152. cust_spend_act_supp_ct ────────────────────────────────
+  cust_spend_act_supp_ct:
+    dtype: int
+    distribution: poisson
+    lambda: 0.8
+    min: 0
+    max: 10
+    description: "number of supplementary cards with spend in past 6 months"
+
+  # ── 153. cust_supp_spend_rt ────────────────────────────────────
+  cust_supp_spend_rt:
+    dtype: float
+    distribution: normal
+    mean: 0.15
+    std: 0.15
+    min: 0.0
+    max: 1.0
+    description: "ratio of supplementary card spend versus total spend"
+
+  # ── 154. cust_extnl_min_otb_am ─────────────────────────────────
+  cust_extnl_min_otb_am:
+    dtype: float
+    distribution: normal
+    mean: 10000.0
+    std: 20000.0
+    min: -50000.0
+    max: 200000.0
+    description: "min open to buy across external plastic tradelines"
+
+  # ── 155. cust_debt_incom_oop ───────────────────────────────────
+  cust_debt_incom_oop:
+    dtype: float
+    distribution: normal
+    mean: 1.0
+    std: 1.5
+    min: 0.0
+    max: 10.0
+    description: "debt income out of pattern"
+
+  # ── 156. cust_annual_air_mile_trvl ─────────────────────────────
+  cust_annual_air_mile_trvl:
+    dtype: float
+    distribution: normal
+    mean: 15000.0
+    std: 25000.0
+    min: 0.0
+    max: 200000.0
+    description: "total annual miles travelled"
+
+  # ── 157. cust_sbfe_paydown_trend_12mo_cc ───────────────────────
+  cust_sbfe_paydown_trend_12mo_cc:
+    dtype: float
+    distribution: normal
+    mean: 0.5
+    std: 0.3
+    min: 0.0
+    max: 1.0
+    description: "12 months time weighted paydown on external commercial cards"
+
+  # ── 158. cust_sbfe_min_due_12mo_cc_in ──────────────────────────
+  cust_sbfe_min_due_12mo_cc_in:
+    dtype: int
+    distribution: poisson
+    lambda: 0.1
+    min: 0
+    max: 1
+    description: "12 months time weighted min due indicator on external commercial cards"
+
+  # ── 159. spend_low_tenure_ctmr ─────────────────────────────────
+  spend_low_tenure_ctmr:
+    dtype: float
+    distribution: normal
+    mean: 0.2
+    std: 0.2
+    min: 0.0
+    max: 1.0
+    description: "spend % low tenure customer"
+
+  # ── 160. spend_diverge_non_corp ────────────────────────────────
+  spend_diverge_non_corp:
+    dtype: float
+    distribution: normal
+    mean: 0.0
+    std: 1.5
+    min: -5.0
+    max: 5.0
+    description: "spend divergence variable for non corp cards"
+
+  # ── 161. all_liens_tot_am ──────────────────────────────────────
+  all_liens_tot_am:
+    dtype: float
+    distribution: normal
+    mean: 5000.0
+    std: 30000.0
+    min: 0.0
+    max: 500000.0
+    description: "total dollar amount of all liens filed"
+
+  # ── 162. subj_most_rec_attend_4_yr_pgm ─────────────────────────
+  subj_most_rec_attend_4_yr_pgm:
+    dtype: int
+    distribution: poisson
+    lambda: 0.3
+    min: 0
+    max: 1
+    description: "indicates if subject attended 4 year program"
+
+  # ── 163. tot_cnt_liens_filed_60_days ───────────────────────────
+  tot_cnt_liens_filed_60_days:
+    dtype: int
+    distribution: poisson
+    lambda: 0.2
+    min: 0
+    max: 10
+    description: "liens filed in last 60 months"
+
+  # ── 164. cust_tot_pers_loan_bal_am ─────────────────────────────
+  cust_tot_pers_loan_bal_am:
+    dtype: float
+    distribution: normal
+    mean: 10000.0
+    std: 20000.0
+    min: 0.0
+    max: 200000.0
+    description: "outstanding balance on personal loans"
+
+  # ── 165. new_adj_home_val_am ───────────────────────────────────
+  new_adj_home_val_am:
+    dtype: float
+    distribution: normal
+    mean: 350000.0
+    std: 200000.0
+    min: 0.0
+    max: 2000000.0
+    description: "new home value"
+
+  # ── 166. glbl_enter_tsa_pre_in ─────────────────────────────────
+  glbl_enter_tsa_pre_in:
+    dtype: int
+    distribution: poisson
+    lambda: 0.3
+    min: 0
+    max: 1
+    description: "global entry & tsa pre indicator"
+
+  # ── 167. cust_loan_repaid_dumas_acct_pct ───────────────────────
+  cust_loan_repaid_dumas_acct_pct:
+    dtype: float
+    distribution: normal
+    mean: 0.6
+    std: 0.3
+    min: 0.0
+    max: 1.0
+    description: "percentage of dumas loan repaid"
+
+  # ── 168. cust_competitive_ucc_fl ───────────────────────────────
+  cust_competitive_ucc_fl:
+    dtype: int
+    distribution: poisson
+    lambda: 0.2
+    min: 0
+    max: 1
+    description: "competitive standing UCC flag"
+
+  # ── 169. cust_home_own_sta_cd ──────────────────────────────────
+  cust_home_own_sta_cd:
+    dtype: categorical
+    categories:
+      own: 0.55
+      rent: 0.30
+      other: 0.15
+    description: "home ownership status"
+
+  # ── 170. cust_lexis_nexis_b2b_opr_seg_act_bal_am1 ─────────────
+  cust_lexis_nexis_b2b_opr_seg_act_bal_am1:
+    dtype: float
+    distribution: normal
+    mean: 30000.0
+    std: 50000.0
+    min: 0.0
+    max: 500000.0
+    description: "total active b2b trade line balances in operations segment"
+
+  # ── 171. cust_extnl_supp_bankcard_trd_ct1 ──────────────────────
+  cust_extnl_supp_bankcard_trd_ct1:
+    dtype: int
+    distribution: poisson
+    lambda: 1.0
+    min: 0
+    max: 10
+    description: "customer external supplementary bankcard trades count"
+
+  # ── 172. cust_experian_trd_delinq_idx1 ─────────────────────────
+  cust_experian_trd_delinq_idx1:
+    dtype: float
+    distribution: normal
+    mean: 2.0
+    std: 3.0
+    min: 0.0
+    max: 20.0
+    description: "experian risk weighted trade delinquency index"
+
+  # ── 173. cust_lexis_nexis_b2b_tm_wt_wp_2yr_idx1 ───────────────
+  cust_lexis_nexis_b2b_tm_wt_wp_2yr_idx1:
+    dtype: float
+    distribution: normal
+    mean: 3.0
+    std: 4.0
+    min: 0.0
+    max: 20.0
+    description: "time weighted b2b tradeline worst performance index in past 2 years"
+
+  # ── 174. cust_extnl_plstc_pay_down_rt1 ─────────────────────────
+  cust_extnl_plstc_pay_down_rt1:
+    dtype: float
+    distribution: normal
+    mean: 0.5
+    std: 0.25
+    min: 0.0
+    max: 1.0
+    description: "proportion of total monthly balance paid on external plastic trades"
+
+  # ── 175. cust_lexis_nexis_b2b_grow_delinq_1yr_idx1 ────────────
+  cust_lexis_nexis_b2b_grow_delinq_1yr_idx1:
+    dtype: float
+    distribution: normal
+    mean: 2.0
+    std: 3.0
+    min: 0.0
+    max: 20.0
+    description: "lexis nexis b2b growth in delinquency index"
+
+  # ── 176. cust_lexis_nexis_b2b_bal_wt_delinq_idx1 ──────────────
+  cust_lexis_nexis_b2b_bal_wt_delinq_idx1:
+    dtype: float
+    distribution: normal
+    mean: 2.0
+    std: 3.0
+    min: 0.0
+    max: 20.0
+    description: "lexis nexis b2b balance weighted delinquency index"
+
+  # ── 177. cust_experian_intelli_blend_score1 ────────────────────
+  cust_experian_intelli_blend_score1:
+    dtype: int
+    distribution: normal
+    mean: 700
+    std: 80
+    min: 300
+    max: 900
+    description: "experian intelli blended score"
+
+  # ── 178. cust_experian_intelli_cmrcl_score1 ────────────────────
+  cust_experian_intelli_cmrcl_score1:
+    dtype: int
+    distribution: normal
+    mean: 680
+    std: 90
+    min: 300
+    max: 900
+    description: "experian intelli commercial score"
+
+  # ── 179. cust_mtge_trd_close_lst_120mo_ctgy ────────────────────
+  cust_mtge_trd_close_lst_120mo_ctgy:
+    dtype: categorical
+    categories:
+      no_loan: 0.45
+      only_open: 0.25
+      good_closed: 0.15
+      bad_closed: 0.10
+      both: 0.05
+    description: "tag presence of closed mortgage loans"
+
+  # ── 180. cust_extnl_post_line_dcr_otb_am ───────────────────────
+  cust_extnl_post_line_dcr_otb_am:
+    dtype: float
+    distribution: normal
+    mean: 5000.0
+    std: 15000.0
+    min: -50000.0
+    max: 200000.0
+    description: "open to buy given a line decrease trigger"
+
+  # ── 181. cust_pers_loan_trd_close_lst_24mo_ctgy ────────────────
+  cust_pers_loan_trd_close_lst_24mo_ctgy:
+    dtype: categorical
+    categories:
+      no_loan: 0.50
+      only_open: 0.20
+      good_closed: 0.15
+      bad_closed: 0.10
+      both: 0.05
+    description: "tag presence of closed personal loans"
+
+  # ── 182. cust_out_pat_spend_rt ─────────────────────────────────
+  cust_out_pat_spend_rt:
+    dtype: float
+    distribution: normal
+    mean: 1.0
+    std: 0.5
+    min: 0.0
+    max: 5.0
+    description: "out of pattern spend ratio"
+
+  # ── 183. cust_mtge_avg_paydown_1mo ─────────────────────────────
+  cust_mtge_avg_paydown_1mo:
+    dtype: float
+    distribution: normal
+    mean: 1500.0
+    std: 1500.0
+    min: 0.0
+    max: 10000.0
+    description: "principal paydown monthly average on mortgage trades"
+
+  # ── 184. cust_open_acct_shr_expsr ──────────────────────────────
+  cust_open_acct_shr_expsr:
+    dtype: float
+    distribution: normal
+    mean: 0.6
+    std: 0.25
+    min: 0.0
+    max: 1.0
+    description: "ratio of open account exposure to total exposure"
+
+  # ── 185. cust_annual_avg_rm_rt_pd ──────────────────────────────
+  cust_annual_avg_rm_rt_pd:
+    dtype: float
+    distribution: normal
+    mean: 3000.0
+    std: 5000.0
+    min: 0.0
+    max: 50000.0
+    description: "total room rent paid for accommodation in hotel in a year"
+
+  # ── 186. cust_6mo_hist_loc_pydn ────────────────────────────────
+  cust_6mo_hist_loc_pydn:
+    dtype: float
+    distribution: normal
+    mean: 0.5
+    std: 0.3
+    min: 0.0
+    max: 1.0
+    description: "6 months time weighted paydown for open sbs and cps customers"
+
+  # ── 187. cust_intr_rvlv_paydown_idx ────────────────────────────
+  cust_intr_rvlv_paydown_idx:
+    dtype: float
+    distribution: normal
+    mean: 0.5
+    std: 0.25
+    min: 0.0
+    max: 1.0
+    description: "customer revolve index using revolve paydown"
+
+  # ── 188. cust_revn_net_worth_yr1_rt ────────────────────────────
+  cust_revn_net_worth_yr1_rt:
+    dtype: float
+    distribution: normal
+    mean: 2.0
+    std: 2.0
+    min: 0.0
+    max: 10.0
+    description: "ratio of total revenue to net worth"
+
+  # ── 189. cust_bill_bal_hi_cr_rt ────────────────────────────────
+  cust_bill_bal_hi_cr_rt:
+    dtype: float
+    distribution: normal
+    mean: 0.5
+    std: 0.5
+    min: 0.0
+    max: 5.0
+    description: "ratio of amex balance to highest credit reported to D&B"
+
+  # ── 190. cust_srce_cnfr_id_ad_ct ───────────────────────────────
+  cust_srce_cnfr_id_ad_ct:
+    dtype: int
+    distribution: poisson
+    lambda: 5.0
+    min: 0
+    max: 20
+    description: "number of sources confirming identity and address"
+
+  # ── 191. se_no_norm_wtd_pd_unpaid_cnt ──────────────────────────
+  se_no_norm_wtd_pd_unpaid_cnt:
+    dtype: int
+    distribution: poisson
+    lambda: 2.0
+    min: 0
+    max: 50
+    description: "normalized accum number weighted by merchant percentage for unpaid"
+
+  # ── 192. norm_amt_maxsectg_unpaid ──────────────────────────────
+  norm_amt_maxsectg_unpaid:
+    dtype: float
+    distribution: normal
+    mean: 10.0
+    std: 15.0
+    min: 0.0
+    max: 100.0
+    description: "normalised accum dollars weighted by avgsectg for unpaid"
+
+  # ── 193. cust_quick_yr1_rt ─────────────────────────────────────
+  cust_quick_yr1_rt:
+    dtype: float
+    distribution: normal
+    mean: 1.2
+    std: 0.8
+    min: 0.0
+    max: 5.0
+    description: "quick ratio for latest full year financial"
+
+  # ── 194. cust_bill_bal_pay_expc_rt ─────────────────────────────
+  cust_bill_bal_pay_expc_rt:
+    dtype: float
+    distribution: normal
+    mean: 1.0
+    std: 1.5
+    min: 0.0
+    max: 10.0
+    description: "ratio of amex balance to payment experiences at D&B"
+
+  # ── 195. cust_bus_cola_in ──────────────────────────────────────
+  cust_bus_cola_in:
+    dtype: int
+    distribution: poisson
+    lambda: 0.4
+    min: 0
+    max: 1
+    description: "customer level no pre-set spend limit indicator"
+
+  # ── 196. cust_revn_grow_yr1_rt ─────────────────────────────────
+  cust_revn_grow_yr1_rt:
+    dtype: float
+    distribution: normal
+    mean: 0.1
+    std: 0.3
+    min: -1.0
+    max: 5.0
+    description: "year on year revenue growth rate"
+
+  # ── 197. cust_sbfe_fin_trd_bal_am ──────────────────────────────
+  cust_sbfe_fin_trd_bal_am:
+    dtype: float
+    distribution: normal
+    mean: 25000.0
+    std: 40000.0
+    min: 0.0
+    max: 500000.0
+    description: "total balance on financial trades at sbfe"
+
+  # ── 198. cust_max_lend_util ────────────────────────────────────
+  cust_max_lend_util:
+    dtype: float
+    distribution: normal
+    mean: 0.5
+    std: 0.3
+    min: 0.0
+    max: 1.5
+    description: "maximum utilization across all lending accounts"
+
+  # ── 199. cust_subj_ad_ct ───────────────────────────────────────
+  cust_subj_ad_ct:
+    dtype: int
+    distribution: poisson
+    lambda: 3.0
+    min: 1
+    max: 20
+    description: "unique addresses found with customer"
+
+  # ── 200. cust_ebit_intrst_expn_yr1_rt ──────────────────────────
+  cust_ebit_intrst_expn_yr1_rt:
+    dtype: float
+    distribution: normal
+    mean: 5.0
+    std: 8.0
+    min: 0.0
+    max: 50.0
+    description: "ratio of ebit to interest expense"
+
+  # ── 201. cust_sbfe_loan_max_tenure ─────────────────────────────
+  cust_sbfe_loan_max_tenure:
+    dtype: int
+    distribution: normal
+    mean: 60
+    std: 50
+    min: 0
+    max: 360
+    description: "maximum tenure of term loans at sbfe"
+
+  # ── 202. cust_ebitda_revn_yr1_rt ───────────────────────────────
+  cust_ebitda_revn_yr1_rt:
+    dtype: float
+    distribution: normal
+    mean: 0.15
+    std: 0.1
+    min: 0.0
+    max: 1.0
+    description: "ratio of ebitda to revenue"
+
+  # ── 203. cust_crnt_ad_old_rec_age ──────────────────────────────
+  cust_crnt_ad_old_rec_age:
+    dtype: int
+    distribution: normal
+    mean: 100
+    std: 80
+    min: 0
+    max: 600
+    description: "time since first reported at current address"
+
+  # ── 204. cust_sbfe_trd_pymt_am ─────────────────────────────────
+  cust_sbfe_trd_pymt_am:
+    dtype: float
+    distribution: normal
+    mean: 10000.0
+    std: 15000.0
+    min: 0.0
+    max: 200000.0
+    description: "total payments on all trades at sbfe"
+
+  # ── 205. cust_dnb_pymt_expc_ct ─────────────────────────────────
+  cust_dnb_pymt_expc_ct:
+    dtype: int
+    distribution: poisson
+    lambda: 15.0
+    min: 0
+    max: 100
+    description: "total payment experiences at D&B"
+
+  # ── 206. cust_appl_risk_card_type_cd ───────────────────────────
+  cust_appl_risk_card_type_cd:
+    dtype: categorical
+    categories:
+      low_risk: 0.50
+      medium_risk: 0.30
+      high_risk: 0.15
+      very_high_risk: 0.05
+    description: "code to identify card type and risk"
+
+  # ── 207. cust_spend_rnn_model_score ────────────────────────────
+  cust_spend_rnn_model_score:
+    dtype: float
+    distribution: normal
+    mean: 0.1
+    std: 0.15
+    min: 0.0
+    max: 1.0
+    description: "spend rnn score predicting risk probability"
+
+  # ── 208. cust_lexis_nexis_sos_corp_mo_ct ───────────────────────
+  cust_lexis_nexis_sos_corp_mo_ct:
+    dtype: int
+    distribution: normal
+    mean: 120
+    std: 80
+    min: 0
+    max: 600
+    description: "months since sos official incorporation filing"
+
+  # ── 209. cust_bus_core_b2b_spend_pct ───────────────────────────
+  cust_bus_core_b2b_spend_pct:
+    dtype: float
+    distribution: normal
+    mean: 0.4
+    std: 0.2
+    min: 0.0
+    max: 1.0
+    description: "core business to business percentage"
+
+  # ── 210. gam_bal_dcr_trgr_30d_ct ───────────────────────────────
+  gam_bal_dcr_trgr_30d_ct:
+    dtype: int
+    distribution: poisson
+    lambda: 0.5
+    min: 0
+    max: 10
+    description: "balance decrease triggers in 30 days from bureau"
+
+  # ── 211. cust_tot_delta_flght_grp_cd ───────────────────────────
+  cust_tot_delta_flght_grp_cd:
+    dtype: categorical
+    categories:
+      none: 0.40
+      low: 0.25
+      medium: 0.20
+      high: 0.10
+      elite: 0.05
+    description: "delta cobrand total flights bucket"
+
+  # ── 212. cust_lexis_nexis_assoc_bus_lien_ct ────────────────────
+  cust_lexis_nexis_assoc_bus_lien_ct:
+    dtype: int
+    distribution: poisson
+    lambda: 0.3
+    min: 0
+    max: 10
+    description: "count of liens for associates of the business"
+
+  # ── 213. cust_tot_delta_prog_mile_ct ───────────────────────────
+  cust_tot_delta_prog_mile_ct:
+    dtype: int
+    distribution: normal
+    mean: 30000
+    std: 50000
+    min: 0
+    max: 500000
+    description: "delta cobrand accumulated miles"
+
+  # ── 214. cust_bus_core_b2b_spend_pct_chng ──────────────────────
+  cust_bus_core_b2b_spend_pct_chng:
+    dtype: float
+    distribution: normal
+    mean: 0.02
+    std: 0.15
+    min: -1.0
+    max: 1.0
+    description: "core b2b percentage change"
+
+  # ── 215. cust_dda_1yr_ct ───────────────────────────────────────
+  cust_dda_1yr_ct:
+    dtype: int
+    distribution: poisson
+    lambda: 1.5
+    min: 0
+    max: 10
+    description: "count of distinct bank accounts used for payments in past year"
+
+  # ── 216. gam_util_dcr_trgr_30d_ct ──────────────────────────────
+  gam_util_dcr_trgr_30d_ct:
+    dtype: int
+    distribution: poisson
+    lambda: 0.3
+    min: 0
+    max: 10
+    description: "utilization decrease triggers in 30 days from bureau"
+
+  # ── 217. cust_bus_non_cncl_acct_ct ─────────────────────────────
+  cust_bus_non_cncl_acct_ct:
+    dtype: int
+    distribution: poisson
+    lambda: 2.0
+    min: 0
+    max: 10
+    description: "total active small business account counts"
+
+  # ── 218. cust_lexis_nexis_ucc_fl_ct ────────────────────────────
+  cust_lexis_nexis_ucc_fl_ct:
+    dtype: int
+    distribution: poisson
+    lambda: 0.5
+    min: 0
+    max: 10
+    description: "count of ucc filings for the business"
+
+  # ── 219. cust_sac_in ───────────────────────────────────────────
+  cust_sac_in:
+    dtype: int
+    distribution: poisson
+    lambda: 0.2
+    min: 0
+    max: 1
+    description: "strategic alliance cobrand card indicator"
+
+  # ── 220. static_value_of_18_ind_duratind ───────────────────────
+  static_value_of_18_ind_duratind:
+    dtype: int
+    distribution: normal
+    mean: 18
+    std: 0
+    min: 18
+    max: 18
+    description: "static value of 18 for performance window"
+
+  # ── 221. ratio_of_mr_bal_cust_curr_exp_cumrblrt ────────────────
+  ratio_of_mr_bal_cust_curr_exp_cumrblrt:
+    dtype: float
+    distribution: normal
+    mean: 0.5
+    std: 0.5
+    min: 0.0
+    max: 5.0
+    description: "ratio of MR balance to current exposure"
+
+  # ── 222. atic_pymnt_in_nxt_stmt_loc_enbl_cust_potpaysh ─────────
+  atic_pymnt_in_nxt_stmt_loc_enbl_cust_potpaysh:
+    dtype: float
+    distribution: normal
+    mean: 3000.0
+    std: 5000.0
+    min: 0.0
+    max: 50000.0
+    description: "anticipated payments in next statement for loc customers"
+
+  # ── 223. cust_talx_max_srvc_lgth_mo_ct ─────────────────────────
+  cust_talx_max_srvc_lgth_mo_ct:
+    dtype: int
+    distribution: normal
+    mean: 48
+    std: 40
+    min: 0
+    max: 360
+    description: "maximum service tenure from talx"
+
+  # ── 224. cust_talx_incom_am ────────────────────────────────────
+  cust_talx_incom_am:
+    dtype: float
+    distribution: normal
+    mean: 75000.0
+    std: 50000.0
+    min: 0.0
+    max: 500000.0
+    description: "customer talx income amount"
+
+  # ── 225. cust_dnbplus_gbr_risk_pred_score ──────────────────────
+  cust_dnbplus_gbr_risk_pred_score:
+    dtype: float
+    distribution: normal
+    mean: 30.0
+    std: 20.0
+    min: 0.0
+    max: 100.0
+    description: "predicts likelihood of risk outcome"
+
+  # ── 226. cust_dnbplus_pymt_expc_ct ─────────────────────────────
+  cust_dnbplus_pymt_expc_ct:
+    dtype: int
+    distribution: poisson
+    lambda: 20.0
+    min: 0
+    max: 200
+    description: "total payment experiences at D&B"
+
+  # ── 227. cust_se_react_risk_score ──────────────────────────────
+  cust_se_react_risk_score:
+    dtype: float
+    distribution: normal
+    mean: 15.0
+    std: 15.0
+    min: 0.0
+    max: 100.0
+    description: "customer level MRS score"
+
+  # ── 228. cust_dnbplus_amex_bal_hi_cr_rt ────────────────────────
+  cust_dnbplus_amex_bal_hi_cr_rt:
+    dtype: float
+    distribution: normal
+    mean: 0.5
+    std: 0.5
+    min: 0.0
+    max: 5.0
+    description: "ratio of balance to highest credit at D&B"
+
+  # ── 229. gam_bal_increase_trgr_30d_ct ──────────────────────────
+  gam_bal_increase_trgr_30d_ct:
+    dtype: int
+    distribution: poisson
+    lambda: 0.5
+    min: 0
+    max: 10
+    description: "balance increased triggers in 30 days from bureau"
+
+  # ── 230. cust_extnl_cpr_exit_seg_cd ────────────────────────────
+  cust_extnl_cpr_exit_seg_cd:
+    dtype: categorical
+    categories:
+      never_enrolled: 0.60
+      still_enrolled: 0.15
+      exited_bau: 0.15
+      exited_stressed: 0.10
+    description: "external CPR exit segment code"
+
+  # ── 231. sow_arbtr_line ────────────────────────────────────────
+  sow_arbtr_line:
+    dtype: float
+    distribution: normal
+    mean: 50000.0
+    std: 50000.0
+    min: 0.0
+    max: 500000.0
+    description: "arbitrated external line"
+
+  # ── 232. gam_clrty_non_traditional_inq_ds ──────────────────────
+  gam_clrty_non_traditional_inq_ds:
+    dtype: int
+    distribution: normal
+    mean: 200
+    std: 200
+    min: 0
+    max: 1000
+    description: "days since clarity last seen non-traditional inquiry"
+
+  # ── 233. cust_unsol_cross_sell_inq_ct ──────────────────────────
+  cust_unsol_cross_sell_inq_ct:
+    dtype: int
+    distribution: poisson
+    lambda: 0.3
+    min: 0
+    max: 5
+    description: "count of unsolicited cross sell inquiries in last 30 days"
+
+  # ── 234. gam_old_auto_loan_open_ms ─────────────────────────────
+  gam_old_auto_loan_open_ms:
+    dtype: int
+    distribution: normal
+    mean: 100
+    std: 80
+    min: 0
+    max: 600
+    description: "months since oldest open auto tradeline"
+
+  # ── 235. cust_crnt_yr1_rt ──────────────────────────────────────
+  cust_crnt_yr1_rt:
+    dtype: float
+    distribution: normal
+    mean: 1.5
+    std: 1.0
+    min: 0.0
+    max: 10.0
+    description: "current ratio for latest full year financial"
+
+  # ── 236. cust_pers_loan_repay_pct ──────────────────────────────
+  cust_pers_loan_repay_pct:
+    dtype: float
+    distribution: normal
+    mean: 0.5
+    std: 0.3
+    min: 0.0
+    max: 1.0
+    description: "percentage of personal loan debt repaid"
+
+  # ── 237. cust_inq_other_rcnt_12mo_in ───────────────────────────
+  cust_inq_other_rcnt_12mo_in:
+    dtype: int
+    distribution: poisson
+    lambda: 0.3
+    min: 0
+    max: 1
+    description: "indicates if other inquiries in last 12 months"
+
+  # ── 238. gam_acct_clsd_trgr_30d_ct ─────────────────────────────
+  gam_acct_clsd_trgr_30d_ct:
+    dtype: int
+    distribution: poisson
+    lambda: 0.2
+    min: 0
+    max: 5
+    description: "account closed triggers in 30 days from bureau"
+
+  # ── 239. norm_amt_avgsectg_unpaid ──────────────────────────────
+  norm_amt_avgsectg_unpaid:
+    dtype: float
+    distribution: normal
+    mean: 10.0
+    std: 15.0
+    min: 0.0
+    max: 100.0
+    description: "normalised accum dollars weighted by avgsectg for unpaid"
+
+  # ── 240. cust_asset_own_in ─────────────────────────────────────
+  cust_asset_own_in:
+    dtype: int
+    distribution: poisson
+    lambda: 0.4
+    min: 0
+    max: 1
+    description: "indicates if customer owns assets"
+
+  # ── 241. cust_ffo_tot_brrw_debt_yr1_rt ─────────────────────────
+  cust_ffo_tot_brrw_debt_yr1_rt:
+    dtype: float
+    distribution: normal
+    mean: 0.3
+    std: 0.3
+    min: 0.0
+    max: 2.0
+    description: "ratio of funds from operations to total borrowed debt"
+
+  # ── 242. gam_auto_loan_actl_pymt_am ────────────────────────────
+  gam_auto_loan_actl_pymt_am:
+    dtype: float
+    distribution: normal
+    mean: 500.0
+    std: 500.0
+    min: 0.0
+    max: 10000.0
+    description: "actual payment amount for open auto trades / 100"
+
+  # ── 243. gam_stdnt_loan_actl_pymt_am ───────────────────────────
+  gam_stdnt_loan_actl_pymt_am:
+    dtype: float
+    distribution: normal
+    mean: 300.0
+    std: 300.0
+    min: 0.0
+    max: 5000.0
+    description: "actual payment amount for open student loan trades / 100"
+
+  # ── 244. cust_inp_ad_old_rec_age ───────────────────────────────
+  cust_inp_ad_old_rec_age:
+    dtype: int
+    distribution: normal
+    mean: 120
+    std: 80
+    min: 0
+    max: 600
+    description: "time since first reported at input address"
+
+  # ── 245. cust_cash_tot_asset_yr1_rt ────────────────────────────
+  cust_cash_tot_asset_yr1_rt:
+    dtype: float
+    distribution: normal
+    mean: 0.1
+    std: 0.1
+    min: 0.0
+    max: 1.0
+    description: "ratio of cash to total assets"
+
+  # ── 246. exp_rev ───────────────────────────────────────────────
+  exp_rev:
+    dtype: float
+    distribution: normal
+    mean: 20000.0
+    std: 25000.0
+    min: 0.0
+    max: 200000.0
+    description: "revolve exposure"
+
+  # ── 247. cust_auto_loan_repay_pct ──────────────────────────────
+  cust_auto_loan_repay_pct:
+    dtype: float
+    distribution: normal
+    mean: 0.4
+    std: 0.3
+    min: 0.0
+    max: 1.0
+    description: "percentage of auto loan debt repaid"
+
+  # ── 248. cust_risk_calc_yr1_edf_score ──────────────────────────
+  cust_risk_calc_yr1_edf_score:
+    dtype: float
+    distribution: normal
+    mean: 5.0
+    std: 10.0
+    min: 0.0
+    max: 100.0
+    description: "risk calc score for default in next year"
+
+  # ── 249. cust_debt_cptl_yr1_rt ─────────────────────────────────
+  cust_debt_cptl_yr1_rt:
+    dtype: float
+    distribution: normal
+    mean: 0.5
+    std: 0.3
+    min: 0.0
+    max: 2.0
+    description: "debt to capital ratio"
+
+  # ── 250. cust_enhnc_spnd_conctrtn ──────────────────────────────
+  cust_enhnc_spnd_conctrtn:
+    dtype: float
+    distribution: normal
+    mean: 1.5
+    std: 1.5
+    min: 0.0
+    max: 10.0
+    description: "customer enhanced spend concentration"
+
+  # ── 251. cust_mr_pt_rdm_12mo_rt ────────────────────────────────
+  cust_mr_pt_rdm_12mo_rt:
+    dtype: float
+    distribution: normal
+    mean: 0.3
+    std: 0.25
+    min: 0.0
+    max: 1.0
+    description: "membership reward points redemption ratio"
+
+  # ── 252. cust_act_corp_rel_ind ─────────────────────────────────
+  cust_act_corp_rel_ind:
+    dtype: int
+    distribution: poisson
+    lambda: 0.2
+    min: 0
+    max: 1
+    description: "corporate card indicator"
+
+  # ── 253. cust_lexis_nexis_rct_lien_mo_ct ───────────────────────
+  cust_lexis_nexis_rct_lien_mo_ct:
+    dtype: int
+    distribution: normal
+    mean: 20
+    std: 25
+    min: 0
+    max: 120
+    description: "months since most recent lien"
+
+  # ── 254. cust_lexis_nexis_asset_prop_size ──────────────────────
+  cust_lexis_nexis_asset_prop_size:
+    dtype: int
+    distribution: normal
+    mean: 5000
+    std: 8000
+    min: 0
+    max: 100000
+    description: "combined building size in sq ft"
+
+  # ── 255. cust_bus_trvl_ent_spend_pct_chng ──────────────────────
+  cust_bus_trvl_ent_spend_pct_chng:
+    dtype: float
+    distribution: normal
+    mean: 0.02
+    std: 0.15
+    min: -1.0
+    max: 1.0
+    description: "travel and entertainment percentage change"
+
+  # ── 256. cust_delta_elite_sta_cd ───────────────────────────────
+  cust_delta_elite_sta_cd:
+    dtype: categorical
+    categories:
+      none: 0.50
+      silver: 0.20
+      gold: 0.15
+      platinum: 0.10
+      diamond: 0.05
+    description: "delta elite status code"
+
+  # ── 257. cust_cmpst_emp_idx ────────────────────────────────────
+  cust_cmpst_emp_idx:
+    dtype: float
+    distribution: normal
+    mean: 50.0
+    std: 20.0
+    min: 0.0
+    max: 100.0
+    description: "customer composite employment index"
+
+  # ── 258. cust_lexis_nexis_cr_score ─────────────────────────────
+  cust_lexis_nexis_cr_score:
+    dtype: int
+    distribution: normal
+    mean: 700
+    std: 80
+    min: 300
+    max: 900
+    description: "credit score of the business from lexis nexis"
+
+  # ── 259. cust_lexis_nexis_consm_ad_mtch_ct ─────────────────────
+  cust_lexis_nexis_consm_ad_mtch_ct:
+    dtype: int
+    distribution: poisson
+    lambda: 3.0
+    min: 0
+    max: 20
+    description: "count of consumers with matching address"
+
+  # ── 260. cust_vlnrbl_seg_extnl_cpr_risk_cd ────────────────────
+  cust_vlnrbl_seg_extnl_cpr_risk_cd:
+    dtype: categorical
+    categories:
+      low: 0.50
+      medium: 0.30
+      high: 0.15
+      critical: 0.05
+    description: "external CPR risk code"
+
+  # ── 261. share_pay_over_tm_bal_in_tot_pay_potsobal ─────────────
+  share_pay_over_tm_bal_in_tot_pay_potsobal:
+    dtype: float
+    distribution: normal
+    mean: 0.2
+    std: 0.2
+    min: 0.0
+    max: 1.0
+    description: "share of pay over time balance in total"
+
+  # ── 262. pay_over_limit_util_in_curr_mon_potlutil ──────────────
+  pay_over_limit_util_in_curr_mon_potlutil:
+    dtype: float
+    distribution: normal
+    mean: 0.3
+    std: 0.3
+    min: 0.0
+    max: 1.5
+    description: "pay over time limit utilization"
+
+  # ── 263. cust_sandbox_cmrcl_bur_score ──────────────────────────
+  cust_sandbox_cmrcl_bur_score:
+    dtype: int
+    distribution: normal
+    mean: 680
+    std: 80
+    min: 300
+    max: 900
+    description: "inhouse commercial credit score"
+
+  # ── 264. cust_dnbplus_tot_emp_ct ───────────────────────────────
+  cust_dnbplus_tot_emp_ct:
+    dtype: int
+    distribution: normal
+    mean: 50
+    std: 200
+    min: 1
+    max: 10000
+    description: "total number of employees from D&B"
