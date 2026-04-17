@@ -34,28 +34,13 @@ def main() -> None:
     if args.cases and args.row_count:
         parser.error("--cases and --row-count are mutually exclusive")
 
-    gen = DataGenerator(profile_dir=args.profile_dir, seed=args.seed)
+    cases = args.cases or 50
+    gen = DataGenerator(profile_dir=args.profile_dir, seed=args.seed, cases=cases)
     gen.load_profiles()
     print(f"Loaded {len(gen.profiles)} profile(s) from {args.profile_dir}")
+    print(f"  Generating {cases} cases")
 
-    if args.cases:
-        # Set one-row-per-case tables to the desired case count.
-        # Multi-row tables using rows_per_case auto-scale via the generator.
-        # Multi-row tables using row_count scale proportionally.
-        baseline_cases = gen._get_case_count()
-
-        for name, profile in gen.profiles.items():
-            if profile.get("one_row_per_case", False):
-                profile["row_count"] = args.cases
-            elif "rows_per_case" not in profile:
-                # Legacy row_count — scale proportionally
-                scale_factor = args.cases / baseline_cases
-                profile["row_count"] = max(1, int(profile["row_count"] * scale_factor))
-
-        gen.generate_all()
-        print(f"  Scaled to {args.cases} cases")
-    else:
-        gen.generate_all(row_count_override=args.row_count)
+    gen.generate_all(row_count_override=args.row_count)
 
     paths = gen.dump_csv_per_case(args.output)
 

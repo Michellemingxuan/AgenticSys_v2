@@ -1,6 +1,6 @@
 table: pmts_detail
 description: "Transaction-level spend and payment detail — multiple rows per case. Contains merchant details, spend amounts, and risk scores."
-rows_per_case: 10               # TUNE: number of transaction rows per case
+rows_per_case: 100              # TUNE: number of transaction rows per case
 one_row_per_case: false
 
 columns:

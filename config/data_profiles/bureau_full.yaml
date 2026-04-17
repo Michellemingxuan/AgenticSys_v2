@@ -1,6 +1,6 @@
 table: bureau_full
 description: "Full bureau credit file — one row per case. Aggregated bureau snapshot including FICO, business credit scores, external exposure, and legal filings."
-row_count: 50
+rows_per_case: 1
 one_row_per_case: true
 
 # ──────────────────────────────────────────────────────────────────

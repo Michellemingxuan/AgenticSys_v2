@@ -18,9 +18,11 @@ class DataGenerator:
     and optional rank-based correlations.
     """
 
-    def __init__(self, profile_dir: str = "config/data_profiles", seed: int = 42):
+    def __init__(self, profile_dir: str = "config/data_profiles", seed: int = 42,
+                 cases: int = 50):
         self.profile_dir = Path(profile_dir)
         self.seed = seed
+        self.cases = cases         # number of cases to generate
         self.profiles: dict[str, dict] = {}
         self._tables: dict[str, dict[str, list]] = {}
 
@@ -92,11 +94,8 @@ class DataGenerator:
             raise ValueError(f"Unknown dtype: {dtype}")
 
     def _get_case_count(self) -> int:
-        """Derive case count from one-row-per-case tables."""
-        for profile in self.profiles.values():
-            if profile.get("one_row_per_case", False):
-                return profile["row_count"]
-        return 50  # fallback
+        """Return the number of cases to generate."""
+        return self.cases
 
     def _gen_string(self, spec: dict, n: int, profile: dict) -> list:
         fmt = spec["format"]

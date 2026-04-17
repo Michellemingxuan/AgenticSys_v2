@@ -146,7 +146,7 @@ def main():
     firewall = FirewallStack(adapter, logger)
 
     # Data generation — organized per case
-    gen = DataGenerator(seed=args.seed)
+    gen = DataGenerator(seed=args.seed, cases=50)
     gen.load_profiles()
     tables_raw = gen.generate_all()
 

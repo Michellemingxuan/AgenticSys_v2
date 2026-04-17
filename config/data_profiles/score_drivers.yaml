@@ -1,0 +1,107 @@
+table: score_drivers
+description: "Top score drivers per model scoring run — shows which variables contributed most to each model's risk score, with direction and magnitude. Used to explain why a model scored a customer as risky or safe."
+rows_per_case: 10              # TUNE: number of top driver rows per case (across all models)
+one_row_per_case: false
+
+columns:
+  case_id:
+    dtype: string
+    format: "CASE-{seq:05d}"
+    description: "Foreign key to case"
+
+  model_id:
+    dtype: categorical
+    categories:
+      risk_v3: 0.40
+      propensity_v2: 0.30
+      collections_v1: 0.30
+    description: "Which model this driver belongs to"
+
+  driver_rank:
+    dtype: int
+    distribution: uniform
+    min: 1
+    max: 5
+    description: "Rank of this driver within the model (1 = most influential)"
+
+  driver_variable:
+    dtype: categorical
+    categories:
+      "credit_loss_prob": 0.08
+      "tot_struct_risk_score": 0.07
+      "cbr_score": 0.07
+      "last_cycle_cut_revolve_rate": 0.06
+      "cust_expsr_avg_rem_12m_ratio": 0.06
+      "hcam_bal_trnd_indx": 0.05
+      "cust_eff_se_cdss_5_180_day_score": 0.05
+      "oop_interaction": 0.05
+      "cust_intr_extnl_unscr_tt_debt_srvc_rt1": 0.05
+      "cust_expr_to_arb_inc_ratio": 0.05
+      "tpf_internal_delinq_idx": 0.04
+      "avutil_exrvlv_balgt50": 0.04
+      "lvrg_debt_remit": 0.04
+      "cust_rnn_score": 0.04
+      "cust_experian_trans_union_inq_idx": 0.04
+      "sum_tot_rsky_evnt": 0.03
+      "times_30_dpd": 0.03
+      "cust_enhnc_one_way_spend_concentration_30day_rt1": 0.03
+      "cust_pymt_chan_risk_score": 0.03
+      "delnqncy_ind_intrnl": 0.03
+      "hcam_src_trnd_indx": 0.03
+    description: "Name of the model input variable driving the score"
+
+  driver_direction:
+    dtype: categorical
+    categories:
+      increasing_risk: 0.55      # TUNE: share of drivers that push risk higher
+      decreasing_risk: 0.45      # TUNE: share of drivers that push risk lower
+    description: "Whether this driver is pushing the score toward higher or lower risk"
+
+  driver_value:
+    dtype: float
+    distribution: normal
+    mean: 0.0
+    std: 2.0
+    min: -10.0
+    max: 10.0
+    description: "The actual value of the driver variable for this case (standardized)"
+
+  driver_contribution:
+    dtype: float
+    distribution: normal
+    mean: 0.05
+    std: 0.08
+    min: -0.5
+    max: 0.5
+    description: "SHAP-like contribution of this driver to the final score (positive = increases risk, negative = decreases risk)"
+
+  driver_description:
+    dtype: categorical
+    categories:
+      "High credit loss probability": 0.08
+      "Elevated structural risk score": 0.07
+      "Low bureau score": 0.06
+      "Low revolve rate (high paydown)": 0.05
+      "High exposure-to-remit ratio": 0.06
+      "Rising balance trend": 0.05
+      "Elevated merchant risk": 0.05
+      "High out-of-pattern spend": 0.05
+      "High debt servicing ratio": 0.05
+      "High exposure-to-income ratio": 0.05
+      "Internal delinquency detected": 0.04
+      "High external utilization": 0.04
+      "High leverage ratio": 0.04
+      "Elevated RNN spend score": 0.04
+      "High inquiry index": 0.04
+      "Risky events on file": 0.03
+      "Past due history": 0.03
+      "Concentrated spend pattern": 0.03
+      "Payment channel risk": 0.03
+      "Strong payment history": 0.03
+      "Positive FICO trend": 0.03
+    description: "Human-readable explanation of what this driver means for risk"
+
+correlations:
+  - columns: [driver_rank, driver_contribution]
+    direction: negative          # rank 1 drivers have larger absolute contributions
+    strength: 0.6
