@@ -1,0 +1,47 @@
+table: bureau_trades
+description: "Tradeline detail, multiple rows per case"
+row_count: 200
+one_row_per_case: false
+
+columns:
+  case_id:
+    dtype: string
+    format: "CASE-{seq:05d}"
+
+  trade_type:
+    dtype: categorical
+    categories:
+      revolving: 0.45
+      installment: 0.35
+      mortgage: 0.15
+      other: 0.05
+
+  balance:
+    dtype: float
+    distribution: normal
+    mean: 8500
+    std: 12000
+    min: 0
+    max: 150000
+
+  limit:
+    dtype: float
+    distribution: normal
+    mean: 15000
+    std: 18000
+    min: 500
+    max: 200000
+
+  dpd_status:
+    dtype: categorical
+    categories:
+      current: 0.70
+      30dpd: 0.12
+      60dpd: 0.08
+      90dpd: 0.06
+      120plus: 0.04
+
+correlations:
+  - columns: [balance, limit]
+    direction: positive
+    strength: 0.6

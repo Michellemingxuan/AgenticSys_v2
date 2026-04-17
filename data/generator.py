@@ -1,0 +1,250 @@
+"""Simulated data generator driven by YAML profile configs."""
+
+from __future__ import annotations
+
+import csv
+import os
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import yaml
+
+
+class DataGenerator:
+    """Generates simulated tabular data from YAML profile definitions.
+
+    Each profile specifies columns with distribution parameters, row counts,
+    and optional rank-based correlations.
+    """
+
+    def __init__(self, profile_dir: str = "config/data_profiles", seed: int = 42):
+        self.profile_dir = Path(profile_dir)
+        self.seed = seed
+        self.profiles: dict[str, dict] = {}
+        self._tables: dict[str, dict[str, list]] = {}
+
+    # ------------------------------------------------------------------
+    # Loading
+    # ------------------------------------------------------------------
+
+    def load_profiles(self) -> None:
+        """Load all YAML profiles from the profile directory."""
+        self.profiles.clear()
+        for path in sorted(self.profile_dir.glob("*.yaml")):
+            with open(path) as f:
+                profile = yaml.safe_load(f)
+            self.profiles[profile["table"]] = profile
+
+    # ------------------------------------------------------------------
+    # Generation
+    # ------------------------------------------------------------------
+
+    def generate_all(self, row_count_override: int | None = None) -> dict[str, dict[str, list]]:
+        """Generate all tables, returning {table_name: {col_name: [values]}}."""
+        self._tables.clear()
+        for name, profile in self.profiles.items():
+            self._tables[name] = self._generate_table(profile, row_count_override)
+        return self._tables
+
+    def _generate_table(
+        self, profile: dict, row_count_override: int | None = None
+    ) -> dict[str, list]:
+        n = row_count_override if row_count_override is not None else profile["row_count"]
+        rng = np.random.default_rng(self.seed)
+
+        columns: dict[str, list] = {}
+        col_specs = profile["columns"]
+
+        # First pass: generate independent columns
+        for col_name, spec in col_specs.items():
+            columns[col_name] = self._generate_column(spec, n, rng, profile)
+
+        # Apply correlations
+        correlations = profile.get("correlations", [])
+        if correlations:
+            self._apply_correlations(columns, correlations, col_specs, n, rng)
+
+        return columns
+
+    def _generate_column(
+        self, spec: dict, n: int, rng: np.random.Generator, profile: dict
+    ) -> list:
+        dtype = spec["dtype"]
+
+        if dtype == "string":
+            return self._gen_string(spec, n, profile)
+        elif dtype == "int":
+            return self._gen_int(spec, n, rng)
+        elif dtype == "float":
+            return self._gen_float(spec, n, rng)
+        elif dtype == "categorical":
+            return self._gen_categorical(spec, n, rng)
+        elif dtype == "date":
+            return self._gen_date(spec, n, rng)
+        else:
+            raise ValueError(f"Unknown dtype: {dtype}")
+
+    def _gen_string(self, spec: dict, n: int, profile: dict) -> list:
+        fmt = spec["format"]
+        one_row = profile.get("one_row_per_case", False)
+        if one_row:
+            return [fmt.format(seq=i + 1) for i in range(n)]
+        else:
+            # For multi-row tables, cycle through 50 case IDs
+            case_count = 50
+            return [fmt.format(seq=(i % case_count) + 1) for i in range(n)]
+
+    def _gen_int(self, spec: dict, n: int, rng: np.random.Generator) -> list:
+        dist = spec.get("distribution", "uniform")
+        lo = spec.get("min", 0)
+        hi = spec.get("max", 100)
+
+        if dist == "normal":
+            mean = spec["mean"]
+            std = spec["std"]
+            values = rng.normal(mean, std, n)
+            values = np.clip(np.round(values), lo, hi).astype(int)
+        elif dist == "poisson":
+            lam = spec["lambda"]
+            values = rng.poisson(lam, n)
+            values = np.clip(values, lo, hi).astype(int)
+        elif dist == "uniform":
+            values = rng.integers(lo, hi + 1, size=n)
+        else:
+            raise ValueError(f"Unknown int distribution: {dist}")
+
+        return values.tolist()
+
+    def _gen_float(self, spec: dict, n: int, rng: np.random.Generator) -> list:
+        dist = spec.get("distribution", "uniform")
+        lo = spec.get("min", 0.0)
+        hi = spec.get("max", 1.0)
+
+        if dist == "normal":
+            mean = spec["mean"]
+            std = spec["std"]
+            values = rng.normal(mean, std, n)
+            values = np.clip(values, lo, hi)
+        elif dist == "uniform":
+            values = rng.uniform(lo, hi, n)
+        else:
+            raise ValueError(f"Unknown float distribution: {dist}")
+
+        return [round(float(v), 4) for v in values]
+
+    def _gen_categorical(self, spec: dict, n: int, rng: np.random.Generator) -> list:
+        cats = spec["categories"]
+        labels = list(cats.keys())
+        probs = np.array([cats[k] for k in labels], dtype=float)
+        probs /= probs.sum()  # normalize
+        indices = rng.choice(len(labels), size=n, p=probs)
+        return [labels[i] for i in indices]
+
+    def _gen_date(self, spec: dict, n: int, rng: np.random.Generator) -> list:
+        year = spec.get("year", 2024)
+        if isinstance(year, list):
+            # span multiple years
+            start_year = min(year)
+            end_year = max(year)
+        else:
+            start_year = year
+            end_year = year
+
+        # Generate random dates within the year range
+        start_ord = _date_to_ordinal(start_year, 1, 1)
+        end_ord = _date_to_ordinal(end_year, 12, 31)
+        ordinals = rng.integers(start_ord, end_ord + 1, size=n)
+        return [_ordinal_to_date_str(int(o)) for o in ordinals]
+
+    # ------------------------------------------------------------------
+    # Rank-based correlation
+    # ------------------------------------------------------------------
+
+    def _apply_correlations(
+        self,
+        columns: dict[str, list],
+        correlations: list[dict],
+        col_specs: dict,
+        n: int,
+        rng: np.random.Generator,
+    ) -> None:
+        """Apply rank-based correlations between numeric column pairs."""
+        for corr in correlations:
+            col_a, col_b = corr["columns"]
+            direction = corr["direction"]
+            # strength is informational; we apply a full rank-sort
+
+            if col_a not in columns or col_b not in columns:
+                continue
+
+            vals_a = np.array(columns[col_a], dtype=float)
+            vals_b = np.array(columns[col_b], dtype=float)
+
+            # Sort both arrays by rank
+            order_a = np.argsort(vals_a)
+            sorted_b = np.sort(vals_b)
+
+            if direction == "negative":
+                sorted_b = sorted_b[::-1]
+
+            # Assign sorted_b values in the order determined by col_a's ranks
+            new_b = np.empty_like(vals_b)
+            new_b[order_a] = sorted_b
+
+            # Clip to spec bounds
+            spec_b = col_specs[col_b]
+            lo = spec_b.get("min", None)
+            hi = spec_b.get("max", None)
+            if lo is not None or hi is not None:
+                new_b = np.clip(new_b, lo, hi)
+
+            # Convert back
+            if spec_b["dtype"] == "int":
+                columns[col_b] = [int(round(v)) for v in new_b]
+            else:
+                columns[col_b] = [round(float(v), 4) for v in new_b]
+
+    # ------------------------------------------------------------------
+    # CSV export
+    # ------------------------------------------------------------------
+
+    def dump_csv(self, output_dir: str) -> list[str]:
+        """Write all generated tables to CSV files. Returns list of file paths."""
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        paths = []
+        for table_name, cols in self._tables.items():
+            path = out / f"{table_name}.csv"
+            col_names = list(cols.keys())
+            n = len(next(iter(cols.values())))
+            with open(path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(col_names)
+                for i in range(n):
+                    writer.writerow([cols[c][i] for c in col_names])
+            paths.append(str(path))
+        return paths
+
+
+# ------------------------------------------------------------------
+# Date helpers (no dependency on datetime for deterministic ordinal math)
+# ------------------------------------------------------------------
+
+def _is_leap(y: int) -> bool:
+    return (y % 4 == 0 and y % 100 != 0) or (y % 400 == 0)
+
+
+def _days_in_year(y: int) -> int:
+    return 366 if _is_leap(y) else 365
+
+
+def _date_to_ordinal(y: int, m: int, d: int) -> int:
+    from datetime import date
+    return date(y, m, d).toordinal()
+
+
+def _ordinal_to_date_str(ordinal: int) -> str:
+    from datetime import date
+    dt = date.fromordinal(ordinal)
+    return dt.isoformat()

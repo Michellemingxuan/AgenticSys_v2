@@ -1,0 +1,33 @@
+table: xbu_summary
+description: "Cross-BU exposure, multiple rows"
+row_count: 120
+one_row_per_case: false
+
+columns:
+  case_id:
+    dtype: string
+    format: "CASE-{seq:05d}"
+
+  product:
+    dtype: categorical
+    categories:
+      credit_card: 0.40
+      charge_card: 0.25
+      personal_loan: 0.20
+      savings: 0.15
+
+  exposure:
+    dtype: float
+    distribution: normal
+    mean: 12000
+    std: 15000
+    min: 0
+    max: 100000
+
+  utilization:
+    dtype: float
+    distribution: normal
+    mean: 0.45
+    std: 0.25
+    min: 0
+    max: 1.5

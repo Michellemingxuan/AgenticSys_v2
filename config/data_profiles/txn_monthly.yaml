@@ -1,0 +1,39 @@
+table: txn_monthly
+description: "Monthly transaction aggregates, multiple rows"
+row_count: 500
+one_row_per_case: false
+
+columns:
+  case_id:
+    dtype: string
+    format: "CASE-{seq:05d}"
+
+  month:
+    dtype: date
+    year: [2023, 2024]
+
+  spend_total:
+    dtype: float
+    distribution: normal
+    mean: 3200
+    std: 4500
+    min: 0
+    max: 50000
+
+  txn_count:
+    dtype: int
+    distribution: normal
+    mean: 35
+    std: 25
+    min: 0
+    max: 200
+
+  category:
+    dtype: categorical
+    categories:
+      retail: 0.30
+      dining: 0.20
+      travel: 0.15
+      grocery: 0.15
+      services: 0.10
+      other: 0.10

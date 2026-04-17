@@ -1,0 +1,41 @@
+table: income_dti
+description: "Income & capacity, one row per case"
+row_count: 50
+one_row_per_case: true
+
+columns:
+  case_id:
+    dtype: string
+    format: "CASE-{seq:05d}"
+
+  income_est:
+    dtype: float
+    distribution: normal
+    mean: 75000
+    std: 45000
+    min: 20000
+    max: 500000
+
+  total_debt:
+    dtype: float
+    distribution: normal
+    mean: 35000
+    std: 40000
+    min: 0
+    max: 300000
+
+  dti_ratio:
+    dtype: float
+    distribution: normal
+    mean: 0.35
+    std: 0.15
+    min: 0
+    max: 1.5
+
+correlations:
+  - columns: [income_est, total_debt]
+    direction: positive
+    strength: 0.5
+  - columns: [total_debt, dti_ratio]
+    direction: positive
+    strength: 0.8

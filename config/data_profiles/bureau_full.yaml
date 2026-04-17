@@ -1,0 +1,51 @@
+table: bureau_full
+description: "Full bureau credit file, one row per case"
+row_count: 50
+one_row_per_case: true
+
+columns:
+  case_id:
+    dtype: string
+    format: "CASE-{seq:05d}"
+
+  score:
+    dtype: int
+    distribution: normal
+    mean: 680
+    std: 75
+    min: 300
+    max: 850
+
+  derog_count:
+    dtype: int
+    distribution: poisson
+    lambda: 1.2
+    min: 0
+    max: 12
+
+  tradeline_ct:
+    dtype: int
+    distribution: normal
+    mean: 12
+    std: 5
+    min: 1
+    max: 40
+
+  inquiry_ct:
+    dtype: int
+    distribution: poisson
+    lambda: 2.0
+    min: 0
+    max: 15
+
+  score_date:
+    dtype: date
+    year: 2024
+
+correlations:
+  - columns: [score, derog_count]
+    direction: negative
+    strength: 0.7
+  - columns: [score, tradeline_ct]
+    direction: positive
+    strength: 0.3

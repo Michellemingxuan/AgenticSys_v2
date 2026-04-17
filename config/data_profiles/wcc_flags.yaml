@@ -1,0 +1,30 @@
+table: wcc_flags
+description: "WCC flags, multiple rows"
+row_count: 60
+one_row_per_case: false
+
+columns:
+  case_id:
+    dtype: string
+    format: "CASE-{seq:05d}"
+
+  flag_type:
+    dtype: categorical
+    categories:
+      overlimit: 0.25
+      rapid_spend: 0.20
+      payment_default: 0.20
+      fraud_alert: 0.15
+      manual_review: 0.20
+
+  trigger_date:
+    dtype: date
+    year: 2024
+
+  severity:
+    dtype: categorical
+    categories:
+      low: 0.30
+      medium: 0.35
+      high: 0.25
+      critical: 0.10

@@ -1,0 +1,32 @@
+table: cust_tenure
+description: "Customer relationship, one row per case"
+row_count: 50
+one_row_per_case: true
+
+columns:
+  case_id:
+    dtype: string
+    format: "CASE-{seq:05d}"
+
+  tenure_months:
+    dtype: int
+    distribution: normal
+    mean: 84
+    std: 60
+    min: 1
+    max: 360
+
+  products_held:
+    dtype: int
+    distribution: poisson
+    lambda: 2.0
+    min: 1
+    max: 6
+
+  segment:
+    dtype: categorical
+    categories:
+      mass: 0.45
+      affluent: 0.30
+      high_net_worth: 0.15
+      ultra_hnw: 0.10

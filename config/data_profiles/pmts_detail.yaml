@@ -1,0 +1,32 @@
+table: pmts_detail
+description: "Payment history, multiple rows"
+row_count: 500
+one_row_per_case: false
+
+columns:
+  case_id:
+    dtype: string
+    format: "CASE-{seq:05d}"
+
+  due_date:
+    dtype: date
+    year: [2023, 2024]
+
+  paid_date:
+    dtype: date
+    year: [2023, 2025]
+
+  amount:
+    dtype: float
+    distribution: normal
+    mean: 1200
+    std: 2000
+    min: 25
+    max: 15000
+
+  status:
+    dtype: categorical
+    categories:
+      on_time: 0.72
+      late: 0.18
+      missed: 0.10
