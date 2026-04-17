@@ -21,12 +21,13 @@ def gen():
 
 class TestLoadProfiles:
     def test_loads_all_profiles(self, gen: DataGenerator):
-        assert len(gen.profiles) == 9
+        assert len(gen.profiles) == 10
 
     def test_profile_names(self, gen: DataGenerator):
         expected = {
             "bureau_full", "bureau_trades", "txn_monthly", "pmts_detail",
             "model_scores", "wcc_flags", "xbu_summary", "cust_tenure", "income_dti",
+            "payments",
         }
         assert set(gen.profiles.keys()) == expected
 
@@ -83,7 +84,7 @@ class TestDumpCSV:
         gen.generate_all()
         with tempfile.TemporaryDirectory() as tmpdir:
             paths = gen.dump_csv(tmpdir)
-            assert len(paths) == 9
+            assert len(paths) == 10
             for p in paths:
                 assert os.path.exists(p)
                 # Check file has header + data rows

@@ -1,0 +1,164 @@
+table: payments
+description: "Transaction-level spend data — one row per transaction per case. Contains merchant details, spend amounts, and risk scores at the transaction level."
+row_count: 800
+one_row_per_case: false
+
+columns:
+  case_id:
+    dtype: string
+    format: "CASE-{seq:05d}"
+    description: "Foreign key to case"
+
+  date:
+    dtype: date
+    year: [2023, 2024]
+    description: "Transaction date"
+
+  month:
+    dtype: categorical
+    categories:
+      "January": 0.083
+      "February": 0.083
+      "March": 0.083
+      "April": 0.083
+      "May": 0.083
+      "June": 0.083
+      "July": 0.083
+      "August": 0.083
+      "September": 0.084
+      "October": 0.084
+      "November": 0.084
+      "December": 0.084
+    description: "Transaction month"
+
+  amount:
+    dtype: float
+    distribution: normal
+    mean: 2500                   # TUNE: average transaction amount in USD
+    std: 5000                    # TUNE: high variance — mix of small daily and large one-off spends
+    min: 1
+    max: 200000
+    description: "Spend amount in USD"
+
+  merchant_name:
+    dtype: categorical
+    categories:
+      "Office Depot": 0.06
+      "Amazon Business": 0.08
+      "Delta Airlines": 0.05
+      "Hilton Hotels": 0.04
+      "Staples": 0.05
+      "FedEx": 0.06
+      "UPS": 0.05
+      "Shell Oil": 0.04
+      "Costco Wholesale": 0.05
+      "Home Depot": 0.04
+      "Walmart": 0.04
+      "Best Buy": 0.03
+      "AT&T": 0.03
+      "Verizon": 0.03
+      "United Airlines": 0.03
+      "Marriott": 0.03
+      "Hertz": 0.02
+      "Enterprise Rent-A-Car": 0.02
+      "Sysco Foods": 0.03
+      "Grainger": 0.03
+      "Comcast Business": 0.02
+      "Microsoft": 0.03
+      "Google Ads": 0.03
+      "Meta Ads": 0.02
+      "Uber Business": 0.02
+      "Other": 0.08
+    description: "Name of the merchant where spend was made"
+
+  merchant_industry:
+    dtype: categorical
+    categories:
+      "Office Supplies": 0.10
+      "Airlines": 0.08
+      "Hotels & Lodging": 0.07
+      "Shipping & Freight": 0.09
+      "Fuel & Gas": 0.06
+      "Wholesale Clubs": 0.06
+      "Retail - General": 0.08
+      "Telecommunications": 0.05
+      "Car Rental": 0.04
+      "Food & Beverage Distribution": 0.05
+      "Industrial Supplies": 0.05
+      "Technology & Software": 0.06
+      "Digital Advertising": 0.05
+      "Transportation Services": 0.04
+      "Construction Materials": 0.04
+      "Professional Services": 0.04
+      "": 0.04                   # TUNE: proportion of rows with missing industry — search SIC4 codes
+    description: "Merchant industry based on SIC4 code. Some rows may be empty — look up industry via merchant name if needed."
+
+  merchant_risk_score:
+    dtype: float
+    distribution: normal
+    mean: 0.25                   # TUNE: average merchant risk score — most merchants are low risk
+    std: 0.2
+    min: 0.0
+    max: 1.0
+    description: "Risk score of the merchant (0-1). Values above 0.7 are considered risky."
+
+  spend_concentration:
+    dtype: float
+    distribution: normal
+    mean: 1.2                    # TUNE: average one-way spend concentration — below 2.4 is typical
+    std: 0.8
+    min: 0.0
+    max: 10.0
+    description: "One-way spend concentration risk rate of a customer at merchants in last 30 days. Values above 2.4 are considered risky."
+
+  rnn_spend_score:
+    dtype: float
+    distribution: normal
+    mean: 0.006                  # TUNE: average RNN risk score — most are well below threshold
+    std: 0.005
+    min: 0.0
+    max: 0.1
+    description: "RNN risk score for spend patterns. Values above 0.017 are considered risky."
+
+  spend_divergence_index:
+    dtype: float
+    distribution: normal
+    mean: 2.5                    # TUNE: average spend divergence — above 1 is normal
+    std: 1.5
+    min: 0.0
+    max: 10.0
+    description: "Index for spend divergence from historical patterns. Values below 1.0 are considered risky (indicating abnormal deviation)."
+
+  customer_industry:
+    dtype: categorical
+    categories:
+      "Retail Trade": 0.12
+      "Professional Services": 0.10
+      "Construction": 0.09
+      "Healthcare": 0.08
+      "Manufacturing": 0.08
+      "Food Services & Restaurants": 0.07
+      "Transportation & Logistics": 0.06
+      "Technology": 0.06
+      "Real Estate": 0.05
+      "Wholesale Trade": 0.05
+      "Finance & Insurance": 0.04
+      "Education": 0.04
+      "Agriculture": 0.03
+      "Hospitality & Tourism": 0.03
+      "Media & Entertainment": 0.03
+      "Energy & Utilities": 0.03
+      "Government & Public Sector": 0.02
+      "Nonprofit": 0.02
+    description: "The industry in which the customer's business operates"
+
+correlations:
+  - columns: [merchant_risk_score, rnn_spend_score]
+    direction: positive          # risky merchants tend to have higher RNN scores
+    strength: 0.4
+  - columns: [spend_concentration, spend_divergence_index]
+    direction: negative          # high concentration often means low divergence from pattern
+    strength: 0.3
+  - columns: [amount, merchant_risk_score]
+    direction: positive          # larger amounts at riskier merchants — slight correlation
+    strength: 0.2
