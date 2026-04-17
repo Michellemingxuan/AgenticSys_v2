@@ -7,33 +7,38 @@ columns:
   case_id:
     dtype: string
     format: "CASE-{seq:05d}"
+    description: "Unique case identifier"
 
   month:
     dtype: date
     year: [2023, 2024]
+    description: "Calendar month of the transaction aggregate"
 
   spend_total:
     dtype: float
     distribution: normal
-    mean: 3200
-    std: 4500
+    mean: 3200                    # TUNE: average monthly spend per case (USD)
+    std: 4500                     # TUNE: spread of monthly spend
     min: 0
     max: 50000
+    description: "Total spend amount for the month (USD)"
 
   txn_count:
     dtype: int
     distribution: normal
-    mean: 35
-    std: 25
+    mean: 35                      # TUNE: average number of transactions per month
+    std: 25                       # TUNE: spread of transaction counts
     min: 0
     max: 200
+    description: "Number of individual transactions in the month"
 
   category:
     dtype: categorical
     categories:
-      retail: 0.30
-      dining: 0.20
-      travel: 0.15
+      retail: 0.30                # TUNE: share of spend in retail
+      dining: 0.20                # TUNE: share of spend in dining
+      travel: 0.15                # TUNE: share of spend in travel
       grocery: 0.15
       services: 0.10
       other: 0.10
+    description: "Merchant category of the aggregated transactions"

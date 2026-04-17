@@ -7,26 +7,31 @@ columns:
   case_id:
     dtype: string
     format: "CASE-{seq:05d}"
+    description: "Unique case identifier"
 
   due_date:
     dtype: date
     year: [2023, 2024]
+    description: "Date the payment was due"
 
   paid_date:
     dtype: date
     year: [2023, 2025]
+    description: "Date the payment was actually received (may be after due_date)"
 
   amount:
     dtype: float
     distribution: normal
-    mean: 1200
-    std: 2000
+    mean: 1200                    # TUNE: average payment amount (USD)
+    std: 2000                     # TUNE: spread of payment amounts
     min: 25
     max: 15000
+    description: "Payment amount received (USD)"
 
   status:
     dtype: categorical
     categories:
-      on_time: 0.72
-      late: 0.18
-      missed: 0.10
+      on_time: 0.72               # TUNE: share of payments received on or before due date
+      late: 0.18                  # TUNE: share of payments received after due date
+      missed: 0.10                # TUNE: share of payments never received
+    description: "Payment status relative to due date"

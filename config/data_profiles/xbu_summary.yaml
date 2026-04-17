@@ -7,27 +7,31 @@ columns:
   case_id:
     dtype: string
     format: "CASE-{seq:05d}"
+    description: "Unique case identifier"
 
   product:
     dtype: categorical
     categories:
-      credit_card: 0.40
-      charge_card: 0.25
-      personal_loan: 0.20
-      savings: 0.15
+      credit_card: 0.40           # TUNE: share of credit card exposure
+      charge_card: 0.25           # TUNE: share of charge card exposure
+      personal_loan: 0.20         # TUNE: share of personal loan exposure
+      savings: 0.15               # TUNE: share of savings / deposit exposure
+    description: "Product type across business units"
 
   exposure:
     dtype: float
     distribution: normal
-    mean: 12000
-    std: 15000
+    mean: 12000                   # TUNE: average exposure amount per product (USD)
+    std: 15000                    # TUNE: spread of exposure amounts
     min: 0
     max: 100000
+    description: "Total exposure (outstanding balance + committed undrawn) for this product (USD)"
 
   utilization:
     dtype: float
     distribution: normal
-    mean: 0.45
-    std: 0.25
+    mean: 0.45                    # TUNE: average utilization rate (0 = no usage, 1 = fully drawn)
+    std: 0.25                     # TUNE: spread of utilization rates
     min: 0
     max: 1.5
+    description: "Utilization rate (balance / limit); values above 1.0 indicate overlimit"

@@ -7,26 +7,30 @@ columns:
   case_id:
     dtype: string
     format: "CASE-{seq:05d}"
+    description: "Unique case identifier"
 
   tenure_months:
     dtype: int
     distribution: normal
-    mean: 84
-    std: 60
+    mean: 84                      # TUNE: average relationship length in months (84 = 7 years)
+    std: 60                       # TUNE: spread of tenure (higher = wider mix of new and long-standing customers)
     min: 1
     max: 360
+    description: "Length of customer relationship in months"
 
   products_held:
     dtype: int
     distribution: poisson
-    lambda: 2.0
+    lambda: 2.0                   # TUNE: average number of products held per customer
     min: 1
     max: 6
+    description: "Number of distinct products the customer currently holds"
 
   segment:
     dtype: categorical
     categories:
-      mass: 0.45
-      affluent: 0.30
-      high_net_worth: 0.15
-      ultra_hnw: 0.10
+      mass: 0.45                  # TUNE: share of mass-market customers
+      affluent: 0.30              # TUNE: share of affluent customers
+      high_net_worth: 0.15        # TUNE: share of high-net-worth customers
+      ultra_hnw: 0.10             # TUNE: share of ultra-high-net-worth customers
+    description: "Customer wealth segment"

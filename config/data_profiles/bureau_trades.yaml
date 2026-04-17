@@ -7,39 +7,44 @@ columns:
   case_id:
     dtype: string
     format: "CASE-{seq:05d}"
+    description: "Unique case identifier"
 
   trade_type:
     dtype: categorical
     categories:
-      revolving: 0.45
-      installment: 0.35
-      mortgage: 0.15
+      revolving: 0.45             # TUNE: share of revolving tradelines (credit cards, HELOCs)
+      installment: 0.35           # TUNE: share of installment tradelines (auto, student loans)
+      mortgage: 0.15              # TUNE: share of mortgage tradelines
       other: 0.05
+    description: "Type of tradeline on the bureau file"
 
   balance:
     dtype: float
     distribution: normal
-    mean: 8500
-    std: 12000
+    mean: 8500                    # TUNE: average outstanding balance across all tradelines
+    std: 12000                    # TUNE: how spread out are balances? (higher = more variance)
     min: 0
     max: 150000
+    description: "Current outstanding balance on the tradeline (USD)"
 
   limit:
     dtype: float
     distribution: normal
-    mean: 15000
-    std: 18000
+    mean: 15000                   # TUNE: average credit limit across all tradelines
+    std: 18000                    # TUNE: spread of credit limits
     min: 500
     max: 200000
+    description: "Credit limit or original loan amount for the tradeline (USD)"
 
   dpd_status:
     dtype: categorical
     categories:
-      current: 0.70
-      30dpd: 0.12
-      60dpd: 0.08
-      90dpd: 0.06
-      120plus: 0.04
+      current: 0.70               # TUNE: share of tradelines that are current
+      30dpd: 0.12                 # TUNE: share 30 days past due
+      60dpd: 0.08                 # TUNE: share 60 days past due
+      90dpd: 0.06                 # TUNE: share 90 days past due
+      120plus: 0.04               # TUNE: share 120+ days past due
+    description: "Days-past-due status of the tradeline at time of bureau pull"
 
 correlations:
   - columns: [balance, limit]

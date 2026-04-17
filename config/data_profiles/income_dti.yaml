@@ -7,30 +7,34 @@ columns:
   case_id:
     dtype: string
     format: "CASE-{seq:05d}"
+    description: "Unique case identifier"
 
   income_est:
     dtype: float
     distribution: normal
-    mean: 75000
-    std: 45000
+    mean: 75000                   # TUNE: average estimated annual income (USD)
+    std: 45000                    # TUNE: spread of incomes
     min: 20000
     max: 500000
+    description: "Estimated annual income used for credit decisioning (USD)"
 
   total_debt:
     dtype: float
     distribution: normal
-    mean: 35000
-    std: 40000
+    mean: 35000                   # TUNE: average total outstanding debt (USD)
+    std: 40000                    # TUNE: spread of total debt
     min: 0
     max: 300000
+    description: "Total outstanding debt obligations across all lenders (USD)"
 
   dti_ratio:
     dtype: float
     distribution: normal
-    mean: 0.35
-    std: 0.15
+    mean: 0.35                    # TUNE: average debt-to-income ratio (0.35 = 35%)
+    std: 0.15                     # TUNE: spread of DTI ratios
     min: 0
     max: 1.5
+    description: "Debt-to-income ratio (total monthly debt payments / gross monthly income)"
 
 correlations:
   - columns: [income_est, total_debt]

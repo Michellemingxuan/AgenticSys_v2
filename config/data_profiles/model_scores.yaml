@@ -7,28 +7,714 @@ columns:
   case_id:
     dtype: string
     format: "CASE-{seq:05d}"
+    description: "Unique case identifier"
 
-  model_id:
-    dtype: categorical
-    categories:
-      risk_v3: 0.40
-      propensity_v2: 0.30
-      collections_v1: 0.30
+  trans_month:
+    dtype: object
+    null_count: 0
+    non_null_count: 18
+    example: November'2023
+    type: string
+    unique_count: 18
+    description: "Transaction month label (e.g. November'2023)"
 
-  score:
-    dtype: float
-    distribution: normal
-    mean: 0.45
-    std: 0.2
+  cust_lexis_nexis_tot_tax_assess_val_am_max:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 1452300
+    min: 1452300
+    max: 2074635
+    range: 622335
+    type: count
+    median: 1452300.0
+    poisson_lambda: 1590596.6666666667
+    description: "LexisNexis total tax-assessed property value, max across accounts (USD)"
+
+  cust_cash_tot_liab_yr1_rt_max:
+    dtype: float64
+    null_count: 18
+    non_null_count: 0
+    example: null
+    min: .nan
+    max: .nan
+    range: .nan
+    type: numerical
+    median: .nan
+    mean: .nan
+    description: "Total cash liability year-1 ratio, max across accounts (currently all null)"
+
+  cbr_score_max:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 786
+    min: 733                      # TUNE: minimum bureau score in population
+    max: 786                      # TUNE: maximum bureau score in population
+    range: 53
+    type: count
+    median: 775.0
+    poisson_lambda: 767.5
+    description: "Credit bureau score, max across accounts (FICO-like, 300-850)"
+
+  max_agec_agel_dyldage_max:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 25
+    min: 15
+    max: 27
+    range: 12
+    type: count
+    median: 25.0
+    poisson_lambda: 23.333333333333332
+    description: "Maximum age of oldest tradeline in years"
+
+  cust_eff_se_cdss_5_180_day_score_max:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: -5.015
+    min: -5.395
+    max: -0.565
+    range: 4.83
+    type: numerical
+    median: -0.9065
+    mean: -1.4356111111111112
+    description: "Effective small-enterprise CDSS 5-180 day score (log-odds); more negative = higher risk"
+
+  cust_expsr_avg_rem_12m_ratio_max:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: 2.45
+    min: 0.64
+    max: 3.12
+    range: 2.48
+    type: numerical
+    median: 2.18
+    mean: 2.125
+    description: "Average exposure remaining over 12 months as a ratio of original exposure"
+
+  se_no_norm_wtd_pd_unpaid_amt_max:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: 0.568
+    min: 0.0
+    max: 0.811
+    range: 0.811
+    type: numerical
+    median: 0.476
+    mean: 0.4733333333333334
+    description: "Small-enterprise normalized weighted probability-of-default unpaid amount (0-1 scale)"
+
+  tpf_internal_delinq_idx_max:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 0
+    min: 0
+    max: 0
+    range: 0
+    type: count
+    median: 0.0
+    poisson_lambda: 0.0
+    description: "Internal delinquency index from third-party feed (0 = no delinquency)"
+
+  oop_interaction_max:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: 28.9
+    min: 7.18
+    max: 38.33
+    range: 31.15
+    type: numerical
+    median: 25.924999999999997
+    mean: 25.633888888888887
+    description: "Out-of-pattern interaction score — measures deviation from normal customer behavior"
+
+  tm_wt_q_score_max:
+    dtype: float64
+    null_count: 18
+    non_null_count: 0
+    example: null
+    min: .nan
+    max: .nan
+    range: .nan
+    type: numerical
+    median: .nan
+    mean: .nan
+    description: "Time-weighted quarterly score (currently all null)"
+
+  sum_tot_rsky_evnt_max:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 0
+    min: 0
+    max: 2
+    range: 2
+    type: count
+    median: 0.0
+    poisson_lambda: 0.2222222222222222
+    description: "Total count of risky events across all accounts"
+
+  cust_rnn_score_max:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: 0.0058
+    min: 0.00156
+    max: 0.02222
+    range: 0.02066
+    type: numerical
+    median: 0.00476
+    mean: 0.005986111111111112
+    description: "Recurrent neural network risk score (probability); higher = higher risk"
+
+  cust_experian_trans_union_inq_idx_max:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: 5.04
+    min: 3.4
+    max: 16.23
+    range: 12.83
+    type: numerical
+    median: 4.98
+    mean: 6.1033333333333335
+    description: "Experian / TransUnion inquiry index — higher values indicate more credit-seeking activity"
+
+  hcam_bal_trnd_indx_max:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: 9.39
+    min: -3.79
+    max: 12.15
+    range: 15.940000000000001
+    type: numerical
+    median: 2.15
+    mean: 3.2527777777777778
+    description: "HCAM balance trend index — positive = increasing balances, negative = decreasing"
+
+  tpf_cust_mod_tenure_max:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 71
+    min: 71
+    max: 89
+    range: 18
+    type: count
+    median: 80.0
+    poisson_lambda: 80.22222222222223
+    description: "Customer tenure in months from third-party feed model"
+
+  avutil_exrvlv_balgt50_max:
+    dtype: float64
+    null_count: 2
+    non_null_count: 16
+    example: 31.0
+    min: 1.0
+    max: 68.0
+    range: 67.0
+    type: numerical
+    median: 18.5
+    mean: 25.5625
+    description: "Average utilization of external revolving tradelines with balance > 50% of limit"
+
+  cust_expr_to_arb_inc_ratio_max:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: 0.15
+    min: 0.08
+    max: 0.27
+    range: 0.19
+    type: numerical
+    median: 0.18
+    mean: 0.18666666666666665
+    description: "Customer expense-to-arbitrated-income ratio (lower = more capacity)"
+
+  lvrg_debt_remit_max:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: 2.35
+    min: 0.63
+    max: 3.06
+    range: 2.43
+    type: numerical
+    median: 2.125
+    mean: 2.0766666666666667
+    description: "Leverage ratio of debt to remittance — higher values indicate heavier debt load relative to payments"
+
+  cust_intr_extnl_unscr_tt_debt_srvc_rt1_max:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: 0.116
+    min: 0.043
+    max: 1.338
+    range: 1.2950000000000002
+    type: numerical
+    median: 0.772
+    mean: 0.7310555555555555
+    description: "Internal + external unsecured total debt service ratio (debt payments / income)"
+
+  cust_lndexpsr_minloc_6m_ratio_max:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 0
+    min: 0
+    max: 0
+    range: 0
+    type: count
+    median: 0.0
+    poisson_lambda: 0.0
+    description: "Lending exposure minimum-local 6-month ratio (0 = no change in local exposure)"
+
+  sum_o30dn_o60dn_o90dn_max:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 0
+    min: 0
+    max: 0
+    range: 0
+    type: count
+    median: 0.0
+    poisson_lambda: 0.0
+    description: "Sum of tradelines 30/60/90+ days delinquent (0 = no delinquencies)"
+
+  tot_cons_comm_trds_g75_max:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 0
+    min: 0
+    max: 0
+    range: 0
+    type: count
+    median: 0.0
+    poisson_lambda: 0.0
+    description: "Total consumer + commercial tradelines with utilization > 75%"
+
+  cust_pymt_chan_risk_score_max:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: 0.041
+    min: 0.035
+    max: 0.043
+    range: 0.007999999999999993
+    type: numerical
+    median: 0.0395
+    mean: 0.03916666666666667
+    description: "Payment channel risk score — assesses risk based on how the customer pays"
+
+  exp_pif_max:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: 36020.25
+    min: 20800.91
+    max: 144009.65
+    range: 123208.73999999999
+    type: numerical
+    median: 74598.72
+    mean: 83662.69888888887
+    description: "Expected paid-in-full amount — projected payoff if customer pays in full (USD)"
+
+  cust_debt_pymcpty_tm_inc_max:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: 0.2
+    min: 0.09
+    max: 0.49
+    range: 0.4
+    type: numerical
+    median: 0.21
+    mean: 0.23555555555555557
+    description: "Debt payment capacity relative to income (higher = more income available for debt service)"
+
+  cb_ten_to_amex_tenure_max:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 490
+    min: 490
+    max: 507
+    range: 17
+    type: count
+    median: 498.5
+    poisson_lambda: 498.44444444444446
+    description: "Ratio of credit bureau tenure to Amex tenure in months"
+
+  positive_events_max:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 0
     min: 0
     max: 1
+    range: 1
+    type: count
+    median: 0.0
+    poisson_lambda: 0.2222222222222222
+    description: "Count of positive credit events (e.g. payoffs, limit increases)"
 
-  percentile:
-    dtype: int
-    distribution: uniform
-    min: 1
-    max: 100
+  cust_atp_arb_incom_am_max:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 900
+    min: 900
+    max: 900
+    range: 0
+    type: count
+    median: 900.0
+    poisson_lambda: 900.0
+    description: "Customer ATP (ability to pay) arbitrated income amount (USD, monthly)"
 
-  timestamp:
-    dtype: date
-    year: 2024
+  times_30_dpd_max:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 0
+    min: 0
+    max: 0
+    range: 0
+    type: count
+    median: 0.0
+    poisson_lambda: 0.0
+    description: "Number of times the customer has been 30+ days past due"
+
+  cust_old_rec_age_max:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 466
+    min: 466
+    max: 481
+    range: 15
+    type: count
+    median: 472.5
+    poisson_lambda: 473.1666666666667
+    description: "Age of oldest record on file in months"
+
+  cust_min_due_12mo_avg_max:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 0
+    min: 0
+    max: 0
+    range: 0
+    type: count
+    median: 0.0
+    poisson_lambda: 0.0
+    description: "Average minimum due over the last 12 months (USD)"
+
+  ratio_30_90dys_trig_amt_max:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 0
+    min: 0
+    max: 0
+    range: 0
+    type: count
+    median: 0.0
+    poisson_lambda: 0.0
+    description: "Ratio of 30-day to 90-day trigger amounts (0 = no triggers)"
+
+  calx_ratio_daily_max_age_max:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: 0.455
+    min: 0.234
+    max: 0.703
+    range: 0.469
+    type: numerical
+    median: 0.447
+    mean: 0.4634444444444445
+    description: "CALX ratio of daily max to account age — measures peak usage relative to maturity"
+
+  cust_enhnc_one_way_spend_concentration_30day_rt1_max:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: 0.96
+    min: 0.96
+    max: 4.863
+    range: 3.9030000000000005
+    type: numerical
+    median: 1.1945000000000001
+    mean: 1.4090555555555553
+    description: "Enhanced one-way spend concentration over 30 days (higher = more concentrated spending pattern)"
+
+  gam_mtge_loan_actl_pymt_am_max:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: -99999999999
+    min: -99999999999
+    max: -99999999999
+    range: 0
+    type: count
+    median: -99999999999.0
+    description: "GAM mortgage loan actual payment amount (USD); sentinel -99999999999 = no mortgage on file"
+
+  cust_ext_delinq_idx_max:
+    dtype: float64
+    null_count: 18
+    non_null_count: 0
+    example: null
+    min: .nan
+    max: .nan
+    range: .nan
+    type: numerical
+    median: .nan
+    mean: .nan
+    description: "External delinquency index (currently all null)"
+
+  time_wtd_return_index_max:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 0
+    min: 0
+    max: 0
+    range: 0
+    type: count
+    median: 0.0
+    poisson_lambda: 0.0
+    description: "Time-weighted return index — measures payment return patterns over time"
+
+  product_risk_attribute_max:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: 0.017
+    min: 0.016
+    max: 0.017
+    range: 0.0010000000000000009
+    type: numerical
+    median: 0.016
+    mean: 0.01627777777777778
+    description: "Product-level risk attribute score (probability)"
+
+  cust_net_pymt_unbl1_max:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: 48590.72
+    min: 16471.54
+    max: 196995.33
+    range: 180523.78999999998
+    type: numerical
+    median: 75000.0
+    mean: 82245.16777777777
+    description: "Customer net payment unbilled balance, max across accounts (USD)"
+
+  avg_remit_minus_max_max:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 77866
+    min: 77866
+    max: 156519
+    range: 78653
+    type: count
+    median: 111180.0
+    poisson_lambda: 111846.05555555556
+    description: "Average remittance minus maximum balance — higher values indicate stronger paydown behavior (USD)"
+
+  credit_loss_prob_max:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: 1.4
+    min: 0.3                      # TUNE: minimum credit loss probability in population (%)
+    max: 8.5                      # TUNE: maximum credit loss probability in population (%)
+    range: 8.2
+    type: numerical
+    median: 1.35
+    mean: 2.261111111111111
+    description: "Estimated probability of credit loss (%); higher = riskier"
+
+  tot_struct_risk_score_max:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: 3.1
+    min: 2.5
+    max: 28.6
+    range: 26.1
+    type: numerical
+    median: 5.5
+    mean: 10.377777777777776
+    description: "Total structural risk score — composite measure of portfolio-level risk factors"
+
+  delnqncy_ind_intrnl_mean:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 0
+    min: 0
+    max: 0
+    range: 0
+    type: count
+    median: 0.0
+    poisson_lambda: 0.0
+    description: "Internal delinquency indicator mean (0 = no internal delinquency)"
+
+  ons_30_trd_mean:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 0
+    min: 0
+    max: 0
+    range: 0
+    type: count
+    median: 0.0
+    poisson_lambda: 0.0
+    description: "Mean count of tradelines 30+ days delinquent on statement"
+
+  last_cycle_cut_revolve_rate_min:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: 1.0
+    min: 0.27
+    max: 1.0
+    range: 0.73
+    type: numerical
+    median: 0.65
+    mean: 0.7194444444444444
+    description: "Last cycle-cut revolve rate, min across accounts (0 = paid in full, 1 = fully revolving)"
+
+  hcam_src_trnd_indx_min:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: -12.57
+    min: -38.37
+    max: 31.42
+    range: 69.78999999999999
+    type: numerical
+    median: -5.215
+    mean: -3.638888888888889
+    description: "HCAM source trend index, min across accounts — negative = deteriorating, positive = improving"
+
+  tpf_cust_hi_rvlv_line_am_min:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 299
+    min: 299
+    max: 299
+    range: 0
+    type: count
+    median: 299.0
+    poisson_lambda: 299.0
+    description: "Third-party feed highest revolving line amount, min across accounts (USD)"
+
+  cust_lend_acct_paydown_min:
+    dtype: float64
+    null_count: 18
+    non_null_count: 0
+    example: null
+    min: .nan
+    max: .nan
+    range: .nan
+    type: numerical
+    median: .nan
+    mean: .nan
+    description: "Lending account paydown rate, min across accounts (currently all null)"
+
+  cust_open_acct_paydown_min:
+    dtype: float64
+    null_count: 0
+    non_null_count: 18
+    example: 1.0
+    min: 0.465
+    max: 1.0
+    range: 0.5349999999999999
+    type: numerical
+    median: 0.863
+    mean: 0.821
+    description: "Open account paydown rate, min across accounts (0 = no paydown, 1 = full paydown each cycle)"
+
+  gam_clr_erly_risk_score_min:
+    dtype: float64
+    null_count: 5
+    non_null_count: 13
+    example: 9005.0
+    min: 9005.0
+    max: 9005.0
+    range: 0.0
+    type: numerical
+    median: 9005.0
+    mean: 9005.0
+    description: "GAM early risk score from clearing, min across accounts (sentinel 9005 = default / no data)"
+
+  cust_lexis_nexis_blended_score_min:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 727
+    min: 702
+    max: 727
+    range: 25
+    type: count
+    median: 723.0
+    poisson_lambda: 719.6666666666666
+    description: "LexisNexis blended score, min across accounts (higher = lower risk)"
+
+  cust_sbfe_score_min:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 881
+    min: 881
+    max: 889
+    range: 8
+    type: count
+    median: 889.0
+    poisson_lambda: 885.6111111111111
+    description: "SBFE (Small Business Financial Exchange) score, min across accounts"
+
+  cust_dnb_paydex_score_min:
+    dtype: float64
+    null_count: 18
+    non_null_count: 0
+    example: null
+    min: .nan
+    max: .nan
+    range: .nan
+    type: numerical
+    median: .nan
+    mean: .nan
+    description: "D&B PAYDEX payment performance score, min across accounts (currently all null)"
+
+  business_revenue:
+    dtype: int64
+    null_count: 0
+    non_null_count: 18
+    example: 3000000
+    min: 3000000
+    max: 3000000
+    range: 0
+    type: count
+    median: 3000000.0
+    poisson_lambda: 3000000.0
+    description: "Reported annual business revenue (USD)"
