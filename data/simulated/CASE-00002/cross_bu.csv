@@ -1,0 +1,4 @@
+card_name,card_type,card_portfolio,card_limit,balance,card_tenure,account_status,past_delinquencies_12m,merchant_name,merchant_industry,merchant_charge_volume
+Blue Business Plus,lending,Cobrand,41707.8665,5722.9487,53,current,0,,Fitness & Wellness,95717.1965
+Business Line of Credit,charge,Small Business,38500.5743,3677.6677,37,current,0,Metro Dental Group,Construction,0.0
+Amazon Business Card,lending,Lending,500.0,0.0,5,current,0,,,0.0

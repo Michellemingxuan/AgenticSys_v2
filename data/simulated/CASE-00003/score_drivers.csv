@@ -1,0 +1,11 @@
+model_id,driver_rank,driver_variable,driver_direction,driver_value,driver_contribution,driver_description
+collections_v1,5,avutil_exrvlv_balgt50,increasing_risk,-2.5559,-0.0674,Low revolve rate (high paydown)
+collections_v1,4,cust_experian_trans_union_inq_idx,decreasing_risk,0.5717,-0.0077,High debt servicing ratio
+propensity_v2,3,oop_interaction,increasing_risk,0.8575,0.027,Elevated structural risk score
+risk_v3,1,cust_eff_se_cdss_5_180_day_score,decreasing_risk,3.3019,0.2203,High inquiry index
+collections_v1,4,tot_struct_risk_score,increasing_risk,-2.2141,0.0076,High debt servicing ratio
+risk_v3,4,last_cycle_cut_revolve_rate,increasing_risk,-0.3269,-0.035,Low revolve rate (high paydown)
+risk_v3,1,last_cycle_cut_revolve_rate,decreasing_risk,-4.1003,0.1465,Rising balance trend
+propensity_v2,1,cust_expsr_avg_rem_12m_ratio,increasing_risk,-0.6682,0.1883,High exposure-to-remit ratio
+collections_v1,2,lvrg_debt_remit,decreasing_risk,-0.6553,0.0773,High debt servicing ratio
+risk_v3,2,tot_struct_risk_score,increasing_risk,-1.3919,0.0752,Internal delinquency detected

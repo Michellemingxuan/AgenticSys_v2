@@ -1,0 +1,11 @@
+model_id,driver_rank,driver_variable,driver_direction,driver_value,driver_contribution,driver_description
+risk_v3,4,cust_experian_trans_union_inq_idx,decreasing_risk,3.1582,0.0056,Elevated merchant risk
+propensity_v2,4,credit_loss_prob,decreasing_risk,0.4388,-0.0083,Risky events on file
+propensity_v2,3,oop_interaction,increasing_risk,0.3665,0.0304,Concentrated spend pattern
+propensity_v2,1,cust_expsr_avg_rem_12m_ratio,increasing_risk,-0.359,0.2514,High inquiry index
+collections_v1,5,delnqncy_ind_intrnl,increasing_risk,1.2867,-0.1218,High out-of-pattern spend
+propensity_v2,4,cust_experian_trans_union_inq_idx,increasing_risk,2.815,-0.0289,High out-of-pattern spend
+propensity_v2,4,cust_enhnc_one_way_spend_concentration_30day_rt1,decreasing_risk,-1.6865,-0.0183,High exposure-to-remit ratio
+propensity_v2,3,cbr_score,decreasing_risk,-2.6528,0.0641,Payment channel risk
+collections_v1,5,tpf_internal_delinq_idx,decreasing_risk,1.0762,-0.0906,High external utilization
+risk_v3,1,credit_loss_prob,increasing_risk,0.485,0.2824,Elevated RNN spend score

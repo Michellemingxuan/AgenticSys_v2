@@ -1,0 +1,4 @@
+card_name,card_type,card_portfolio,card_limit,balance,card_tenure,account_status,past_delinquencies_12m,merchant_name,merchant_industry,merchant_charge_volume
+Business Platinum Card,lending,Corporate,41964.8397,8556.5222,54,current,0,,,5028.1761
+Blue Business Plus,lending,Consumer Premium,37027.3721,0.0,35,120dpb,0,,Accounting & Finance,0.0
+Blue Business Plus,lending,Lending,41560.6579,29429.0104,48,30dpb,2,,Professional Services,18734.4841

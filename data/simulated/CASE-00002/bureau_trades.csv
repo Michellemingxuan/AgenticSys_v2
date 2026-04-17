@@ -1,0 +1,5 @@
+trade_type,balance,credit_limit,utilization,dpd_status,delinquency_amount,is_revolving,open_date,last_reported_date
+installment,0.0,0.0,0.0,current,0.0,0,2018-04-26,2023-07-25
+mortgage,16484.6378,35782.2056,0.4966,current,1213.2068,0,2017-11-05,2024-11-17
+commercial,2403.7748,13121.4437,0.2628,current,0.0,0,2023-12-18,2024-10-31
+installment,6790.7881,25589.8887,0.3856,current,0.0,0,2018-02-27,2023-04-14

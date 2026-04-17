@@ -1,0 +1,101 @@
+date,month,amount,merchant_name,merchant_industry,merchant_risk_score,spend_concentration,rnn_spend_score,spend_divergence_index,customer_industry
+2024-07-19,November,8140.0943,Comcast Business,,0.4915,0.0,0.0079,5.1863,Transportation & Logistics
+2023-03-04,October,3912.9349,FedEx,Hotels & Lodging,0.3239,1.1402,0.012,2.5639,Finance & Insurance
+2024-12-14,October,2791.3717,Other,Office Supplies,0.2714,1.3295,0.0054,2.2333,Energy & Utilities
+2024-01-11,April,6388.8369,Shell Oil,Food & Beverage Distribution,0.4355,0.0,0.0063,4.9641,Transportation & Logistics
+2023-09-29,March,8438.6255,Amazon Business,Wholesale Clubs,0.5016,1.0644,0.0086,2.7931,Retail Trade
+2023-10-22,April,11487.9726,Costco Wholesale,Shipping & Freight,0.6286,2.5819,0.0,0.1023,Energy & Utilities
+2023-06-16,March,1003.6765,FedEx,Industrial Supplies,0.1859,1.0119,0.0055,2.8427,Retail Trade
+2024-09-19,January,1.0,Walmart,Hotels & Lodging,0.1297,0.5348,0.0,3.6391,Professional Services
+2024-07-08,January,5676.8557,Delta Airlines,Shipping & Freight,0.4081,0.8241,0.0023,3.0641,Finance & Insurance
+2023-11-22,December,2918.1054,Sysco Foods,Airlines,0.28,0.0,0.0091,6.6093,Retail Trade
+2023-05-23,February,9296.103,United Airlines,Wholesale Clubs,0.532,1.4652,0.0071,2.0185,Energy & Utilities
+2024-02-04,May,1.0,Best Buy,Technology & Software,0.101,0.7732,0.0065,3.1149,Transportation & Logistics
+2024-06-28,June,2101.3522,Office Depot,Retail - General,0.2373,2.6021,0.0048,0.0727,Food Services & Restaurants
+2024-10-23,May,2721.0619,Office Depot,Retail - General,0.2702,1.0045,0.0088,2.8465,Retail Trade
+2023-05-19,June,1.0,Best Buy,Retail - General,0.0767,0.829,0.0156,3.0627,Wholesale Trade
+2023-08-30,October,7478.5069,Walmart,Wholesale Clubs,0.4767,1.6009,0.0109,1.7864,Healthcare
+2023-11-16,March,1.0,AT&T,Wholesale Clubs,0.1259,1.1548,0.0172,2.5155,Construction
+2023-03-13,February,1838.8567,Home Depot,Airlines,0.2241,0.5714,0.0114,3.599,Finance & Insurance
+2024-08-11,December,1.0,UPS,Food & Beverage Distribution,0.0705,0.994,0.0022,2.8519,Professional Services
+2023-06-25,December,490.0371,FedEx,Retail - General,0.1632,1.8994,0.0,1.2567,Wholesale Trade
+2023-05-27,March,9688.8847,Costco Wholesale,Shipping & Freight,0.544,0.0,0.0061,5.2757,Media & Entertainment
+2024-07-24,October,2654.5864,Verizon,,0.2612,0.8636,0.0125,2.9856,Retail Trade
+2024-07-24,February,10307.191,Delta Airlines,Hotels & Lodging,0.5643,1.8239,0.0078,1.3502,Food Services & Restaurants
+2023-01-28,October,868.69,Shell Oil,,0.1769,1.7408,0.0111,1.4975,Professional Services
+2024-05-03,April,2677.8824,Google Ads,Shipping & Freight,0.2669,2.7396,0.0131,0.0,Professional Services
+2023-02-27,December,18394.2684,Walmart,Wholesale Clubs,0.8035,1.9764,0.0072,1.0955,Media & Entertainment
+2024-02-09,December,51.2491,FedEx,Hotels & Lodging,0.1514,1.3845,0.0098,2.1314,Education
+2024-03-16,September,4182.9156,Amazon Business,Telecommunications,0.3379,1.6643,0.0,1.5566,Healthcare
+2023-06-06,February,1.0,Uber Business,Shipping & Freight,0.0,0.7033,0.0026,3.2999,Healthcare
+2023-01-26,October,1.0,Other,Transportation Services,0.0,2.2948,0.0058,0.5025,Government & Public Sector
+2023-07-25,December,1.0,Amazon Business,Office Supplies,0.0,1.3009,0.0075,2.2466,Professional Services
+2023-04-03,April,2438.4035,Microsoft,Construction Materials,0.2433,0.5733,0.0044,3.5702,Manufacturing
+2024-04-30,August,7238.248,Walmart,Industrial Supplies,0.4665,2.4235,0.0043,0.3674,Professional Services
+2023-08-23,February,8724.7369,Costco Wholesale,Retail - General,0.5083,0.3411,0.0052,4.0393,Construction
+2023-03-07,January,1.0,Amazon Business,Industrial Supplies,0.0,0.7702,0.0025,3.1544,Food Services & Restaurants
+2024-06-08,March,1.0,Office Depot,Technology & Software,0.0698,1.8019,0.0,1.387,Technology
+2023-04-22,October,3012.7659,Walmart,Car Rental,0.2903,1.3133,0.009,2.2394,Finance & Insurance
+2023-05-02,February,1372.8428,Delta Airlines,Wholesale Clubs,0.2057,1.1248,0.0,2.5915,Agriculture
+2024-04-05,February,4485.1665,Walmart,Professional Services,0.3509,1.2629,0.0049,2.3257,Food Services & Restaurants
+2023-09-08,December,9681.5088,Google Ads,Technology & Software,0.5432,2.017,0.0073,1.0,Manufacturing
+2024-10-26,November,1.0,Costco Wholesale,Office Supplies,0.0685,1.216,0.0044,2.3681,Manufacturing
+2024-07-12,December,1651.401,Delta Airlines,Telecommunications,0.2133,1.1991,0.0,2.4044,Food Services & Restaurants
+2024-06-08,February,4741.6203,Staples,Transportation Services,0.3722,2.6648,0.0028,0.0,Manufacturing
+2023-02-27,August,1.0,Amazon Business,Technology & Software,0.0,0.1816,0.0135,4.5275,Manufacturing
+2023-11-30,June,6931.9698,Other,Professional Services,0.4499,1.4215,0.0031,2.0435,Wholesale Trade
+2024-08-14,June,4179.2063,AT&T,Transportation Services,0.3375,2.1425,0.0005,0.6821,Healthcare
+2024-09-18,March,4758.843,Costco Wholesale,Industrial Supplies,0.3732,2.3373,0.0073,0.4651,Real Estate
+2024-04-29,June,79.8493,United Airlines,Shipping & Freight,0.1526,1.2196,0.0008,2.3676,Retail Trade
+2024-03-02,August,3155.1356,Verizon,Shipping & Freight,0.2989,1.538,0.0038,1.8408,Nonprofit
+2024-07-07,June,1220.8396,UPS,Professional Services,0.1953,0.9643,0.0085,2.91,Real Estate
+2023-12-28,November,1969.0903,Costco Wholesale,Airlines,0.2304,1.291,0.0029,2.2794,Finance & Insurance
+2024-05-10,April,8023.3961,Verizon,Airlines,0.4905,1.4435,0.0052,2.023,Construction
+2023-05-05,November,1.0,Other,Office Supplies,0.018,0.6547,0.0121,3.3954,Wholesale Trade
+2023-11-23,April,1.0,Meta Ads,Office Supplies,0.0135,1.1754,0.0076,2.4399,Hospitality & Tourism
+2023-01-17,May,9896.3726,Home Depot,Fuel & Gas,0.5575,1.1,0.0068,2.6383,Education
+2023-12-08,December,6334.1144,Walmart,Fuel & Gas,0.4317,1.0435,0.0069,2.813,Finance & Insurance
+2023-12-22,September,1.0,Sysco Foods,Office Supplies,0.0,2.4688,0.0099,0.255,Food Services & Restaurants
+2023-04-28,July,5850.3962,UPS,Food & Beverage Distribution,0.4139,1.1528,0.0092,2.5188,Food Services & Restaurants
+2023-07-15,July,9711.524,Sysco Foods,Telecommunications,0.5447,3.0648,0.0,0.0,Manufacturing
+2024-09-13,May,2760.8666,FedEx,Wholesale Clubs,0.2705,2.7729,0.0106,0.0,Media & Entertainment
+2024-08-27,February,4080.2394,Home Depot,Retail - General,0.3333,2.0483,0.0076,0.9208,Agriculture
+2023-08-09,April,1.0,Meta Ads,Retail - General,0.0427,0.8631,0.0069,2.9911,Construction
+2024-05-06,March,3513.8752,Office Depot,,0.3054,2.0458,0.0128,0.9334,Professional Services
+2024-06-17,October,7430.6816,Walmart,Shipping & Freight,0.4739,1.5215,0.0048,1.9061,Energy & Utilities
+2023-03-20,November,7369.4706,Microsoft,Hotels & Lodging,0.472,0.1134,0.0043,4.63,Agriculture
+2023-06-22,November,1.0,Shell Oil,Industrial Supplies,0.0572,0.2164,0.007,4.4163,Manufacturing
+2023-09-29,July,1479.6571,Best Buy,Fuel & Gas,0.2071,1.1233,0.0,2.5924,Healthcare
+2024-12-05,March,3249.2121,Other,Telecommunications,0.3022,0.4882,0.0045,3.7909,Retail Trade
+2023-08-01,June,9770.2509,Delta Airlines,Retail - General,0.546,1.6183,0.0159,1.768,Media & Entertainment
+2024-12-25,September,1.0,Marriott,Digital Advertising,0.0,0.4772,0.004,3.7995,Education
+2023-02-02,October,1.0,Staples,,0.0,0.8204,0.0099,3.0922,Hospitality & Tourism
+2023-04-21,November,9095.066,Sysco Foods,Airlines,0.5245,3.1774,0.0121,0.0,Media & Entertainment
+2024-10-13,August,1743.7618,Best Buy,Office Supplies,0.215,1.5482,0.008,1.8338,Education
+2023-12-10,October,1.0,Comcast Business,Shipping & Freight,0.0,0.0,0.0131,5.7983,Construction
+2024-04-28,June,2542.5281,Hilton Hotels,Shipping & Freight,0.2527,0.0,0.0009,5.9148,Retail Trade
+2024-06-22,October,10395.9275,Verizon,,0.5651,1.3836,0.0056,2.1317,Retail Trade
+2024-11-15,October,5570.4959,Other,Technology & Software,0.4024,0.4757,0.0127,3.8341,Construction
+2023-02-19,September,1.0,Costco Wholesale,Technology & Software,0.0,1.9499,0.0081,1.209,Construction
+2023-05-12,October,1141.6281,Grainger,,0.189,0.6748,0.0073,3.3382,Manufacturing
+2023-02-02,January,8168.4024,Staples,Technology & Software,0.4959,1.8249,0.0056,1.3378,Manufacturing
+2024-07-22,November,2515.5428,Microsoft,Shipping & Freight,0.2522,1.3054,0.0048,2.2456,Retail Trade
+2023-11-14,November,11356.7062,Grainger,Fuel & Gas,0.6065,2.4928,0.0029,0.1863,Construction
+2023-06-17,November,1184.6329,Hilton Hotels,Wholesale Clubs,0.1939,1.0774,0.0101,2.7425,Healthcare
+2024-12-09,October,2808.5232,Sysco Foods,Retail - General,0.2747,1.7501,0.0133,1.4818,Transportation & Logistics
+2024-05-22,July,1.0,Costco Wholesale,Digital Advertising,0.1272,1.5303,0.013,1.8884,Education
+2024-09-23,November,4865.436,Sysco Foods,Digital Advertising,0.3762,1.2415,0.0057,2.3517,Media & Entertainment
+2024-06-24,March,7313.2879,Home Depot,Telecommunications,0.4669,2.0525,0.0048,0.9156,Real Estate
+2024-02-19,June,2506.6992,Staples,Industrial Supplies,0.2495,1.018,0.0008,2.8321,Construction
+2023-08-08,November,683.6968,Grainger,Retail - General,0.1701,1.1089,0.0035,2.6188,Manufacturing
+2023-08-18,September,14787.1205,UPS,Construction Materials,0.7645,1.5348,0.0117,1.8877,Food Services & Restaurants
+2024-11-07,April,1.0,Shell Oil,Wholesale Clubs,0.1116,0.9892,0.0009,2.8674,Manufacturing
+2023-04-19,October,1.0,Other,Transportation Services,0.1131,1.6438,0.0044,1.7097,Food Services & Restaurants
+2023-04-13,September,6773.4287,AT&T,Professional Services,0.4489,0.7043,0.0047,3.2755,Technology
+2023-05-02,July,919.0115,Hertz,Wholesale Clubs,0.1795,1.9813,0.0036,1.0561,Manufacturing
+2024-08-10,June,7537.5539,Google Ads,Office Supplies,0.478,1.3417,0.0084,2.2018,Manufacturing
+2024-09-11,March,1.0,Sysco Foods,Office Supplies,0.1396,0.6304,0.0104,3.4477,Nonprofit
+2024-08-29,January,69.0293,Hilton Hotels,Shipping & Freight,0.152,0.6214,0.0047,3.4521,Healthcare
+2023-09-02,March,1.0,Office Depot,Fuel & Gas,0.0952,1.269,0.0057,2.2929,Retail Trade
+2024-09-26,February,54.6127,Walmart,Car Rental,0.1517,1.0348,0.0066,2.8291,Professional Services
+2023-03-28,May,1.0,Meta Ads,Fuel & Gas,0.1291,0.955,0.0098,2.9213,Professional Services
