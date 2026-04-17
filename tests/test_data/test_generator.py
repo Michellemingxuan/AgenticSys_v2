@@ -42,14 +42,14 @@ class TestGeneration:
 
     def test_respects_int_range(self, gen: DataGenerator):
         tables = gen.generate_all()
-        # bureau_full.score should be in [300, 850]
-        scores = tables["bureau_full"]["score"]
-        assert all(300 <= s <= 850 for s in scores), "score out of range"
+        # bureau_full.fico_score should be in [300, 850]
+        scores = tables["bureau_full"]["fico_score"]
+        assert all(300 <= s <= 850 for s in scores), "fico_score out of range"
 
     def test_categorical_values(self, gen: DataGenerator):
         tables = gen.generate_all()
         trade_types = set(tables["bureau_trades"]["trade_type"])
-        valid = {"revolving", "installment", "mortgage", "other"}
+        valid = {"revolving", "installment", "mortgage", "commercial", "other"}
         assert trade_types.issubset(valid), f"Unexpected trade_type values: {trade_types - valid}"
 
     def test_sequential_case_ids(self, gen: DataGenerator):
