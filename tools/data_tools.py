@@ -70,7 +70,38 @@ def query_table(
     if not rows:
         return f"No rows matching filter in '{table_name}'."
 
+    total_rows = len(rows)
+    total_cols = len(rows[0]) if rows else 0
+    truncation_notes: list[str] = []
+
+    # Step 1: trim columns if a single row is already too wide
+    if total_cols > 0:
+        single_row_size = len(json.dumps([rows[0]], indent=2, default=str))
+        if single_row_size > _MAX_CHARS - 200:
+            # Each row is too wide — trim columns on all rows
+            keys = list(rows[0].keys())
+            keep_keys: list[str] = []
+            for k in keys:
+                test_row = {kk: rows[0][kk] for kk in keep_keys + [k]}
+                if len(json.dumps([test_row], indent=2, default=str)) > _MAX_CHARS - 300:
+                    break
+                keep_keys.append(k)
+            rows = [{k: row[k] for k in keep_keys if k in row} for row in rows]
+            truncation_notes.append(f"showing {len(keep_keys)}/{total_cols} columns")
+
+    # Step 2: reduce rows until JSON fits
     text = json.dumps(rows, indent=2, default=str)
-    if len(text) > _MAX_CHARS:
-        text = text[:_MAX_CHARS] + "\n... (truncated)"
-    return text
+    shown_rows = len(rows)
+    while len(text) > _MAX_CHARS and len(rows) > 1:
+        rows = rows[: len(rows) // 2]
+        shown_rows = len(rows)
+        text = json.dumps(rows, indent=2, default=str)
+
+    if shown_rows < total_rows:
+        truncation_notes.append(f"showing {shown_rows}/{total_rows} rows")
+
+    # Append truncation metadata as a final element (valid JSON)
+    if truncation_notes:
+        rows.append({"_truncated": ", ".join(truncation_notes)})
+
+    return json.dumps(rows, indent=2, default=str)
