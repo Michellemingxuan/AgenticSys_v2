@@ -21,10 +21,16 @@ def main() -> None:
     print(f"Loaded {len(gen.profiles)} profile(s) from {args.profile_dir}")
 
     gen.generate_all(row_count_override=args.row_count)
-    paths = gen.dump_csv(args.output)
+    paths = gen.dump_csv_per_case(args.output)
 
+    case_ids = set()
     for p in paths:
-        print(f"  wrote {p}")
+        # Extract case ID from path: output/CASE-00001/table.csv
+        parts = p.split("/")
+        if len(parts) >= 2:
+            case_ids.add(parts[-2])
+
+    print(f"  {len(case_ids)} cases, {len(paths)} files total")
     print("Done.")
 
 
