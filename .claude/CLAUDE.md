@@ -1,0 +1,4 @@
+- The agents generally have the permissions for bash and can execute "cd" directly.
+- When establishing the framwork from scratch, there operations also can be executed directly.
+- Only operations that modify files (e.g., `edit`, `write`, `create`) require prior confirmation. 
+- Actions such as reading, viewing, searching, or running read-only commands should be executed directly without asking.

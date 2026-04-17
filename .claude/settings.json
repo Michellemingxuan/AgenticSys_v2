@@ -1,0 +1,45 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp architecture-v6.html architecture-v7.html)",
+      "Bash(cp brainstorm/architecture-v6.html brainstorm/architecture-v7.html)",
+      "Read(//Users/mingxuanliu/Library/CloudStorage/GoogleDrive-mingxuan99michelle@gmail.com/My Drive/Projs/**)",
+      "Bash(wc -l \"/Users/mingxuanliu/Library/CloudStorage/GoogleDrive-mingxuan99michelle@gmail.com/My Drive/Projs/AgenticSys_v0\"/**/*.py)",
+      "Read(//Users/mingxuanliu/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7/skills/brainstorming/**)",
+      "Read(//Users/mingxuanliu/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7/skills/subagent-driven-development/**)",
+      "Read(//Users/mingxuanliu/Library/CloudStorage/GoogleDrive-mingxuan99michelle@gmail.com/My\\\\ Drive/Projs/AgenticSys_v1/**)",
+      "Bash(pip install *)",
+      "Bash(python -c \"import pydantic, yaml, openai, flask, numpy; print\\('OK'\\)\")",
+      "Bash(venv/bin/pytest tests/test_models/test_types.py -v)",
+      "Bash(venv/bin/pytest tests/test_log/test_event_logger.py -v)",
+      "Bash(\"/Users/mingxuanliu/Library/CloudStorage/GoogleDrive-mingxuan99michelle@gmail.com/My Drive/Projs/AgenticSys_v1/venv/bin/python\" -c \"import yaml; print\\('pyyaml ok'\\)\")",
+      "Bash(\"/Users/mingxuanliu/Library/CloudStorage/GoogleDrive-mingxuan99michelle@gmail.com/My Drive/Projs/AgenticSys_v1/venv/bin/python\" -c \"import numpy; print\\('numpy ok'\\)\")",
+      "Bash(\"/Users/mingxuanliu/Library/CloudStorage/GoogleDrive-mingxuan99michelle@gmail.com/My Drive/Projs/AgenticSys_v1/venv/bin/python\" -c \"import pandas; print\\('pandas ok'\\)\")",
+      "Bash(\"/Users/mingxuanliu/Library/CloudStorage/GoogleDrive-mingxuan99michelle@gmail.com/My Drive/Projs/AgenticSys_v1/venv/bin/python\" -c \"import scipy; print\\('scipy ok'\\)\")",
+      "Bash(venv/bin/pytest tests/test_data/test_generator.py -v)",
+      "Bash(venv/bin/pytest tests/test_config/test_pillar_loader.py -v)",
+      "Bash(venv/bin/pytest tests/test_data/test_generator.py tests/test_config/test_pillar_loader.py -v --tb=short)",
+      "Bash(venv/bin/pytest tests/test_data/test_gateway.py tests/test_tools/test_data_tools.py -v)",
+      "Bash(venv/bin/pytest tests/test_gateway/test_llm_adapter.py -v)",
+      "Bash(venv/bin/pytest tests/test_skills/test_domain_skills.py -v)",
+      "Bash(venv/bin/pytest -v --tb=short)",
+      "Bash(venv/bin/pytest tests/test_gateway/test_firewall_stack.py -v)",
+      "Bash(venv/bin/pytest tests/test_agents/test_base_agent.py -v)",
+      "Bash(venv/bin/pytest tests/test_agents/test_session_registry.py tests/test_agents/test_general_specialist.py -v)",
+      "Bash(venv/bin/pytest -v)",
+      "Bash(venv/bin/pytest --tb=short -q)",
+      "Bash(venv/bin/pytest tests/test_orchestrator/ tests/test_e2e/ -v)",
+      "Bash(venv/bin/python main.py --help)",
+      "Bash(venv/bin/python -m data --output data/simulated/ --seed 42)",
+      "Bash(venv/bin/python -c ' *)",
+      "Bash(venv/bin/pytest -q --tb=short)",
+      "Bash(grep \"dtype: object\" config/data_profiles/*.yaml)",
+      "Bash(ls config/data_profiles/*.yaml)",
+      "Bash(rm config/data_profiles/modeling.yaml config/data_profiles/score_drivers.yaml)",
+      "Bash(mv config/data_profiles/pmts.yaml config/data_profiles/pmts_detail.yaml)"
+    ],
+    "additionalDirectories": [
+      "/Users/mingxuanliu/Library/CloudStorage/GoogleDrive-mingxuan99michelle@gmail.com/My\\ Drive/Projs/AgenticSys_v1"
+    ]
+  }
+}

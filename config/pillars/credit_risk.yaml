@@ -10,7 +10,7 @@ specialists:
     prompt_overlay: "Multi-product overlap"
   modeling:
     focus: "Score Trajectories"
-    prompt_overlay: "Trend vs threshold"
+    prompt_overlay: "Trend vs threshold; top and bottom drivers, in late and early time windows."
   spend_payments:
     focus: "Payment Behavior"
     prompt_overlay: "6M rolling trends"

@@ -1,0 +1,1205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic Case Review — Architecture v7</title>
+<style>
+:root {
+  --navy: #00175A; --blue: #006FCF; --white: #FFFFFF;
+  --gray-light: #F4F6F9; --gray-text: #4A5568; --gray-border: #E2E8F0;
+  --green: #166534; --green-bg: #DCFCE7; --green-border: #86EFAC;
+  --purple: #4C1D95; --purple-bg: #EDE9FE; --purple-border: #A78BFA;
+  --red: #991B1B; --red-bg: #FEE2E2; --red-border: #FCA5A5;
+  --amber: #92400E; --amber-bg: #FEF3C7; --amber-border: #FCD34D;
+  --slate: #334155;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #fff; color: var(--navy); }
+
+/* HERO */
+.hero { background:var(--navy);color:white;padding:26px 80px 22px;position:relative; }
+.blue-stripe { position:absolute;top:0;left:0;right:0;height:4px;background:var(--blue); }
+.hero-row { display:flex;align-items:center;gap:28px; }
+.amex-logo { background:var(--blue);padding:6px 12px;display:inline-flex;flex-direction:column;line-height:1.1;flex-shrink:0; }
+.logo-american,.logo-express { color:white;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase; }
+.hero h1 { font-family:Georgia,serif;font-size:26px;font-weight:700;letter-spacing:-0.01em; }
+.hero-sub { font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.5);font-weight:600;margin-top:4px; }
+
+/* PAGE */
+.page { max-width:1600px;margin:0 auto;padding:24px 80px 52px; }
+
+/* LEGEND */
+.legend { display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:9px 16px;background:var(--gray-light);border:1px solid var(--gray-border);border-radius:2px;margin-bottom:20px; }
+.legend-label { font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;color:var(--gray-text); }
+
+/* SINGLE TAG SYSTEM */
+.tag { display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:2px;letter-spacing:0.02em;white-space:nowrap; }
+.tag-agent      { background:#DBEAFE;color:var(--blue);border:1px solid #93C5FD; }
+.tag-skill      { background:var(--green-bg);color:var(--green);border:1px solid var(--green-border); }
+.tag-skill-alt  { background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple-border); }
+.tag-yaml       { background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border); }
+
+/* LAYER HEADER */
+.lh { display:flex;align-items:center;gap:12px;margin-bottom:10px;margin-top:20px; }
+.lh-label { font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.14em;color:var(--gray-text);white-space:nowrap; }
+.lh-line { flex:1;height:1px;background:var(--gray-border); }
+
+/* AGENT CARD — uniform across all layers */
+.alc { display:flex;align-items:center;gap:10px;background:white;border:1px solid var(--gray-border);border-left:3px solid var(--purple);border-radius:2px;padding:9px 12px; }
+.alc.blue-left  { border-left-color:var(--blue); }
+.alc.green-left { border-left-color:var(--green); }
+.alc.ghost      { border-left-style:dashed;background:transparent; }
+.alc-name { font-size:13px;font-weight:700;color:var(--navy);line-height:1.3;white-space:nowrap; }
+.alc-skills { display:flex;gap:4px;flex-wrap:wrap;margin-left:auto;flex-shrink:0; }
+
+/* SKILLS ROW (below agent card — used in Layer 1) */
+.skills-row { display:flex;gap:5px;flex-wrap:wrap;padding:5px 3px 0; }
+
+/* SPECIALIST SKILL HINT (right-aligned in Layer 2) */
+.spec-skill-hint { font-size:9px;color:var(--gray-text);font-style:italic;margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px; }
+
+/* PILLAR CARDS */
+/* (pillar-grid removed — replaced by pillar-tab system) */
+.pillar-card { border:1px solid var(--gray-border);border-top:3px solid var(--blue);border-radius:2px;padding:14px;background:white;box-shadow:0 2px 8px rgba(0,0,0,0.05); }
+.pillar-card.p-credit { border-top-color:var(--blue); }
+.pillar-card.p-esc    { border-top-color:#C85250; }
+.pillar-card.p-cbo    { border-top-color:#B45309; }
+.pillar-name { font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;color:var(--gray-text);margin-bottom:8px;display:flex;align-items:center;gap:7px; }
+.pdot { width:7px;height:7px;border-radius:50%;display:inline-block; }
+.yaml-chip { display:inline-flex;align-items:center;gap:5px;background:var(--amber-bg);border:1px solid var(--amber-border);border-radius:2px;padding:3px 8px;font-size:9px;font-weight:700;color:var(--amber);font-family:'Courier New',monospace;margin-bottom:8px; }
+
+/* AGENT BLOCK in Layer 1 */
+.agent-block { margin-bottom:4px; }
+
+/* INTRA-PILLAR ARROW — chat agent → orchestrator */
+.agent-arrow { display:flex;flex-direction:column;align-items:center;padding:3px 0;gap:1px; }
+.aa-symbol { font-size:18px;color:var(--blue);line-height:1;font-weight:700; }
+.aa-label { font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--gray-text); }
+
+/* ORCH FLOW BOX */
+.orch-box { margin-top:7px;border:1px solid var(--gray-border);border-radius:2px;background:var(--gray-light); }
+.orch-box-title { background:var(--navy);color:white;padding:4px 12px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em; }
+.orch-inputs { display:flex;gap:6px;padding:7px 12px 0;flex-wrap:wrap; }
+.orch-steps { padding:7px 12px 8px;display:flex;flex-direction:column;gap:5px; }
+.orch-step { display:flex;align-items:flex-start;gap:8px; }
+.step-num { background:var(--blue);color:white;font-size:8px;font-weight:700;width:15px;height:15px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px; }
+.step-text { font-size:10px;color:var(--slate);line-height:1.5; }
+.step-text strong { color:var(--navy); }
+.inline-tag { display:inline-block;margin-top:2px;padding:2px 7px;border-radius:2px;font-size:9px;font-weight:600; }
+.inline-tag.red   { background:var(--red-bg);border:1px solid var(--red-border);color:var(--red); }
+.inline-tag.amber { background:var(--amber-bg);border:1px solid var(--amber-border);color:var(--amber); }
+.inline-tag.blue  { background:#DBEAFE;border:1px solid #93C5FD;color:var(--blue); }
+
+/* ORCH BRANCH — Report Check decision split */
+.orch-branch { display:block; }
+.branch-split { display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-left:23px; }
+.branch-yes, .branch-no { border:1px solid var(--gray-border);border-radius:2px;padding:8px 10px;background:white;font-size:10px;color:var(--slate);line-height:1.5; }
+.branch-yes { border-top:2px solid var(--green); }
+.branch-no  { border-top:2px solid var(--amber); }
+.branch-label { font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px; }
+.branch-label-yes { color:var(--green); }
+.branch-label-no  { color:var(--amber); }
+.branch-body { font-size:9.5px; }
+.branch-body strong { color:var(--navy); }
+
+/* RETURN PATH — orchestrator → chat agent */
+.return-path { display:flex;align-items:center;gap:8px;margin-top:7px;padding:7px 10px;background:#EEF3FB;border:1px solid #93C5FD;border-radius:2px; }
+.rp-arrow { color:var(--blue);font-size:16px;font-weight:900;line-height:1; }
+.rp-label { font-size:10px;color:var(--blue);font-weight:600;line-height:1.3;flex:1; }
+
+/* BIDIRECTIONAL FLOW — between chat agent and orchestrator */
+.bidir-flow { display:grid;grid-template-columns:1fr 1px 1fr;gap:0;padding:6px 0 8px;align-items:center; }
+.bidir-dn { display:flex;flex-direction:column;align-items:center;gap:2px;padding:0 12px; }
+.bidir-sep { width:1px;align-self:stretch;background:var(--gray-border); }
+.bidir-up { display:flex;flex-direction:column;align-items:center;gap:3px;padding:0 12px;text-align:center; }
+.bidir-sym { font-size:18px;font-weight:900;line-height:1; }
+.bidir-lbl { font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--gray-text);text-align:center; }
+.bidir-lbl-up { font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--blue);line-height:1.35;text-align:center; }
+
+/* DYNAMIC NOTE */
+.dynamic-note { margin-top:8px;padding:7px 10px;background:#EEF3FB;border:1px dashed var(--blue);border-radius:2px;font-size:10px;color:var(--blue);font-weight:600;line-height:1.5; }
+.dynamic-note.esc { background:#FFF5F5;border-color:#C85250;color:#C85250; }
+.dynamic-note.cbo { background:#FFFBEB;border-color:#B45309;color:#B45309; }
+.dn-label { font-size:8px;text-transform:uppercase;letter-spacing:0.1em;color:var(--gray-text);font-weight:700;margin-bottom:2px; }
+.tc-note { padding:7px 10px;background:var(--gray-light);border:1px solid var(--gray-border);border-radius:2px;font-size:10px;line-height:1.5; }
+
+/* LAYERS MAIN */
+.layers-main { flex:1;min-width:0; }
+
+/* LAYER CONNECTOR — replaces down-arrow + down-label */
+.layer-connector { display:flex;align-items:center;gap:14px;background:var(--gray-light);border:1px solid var(--gray-border);border-radius:2px;padding:10px 20px;margin:10px 0; }
+.lc-arrow { font-size:24px;color:var(--navy);font-weight:900;line-height:1;flex-shrink:0; }
+.lc-main { flex:1; }
+.lc-label { font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--navy); }
+.lc-sublabel { font-size:9px;color:var(--gray-text);margin-top:3px; }
+.lc-tags { display:flex;gap:6px;flex-wrap:wrap;margin-left:auto;flex-shrink:0; }
+
+/* LAYER WRAPPER CARDS */
+.layer-card { border:1px solid var(--gray-border);border-top:3px solid var(--purple);border-radius:2px;background:white;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.05); }
+.layer-card.green-top { border-top-color:var(--green); }
+
+/* EQUAL-THIRDS 3-COL */
+.three-col { display:grid;grid-template-columns:repeat(3,1fr);gap:16px;align-items:start; }
+
+/* LAYER 2 LAYOUT */
+.l2-top-row { display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start; }
+
+/* INNER PANELS */
+.panel { border:1px solid var(--gray-border);border-top:2px solid var(--purple);border-radius:2px;background:var(--gray-light);padding:13px 14px; }
+.panel.green-top { border-top-color:var(--green); }
+.panel.red-top   { border-top-color:var(--red); }
+.panel-title { font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:var(--purple);margin-bottom:10px; }
+.panel-title.green { color:var(--green); }
+.panel-title.red   { color:var(--red); }
+.panel-sub { font-size:10px;color:var(--gray-text);margin-bottom:12px;line-height:1.5; }
+
+/* AGENT LIST */
+.agent-list { display:flex;flex-direction:column;gap:6px; }
+
+/* SKILL LIST in panels */
+.skill-list { display:flex;flex-direction:column;gap:10px; }
+.skill-entry-desc { font-size:10px;color:var(--gray-text);line-height:1.4;margin-top:3px;padding-left:2px; }
+
+/* YAML FOOTNOTE (retained for potential reuse) */
+.yaml-footnote { margin-top:9px;padding:8px 10px;background:var(--amber-bg);border:1px solid var(--amber-border);border-radius:2px;font-size:10px;color:var(--amber);line-height:1.5; }
+
+/* YAML SPECIALIST CONFIG TABLE — right panel in Layer 1 */
+.yaml-spec-table { border:1px solid var(--gray-border);border-radius:2px;background:white;padding:12px 14px; }
+.yst-title { font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:var(--navy);margin-bottom:2px; }
+.yst-subtitle { font-size:9px;color:var(--gray-text);margin-bottom:10px;line-height:1.4; }
+table.yst { width:100%;border-collapse:collapse;font-size:9.5px; }
+table.yst th { text-align:left;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--gray-text);padding:4px 6px 4px 0;border-bottom:2px solid var(--gray-border); }
+table.yst td { padding:4px 6px 4px 0;border-bottom:1px solid var(--gray-light);color:var(--slate);line-height:1.4;vertical-align:top; }
+table.yst td:first-child { white-space:nowrap;color:var(--navy); }
+table.yst td code, table.yst td { font-size:9.5px; }
+table.yst tbody tr:last-child td { border-bottom:none; }
+.yst-callout { display:flex;gap:8px;align-items:flex-start;margin-top:10px;padding:8px 10px;background:var(--amber-bg);border:1px solid var(--amber-border);border-radius:2px;font-size:9.5px;color:var(--amber);line-height:1.5; }
+.yst-callout-icon { font-size:14px;flex-shrink:0;margin-top:-1px; }
+.yst-callout strong { color:var(--navy); }
+.yst-callout em { font-style:italic; }
+.yst-callout code { background:rgba(0,0,0,0.06);padding:1px 4px;border-radius:2px;font-family:'Courier New',monospace;font-size:9px; }
+
+/* DATA FLOW SECTION — specialist → repo agent → data agent → back */
+.data-flow-section { margin:12px 0;border:1px solid var(--gray-border);border-radius:2px;background:white;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.04); }
+.df-title { font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:var(--navy);margin-bottom:12px;text-align:center; }
+.df-flow { display:flex;flex-direction:column;gap:0;max-width:700px;margin:0 auto; }
+.df-step { display:flex;gap:10px;align-items:flex-start;padding:8px 12px;border:1px solid var(--gray-border);border-radius:2px;background:var(--gray-light); }
+.df-step.df-return { border-style:dashed; }
+.df-step-num { width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-size:9px;font-weight:700;flex-shrink:0;margin-top:1px; }
+.df-step-body { flex:1;min-width:0; }
+.df-step-label { font-size:10px;font-weight:700;color:var(--navy);margin-bottom:2px; }
+.df-step-desc { font-size:9.5px;color:var(--gray-text);line-height:1.5; }
+.df-step-desc strong { color:var(--navy); }
+.df-step-desc code { background:rgba(0,0,0,0.06);padding:1px 4px;border-radius:2px;font-family:'Courier New',monospace; }
+.df-example { display:flex;align-items:center;gap:6px;margin-top:5px; }
+.df-code { font-family:'Courier New',monospace;font-size:8.5px;color:var(--slate);background:white;border:1px solid var(--gray-border);border-radius:2px;padding:3px 7px;flex:1;overflow-x:auto;white-space:nowrap; }
+.df-arrow { text-align:center;font-size:16px;color:var(--gray-text);font-weight:700;padding:2px 0;line-height:1; }
+.df-layout { display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start; }
+
+/* DATA CATALOG */
+.df-catalog { border:1px solid var(--gray-border);border-top:2px solid var(--navy);border-radius:2px;background:white;padding:14px 16px; }
+.df-catalog-title { font-size:11px;font-weight:700;color:var(--navy);margin-bottom:3px; }
+.df-catalog-sub { font-size:9px;color:var(--gray-text);margin-bottom:10px;line-height:1.4; }
+table.df-cat-table { width:100%;border-collapse:collapse;font-size:9px; }
+table.df-cat-table th { text-align:left;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-text);padding:3px 6px 3px 0;border-bottom:2px solid var(--gray-border); }
+table.df-cat-table td { padding:3px 6px 3px 0;border-bottom:1px solid var(--gray-light);color:var(--slate);line-height:1.4;vertical-align:top; }
+table.df-cat-table td:first-child { font-family:'Courier New',monospace;font-weight:600;color:var(--navy);white-space:nowrap;font-size:9px; }
+table.df-cat-table tbody tr:last-child td { border-bottom:none; }
+.df-catalog-note { margin-top:8px;font-size:8px;color:var(--gray-text);font-style:italic; }
+.df-cat-list { display:flex;flex-direction:column;gap:0; }
+.df-cat-entry { padding:6px 0;border-bottom:1px solid var(--gray-light); }
+.df-cat-entry:last-child { border-bottom:none; }
+.df-cat-row { display:flex;align-items:baseline;gap:8px;margin-bottom:2px; }
+.df-cat-tbl { font-family:'Courier New',monospace;font-size:10px;font-weight:700;color:var(--navy);flex-shrink:0; }
+.df-cat-desc { font-size:9px;color:var(--gray-text);line-height:1.3; }
+.df-cat-schemas { font-size:8.5px;color:var(--slate);line-height:1.6;padding-left:2px; }
+.df-cat-sl { font-family:'Courier New',monospace;font-weight:600;color:var(--blue);font-size:8.5px; }
+.df-cat-sd { color:var(--gray-text);font-size:8px; }
+
+/* PAIRWISE REVIEW */
+.pairwise-section { margin-top:14px;border:1px solid var(--purple-border);border-radius:2px;background:var(--purple-bg);padding:13px 15px; }
+.pairwise-title { font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:var(--purple);margin-bottom:12px;display:flex;align-items:center;gap:8px; }
+.pairwise-flow { display:grid;grid-template-columns:1fr 1fr;gap:10px; }
+.pr-phase { padding:10px 12px;background:rgba(255,255,255,0.35);border:1px solid var(--purple-border);border-radius:2px; }
+.pr-phase-label { font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--purple);margin-bottom:6px;display:flex;align-items:center;gap:6px; }
+.phase-num { background:var(--purple);color:white;width:17px;height:17px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex-shrink:0; }
+.pr-row { font-size:11px;color:var(--slate);line-height:2;display:flex;align-items:center;gap:6px; }
+.pr-arr { color:var(--purple);font-weight:700; }
+.pr-note { font-size:11px;color:var(--gray-text);line-height:1.55; }
+.pr-note strong { color:var(--navy); }
+.ph-arr { display:none; }
+
+/* REVIEW LOOP */
+.pr-loop { border:1px solid var(--purple-border);border-radius:2px;background:rgba(255,255,255,0.5);padding:10px 12px;margin-top:6px;position:relative; }
+.pr-loop-label { position:absolute;top:-8px;right:12px;background:var(--purple);color:white;font-size:7px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;padding:2px 8px;border-radius:2px; }
+.pr-loop-steps { display:flex;flex-direction:column;gap:6px; }
+.pr-loop-step { display:flex;gap:8px;align-items:flex-start;font-size:10px;color:var(--slate);line-height:1.5; }
+.pr-loop-step strong { color:var(--navy); }
+.pr-loop-icon { font-size:12px;flex-shrink:0;width:16px;text-align:center;margin-top:1px; }
+.pr-loop-arrow { text-align:center;font-size:11px;color:var(--purple);font-weight:700;padding:0 0 0 24px; }
+.pr-context { margin-top:8px;padding:7px 10px;background:white;border:1px solid var(--purple-border);border-radius:2px;font-size:9px;color:var(--slate);line-height:1.6; }
+.pr-context strong { color:var(--purple); }
+
+/* REPO STEPS */
+.repo-step { display:flex;align-items:flex-start;gap:7px;margin-bottom:8px; }
+.rsn { background:var(--red);color:white;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;flex-shrink:0;margin-top:1px; }
+.rsd { font-size:10px;color:var(--slate);line-height:1.5; }
+.rsd strong { color:var(--navy); }
+
+/* TWO INTERACTION MODES SECTION */
+.modes-row { display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px; }
+.mode-card { background:white;border:1px solid var(--gray-border);border-radius:2px;padding:14px 16px;box-shadow:0 1px 4px rgba(0,0,0,0.04); }
+.mode-card.mc-report { border-top:3px solid var(--navy); }
+.mode-card.mc-chat   { border-top:3px solid var(--blue); }
+.mc-header { display:flex;align-items:center;gap:8px;margin-bottom:6px; }
+.mc-icon { font-size:16px;line-height:1; }
+.mc-title { font-size:12px;font-weight:700;color:var(--navy); }
+.mc-subtitle { font-size:10px;color:var(--gray-text);margin-bottom:10px;line-height:1.5; }
+.mc-rows { display:flex;flex-direction:column;gap:5px; }
+.mc-row { display:grid;grid-template-columns:90px 1fr;gap:8px;font-size:10px;align-items:start; }
+.mc-k { font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-text);padding-top:1px; }
+.mc-v { color:var(--slate);line-height:1.4; }
+.mc-v strong { color:var(--navy); }
+
+/* MODE BRANCH in orch-box step 2 */
+.mode-branch { display:flex;align-items:flex-start;gap:5px;margin-top:3px;line-height:1.4;font-size:10px;color:var(--slate); }
+.mb-badge { display:inline-flex;align-items:center;padding:1px 6px;border-radius:2px;font-size:8px;font-weight:700;letter-spacing:0.04em;flex-shrink:0;margin-top:1px;white-space:nowrap; }
+.mb-report { background:var(--gray-light);border:1px solid var(--gray-border);color:var(--navy); }
+.mb-chat   { background:#DBEAFE;border:1px solid #93C5FD;color:var(--blue); }
+
+/* MODE PIPS on specialist skills */
+.skill-mode-row { display:flex;align-items:center;gap:5px;margin-bottom:3px;flex-wrap:wrap; }
+.mode-pip { display:inline-flex;padding:1px 6px;border-radius:2px;font-size:8px;font-weight:700;letter-spacing:0.04em;white-space:nowrap; }
+.mp-report { background:var(--gray-light);border:1px solid var(--gray-border);color:var(--navy); }
+.mp-chat   { background:#DBEAFE;border:1px solid #93C5FD;color:var(--blue); }
+.mp-both   { background:var(--green-bg);border:1px solid var(--green-border);color:var(--green); }
+.mp-review { background:var(--purple-bg);border:1px solid var(--purple-border);color:var(--purple); }
+
+/* PILLAR TABS IN LAYER 1 */
+.pillar-tab-bar { display:flex;border-bottom:2px solid var(--gray-border); }
+.pillar-tab-btn {
+  padding:11px 22px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;
+  color:var(--gray-text);border:none;background:none;cursor:pointer;
+  border-bottom:3px solid transparent;margin-bottom:-2px;
+  display:flex;align-items:center;gap:8px;transition:color 0.15s;
+}
+.pillar-tab-btn:hover { color:var(--navy); }
+.ptab-credit.active { color:var(--blue);border-bottom-color:var(--blue); }
+.ptab-esc.active    { color:#C85250;border-bottom-color:#C85250; }
+.ptab-cbo.active    { color:#B45309;border-bottom-color:#B45309; }
+.pillar-pdot { width:9px;height:9px;border-radius:50%;display:inline-block;flex-shrink:0; }
+.pillar-tab-pane { display:none;border:1px solid var(--gray-border);border-top:none;border-radius:0 0 2px 2px;background:white;padding:16px 18px; }
+.pillar-tab-pane.active { display:block; }
+.pp-layout { display:grid;grid-template-columns:3fr 2fr;gap:20px;align-items:start; }
+.pp-right { display:flex;flex-direction:column;gap:12px; }
+.pp-ctx { border:1px solid var(--gray-border);border-radius:2px;padding:12px 14px;background:var(--gray-light); }
+.pp-ctx-name { font-size:14px;font-weight:700;color:var(--navy);margin-bottom:8px;display:flex;align-items:center;gap:8px; }
+
+/* PILLAR DIFF — pulse on tab switch */
+.pillar-diff { border-radius:2px; }
+@keyframes pillarPulse {
+  0%   { background-color:#FEF3C7; }
+  55%  { background-color:#FEF3C7; }
+  100% { background-color:transparent; }
+}
+.pillar-diff.pulsing { animation:pillarPulse 0.75s ease-out forwards; }
+
+/* FOOTER */
+.footer-note { margin-top:22px;padding:13px 18px;background:#EEF3FB;border-left:4px solid var(--blue);border-radius:0 2px 2px 0;font-size:11px;color:var(--navy);line-height:1.7; }
+.footer-note strong { color:var(--blue);font-weight:700; }
+</style>
+</head>
+<body>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="blue-stripe"></div>
+  <div class="hero-row">
+    <div class="amex-logo"><span class="logo-american">American</span><span class="logo-express">Express</span></div>
+    <div>
+      <h1>Agentic Case Review — Architecture</h1>
+      <p class="hero-sub">Multi-Pillar · Dynamic Specialist Routing · General Specialist Compare · Shared Data Infrastructure</p>
+    </div>
+  </div>
+</div>
+
+<div class="page">
+
+  <!-- LEGEND
+  <div class="legend">
+    <span class="legend-label">Legend</span>
+    <span class="tag tag-agent">Agent (LLM Entity)</span>
+    <span class="tag tag-skill">Skill (Prompt Mode)</span>
+    <span class="tag tag-skill-alt">Skill (Data Mode)</span>
+    <span class="tag tag-yaml">YAML Config</span>
+    <span class="tag tag-compliance">⚠ Compliance Constraint</span>
+  </div> -->
+
+  <!-- TWO INTERACTION MODES -->
+  <div class="modes-row">
+
+    <div class="mode-card mc-report">
+      <div class="mc-header">
+        <span class="mc-icon">📄</span>
+        <span class="mc-title">Report Mode</span>
+      </div>
+      <div class="mc-subtitle">Reviewer requests a full case review report. Orchestrator plans all sections and fans out to all relevant specialists.</div>
+      <div class="mc-rows">
+        <div class="mc-row"><span class="mc-k">Trigger</span><span class="mc-v">Reviewer requests a full report</span></div>
+        <div class="mc-row"><span class="mc-k">Orch Step 2</span><span class="mc-v"><strong>Plan Sections</strong> — maps report structure to specialist domains</span></div>
+        <div class="mc-row"><span class="mc-k">Specialist Skill</span><span class="mc-v"><strong>Report</strong> — full narrative section (Findings → Evidence → Risk Implication)</span></div>
+        <div class="mc-row"><span class="mc-k">Selection</span><span class="mc-v">All pillar-relevant specialists called in parallel</span></div>
+        <div class="mc-row"><span class="mc-k">Pairwise Review</span><span class="mc-v">Always runs — all 3 phases</span></div>
+        <div class="mc-row"><span class="mc-k">Output</span><span class="mc-v">Multi-section structured report → Chat Agent streams to reviewer</span></div>
+      </div>
+    </div>
+
+    <div class="mode-card mc-chat">
+      <div class="mc-header">
+        <span class="mc-icon">💬</span>
+        <span class="mc-title">Chat Mode — Q&amp;A</span>
+      </div>
+      <div class="mc-subtitle">Reviewer asks a specific question mid-review. Orchestrator decomposes it and routes only to the needed specialists.</div>
+      <div class="mc-rows">
+        <div class="mc-row"><span class="mc-k">Trigger</span><span class="mc-v">Reviewer asks a specific question</span></div>
+        <div class="mc-row"><span class="mc-k">Orch Step 2</span><span class="mc-v"><strong>Decompose</strong> — question split into specialist sub-questions</span></div>
+        <div class="mc-row"><span class="mc-k">Specialist Skill</span><span class="mc-v"><strong>Answer</strong> — targeted response to sub-question; also used in peer review mode</span></div>
+        <div class="mc-row"><span class="mc-k">Selection</span><span class="mc-v">Only needed specialists called (dynamic, typically 1–3)</span></div>
+        <div class="mc-row"><span class="mc-k">Pairwise Review</span><span class="mc-v">Runs only if multiple specialists selected</span></div>
+        <div class="mc-row"><span class="mc-k">Output</span><span class="mc-v">Direct answer grounded in specialist evidence → Chat Agent streams to reviewer</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ALL LAYERS -->
+  <div class="layers-main">
+
+      <!-- ════════════ LAYER 1 ════════════ -->
+      <div class="lh" style="margin-top:0"><span class="lh-label">Layer 1 — Pillar Orchestration</span><div class="lh-line"></div></div>
+
+      <!-- PILLAR TABS -->
+      <div class="pillar-tab-bar">
+        <button class="pillar-tab-btn ptab-credit active" data-ptab="credit">
+          <span class="pillar-pdot" style="background:var(--blue)"></span>Credit &amp; Risk
+        </button>
+        <button class="pillar-tab-btn ptab-esc" data-ptab="esc">
+          <span class="pillar-pdot" style="background:#C85250"></span>Escalation
+        </button>
+        <button class="pillar-tab-btn ptab-cbo" data-ptab="cbo">
+          <span class="pillar-pdot" style="background:#B45309"></span>CBO — Credit Burst Out
+        </button>
+      </div>
+
+      <!-- ── CREDIT & RISK ── -->
+      <div class="pillar-tab-pane active" id="ptab-credit">
+        <div class="pp-layout">
+          <div><!-- LEFT: agents + orch-box -->
+            <div class="agent-block">
+              <div class="alc blue-left">
+                <span class="alc-name">Chat Agent</span>
+                <div class="alc-skills">
+                  <span class="tag tag-skill" style="font-size:9px">Converse</span>
+                  <span class="tag tag-skill" style="font-size:9px">Stream</span>
+                </div>
+                <span class="tag tag-agent" style="font-size:9px">Agent</span>
+              </div>
+            </div>
+            <div class="bidir-flow">
+              <div class="bidir-dn"><span class="bidir-sym" style="color:var">↓</span><span class="bidir-lbl">Routes to</span></div>
+              <div class="bidir-sep"></div>
+              <div class="bidir-up">
+                <span class="bidir-sym" style="color:var">↑</span>
+                <span class="bidir-lbl">Summarized answer<br>returned to chat agent</span>
+              </div>
+            </div>
+            <div class="agent-block">
+              <div class="alc blue-left">
+                <span class="alc-name">Orchestrator Agent</span>
+                <div class="alc-skills">
+                  <span class="tag tag-skill" style="font-size:9px">Report Check</span>
+                  <span class="tag tag-skill" style="font-size:9px">Team Construction</span>
+                  <span class="tag tag-skill" style="font-size:9px">Synthesize</span>
+                </div>
+                <span class="tag tag-agent" style="font-size:9px">Agent</span>
+              </div>
+              <div class="orch-box">
+                <div class="orch-box-title">Orchestration Flow</div>
+                <div class="orch-inputs">
+                  <span class="tag tag-yaml" style="font-size:9px">📄 Pillar Instructions</span>
+                  <span class="tag tag-agent" style="font-size:9px">👤 Reviewer Question</span>
+                  <span class="tag tag-skill" style="font-size:9px">📑 Available Reports</span>
+                </div>
+                <div class="orch-steps">
+                  <div class="orch-step"><div class="step-num">1</div>
+                    <div class="step-text"><strong>Report Check</strong> — can existing reports fully answer the question?
+                      <!-- <div class="inline-tag blue">Scans available report sections for relevant evidence</div> -->
+                    </div>
+                  </div>
+                  <div class="orch-step orch-branch">
+                    <div class="branch-split">
+                      <div class="branch-yes">
+                        <div class="branch-label branch-label-yes">✓ Fully covered</div>
+                        <div class="branch-body"><strong>Structure Answer</strong> — extracts and organizes evidence from existing reports into a coherent response. No specialists called.</div>
+                      </div>
+                      <div class="branch-no">
+                        <div class="branch-label branch-label-no">✗ Gap detected</div>
+                        <div class="branch-body">
+                          <div style="margin-bottom:4px">
+                            <div class="mode-branch"><span class="mb-badge mb-report">📄 Report</span> <strong>Plan Sections</strong></div>
+                            <div class="mode-branch"><span class="mb-badge mb-chat">💬 Chat</span> <strong>Decompose</strong></div>
+                          </div>
+                          <strong>Team Construction</strong> — selects specialists for the gaps
+                          <div class="inline-tag amber">Pillar Instructions Injected Into Each Specialist</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="orch-step"><div class="step-num">2</div>
+                    <div class="step-text"><strong>Synthesize</strong> — merges specialist outputs + report evidence into a single coherent answer; resolves contradictions, grounds claims in data. When specialists flag missing data, evaluates whether <strong>absence of data is itself a signal</strong> (e.g. no bureau record may indicate thin-file risk) and surfaces this interpretation explicitly.</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Dynamic Selection Examples — below orch-box -->
+              <div class="dynamic-note" style="margin-top:8px">
+                <div class="dn-label">Dynamic Selection — Examples</div>
+                <ul class="pillar-diff" style="margin:4px 0 0;padding-left:14px;font-size:10px;line-height:1.9">
+                  <li>"What Is The Bureau Risk Score?" → <span class="tag tag-skill" style="font-size:8px;padding:1px 5px">Report Check</span> covers it → <strong>Reports only</strong></li>
+                  <li>"How frequent were positive events (e.g. limit increases) in the last 18 months?" → Gap → <strong>Cust. Rel. + Bureau</strong></li>
+                  <li>"Are Derogatory Marks Consistent With Model Score?" → Partial → <strong>Bureau + Modeling</strong> + report context</li>
+                  <li>"Is There Cross-Bureau &amp; Capacity Risk Combined?" → Gap → <strong>Bureau + CrossBU + Cap. &amp; Afford.</strong></li>
+                </ul>
+              </div>
+
+              <!-- How Team Construction Works -->
+              <div class="tc-note" style="margin-top:8px">
+                <div class="dn-label">How Team Construction Works</div>
+                <ul style="margin:4px 0 0;padding-left:14px;font-size:10px;color:var(--slate);line-height:1.9">
+                  <li><strong style="color:var(--navy)">No hard-coded specialist list</strong> — selection is fully dynamic via LLM reasoning</li>
+                  <li><strong style="color:var(--navy)">Reads pillar context</strong> — each specialist's focus and prompt overlay from YAML</li>
+                  <li><strong style="color:var(--navy)">Matches sub-questions to specialists</strong> — only calls those whose focus is relevant</li>
+                  <li><strong style="color:var(--navy)">Skips what reports already cover</strong> — Report Check gaps drive selection</li>
+                  <li><strong style="color:var(--navy)">Injects YAML at call time</strong> — same class, different behavior per pillar</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          <div class="pp-right"><!-- RIGHT: YAML control plane -->
+            <div class="pp-ctx">
+              <div style="margin-bottom:8px"><span class="yaml-chip pillar-diff">📄 credit_risk.yaml</span></div>
+              <div class="pillar-diff" style="font-size:10px;color:var(--gray-text);margin-bottom:8px;line-height:1.5">
+                <strong style="color:var(--navy)">Focus:</strong> Delinquency risk, bureau scores, cross-BU exposure, model scores, spend patterns, WCC flags, capacity &amp; affordability
+              </div>
+            </div>
+
+            <!-- YAML specialist config table -->
+            <div class="yaml-spec-table pillar-diff">
+              <div class="yst-title">YAML Specialist Configs Under This Pillar</div>
+              <div class="yst-subtitle">One Base Agent + domain skill + YAML — domain skill provides expertise, YAML swaps the pillar lens</div>
+              <table class="yst">
+                <thead><tr><th>Specialist</th><th>focus</th><th>prompt_overlay</th></tr></thead>
+                <tbody>
+                  <tr><td><strong>Bureau</strong></td><td>Delinquency Risk</td><td>Flag 90D+ Marks</td></tr>
+                  <tr><td><strong>CrossBU</strong></td><td>Cross-BU Exposure</td><td>Multi-product overlap</td></tr>
+                  <tr><td><strong>Modeling</strong></td><td>Score Trajectories</td><td>Trend vs threshold</td></tr>
+                  <tr><td><strong>Spend &amp; Payments</strong></td><td>Payment Behavior</td><td>6M rolling trends</td></tr>
+                  <tr><td><strong>WCC</strong></td><td>Watch-list Flags</td><td>Standalone signals</td></tr>
+                  <tr><td><strong>Cust. Rel.</strong></td><td>Relationship Depth</td><td>Product breadth</td></tr>
+                  <tr><td><strong>Cap. &amp; Afford.</strong></td><td>Capacity Headroom</td><td>Limit vs DTI</td></tr>
+                </tbody>
+              </table>
+              <div class="yst-callout">
+                <span class="yst-callout-icon">↻</span>
+                <div><strong>One Base Agent, many specialists, many pillars.</strong> The Base Agent invoked with <em>domain_skill=bureau</em> + <em>credit_risk.yaml</em> focuses on "Delinquency Risk" with overlay "Flag 90D+ Marks." The same Base Agent with <em>domain_skill=bureau</em> + <em>cbo.yaml</em> focuses on "Limit Utilisation" with overlay "Burst Risk Signals." Domain skill provides the expertise, YAML provides the pillar lens — zero code change.</div>
+              </div>
+            </div>
+
+            <!-- YAML comparison — Bureau example across pillars -->
+            <div class="yaml-spec-table" style="margin-top:10px">
+              <div class="yst-title">Example: Bureau Config Across Pillars</div>
+              <table class="yst">
+                <thead><tr><th>Field</th><th>credit_risk.yaml</th><th>cbo.yaml</th></tr></thead>
+                <tbody>
+                  <tr><td><strong>focus</strong></td><td>Delinquency Risk</td><td>Limit Utilisation</td></tr>
+                  <tr><td><strong>prompt_overlay</strong></td><td>Flag 90D+ Marks</td><td>Burst Risk Signals</td></tr>
+                </tbody>
+              </table>
+              <div style="margin-top:6px;font-size:9px;color:var(--gray-text);line-height:1.4"><strong style="color:var(--navy)">Same Base Agent.</strong> Domain skill provides expertise, YAML controls pillar focus and prompt overlay. Adding a new specialist = one new domain skill. Adding a new pillar = one new YAML. No agent code changes.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── ESCALATION ── -->
+      <div class="pillar-tab-pane" id="ptab-esc">
+        <div class="pp-layout">
+          <div><!-- LEFT: identical structure, only compliance blocked fields differ -->
+            <div class="agent-block">
+              <div class="alc" style="border-left-color:#C85250">
+                <span class="alc-name">Chat Agent</span>
+                <div class="alc-skills">
+                  <span class="tag tag-skill" style="font-size:9px">Converse</span>
+                  <span class="tag tag-skill" style="font-size:9px">Stream</span>
+                </div>
+                <span class="tag tag-agent" style="font-size:9px">Agent</span>
+              </div>
+            </div>
+            <div class="bidir-flow">
+              <div class="bidir-dn"><span class="bidir-sym" style="color:var">↓</span><span class="bidir-lbl">Routes to</span></div>
+              <div class="bidir-sep"></div>
+              <div class="bidir-up">
+                <span class="bidir-sym" style="color:var">↑</span>
+                <span class="bidir-lbl">Summarized answer<br>returned to chat agent</span>
+              </div>
+            </div>
+            <div class="agent-block">
+              <div class="alc" style="border-left-color:#C85250">
+                <span class="alc-name">Orchestrator Agent</span>
+                <div class="alc-skills">
+                  <span class="tag tag-skill" style="font-size:9px">Report Check</span>
+                  <span class="tag tag-skill" style="font-size:9px">Team Construction</span>
+                  <span class="tag tag-skill" style="font-size:9px">Synthesize</span>
+                </div>
+                <span class="tag tag-agent" style="font-size:9px">Agent</span>
+              </div>
+              <div class="orch-box">
+                <div class="orch-box-title">Orchestration Flow</div>
+                <div class="orch-inputs">
+                  <span class="tag tag-yaml" style="font-size:9px">📄 Pillar Instructions</span>
+                  <span class="tag tag-agent" style="font-size:9px">👤 Reviewer Question</span>
+                  <span class="tag tag-skill" style="font-size:9px">📑 Available Reports</span>
+                </div>
+                <div class="orch-steps">
+                  <div class="orch-step"><div class="step-num">1</div>
+                    <div class="step-text"><strong>Report Check</strong> — can existing reports fully answer the question?
+                      <!-- <div class="inline-tag blue">Scans available report sections for relevant evidence</div> -->
+                    </div>
+                  </div>
+                  <div class="orch-step orch-branch">
+                    <div class="branch-split">
+                      <div class="branch-yes">
+                        <div class="branch-label branch-label-yes">✓ Fully covered</div>
+                        <div class="branch-body"><strong>Structure Answer</strong> — extracts and organizes evidence from existing reports into a coherent response. No specialists called.</div>
+                      </div>
+                      <div class="branch-no">
+                        <div class="branch-label branch-label-no">✗ Gap detected</div>
+                        <div class="branch-body">
+                          <div style="margin-bottom:4px">
+                            <div class="mode-branch"><span class="mb-badge mb-report">📄 Report</span> <strong>Plan Sections</strong></div>
+                            <div class="mode-branch"><span class="mb-badge mb-chat">💬 Chat</span> <strong>Decompose</strong></div>
+                          </div>
+                          <strong>Team Construction</strong> — selects specialists for the gaps
+                          <div class="inline-tag amber">Pillar Instructions Injected Into Each Specialist</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="orch-step"><div class="step-num">2</div>
+                    <div class="step-text"><strong>Synthesize</strong> — merges specialist outputs + report evidence into a single coherent answer; resolves contradictions, grounds claims in data. When specialists flag missing data, evaluates whether <strong>absence of data is itself a signal</strong> (e.g. no bureau record may indicate thin-file risk) and surfaces this interpretation explicitly.</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="dynamic-note esc" style="margin-top:8px">
+                <div class="dn-label" style="color:var(--gray-text)">Dynamic Selection — Examples</div>
+                <ul class="pillar-diff" style="margin:4px 0 0;padding-left:14px;font-size:10px;line-height:1.9">
+                  <li>"What Triggered The Escalation Flag?" → <span class="tag tag-skill" style="font-size:8px;padding:1px 5px">Report Check</span> partial → <strong>WCC + Modeling</strong></li>
+                  <li>"Show Payment Behavior Alongside Internal Risk Score" → Gap → <strong>Spend &amp; Payments + Modeling</strong></li>
+                  <li>"Is There Capacity To Absorb A Limit Increase?" → Gap → <strong>Cap. &amp; Afford.</strong></li>
+                  <li>"Is Cross-BU Exposure The Primary Escalation Driver?" → Gap → <strong>CrossBU + Bureau + Modeling</strong></li>
+                </ul>
+              </div>
+
+              <div class="tc-note" style="margin-top:8px">
+                <div class="dn-label" style="color:var(--gray-text)">How Team Construction Works</div>
+                <ul style="margin:4px 0 0;padding-left:14px;font-size:10px;color:var(--slate);line-height:1.9">
+                  <li><strong style="color:var(--navy)">No hard-coded specialist list</strong> — selection is fully dynamic via LLM reasoning</li>
+                  <li><strong style="color:var(--navy)">Reads pillar context</strong> — each specialist's focus and prompt overlay from YAML</li>
+                  <li><strong style="color:var(--navy)">Matches sub-questions to specialists</strong> — only calls those whose focus is relevant</li>
+                  <li><strong style="color:var(--navy)">Skips what reports already cover</strong> — Report Check gaps drive selection</li>
+                  <li><strong style="color:var(--navy)">Injects YAML at call time</strong> — same class, different behavior per pillar</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          <div class="pp-right">
+            <div class="pp-ctx">
+              <div style="margin-bottom:8px"><span class="yaml-chip pillar-diff">📄 escalation.yaml</span></div>
+              <div class="pillar-diff" style="font-size:10px;color:var(--gray-text);margin-bottom:8px;line-height:1.5">
+                <strong style="color:var(--navy)">Focus:</strong> Escalation triggers, cross-product risk, payment behavior alongside risk scores, WCC flags, capacity headroom assessment
+              </div>
+            </div>
+
+            <div class="yaml-spec-table pillar-diff">
+              <div class="yst-title">YAML Specialist Configs Under This Pillar</div>
+              <div class="yst-subtitle">One Base Agent + domain skill + YAML — domain skill provides expertise, YAML swaps the pillar lens</div>
+              <table class="yst">
+                <thead><tr><th>Specialist</th><th>focus</th><th>prompt_overlay</th></tr></thead>
+                <tbody>
+                  <tr><td><strong>Bureau</strong></td><td>Escalation Signals</td><td>Recent derog triggers</td></tr>
+                  <tr><td><strong>CrossBU</strong></td><td>Cross-Product Risk</td><td>Product contagion</td></tr>
+                  <tr><td><strong>Modeling</strong></td><td>Risk Score Context</td><td>Score vs escalation</td></tr>
+                  <tr><td><strong>Spend &amp; Payments</strong></td><td>Payment Behavior</td><td>Delinquency trajectory</td></tr>
+                  <tr><td><strong>WCC</strong></td><td>Escalation Triggers</td><td>Trigger classification</td></tr>
+                  <tr><td><strong>Cust. Rel.</strong></td><td>Relationship Context</td><td>Tenure vs escalation</td></tr>
+                  <tr><td><strong>Cap. &amp; Afford.</strong></td><td>Headroom Assessment</td><td>Absorb capacity</td></tr>
+                </tbody>
+              </table>
+              <div class="yst-callout">
+                <span class="yst-callout-icon">↻</span>
+                <div><strong>One Base Agent, many specialists, many pillars.</strong> The Base Agent with <em>domain_skill=wcc</em> + <em>escalation.yaml</em> focuses on "Escalation Triggers" with overlay "Trigger classification." With <em>domain_skill=wcc</em> + <em>credit_risk.yaml</em> it focuses on "Watch-list Flags" with overlay "Standalone signals." Domain skill provides the expertise, YAML provides the pillar lens.</div>
+              </div>
+            </div>
+
+            <div class="yaml-spec-table" style="margin-top:10px">
+              <div class="yst-title">Example: WCC Config Across Pillars</div>
+              <table class="yst">
+                <thead><tr><th>Field</th><th>escalation.yaml</th><th>credit_risk.yaml</th></tr></thead>
+                <tbody>
+                  <tr><td><strong>focus</strong></td><td>Escalation Triggers</td><td>Watch-list Flags</td></tr>
+                  <tr><td><strong>prompt_overlay</strong></td><td>Trigger classification</td><td>Standalone signals</td></tr>
+                </tbody>
+              </table>
+              <div style="margin-top:6px;font-size:9px;color:var(--gray-text);line-height:1.4"><strong style="color:var(--navy)">Same Base Agent.</strong> Domain skill provides expertise, YAML controls pillar focus and prompt overlay. Adding a new specialist = one new domain skill. Adding a new pillar = one new YAML. No agent code changes.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── CBO ── -->
+      <div class="pillar-tab-pane" id="ptab-cbo">
+        <div class="pp-layout">
+          <div><!-- LEFT: identical structure -->
+            <div class="agent-block">
+              <div class="alc" style="border-left-color:#B45309">
+                <span class="alc-name">Chat Agent</span>
+                <div class="alc-skills">
+                  <span class="tag tag-skill" style="font-size:9px">Converse</span>
+                  <span class="tag tag-skill" style="font-size:9px">Stream</span>
+                </div>
+                <span class="tag tag-agent" style="font-size:9px">Agent</span>
+              </div>
+            </div>
+            <div class="bidir-flow">
+              <div class="bidir-dn"><span class="bidir-sym" style="color:var">↓</span><span class="bidir-lbl">Routes to</span></div>
+              <div class="bidir-sep"></div>
+              <div class="bidir-up">
+                <span class="bidir-sym" style="color:var">↑</span>
+                <span class="bidir-lbl">Summarized answer<br>returned to chat agent</span>
+              </div>
+            </div>
+            <div class="agent-block">
+              <div class="alc" style="border-left-color:#B45309">
+                <span class="alc-name">Orchestrator Agent</span>
+                <div class="alc-skills">
+                  <span class="tag tag-skill" style="font-size:9px">Report Check</span>
+                  <span class="tag tag-skill" style="font-size:9px">Team Construction</span>
+                  <span class="tag tag-skill" style="font-size:9px">Synthesize</span>
+                </div>
+                <span class="tag tag-agent" style="font-size:9px">Agent</span>
+              </div>
+              <div class="orch-box">
+                <div class="orch-box-title">Orchestration Flow</div>
+                <div class="orch-inputs">
+                  <span class="tag tag-yaml" style="font-size:9px">📄 Pillar Instructions</span>
+                  <span class="tag tag-agent" style="font-size:9px">👤 Reviewer Question</span>
+                  <span class="tag tag-skill" style="font-size:9px">📑 Available Reports</span>
+                </div>
+                <div class="orch-steps">
+                  <div class="orch-step"><div class="step-num">1</div>
+                    <div class="step-text"><strong>Report Check</strong> — can existing reports fully answer the question?
+                      <!-- <div class="inline-tag blue">Scans available report sections for relevant evidence</div> -->
+                    </div>
+                  </div>
+                  <div class="orch-step orch-branch">
+                    <div class="branch-split">
+                      <div class="branch-yes">
+                        <div class="branch-label branch-label-yes">✓ Fully covered</div>
+                        <div class="branch-body"><strong>Structure Answer</strong> — extracts and organizes evidence from existing reports into a coherent response. No specialists called.</div>
+                      </div>
+                      <div class="branch-no">
+                        <div class="branch-label branch-label-no">✗ Gap detected</div>
+                        <div class="branch-body">
+                          <div style="margin-bottom:4px">
+                            <div class="mode-branch"><span class="mb-badge mb-report">📄 Report</span> <strong>Plan Sections</strong></div>
+                            <div class="mode-branch"><span class="mb-badge mb-chat">💬 Chat</span> <strong>Decompose</strong></div>
+                          </div>
+                          <strong>Team Construction</strong> — selects specialists for the gaps
+                          <div class="inline-tag amber">Pillar Instructions Injected Into Each Specialist</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="orch-step"><div class="step-num">2</div>
+                    <div class="step-text"><strong>Synthesize</strong> — merges specialist outputs + report evidence into a single coherent answer; resolves contradictions, grounds claims in data. When specialists flag missing data, evaluates whether <strong>absence of data is itself a signal</strong> (e.g. no bureau record may indicate thin-file risk) and surfaces this interpretation explicitly.</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="dynamic-note cbo" style="margin-top:8px">
+                <div class="dn-label" style="color:var(--gray-text)">Dynamic Selection — Examples</div>
+                <ul class="pillar-diff" style="margin:4px 0 0;padding-left:14px;font-size:10px;line-height:1.9">
+                  <li>"Is The Customer Showing Burst Spending Signals?" → Gap → <strong>Spend &amp; Payments + Bureau</strong></li>
+                  <li>"What Is Current Utilization vs Limit Exposure?" → Partial → <strong>Bureau + Cap. &amp; Afford.</strong> + report context</li>
+                  <li>"Does Cross-BU Data Confirm Concentrated Burst Risk?" → Gap → <strong>CrossBU + Modeling</strong></li>
+                  <li>"Is WCC Behavior Aligning With Limit Pressure?" → Gap → <strong>WCC + Spend &amp; Payments + Bureau</strong></li>
+                </ul>
+              </div>
+
+              <div class="tc-note" style="margin-top:8px">
+                <div class="dn-label" style="color:var(--gray-text)">How Team Construction Works</div>
+                <ul style="margin:4px 0 0;padding-left:14px;font-size:10px;color:var(--slate);line-height:1.9">
+                  <li><strong style="color:var(--navy)">No hard-coded specialist list</strong> — selection is fully dynamic via LLM reasoning</li>
+                  <li><strong style="color:var(--navy)">Reads pillar context</strong> — each specialist's focus and prompt overlay from YAML</li>
+                  <li><strong style="color:var(--navy)">Matches sub-questions to specialists</strong> — only calls those whose focus is relevant</li>
+                  <li><strong style="color:var(--navy)">Skips what reports already cover</strong> — Report Check gaps drive selection</li>
+                  <li><strong style="color:var(--navy)">Injects YAML at call time</strong> — same class, different behavior per pillar</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          <div class="pp-right">
+            <div class="pp-ctx">
+              <div style="margin-bottom:8px"><span class="yaml-chip pillar-diff">📄 cbo.yaml</span></div>
+              <div class="pillar-diff" style="font-size:10px;color:var(--gray-text);margin-bottom:8px;line-height:1.5">
+                <strong style="color:var(--navy)">Focus:</strong> Limit utilization, burst spending signals, concentrated cross-BU risk, limit pressure vs WCC behavior
+              </div>
+            </div>
+
+            <div class="yaml-spec-table pillar-diff">
+              <div class="yst-title">YAML Specialist Configs Under This Pillar</div>
+              <div class="yst-subtitle">One Base Agent + domain skill + YAML — domain skill provides expertise, YAML swaps the pillar lens</div>
+              <table class="yst">
+                <thead><tr><th>Specialist</th><th>focus</th><th>prompt_overlay</th></tr></thead>
+                <tbody>
+                  <tr><td><strong>Bureau</strong></td><td>Limit Utilisation</td><td>Burst Risk Signals</td></tr>
+                  <tr><td><strong>CrossBU</strong></td><td>Concentrated Risk</td><td>Cross-BU concentration</td></tr>
+                  <tr><td><strong>Modeling</strong></td><td>Burst Score Signals</td><td>Burst vs baseline</td></tr>
+                  <tr><td><strong>Spend &amp; Payments</strong></td><td>Burst Spending</td><td>Spike detection</td></tr>
+                  <tr><td><strong>WCC</strong></td><td>Limit Pressure</td><td>Limit vs WCC alignment</td></tr>
+                  <tr><td><strong>Cust. Rel.</strong></td><td>Usage Patterns</td><td>Product burst signals</td></tr>
+                  <tr><td><strong>Cap. &amp; Afford.</strong></td><td>Limit Exposure</td><td>Utilization headroom</td></tr>
+                </tbody>
+              </table>
+              <div class="yst-callout">
+                <span class="yst-callout-icon">↻</span>
+                <div><strong>One Base Agent, many specialists, many pillars.</strong> The Base Agent with <em>domain_skill=spend_payments</em> + <em>cbo.yaml</em> focuses on "Burst Spending" with overlay "Spike detection." With <em>domain_skill=spend_payments</em> + <em>credit_risk.yaml</em> it focuses on "Payment Behavior" with overlay "6M rolling trends." Domain skill provides the expertise, YAML provides the pillar lens.</div>
+              </div>
+            </div>
+
+            <div class="yaml-spec-table" style="margin-top:10px">
+              <div class="yst-title">Example: Spend &amp; Payments Config Across Pillars</div>
+              <table class="yst">
+                <thead><tr><th>Field</th><th>cbo.yaml</th><th>credit_risk.yaml</th></tr></thead>
+                <tbody>
+                  <tr><td><strong>focus</strong></td><td>Burst Spending</td><td>Payment Behavior</td></tr>
+                  <tr><td><strong>prompt_overlay</strong></td><td>Spike detection</td><td>6M rolling trends</td></tr>
+                </tbody>
+              </table>
+              <div style="margin-top:6px;font-size:9px;color:var(--gray-text);line-height:1.4"><strong style="color:var(--navy)">Same Base Agent.</strong> Domain skill provides expertise, YAML controls pillar focus and prompt overlay. Adding a new specialist = one new domain skill. Adding a new pillar = one new YAML. No agent code changes.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- LAYER CONNECTOR 1 → 2 -->
+      <div class="layer-connector">
+        <span class="lc-arrow">↓</span>
+        <div class="lc-main">
+          <div class="lc-label">Pillar Instructions + Domain Skill Injected Into Base Agent At Call Time</div>
+          <div class="lc-sublabel">YAML config (focus, prompt_overlay) + domain skill (expertise &amp; context) compose a specialist from the shared Base Agent</div>
+        </div>
+        <div class="lc-tags">
+          <span class="tag tag-yaml" style="font-size:9px">YAML Context</span>
+          <span class="tag tag-skill" style="font-size:9px">Domain Skill</span>
+        </div>
+      </div>
+
+      <!-- ════════════ LAYER 2 ════════════ -->
+      <div class="lh"><span class="lh-label">Layer 2 — Shared Specialist Pool</span><div class="lh-line"></div></div>
+
+      <div class="layer-card">
+
+        <!-- TOP ROW: Base Agent + Skills side by side -->
+        <div class="l2-top-row">
+
+          <div class="panel">
+            <div class="panel-title">One Base Agent → Many Specialists</div>
+            <div class="panel-sub">There is no separate Bureau agent, Modeling agent, etc. There is <strong style="color:var(--navy)">one Base Specialist Agent</strong> that becomes any domain specialist when invoked with a <strong style="color:var(--green)">domain skill</strong>. The domain skill injects the expertise and context — what to look for, how to interpret data, what matters in this domain. YAML adds the pillar lens on top.</div>
+
+            <!-- Base Agent card -->
+            <div class="agent-block" style="margin-top:10px">
+              <div class="alc blue-left" style="border-left-width:3px">
+                <span class="alc-name">Base Specialist Agent</span>
+                <div class="alc-skills">
+                  <span class="tag tag-skill-alt" style="font-size:9px">Data Request</span>
+                  <span class="tag tag-skill" style="font-size:9px">Synthesize</span>
+                  <span class="tag tag-skill" style="font-size:9px">Report</span>
+                  <span class="tag tag-skill" style="font-size:9px">Answer</span>
+                </div>
+                <span class="tag tag-agent" style="font-size:9px">Agent</span>
+              </div>
+              <div style="font-size:9.5px;color:var(--gray-text);line-height:1.5;margin-top:6px;padding:0 2px">Generic agent with shared capabilities. Becomes a domain specialist when a <strong style="color:var(--green)">domain skill</strong> is injected at invocation. Multiple instances run in parallel — each with a different domain skill.</div>
+            </div>
+
+            <!-- Domain Skills as injection -->
+            <div style="margin-top:12px;border:1px solid var(--green-border);border-top:2px solid var(--green);border-radius:2px;padding:12px 14px;background:var(--green-bg)">
+              <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:var(--green);margin-bottom:8px;display:flex;align-items:center;gap:6px">
+                <span style="font-size:13px">⚙</span> Domain Skills — Injected At Call Time
+              </div>
+              <div style="font-size:9.5px;color:var(--slate);line-height:1.5;margin-bottom:10px">Each domain skill encapsulates the <strong style="color:var(--navy)">expertise and context</strong> for one analytical domain. It tells the Base Agent what data to request, what patterns to look for, how to interpret findings, and what risk signals matter. Adding a new specialist = writing a new domain skill, no agent code changes.</div>
+              <div style="display:flex;flex-direction:column;gap:4px">
+                <div class="alc green-left" style="background:white"><span class="alc-name" style="font-size:12px">Bureau</span><span class="spec-skill-hint">tradeline analysis, derog marks, score interpretation</span><span class="tag tag-skill" style="font-size:8px;margin-left:auto">Domain Skill</span></div>
+                <div class="alc green-left" style="background:white"><span class="alc-name" style="font-size:12px">CrossBU</span><span class="spec-skill-hint">cross-product exposure, contagion patterns</span><span class="tag tag-skill" style="font-size:8px;margin-left:auto">Domain Skill</span></div>
+                <div class="alc green-left" style="background:white"><span class="alc-name" style="font-size:12px">Modeling</span><span class="spec-skill-hint">score trajectories, model signals, thresholds</span><span class="tag tag-skill" style="font-size:8px;margin-left:auto">Domain Skill</span></div>
+                <div class="alc green-left" style="background:white"><span class="alc-name" style="font-size:12px">Spend &amp; Payments</span><span class="spec-skill-hint">payment trends, delinquency patterns, spend spikes</span><span class="tag tag-skill" style="font-size:8px;margin-left:auto">Domain Skill</span></div>
+                <div class="alc green-left" style="background:white"><span class="alc-name" style="font-size:12px">WCC</span><span class="spec-skill-hint">watch-list flags, control signals, trigger classification</span><span class="tag tag-skill" style="font-size:8px;margin-left:auto">Domain Skill</span></div>
+                <div class="alc green-left" style="background:white"><span class="alc-name" style="font-size:12px">Customer Rel. &amp; Internal</span><span class="spec-skill-hint">tenure, product usage, relationship depth</span><span class="tag tag-skill" style="font-size:8px;margin-left:auto;flex-shrink:0">Domain Skill</span></div>
+                <div class="alc green-left" style="background:white"><span class="alc-name" style="font-size:12px">Capacity &amp; Affordability</span><span class="spec-skill-hint">DTI, limit headroom, income capacity</span><span class="tag tag-skill" style="font-size:8px;margin-left:auto;flex-shrink:0">Domain Skill</span></div>
+                <div class="alc green-left" style="background:white;border-left-style:dashed"><span class="alc-name" style="color:#CBD5E0;font-size:11px">+ Add New Domain Skill</span></div>
+              </div>
+              <div style="margin-top:10px;padding:7px 10px;background:white;border:1px solid var(--green-border);border-radius:2px;font-size:9px;color:var(--slate);line-height:1.6">
+                <strong style="color:var(--green)">How invocation works:</strong> Orchestrator calls <code style="font-size:8.5px;background:rgba(0,0,0,0.06);padding:1px 4px;border-radius:2px">Base Agent</code> + <code style="font-size:8.5px;background:rgba(0,0,0,0.06);padding:1px 4px;border-radius:2px">domain_skill=bureau</code> + <code style="font-size:8.5px;background:rgba(0,0,0,0.06);padding:1px 4px;border-radius:2px">pillar_yaml=credit_risk</code>. The Base Agent loads the Bureau domain skill (expertise &amp; context) and the pillar YAML (analytical lens). Same agent, same code — different skill + YAML = different specialist behavior.
+              </div>
+            </div>
+
+            <!-- General Specialist -->
+            <div style="margin-top:12px;border-top:1px dashed var(--purple-border);padding-top:10px">
+              <div style="font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--gray-text);margin-bottom:6px">Cross-Cutting Review Agent</div>
+              <div class="alc" style="border-left-color:var(--purple);border-left-width:3px;background:var(--purple-bg)">
+                <span class="alc-name">General Specialist</span>
+                <div class="alc-skills">
+                  <span class="tag tag-skill" style="font-size:9px;background:var(--purple-bg);color:var(--purple);border-color:var(--purple-border)">Compare</span>
+                  <span class="tag tag-skill-alt" style="font-size:9px">Data Request</span>
+                </div>
+                <span class="tag tag-agent" style="font-size:9px">Agent</span>
+              </div>
+              <div style="font-size:9.5px;color:var(--gray-text);line-height:1.5;margin-top:6px;padding:0 2px">Not a domain expert — a <strong style="color:var(--navy)">generalist reviewer</strong> that reads all specialist outputs, detects contradictions in cross-domain implications, and self-resolves them through structured Q&amp;A. Can also send <strong style="color:var(--navy)">Data Requests</strong> to fetch additional evidence when existing outputs are insufficient to resolve a contradiction.</div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">Skills</div>
+            <div class="panel-sub">The <strong style="color:var(--navy)">Base Agent</strong> carries four shared skills (data in → findings out → formatted output) plus one <strong style="color:var(--green)">domain skill</strong> injected per invocation. The <strong style="color:var(--purple)">General Specialist</strong> holds one additional skill — <strong style="color:var(--purple)">Compare</strong> — that drives the cross-specialist review.</div>
+            <div class="skill-list">
+
+              <div style="font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--gray-text);margin-top:2px">Domain Expertise — Injected Per Invocation</div>
+              <div>
+                <div class="skill-mode-row">
+                  <span class="tag tag-skill" style="background:var(--green-bg);color:var(--green);border-color:var(--green-border)">Domain Skill</span>
+                  <span class="mode-pip" style="background:#DBEAFE;border:1px solid #93C5FD;color:var(--blue)">1 per invocation</span>
+                </div>
+                <div class="skill-entry-desc">Provides the <strong>expertise and context</strong> that transforms the generic Base Agent into a domain specialist. Contains: what data patterns to look for, how to interpret findings in this domain, what risk signals are relevant, what constitutes an anomaly. For example, the Bureau domain skill instructs the agent to focus on tradeline health, derogatory marks, and score trajectories — while the Spend &amp; Payments skill focuses on payment velocity, delinquency patterns, and spend spikes. Domain skills are composable with pillar YAML — Bureau + <em>credit_risk.yaml</em> examines delinquency, Bureau + <em>cbo.yaml</em> examines utilization.</div>
+              </div>
+
+              <div style="font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--gray-text);margin-top:6px">Foundational — Shared Across All Invocations</div>
+              <div>
+                <div class="skill-mode-row">
+                  <span class="tag tag-skill-alt">Data Request</span>
+                </div>
+                <div class="skill-entry-desc">Describes what data is needed using semantic variables (e.g. "delinquency count", not exact column names). May optionally hint at tables. The Text-to-SQL skill resolves the actual table and column mapping. If a <em>data unavailable</em> notice is returned, the specialist flags what information is missing.</div>
+              </div>
+              <div>
+                <div class="skill-mode-row">
+                  <span class="tag tag-skill">Synthesize</span>
+                </div>
+                <div class="skill-entry-desc">Ingests structured data returned by Data Agents and synthesizes it into analytical findings — identifies patterns, anomalies, trends, and gaps. The domain skill shapes <em>what</em> the agent looks for during synthesis.</div>
+              </div>
+
+              <div style="font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--gray-text);margin-top:6px">Output — Shared Across All Invocations</div>
+              <div>
+                <div class="skill-mode-row">
+                  <span class="tag tag-skill">Report</span>
+                  <span class="mode-pip mp-report">📄 Report Mode</span>
+                </div>
+                <div class="skill-entry-desc">Produces a standardized section narrative from synthesized findings. Enforces consistent structure: Key Findings → Supporting Evidence → Risk Implication. Designed for assembly into the final case report.</div>
+              </div>
+              <div>
+                <div class="skill-mode-row">
+                  <span class="tag tag-skill">Answer</span>
+                  <span class="mode-pip mp-chat">💬 Chat Mode</span>
+                </div>
+                <div class="skill-entry-desc">Answers the sub-question distributed by the orchestrator. Delivers evidence-backed replies grounded in the specialist's synthesized findings.</div>
+              </div>
+
+              <div style="font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--gray-text);margin-top:6px">Cross-Specialist Review — General Specialist Only</div>
+              <div>
+                <div class="skill-mode-row">
+                  <span class="tag tag-skill" style="background:var(--purple-bg);color:var(--purple);border-color:var(--purple-border)">Compare</span>
+                  <span class="mode-pip mp-review">Review Phase</span>
+                </div>
+                <div class="skill-entry-desc">Examines outputs from all domain specialists pairwise. For each pair, extracts the <strong>implications</strong> each specialist draws, identifies where implications <strong>contradict</strong> across domains (e.g. Bureau says "low risk" but Spend &amp; Payments shows deterioration), formulates pointed questions about each contradiction, then <strong>answers its own questions</strong> by reasoning across the combined evidence. When existing evidence is insufficient, sends <strong>Data Requests</strong> to fetch additional data needed to resolve the contradiction. Produces a contradiction resolution with supporting logic. Contradictions that cannot be resolved even after additional data retrieval are escalated as open flags for the orchestrator.</div>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /l2-top-row -->
+
+        <!-- CROSS-SPECIALIST REVIEW — full width below -->
+        <div class="pairwise-section" style="margin-top:12px">
+          <div class="pairwise-title">⇄ &nbsp; Cross-Specialist Review — General Specialist Compare (Both Modes)</div>
+          <div class="pairwise-flow">
+
+            <div class="pr-phase">
+              <div class="pr-phase-label"><div class="phase-num">1</div>First-Pass Generation</div>
+              <div class="pr-note">All called domain specialists run <strong>Data Request → Synthesize → Report</strong> (report mode) or <strong>Data Request → Synthesize → Answer</strong> (chat mode) in parallel. Each produces an independent output with no knowledge of peers.</div>
+              <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px">
+                <span class="tag" style="background:white;border:1px solid var(--purple-border);color:var(--purple);font-size:9px">Bureau ✓</span>
+                <span class="tag" style="background:white;border:1px solid var(--purple-border);color:var(--purple);font-size:9px">CrossBU ✓</span>
+                <span class="tag" style="background:white;border:1px solid var(--purple-border);color:var(--purple);font-size:9px">Modeling ✓</span>
+                <span class="tag" style="background:white;border:1px solid var(--purple-border);color:var(--purple);font-size:9px">… ✓</span>
+              </div>
+            </div>
+
+            <div class="pr-phase">
+              <div class="pr-phase-label"><div class="phase-num">2</div>Pairwise Compare — General Specialist</div>
+              <div class="pr-note">The <strong>General Specialist</strong> receives all domain specialist outputs. Using its <strong>Compare</strong> skill, it examines outputs pairwise and extracts the <strong>implications</strong> each specialist draws.</div>
+              <div style="margin-top:6px">
+                <div class="pr-row"><span style="color:var(--purple);font-weight:700">General Specialist</span> reads:</div>
+                <div class="pr-row" style="padding-left:12px">Bureau output <span class="pr-arr">↔</span> CrossBU output</div>
+                <div class="pr-row" style="padding-left:12px">Bureau output <span class="pr-arr">↔</span> Modeling output</div>
+                <div class="pr-row" style="padding-left:12px">Modeling output <span class="pr-arr">↔</span> Cap. &amp; Afford. output</div>
+                <div class="pr-row" style="padding-left:12px;color:#aaa">… all relevant pairs</div>
+              </div>
+            </div>
+
+            <div class="pr-phase">
+              <div class="pr-phase-label"><div class="phase-num">3</div>Contradiction Detection &amp; Self-Resolution</div>
+              <div class="pr-loop">
+                <div class="pr-loop-label">Per Contradiction</div>
+                <div class="pr-loop-steps">
+                  <div class="pr-loop-step">
+                    <span class="pr-loop-icon">🔍</span>
+                    <div><strong>Identify contradiction</strong> — General Specialist detects where two specialists' implications conflict (e.g. Bureau implies "low delinquency risk" but Spend &amp; Payments shows "accelerating late payments")</div>
+                  </div>
+                  <div class="pr-loop-arrow">↓</div>
+                  <div class="pr-loop-step">
+                    <span class="pr-loop-icon">❓</span>
+                    <div><strong>Raise question</strong> — formulates a precise question about the contradiction: <em>"How can bureau score indicate low risk while payment behavior shows deterioration — is the score lagging, or are the late payments too recent to register?"</em></div>
+                  </div>
+                  <div class="pr-loop-arrow">↓</div>
+                  <div class="pr-loop-step">
+                    <span class="pr-loop-icon">💡</span>
+                    <div><strong>Self-answer</strong> — reasons across both specialists' evidence to resolve the contradiction. If the existing evidence is insufficient, sends a <strong>Data Request</strong> to fetch additional data (e.g. requesting recent payment timestamps to determine whether late payments pre- or post-date the bureau score refresh). Produces a structured resolution: which implication holds, why, and what the combined evidence actually means for risk. If unresolvable even after additional data, flags it as an <strong>open conflict</strong> for the orchestrator.</div>
+                  </div>
+                </div>
+              </div>
+              <div class="pr-context">
+                <strong>Why self-Q&amp;A works:</strong> The General Specialist is a generalist — it doesn't have domain bias. By asking and answering its own questions, it avoids the problem of domain specialists lacking the cross-domain knowledge needed to challenge peers. Contradictions are resolved through reasoning over the combined evidence, not through back-and-forth negotiation between specialists.
+              </div>
+            </div>
+
+            <div class="pr-phase">
+              <div class="pr-phase-label"><div class="phase-num">4</div>Annotated Outputs to Orchestrator</div>
+              <div class="pr-note">The General Specialist produces a <strong>review report</strong> containing: resolved contradictions with reasoning, open conflicts that need human judgment, and cross-domain insights that no single specialist could surface alone. Original specialist outputs + this review report are passed to the orchestrator's <strong>Synthesize</strong> skill for final assembly.</div>
+              <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+                <span class="tag tag-yaml" style="font-size:9px">→ Original Specialist Outputs</span>
+                <span class="tag" style="font-size:9px;background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple-border)">→ General Specialist Review Report</span>
+                <span class="tag tag-yaml" style="font-size:9px">→ Orchestrator Synthesize</span>
+              </div>
+            </div>
+
+          </div>
+        </div><!-- /pairwise-section -->
+
+      </div><!-- /layer-card -->
+
+      <!-- SPECIALIST → DATA AGENT FLOW -->
+      <div class="data-flow-section">
+        <div class="df-title">How Specialists Get Data — The Full Call Chain</div>
+        <div class="df-layout">
+
+          <!-- LEFT: Data Catalog -->
+          <div class="df-catalog">
+            <div class="df-catalog-title">📚 Shared Data Catalog</div>
+            <div class="df-catalog-sub">Single source of truth for all available data. Schema descriptions are the key for table discovery — the Text-to-SQL skill reads these to resolve which tables and columns match a specialist's semantic request.</div>
+            <div class="df-cat-list">
+              <div class="df-cat-entry">
+                <div class="df-cat-row"><span class="df-cat-tbl">bureau_full</span><span class="df-cat-desc">Full bureau credit file — one row per case, aggregated bureau snapshot</span></div>
+                <div class="df-cat-schemas"><span class="df-cat-sl">score</span> <span class="df-cat-sd">Credit score (int)</span> · <span class="df-cat-sl">derog_count</span> <span class="df-cat-sd">Number of derogatory marks</span> · <span class="df-cat-sl">tradeline_ct</span> <span class="df-cat-sd">Active tradelines</span> · <span class="df-cat-sl">inquiry_ct</span> <span class="df-cat-sd">Recent hard inquiries</span></div>
+              </div>
+              <div class="df-cat-entry">
+                <div class="df-cat-row"><span class="df-cat-tbl">bureau_trades</span><span class="df-cat-desc">Individual tradeline detail — one row per tradeline per case</span></div>
+                <div class="df-cat-schemas"><span class="df-cat-sl">trade_type</span> <span class="df-cat-sd">Revolving / installment / mortgage</span> · <span class="df-cat-sl">balance</span> <span class="df-cat-sd">Current balance ($)</span> · <span class="df-cat-sl">limit</span> <span class="df-cat-sd">Credit limit ($)</span> · <span class="df-cat-sl">dpd_status</span> <span class="df-cat-sd">Days past due bucket</span></div>
+              </div>
+              <div class="df-cat-entry">
+                <div class="df-cat-row"><span class="df-cat-tbl">txn_monthly</span><span class="df-cat-desc">Monthly transaction aggregates — one row per month per case</span></div>
+                <div class="df-cat-schemas"><span class="df-cat-sl">month</span> <span class="df-cat-sd">Calendar month</span> · <span class="df-cat-sl">spend_total</span> <span class="df-cat-sd">Total spend ($)</span> · <span class="df-cat-sl">txn_count</span> <span class="df-cat-sd">Transaction count</span> · <span class="df-cat-sl">category</span> <span class="df-cat-sd">Spend category</span></div>
+              </div>
+              <div class="df-cat-entry">
+                <div class="df-cat-row"><span class="df-cat-tbl">pmts_detail</span><span class="df-cat-desc">Payment history — one row per billing cycle per case</span></div>
+                <div class="df-cat-schemas"><span class="df-cat-sl">due_date</span> <span class="df-cat-sd">Payment due date</span> · <span class="df-cat-sl">paid_date</span> <span class="df-cat-sd">Actual payment date</span> · <span class="df-cat-sl">amount</span> <span class="df-cat-sd">Payment amount ($)</span> · <span class="df-cat-sl">status</span> <span class="df-cat-sd">on_time / late / missed</span></div>
+              </div>
+              <div class="df-cat-entry">
+                <div class="df-cat-row"><span class="df-cat-tbl">model_scores</span><span class="df-cat-desc">Internal model outputs — one row per model per scoring run</span></div>
+                <div class="df-cat-schemas"><span class="df-cat-sl">model_id</span> <span class="df-cat-sd">Model identifier</span> · <span class="df-cat-sl">score</span> <span class="df-cat-sd">Raw score value</span> · <span class="df-cat-sl">percentile</span> <span class="df-cat-sd">Population percentile</span> · <span class="df-cat-sl">timestamp</span> <span class="df-cat-sd">Scoring date</span></div>
+              </div>
+              <div class="df-cat-entry">
+                <div class="df-cat-row"><span class="df-cat-tbl">wcc_flags</span><span class="df-cat-desc">Watch-list / credit control flags — event-level, one row per flag</span></div>
+                <div class="df-cat-schemas"><span class="df-cat-sl">flag_type</span> <span class="df-cat-sd">Flag category</span> · <span class="df-cat-sl">trigger_date</span> <span class="df-cat-sd">Date flag raised</span> · <span class="df-cat-sl">severity</span> <span class="df-cat-sd">low / medium / high / critical</span></div>
+              </div>
+              <div class="df-cat-entry">
+                <div class="df-cat-row"><span class="df-cat-tbl">xbu_summary</span><span class="df-cat-desc">Cross-BU exposure — one row per product per case</span></div>
+                <div class="df-cat-schemas"><span class="df-cat-sl">product</span> <span class="df-cat-sd">Product name</span> · <span class="df-cat-sl">exposure</span> <span class="df-cat-sd">Total exposure ($)</span> · <span class="df-cat-sl">utilization</span> <span class="df-cat-sd">Limit utilization %</span></div>
+              </div>
+              <div class="df-cat-entry">
+                <div class="df-cat-row"><span class="df-cat-tbl">cust_tenure</span><span class="df-cat-desc">Customer relationship — one row per case</span></div>
+                <div class="df-cat-schemas"><span class="df-cat-sl">tenure_months</span> <span class="df-cat-sd">Months as customer</span> · <span class="df-cat-sl">products_held</span> <span class="df-cat-sd">Active product count</span> · <span class="df-cat-sl">segment</span> <span class="df-cat-sd">Customer segment</span></div>
+              </div>
+              <div class="df-cat-entry">
+                <div class="df-cat-row"><span class="df-cat-tbl">income_dti</span><span class="df-cat-desc">Income &amp; capacity — one row per case</span></div>
+                <div class="df-cat-schemas"><span class="df-cat-sl">income_est</span> <span class="df-cat-sd">Estimated income ($)</span> · <span class="df-cat-sl">total_debt</span> <span class="df-cat-sd">Total debt obligations ($)</span> · <span class="df-cat-sl">dti_ratio</span> <span class="df-cat-sd">Debt-to-income ratio</span></div>
+              </div>
+            </div>
+            <div class="df-catalog-note">+ additional tables as onboarded. Catalog grows independently of pillar YAML or specialist code.</div>
+          </div>
+
+          <!-- RIGHT: Flow steps -->
+          <div class="df-flow">
+
+            <div class="df-step">
+              <div class="df-step-num" style="background:var(--purple)">1</div>
+              <div class="df-step-body">
+                <div class="df-step-label">Specialist Emits Data Request</div>
+                <div class="df-step-desc">Specialist describes <strong>what data it needs</strong> semantically — analytical intent, potential variables (not exact column names), and desired operations. May or may not reference specific tables — the Text-to-SQL skill resolves the rest.</div>
+                <div class="df-example">
+                  <span class="tag tag-skill-alt" style="font-size:8px">Data Request</span>
+                  <code class="df-code">{ intent: "delinquency history last 18 months", variables: ["delinquency count", "credit score", "severity"], ops: "filter 18 months, group by severity" }</code>
+                </div>
+              </div>
+            </div>
+
+            <div class="df-arrow">↓</div>
+
+            <div class="df-step">
+              <div class="df-step-num" style="background:var(--red)">2</div>
+              <div class="df-step-body">
+                <div class="df-step-label">Repository Agent — Gates &amp; Redacts</div>
+                <div class="df-step-desc">Checks <strong>Pillar Access Control</strong> (silenced tables/schemas for this pillar), gates access by user role, redacts sensitive fields. Passes only clean requests downstream to Data Agents.</div>
+              </div>
+            </div>
+
+            <div class="df-arrow">↓</div>
+
+            <div class="df-step">
+              <div class="df-step-num" style="background:var(--green)">3</div>
+              <div class="df-step-body">
+                <div class="df-step-label">Data Agent Executes</div>
+                <div class="df-step-desc"><strong>Text-to-SQL</strong> reads the Data Catalog's schema descriptions to resolve which tables and columns match the specialist's semantic variables (e.g. "delinquency count" → <code style="font-size:8px">bureau_full.derog_count</code>). If no match found, returns a <em>data unavailable</em> notice. Otherwise → <strong>Execute</strong> in sandbox → <strong>Retrieve</strong> structured results.</div>
+                <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">
+                  <span class="tag tag-skill" style="font-size:8px">Text-to-SQL</span>
+                  <span class="tag tag-skill" style="font-size:8px">Execute</span>
+                  <span class="tag tag-skill" style="font-size:8px">Retrieve</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="df-arrow">↑</div>
+
+            <div class="df-step df-return">
+              <div class="df-step-num" style="background:var(--purple)">4</div>
+              <div class="df-step-body">
+                <div class="df-step-label">Results Returned To Specialist</div>
+                <div class="df-step-desc">Structured results (or <em>data unavailable</em> notices) flow back → specialist uses data in its output, and explicitly reports any missing tables/schemas: <strong>"certain information is not available at this time."</strong></div>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ════════════ LAYER 3 ════════════ -->
+      <div class="lh"><span class="lh-label">Layer 3 — Data Infrastructure (Shared Across All Pillars)</span><div class="lh-line"></div></div>
+
+      <div class="layer-card green-top">
+        <div class="three-col">
+
+          <!-- COL 1: Repository Agent -->
+          <div class="panel red-top">
+            <div class="panel-title red">Repository Agent — Gatekeeper</div>
+            <div class="panel-sub" style="margin-bottom:10px">Request processing pipeline (every Data Request passes through in order):</div>
+            <div class="repo-step"><div class="rsn">1</div><div class="rsd"><strong>Pillar Access Control</strong> — checks silenced tables/schemas for the requesting pillar; rejects or filters fields restricted at the pillar level</div></div>
+            <div class="repo-step"><div class="rsn">2</div><div class="rsd"><strong>Access Gating</strong> — validates request against user role permissions</div></div>
+            <div class="repo-step"><div class="rsn">3</div><div class="rsd"><strong>Redaction</strong> — strips PII and sensitive fields before forwarding to data agents</div></div>
+            <div style="margin-top:12px;border-top:1px solid var(--gray-border);padding-top:10px">
+              <div style="font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--gray-text);margin-bottom:6px">Administrative Skills</div>
+              <div class="skill-list" style="gap:8px">
+                <div>
+                  <span class="tag tag-skill-alt" style="font-size:9px">Catalog Governance</span>
+                  <div class="skill-entry-desc">Register, update, or retire tables and schemas in the shared Data Catalog. Maintains descriptions, schema metadata, and data lineage.</div>
+                </div>
+                <div>
+                  <span class="tag tag-skill-alt" style="font-size:9px">Pillar Access Control</span>
+                  <div class="skill-entry-desc">Silence specific tables or schemas per pillar based on compliance rules. Configured via pillar YAML <code style="font-size:8px">silenced_tables</code> / <code style="font-size:8px">silenced_schemas</code> — restricts what a pillar can request without removing data from the catalog.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- COL 2: Data Agents -->
+          <div class="panel green-top">
+            <div class="panel-title green">Data Agents</div>
+            <div class="agent-list">
+              <div class="alc green-left"><span class="alc-name">Data Agent A</span><span class="tag tag-agent" style="font-size:9px;margin-left:auto">Agent</span></div>
+              <div class="alc green-left"><span class="alc-name">Data Agent B</span><span class="tag tag-agent" style="font-size:9px;margin-left:auto">Agent</span></div>
+              <div class="alc green-left"><span class="alc-name">Data Agent C</span><span class="tag tag-agent" style="font-size:9px;margin-left:auto">Agent</span></div>
+              <div class="alc ghost green-left" style="border-left-style:dashed"><span class="alc-name" style="color:#CBD5E0;font-size:11px">+ Scale As Needed</span></div>
+            </div>
+            <div style="margin-top:10px;padding:8px 10px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:2px;font-size:10px;color:var(--green);line-height:1.5">
+              General-purpose &amp; stateless. Multiple agents run in parallel for concurrent specialist requests. Pillar-awareness lives in YAML, not in the agents.
+            </div>
+          </div>
+
+          <!-- COL 3: Shared Skills -->
+          <div class="panel green-top">
+            <div class="panel-title green">Shared Skills — Data Agents</div>
+            <div class="panel-sub">All data agents expose the same four skills.</div>
+            <div class="skill-list">
+              <div>
+                <span class="tag tag-skill">Text-to-SQL</span>
+                <div class="skill-entry-desc">Reads the Data Catalog's schema descriptions to intelligently match the specialist's semantic variables to real tables and columns. Resolves table selection when the specialist doesn't specify one. If no match found, returns a structured <strong>data unavailable</strong> notice.</div>
+              </div>
+              <div>
+                <span class="tag tag-skill">Execute</span>
+                <div class="skill-entry-desc">Run generated code in a sandboxed environment. Retry on recoverable failures.</div>
+              </div>
+              <div>
+                <span class="tag tag-skill">Retrieve</span>
+                <div class="skill-entry-desc">Return structured results to the requesting specialist via the Repository Agent.</div>
+              </div>
+              <div>
+                <span class="tag tag-skill">Analyze</span>
+                <div class="skill-entry-desc">Optional: produce a brief statistical summary or anomaly flag on retrieved data before returning.</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div><!-- /layer-card -->
+
+    </div><!-- /layers-main -->
+
+
+</div>
+
+<script>
+document.querySelectorAll('.pillar-tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const target = btn.dataset.ptab;
+    document.querySelectorAll('.pillar-tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.pillar-tab-pane').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('ptab-' + target).classList.add('active');
+    document.querySelectorAll('#ptab-' + target + ' .pillar-diff').forEach(el => {
+      el.style.animation = 'none';
+      el.offsetHeight;
+      el.style.animation = 'pillarPulse 0.6s ease';
+    });
+  });
+});
+</script>
+</body>
+</html>
