@@ -1,9 +1,23 @@
-"""SafeChain adapter stub — for deployment environment with SafeChain LLM pipeline."""
+"""SafeChain adapter — for deployment environment with SafeChain LLM pipeline.
+
+WIRING INSTRUCTIONS (for the private environment):
+    from safechain.lcel import model as safechain_model
+    llm = safechain_model("gpt-4.1")   # or whatever model name is configured
+    adapter = SafeChainAdapter(llm=llm, model_name="gpt-4.1")
+
+The adapter:
+  - Combines all messages into a single human message (SafeChain requirement)
+  - Uses neutral role labels (Context/Request/Response) to avoid firewall patterns
+  - Masks long digit sequences to prevent PII-related rejections
+  - Handles 401 (token expiry → refresh) and 403/400 (firewall → FirewallRejection)
+  - Implements manual tool-calling loop via prompt injection (no native function calling)
+"""
 
 from __future__ import annotations
 
 import inspect
 import json
+import os
 import re
 from typing import Any, Callable
 
@@ -12,13 +26,15 @@ from pydantic import BaseModel
 from gateway.firewall_stack import FirewallRejection
 from gateway.llm_adapter import BaseLLMAdapter
 
+# Neutral role labels to avoid firewall pattern-matching on [SYSTEM], [USER], etc.
+_ROLE_LABELS = {"system": "Context", "user": "Request", "assistant": "Response"}
+
 
 class SafeChainAdapter(BaseLLMAdapter):
     """Adapter for SafeChain-based LLM invocation.
 
-    This is a stub — the actual SafeChain package is only available in the
-    deployment environment. All methods raise NotImplementedError if
-    safechain is not installed.
+    Uses ValidChatPromptTemplate from safechain.prompts to send all messages
+    as a single human message — required by the SafeChain pipeline.
     """
 
     def __init__(
@@ -49,8 +65,8 @@ class SafeChainAdapter(BaseLLMAdapter):
         tool_map = {fn.__name__: fn for fn in (tools or [])}
 
         messages = [
-            {"role": "Context", "content": system_prompt},
-            {"role": "Request", "content": user_message},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
         ]
 
         for _ in range(effective_max):
@@ -68,7 +84,7 @@ class SafeChainAdapter(BaseLLMAdapter):
             if "tool_call" in parsed:
                 tc = parsed["tool_call"]
                 fn_name = tc.get("name", "")
-                fn_args = tc.get("arguments", {})
+                fn_args = tc.get("arguments", tc.get("args", {}))
 
                 fn = tool_map.get(fn_name)
                 if fn is None:
@@ -76,12 +92,11 @@ class SafeChainAdapter(BaseLLMAdapter):
                 else:
                     result = fn(**fn_args)
                     result_str = str(result)
-                    # Truncate large results
                     if len(result_str) > 3000:
                         result_str = result_str[:3000] + "\n... (truncated)"
 
-                messages.append({"role": "Response", "content": raw})
-                messages.append({"role": "Context", "content": f"Tool result for {fn_name}: {result_str}"})
+                messages.append({"role": "assistant", "content": raw})
+                messages.append({"role": "user", "content": f"Tool result for {fn_name}:\n{result_str}"})
                 continue
 
             # Check for final output
@@ -95,60 +110,65 @@ class SafeChainAdapter(BaseLLMAdapter):
 
     def chat_turn(self, messages: list[dict]) -> str:
         """Single invocation for chat-style turn."""
-        # Remap roles to neutral labels
-        remapped = []
-        for m in messages:
-            role = m.get("role", "")
-            if role == "system":
-                remapped.append({"role": "Context", "content": m["content"]})
-            elif role == "user":
-                remapped.append({"role": "Request", "content": m["content"]})
-            elif role == "assistant":
-                remapped.append({"role": "Response", "content": m["content"]})
-            else:
-                remapped.append({"role": "Context", "content": m["content"]})
-
-        return self._invoke(remapped)
+        return self._invoke(messages)
 
     def _invoke(self, messages: list[dict]) -> str:
-        """Invoke the SafeChain LLM. Raises NotImplementedError if not available."""
+        """Invoke the SafeChain LLM.
+
+        Combines all messages into a single human message using neutral role labels,
+        then sends via ValidChatPromptTemplate. Handles token refresh on 401
+        and raises FirewallRejection on 403/400.
+        """
         try:
-            import safechain  # noqa: F401
+            from safechain.prompts import ValidChatPromptTemplate
         except ImportError:
             raise NotImplementedError(
                 "SafeChain is not available in this environment. "
                 "Install safechain or use OpenAIAdapter instead."
             )
 
-        # Mask long digit sequences in messages
-        masked_messages = []
-        for m in messages:
-            content = re.sub(r"\d{6,}", "***MASKED***", m.get("content", ""))
-            masked_messages.append({**m, "content": content})
+        if self.llm is None:
+            self._refresh_llm()
+
+        # Combine all messages with neutral role labels into a single string
+        combined = "\n\n".join(
+            f"{_ROLE_LABELS.get(m.get('role', ''), m.get('role', 'Context').title())}:\n{m['content']}"
+            for m in messages
+        )
+
+        # Mask long digit sequences (potential account numbers / PII)
+        combined = re.sub(r"\b\d{8,}\b", "***MASKED***", combined)
+
+        # Strip code execution keywords from tool results
+        combined = re.sub(r"\b(exec|eval|import|__\w+__)\b", "[FILTERED]", combined)
+
+        def _call(active_llm: Any) -> str:
+            chain = ValidChatPromptTemplate.from_messages([
+                ("human", "{__input__}"),
+            ]) | active_llm
+            result = chain.invoke({"__input__": combined})
+            return result.content if hasattr(result, "content") else str(result)
 
         try:
-            if self.llm is None:
-                self._refresh_llm()
-            response = self.llm.invoke(masked_messages)
-            return response.content if hasattr(response, "content") else str(response)
+            return _call(self.llm)
         except Exception as e:
             error_str = str(e)
             if "401" in error_str:
-                # Token refresh
+                # Token expiry — refresh and retry once
                 self._refresh_llm()
-                response = self.llm.invoke(masked_messages)
-                return response.content if hasattr(response, "content") else str(response)
+                return _call(self.llm)
             elif "403" in error_str:
-                raise FirewallRejection("403", "Access denied by SafeChain firewall")
+                raise FirewallRejection(403, f"Access denied by SafeChain firewall: {error_str}")
             elif "400" in error_str:
-                raise FirewallRejection("400", f"Bad request: {error_str}")
+                raise FirewallRejection(400, f"Bad request: {error_str}")
             raise
 
     def _refresh_llm(self) -> None:
         """Refresh the LLM instance from safechain."""
         try:
-            from safechain.lcel import model  # type: ignore
-            self.llm = model
+            from safechain.lcel import model as safechain_model
+            model_id = os.environ.get("SAFECHAIN_MODEL", self.model_name)
+            self.llm = safechain_model(model_id)
         except ImportError:
             raise NotImplementedError(
                 "SafeChain is not available — cannot refresh LLM."
@@ -157,7 +177,16 @@ class SafeChainAdapter(BaseLLMAdapter):
     @staticmethod
     def _build_tool_schema_block(functions: list[Callable]) -> str:
         """Format tool signatures for prompt injection."""
-        lines = ["Available tools (respond with {\"tool_call\": {\"name\": \"...\", \"arguments\": {...}}} to use):"]
+        lines = [
+            "You have access to the following tools.",
+            "To call a tool, respond with ONLY this JSON (no other text):",
+            '  {"tool_call": {"name": "<tool_name>", "arguments": {<args>}}}',
+            "",
+            "When you have your final answer, respond with ONLY this JSON:",
+            '  {"output": {<your structured answer>}}',
+            "",
+            "Available tools:",
+        ]
         for fn in functions:
             sig = inspect.signature(fn)
             params = []
@@ -167,6 +196,7 @@ class SafeChainAdapter(BaseLLMAdapter):
                 default = f" = {param.default}" if param.default is not inspect.Parameter.empty else ""
                 params.append(f"{name}: {type_name}{default}")
             doc = (fn.__doc__ or "").strip().split("\n")[0]
-            lines.append(f"  - {fn.__name__}({', '.join(params)}): {doc}")
-        lines.append("\nWhen done, respond with {\"output\": <your final answer>}.")
+            lines.append(f"  - {fn.__name__}({', '.join(params)})")
+            if doc:
+                lines.append(f"    {doc}")
         return "\n".join(lines)
