@@ -59,6 +59,7 @@ def run_question(
         pillar=pillar,
         available_specialists=available,
         active_specialists=active,
+        mode=mode,
     )
 
     # Specialist dispatch

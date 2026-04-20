@@ -40,11 +40,17 @@ class TeamConstructor:
         pillar: str,
         available_specialists: list[str],
         active_specialists: list[dict],
+        mode: str = "chat",
     ) -> list[str]:
         self.logger.log(
             "team_construction_start",
-            {"question": question, "pillar": pillar, "available": available_specialists},
+            {"question": question, "pillar": pillar, "mode": mode, "available": available_specialists},
         )
+
+        # Report mode → all specialists (a full report needs every domain)
+        if mode == "report":
+            self.logger.log("team_construction_done", {"selected": available_specialists, "reason": "report mode — all specialists"})
+            return available_specialists
 
         # Build specialist descriptions with data coverage
         spec_descriptions = self._build_specialist_descriptions(available_specialists)
