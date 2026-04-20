@@ -1,5 +1,0 @@
-fico_score,sbfe_score,ln_credit_score,ln_blended_score,css_score,fss_score,paydex_score,delinquent_external_trades,external_delinquency_amount,total_tradelines,overall_external_exposure,overall_external_revolving_balance,avg_external_utilization,amex_primary_lender_indicator,ln_business_value,judgements_org_count,lien_org_count,score_date,trade_type,balance,credit_limit,utilization,dpd_status,delinquency_amount,is_revolving,open_date,last_reported_date
-768,855,737,703,68,54,75,1,1673.8998,22,31635.0624,0.0,0.5525,1,216670.7795,0,0,2024-11-24,installment,15094.5491,18271.5516,0.4405,current,1543.1254,1,2017-02-02,2023-11-24
-793,891,754,703,71,55,94,0,0.0,5,31893.0762,0.0,0.3232,0,621639.1088,0,0,2024-10-18,other,9315.3038,3043.389,0.2605,current,329.6504,0,2022-02-12,2024-09-02
-785,863,742,663,77,60,51,1,4286.6091,11,17162.2955,0.0,0.2748,0,1335737.3884,0,0,2024-02-27,installment,19901.9963,53192.1533,0.6802,current,6311.6935,1,2024-11-22,2023-12-10
-721,872,696,699,58,46,77,0,5430.0515,0,48619.5913,3225.3641,0.3009,0,1791327.621,0,0,2024-07-22,installment,11451.6414,12877.8983,0.3027,current,774.5605,1,2023-01-07,2023-06-28

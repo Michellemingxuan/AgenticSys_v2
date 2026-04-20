@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic Case Review — System at a Glance</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+:root {
+  --navy: #00175A; --blue: #006FCF; --white: #FFFFFF;
+  --gray-light: #F4F6F9; --gray-text: #4A5568; --gray-border: #E2E8F0;
+  --gray-bg: #FAFBFC;
+  --green: #166534; --green-bg: #DCFCE7; --green-border: #86EFAC;
+  --amber: #92400E; --amber-bg: #FEF3C7; --amber-border: #FCD34D;
+  --purple: #4C1D95; --purple-bg: #EDE9FE; --purple-border: #A78BFA;
+  --slate: #334155;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #fff; color: var(--navy); line-height: 1.5; }
+
+/* ── HERO ── */
+.hero { background: var(--navy); color: white; padding: 24px 60px 20px; position: relative; }
+.blue-stripe { position: absolute; top: 0; left: 0; right: 0; height: 4px; background: var(--blue); }
+.hero-row { display: flex; align-items: center; gap: 22px; }
+.amex-logo { background: var(--blue); padding: 6px 12px; display: inline-flex; flex-direction: column; line-height: 1.1; flex-shrink: 0; }
+.logo-american, .logo-express { color: white; font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+.hero h1 { font-family: Georgia, serif; font-size: 24px; font-weight: 700; letter-spacing: -0.01em; }
+.hero-sub { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 255, 255, 0.55); font-weight: 600; margin-top: 3px; }
+
+/* ── PAGE ── */
+.page { max-width: 1280px; margin: 0 auto; padding: 24px 60px 48px; }
+
+/* ── Q1 EXAMPLE BANNER ── */
+.example {
+  background: linear-gradient(to right, #F8FAFC, #fff);
+  border: 1px solid var(--gray-border); border-left: 4px solid var(--blue); border-radius: 3px;
+  padding: 14px 18px; margin-bottom: 26px;
+  display: flex; gap: 16px; align-items: center;
+}
+.example-icon { flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%; background: #DBEAFE; display: flex; align-items: center; justify-content: center; color: var(--blue); }
+.example-body { flex: 1; min-width: 0; }
+.example-label { font-size: 9px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--blue); }
+.example-q { font-family: Georgia, serif; font-size: 17px; font-weight: 700; color: var(--navy); margin-top: 2px; line-height: 1.35; }
+.example-meta { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.meta-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+  padding: 3px 8px; border-radius: 2px; font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+.meta-pill-key { color: var(--gray-text); }
+.meta-pill-val { color: var(--navy); }
+.meta-pill.mode { background: #DBEAFE; color: var(--blue); border: 1px solid #93C5FD; }
+
+/* ── SECTION HEADS ── */
+.section { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; padding-top: 4px; }
+.section-label { font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gray-text); white-space: nowrap; }
+.section-line { flex: 1; height: 1px; background: var(--gray-border); }
+.section-note { font-size: 11px; color: var(--gray-text); font-style: italic; }
+
+.mono { font-family: 'SF Mono', 'Monaco', 'Consolas', monospace; font-size: 11px; color: var(--navy); background: #EEF2F7; padding: 1px 5px; border-radius: 2px; }
+.mono-strong { font-family: 'SF Mono', 'Monaco', 'Consolas', monospace; color: var(--blue); font-weight: 700; }
+
+/* ── PIPELINE (flow + Q1 side-by-side) ── */
+.pipeline {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 0 14px;
+  margin-bottom: 24px;
+  max-width: 980px;
+}
+.pipe-row {
+  display: contents;
+}
+.pipe-node {
+  background: var(--white); border: 1px solid var(--gray-border); border-left: 3px solid var(--blue); border-radius: 3px;
+  padding: 10px 14px; display: flex; align-items: center; gap: 10px;
+  position: relative;
+}
+.pipe-node.spec    { border-left-color: var(--green); }
+.pipe-node.review  { border-left-color: var(--purple); }
+.pipe-node.synth   { border-left-color: var(--amber); }
+.pipe-node.endpt   { border-left-color: var(--gray-border); background: var(--gray-light); justify-content: center; padding: 8px 14px; }
+
+/* vertical connector between rows */
+.pipe-row .pipe-node:not(.endpt-last)::after,
+.pipe-row .pipe-node.endpt:not(.endpt-last)::after {
+  content: '';
+  position: absolute;
+  left: 22px;
+  bottom: -6px;
+  width: 2px;
+  height: 6px;
+  background: var(--gray-border);
+  z-index: 0;
+}
+.pipe-row + .pipe-row .pipe-node { margin-top: 6px; }
+.pipe-row + .pipe-row .pipe-q1 { margin-top: 6px; }
+
+.pipe-icon {
+  width: 28px; height: 28px; flex-shrink: 0; border-radius: 3px;
+  display: flex; align-items: center; justify-content: center;
+  background: #DBEAFE; color: var(--blue);
+  z-index: 1;
+}
+.pipe-node.spec .pipe-icon   { background: var(--green-bg); color: var(--green); }
+.pipe-node.review .pipe-icon { background: var(--purple-bg); color: var(--purple); }
+.pipe-node.synth .pipe-icon  { background: var(--amber-bg); color: var(--amber); }
+.pipe-node.endpt .pipe-icon  { background: transparent; color: var(--slate); width: 22px; height: 22px; }
+
+.pipe-text { flex: 1; min-width: 0; }
+.pipe-title { font-size: 13px; font-weight: 700; color: var(--navy); line-height: 1.2; }
+.pipe-role  { font-size: 8.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gray-text); margin-top: 2px; }
+.pipe-endpt-text { font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--slate); }
+
+.pipe-q1 {
+  font-size: 12px; color: var(--slate); line-height: 1.5;
+  padding: 10px 14px; background: var(--gray-bg);
+  border: 1px dashed var(--gray-border); border-radius: 3px;
+  display: flex; flex-direction: column; gap: 6px;
+  justify-content: center;
+}
+.pipe-q1-tag { font-size: 8px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--blue); }
+.pipe-q1 ul { margin: 0; padding-left: 14px; }
+.pipe-q1 ul li { margin-bottom: 2px; }
+.pipe-q1 ul li:last-child { margin-bottom: 0; }
+.pipe-q1.dim { opacity: 0.7; font-style: italic; }
+
+/* ── SPECIALIST ZOOM ── */
+.zoom {
+  background: var(--white); border: 1px solid var(--gray-border); border-radius: 3px;
+  padding: 16px 20px 14px; margin-bottom: 28px;
+}
+.zoom .mermaid { display: flex; justify-content: center; min-width: 700px; overflow-x: auto; }
+
+/* ── INFRA ── */
+.infra { margin-bottom: 22px; }
+.infra-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.infra-group { background: var(--gray-light); border: 1px solid var(--gray-border); border-radius: 3px; padding: 14px 16px; }
+.infra-group-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.infra-group-title { font-size: 9.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gray-text); }
+.infra-items { display: flex; flex-direction: column; gap: 8px; }
+.infra-item { display: flex; align-items: center; gap: 10px; }
+.infra-icon { width: 28px; height: 28px; background: var(--white); border: 1px solid var(--gray-border); border-radius: 3px; display: flex; align-items: center; justify-content: center; color: var(--slate); flex-shrink: 0; }
+.infra-text { flex: 1; font-size: 11.5px; color: var(--slate); line-height: 1.45; }
+.infra-name { font-weight: 700; color: var(--navy); font-family: 'SF Mono', 'Monaco', 'Consolas', monospace; font-size: 11.5px; }
+.infra-name.link { color: var(--blue); text-decoration: none; border-bottom: 1px dashed var(--blue); }
+.infra-name.link:hover { color: var(--navy); border-bottom-color: var(--navy); }
+
+/* ── PILLAR ── */
+.pillar {
+  background: var(--white); border: 1px solid var(--gray-border); border-left: 3px solid var(--amber); border-radius: 3px;
+  padding: 12px 16px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+}
+.pillar-icon { width: 30px; height: 30px; background: var(--amber-bg); border-radius: 3px; display: flex; align-items: center; justify-content: center; color: var(--amber); flex-shrink: 0; }
+.pillar-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em; color: var(--gray-text); }
+.pillar-pills { display: inline-flex; gap: 5px; flex-wrap: wrap; }
+.pillar-pill {
+  font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 2px;
+  background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+.pillar-pill.active { background: var(--amber); color: var(--white); }
+.pillar-desc { font-size: 11.5px; color: var(--gray-text); line-height: 1.5; flex: 1; min-width: 220px; }
+
+@media (max-width: 980px) {
+  .pipeline { grid-template-columns: 1fr; gap: 10px; }
+  .pipe-row + .pipe-row .pipe-q1 { margin-top: 4px; }
+  .infra-grid { grid-template-columns: 1fr; }
+  .page, .hero { padding-left: 24px; padding-right: 24px; }
+}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="blue-stripe"></div>
+  <div class="hero-row">
+    <div class="amex-logo">
+      <span class="logo-american">American</span>
+      <span class="logo-express">Express</span>
+    </div>
+    <div>
+      <h1>System at a Glance</h1>
+      <div class="hero-sub">Agentic Case Review · Walk-through with Q1</div>
+    </div>
+  </div>
+</div>
+
+<div class="page">
+
+  <!-- Q1 EXAMPLE BANNER -->
+  <div class="example">
+    <div class="example-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    </div>
+    <div class="example-body">
+      <div class="example-label">Walk-through example · Q1</div>
+      <div class="example-q">“How frequent were positive events (e.g. limit increases) in the last 18 months?”</div>
+      <div class="example-meta">
+        <span class="meta-pill"><span class="meta-pill-key">Case</span><span class="meta-pill-val">CASE-00001</span></span>
+        <span class="meta-pill"><span class="meta-pill-key">Pillar</span><span class="meta-pill-val">credit_risk</span></span>
+        <span class="meta-pill mode">Mode · chat</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- PIPELINE: flow on the left, Q1 details on the right -->
+  <div class="section">
+    <span class="section-label">Pipeline</span>
+    <span class="section-line"></span>
+    <span class="section-note">Flow on the left · what happens for Q1 on the right</span>
+  </div>
+
+  <div class="pipeline">
+
+    <!-- Row: Reviewer (entry) -->
+    <div class="pipe-row">
+      <div class="pipe-node endpt">
+        <div class="pipe-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        </div>
+        <div class="pipe-endpt-text">Reviewer · asks</div>
+      </div>
+      <div class="pipe-q1">
+        <span class="pipe-q1-tag">Q1</span>
+        “…positive events in the last 18 months?”
+      </div>
+    </div>
+
+    <!-- Row: Chat Agent entry -->
+    <div class="pipe-row">
+      <div class="pipe-node">
+        <div class="pipe-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <div class="pipe-text">
+          <div class="pipe-title">Chat Agent</div>
+          <div class="pipe-role">Entry</div>
+        </div>
+      </div>
+      <div class="pipe-q1">
+        Receives the question; passes it untouched into the pipeline.
+      </div>
+    </div>
+
+    <!-- Row: Team Constructor -->
+    <div class="pipe-row">
+      <div class="pipe-node">
+        <div class="pipe-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+        </div>
+        <div class="pipe-text">
+          <div class="pipe-title">Team Constructor</div>
+          <div class="pipe-role">Planner</div>
+        </div>
+      </div>
+      <div class="pipe-q1">
+        <ul>
+          <li>Loads the <span class="mono">credit_risk</span> pillar (focus, cut-off <span class="mono">2025-12-01</span>).</li>
+          <li>Reads each specialist's tables + columns from the Data Catalog.</li>
+          <li>Matches <span class="mono">positive_events</span> in <span class="mono">model_scores</span> → <span class="mono-strong">picks modeling</span>.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Row: Specialist -->
+    <div class="pipe-row">
+      <div class="pipe-node spec">
+        <div class="pipe-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>
+        </div>
+        <div class="pipe-text">
+          <div class="pipe-title">Specialist · modeling</div>
+          <div class="pipe-role">Skill + Tools · 3-step chain</div>
+        </div>
+      </div>
+      <div class="pipe-q1">
+        <ul>
+          <li>Injected context: <span class="mono">modeling</span> skill prompt + <span class="mono">credit_risk</span> overlay.</li>
+          <li><strong>Data</strong> · <span class="mono">query_table('model_scores', columns='trans_month,positive_events')</span></li>
+          <li><strong>Synthesize</strong> · counts months with events in last 18.</li>
+          <li><strong>Answer</strong> · chat-style findings, evidence, data gaps.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Row: General Specialist -->
+    <div class="pipe-row">
+      <div class="pipe-node review">
+        <div class="pipe-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M5 8h14"/><path d="M2 8l3 8 3-8"/><path d="M16 8l3 8 3-8"/></svg>
+        </div>
+        <div class="pipe-text">
+          <div class="pipe-title">General Specialist</div>
+          <div class="pipe-role">Cross-review</div>
+        </div>
+      </div>
+      <div class="pipe-q1 dim">
+        Only one specialist ran → nothing to compare. Skipped.
+      </div>
+    </div>
+
+    <!-- Row: Orchestrator -->
+    <div class="pipe-row">
+      <div class="pipe-node synth">
+        <div class="pipe-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+        </div>
+        <div class="pipe-text">
+          <div class="pipe-title">Orchestrator</div>
+          <div class="pipe-role">Synthesis</div>
+        </div>
+      </div>
+      <div class="pipe-q1">
+        Wraps modeling's findings into a <span class="mono">FinalOutput</span> — answer, data-gap summary, specialists consulted. Evaluates absence-as-signal.
+      </div>
+    </div>
+
+    <!-- Row: Chat Agent format -->
+    <div class="pipe-row">
+      <div class="pipe-node">
+        <div class="pipe-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <div class="pipe-text">
+          <div class="pipe-title">Chat Agent</div>
+          <div class="pipe-role">Format</div>
+        </div>
+      </div>
+      <div class="pipe-q1">
+        Renders the answer plus "Specialists consulted: modeling".
+      </div>
+    </div>
+
+    <!-- Row: Reviewer (out) -->
+    <div class="pipe-row">
+      <div class="pipe-node endpt endpt-last">
+        <div class="pipe-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        </div>
+        <div class="pipe-endpt-text">Reviewer · receives answer</div>
+      </div>
+      <div class="pipe-q1 dim">
+        Final output rendered in the notebook / CLI.
+      </div>
+    </div>
+
+  </div>
+
+  <!-- SPECIALIST ZOOM -->
+  <div class="section">
+    <span class="section-label">Zoom · inside a specialist</span>
+    <span class="section-line"></span>
+    <span class="section-note">Every specialist runs the same 3-step chain</span>
+  </div>
+
+  <div class="zoom">
+    <div class="mermaid">
+flowchart LR
+    Q["Question<br/><i>last 18 mo positive events?</i>"]:::q
+    S1["① Data<br/><i>tools: list · schema · query</i><br/>query_table('model_scores',<br/>columns='trans_month,positive_events')"]:::step
+    S2["② Synthesize<br/><i>LLM turns data → findings</i>"]:::step
+    S3["③ Answer<br/><i>chat format (or 'Report' in report mode)</i>"]:::step
+    OUT["Findings<br/>evidence · implications<br/>data_gaps"]:::out
+
+    Q --> S1 --> S2 --> S3 --> OUT
+
+    classDef q fill:#F4F6F9,stroke:#E2E8F0,color:#334155,stroke-width:1px;
+    classDef step fill:#DCFCE7,stroke:#166534,color:#00175A,stroke-width:1.5px;
+    classDef out fill:#FEF3C7,stroke:#92400E,color:#00175A,stroke-width:1.5px;
+    </div>
+  </div>
+
+  <!-- INFRA -->
+  <div class="section">
+    <span class="section-label">Supporting layer</span>
+    <span class="section-line"></span>
+    <span class="section-note">Wraps every call · underpins every data read</span>
+  </div>
+
+  <div class="infra">
+    <div class="infra-grid">
+      <div class="infra-group">
+        <div class="infra-group-head">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--gray-text)"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <span class="infra-group-title">Gateway · every LLM call</span>
+        </div>
+        <div class="infra-items">
+          <div class="infra-item">
+            <div class="infra-icon">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </div>
+            <div class="infra-text"><span class="infra-name">Firewall Stack</span> — retries on content blocks, masks long digit runs, blocks PII / role injection.</div>
+          </div>
+          <div class="infra-item">
+            <div class="infra-icon">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>
+            </div>
+            <div class="infra-text"><span class="infra-name">LLM Adapter</span> — pluggable backend: OpenAI (dev) or SafeChain (deployment).</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="infra-group">
+        <div class="infra-group-head">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--gray-text)"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
+          <span class="infra-group-title">Data · every specialist read</span>
+        </div>
+        <div class="infra-items">
+          <div class="infra-item">
+            <div class="infra-icon">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+            </div>
+            <div class="infra-text"><a href="data_catalog.html" class="infra-name link">Data Catalog →</a> YAML profiles: the source of truth for table schemas and column meanings.</div>
+          </div>
+          <div class="infra-item">
+            <div class="infra-icon">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
+            </div>
+            <div class="infra-text"><span class="infra-name">Data Gateway</span> — simulated data, scoped to the active case. Tools: <span class="mono">list</span> · <span class="mono">schema</span> · <span class="mono">query</span>.</div>
+          </div>
+          <div class="infra-item">
+            <div class="infra-icon">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M12 7v5l3 3"/></svg>
+            </div>
+            <div class="infra-text"><span class="infra-name">Session Registry</span> — keeps specialists warm across questions with a rolling summary.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PILLAR -->
+  <div class="pillar">
+    <div class="pillar-icon">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/></svg>
+    </div>
+    <span class="pillar-label">Pillar overlay</span>
+    <div class="pillar-pills">
+      <span class="pillar-pill active">credit_risk</span>
+      <span class="pillar-pill">escalation</span>
+      <span class="pillar-pill">cbo</span>
+    </div>
+    <span class="pillar-desc">One pillar per session — sets the <strong>focus</strong>, <strong>cut-off date</strong> (defines "recent"), and per-specialist <strong>report format rules</strong>. Q1 uses <span class="mono">credit_risk</span>, cut-off <span class="mono">2025-12-01</span>.</span>
+  </div>
+
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      fontFamily: 'Helvetica Neue, Helvetica, Arial, sans-serif',
+      fontSize: '12.5px',
+      primaryColor: '#DBEAFE',
+      primaryBorderColor: '#006FCF',
+      primaryTextColor: '#00175A',
+      lineColor: '#4A5568',
+      edgeLabelBackground: '#ffffff',
+    },
+    flowchart: { curve: 'basis', nodeSpacing: 35, rankSpacing: 50, padding: 10 }
+  });
+</script>
+</body>
+</html>

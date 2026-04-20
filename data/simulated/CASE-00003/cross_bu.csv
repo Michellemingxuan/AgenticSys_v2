@@ -1,4 +1,0 @@
-card_name,card_type,card_portfolio,card_limit,balance,card_tenure,account_status,past_delinquencies_12m,merchant_name,merchant_industry,merchant_charge_volume
-Business Checking,charge,Small Business,79848.2393,5972.0695,73,current,0,,Healthcare,30210.9809
-Kabbage Business Line,loc,Corporate,43673.582,22552.002,64,current,1,,,0.0
-Corporate Card,charge,Consumer Core,55367.4069,0.0,66,current,0,Pinnacle IT Solutions,Healthcare,62262.9205

@@ -1017,92 +1017,152 @@ table.df-cat-table tbody tr:last-child td { border-bottom:none; }
             <div class="df-catalog-sub">Single source of truth for all available data. Schema descriptions are the key for table discovery — the Text-to-SQL skill reads these to resolve which tables and columns match a specialist's semantic request.</div>
             <div class="df-cat-list">
               <div class="df-cat-entry">
-                <div class="df-cat-row"><span class="df-cat-tbl">bureau_full</span><span class="df-cat-desc">Full bureau credit file — one row per case, aggregated bureau snapshot</span></div>
-                <div class="df-cat-schemas"><span class="df-cat-sl">score</span> <span class="df-cat-sd">Credit score (int)</span> · <span class="df-cat-sl">derog_count</span> <span class="df-cat-sd">Number of derogatory marks</span> · <span class="df-cat-sl">tradeline_ct</span> <span class="df-cat-sd">Active tradelines</span> · <span class="df-cat-sl">inquiry_ct</span> <span class="df-cat-sd">Recent hard inquiries</span></div>
+                <div class="df-cat-row"><span class="df-cat-tbl">bureau</span><span class="df-cat-desc">Credit bureau data — one row per external tradeline per case; case-level scores repeat across rows</span></div>
+                <div class="df-cat-schemas"><span class="df-cat-sl">fico_score</span> <span class="df-cat-sd">FICO (300–850)</span> · <span class="df-cat-sl">sbfe_score</span> <span class="df-cat-sd">Business credit score</span> · <span class="df-cat-sl">balance</span> <span class="df-cat-sd">Tradeline balance ($)</span> · <span class="df-cat-sl">dpd_status</span> <span class="df-cat-sd">current / 30 / 60 / 90+ / defaulted</span></div>
               </div>
               <div class="df-cat-entry">
-                <div class="df-cat-row"><span class="df-cat-tbl">bureau_trades</span><span class="df-cat-desc">Individual tradeline detail — one row per tradeline per case</span></div>
-                <div class="df-cat-schemas"><span class="df-cat-sl">trade_type</span> <span class="df-cat-sd">Revolving / installment / mortgage</span> · <span class="df-cat-sl">balance</span> <span class="df-cat-sd">Current balance ($)</span> · <span class="df-cat-sl">limit</span> <span class="df-cat-sd">Credit limit ($)</span> · <span class="df-cat-sl">dpd_status</span> <span class="df-cat-sd">Days past due bucket</span></div>
+                <div class="df-cat-row"><span class="df-cat-tbl">cross_bu</span><span class="df-cat-desc">Cross-business-unit view — one row per card per case; cards held + Amex merchant relationship</span></div>
+                <div class="df-cat-schemas"><span class="df-cat-sl">card_type</span> <span class="df-cat-sd">Charge / Lending / LOC</span> · <span class="df-cat-sl">card_limit</span> <span class="df-cat-sd">Credit limit ($)</span> · <span class="df-cat-sl">balance</span> <span class="df-cat-sd">Outstanding exposure ($)</span> · <span class="df-cat-sl">merchant_charge_volume</span> <span class="df-cat-sd">Merchant volume ($)</span></div>
               </div>
               <div class="df-cat-entry">
-                <div class="df-cat-row"><span class="df-cat-tbl">txn_monthly</span><span class="df-cat-desc">Monthly transaction aggregates — one row per month per case</span></div>
-                <div class="df-cat-schemas"><span class="df-cat-sl">month</span> <span class="df-cat-sd">Calendar month</span> · <span class="df-cat-sl">spend_total</span> <span class="df-cat-sd">Total spend ($)</span> · <span class="df-cat-sl">txn_count</span> <span class="df-cat-sd">Transaction count</span> · <span class="df-cat-sl">category</span> <span class="df-cat-sd">Spend category</span></div>
+                <div class="df-cat-row"><span class="df-cat-tbl">txn_monthly</span><span class="df-cat-desc">Monthly transaction aggregates — multiple rows per case</span></div>
+                <div class="df-cat-schemas"><span class="df-cat-sl">month</span> <span class="df-cat-sd">Calendar month</span> · <span class="df-cat-sl">spend_total</span> <span class="df-cat-sd">Total spend ($)</span> · <span class="df-cat-sl">txn_count</span> <span class="df-cat-sd">Transaction count</span> · <span class="df-cat-sl">category</span> <span class="df-cat-sd">Merchant category</span></div>
               </div>
               <div class="df-cat-entry">
-                <div class="df-cat-row"><span class="df-cat-tbl">pmts_detail</span><span class="df-cat-desc">Payment history — one row per billing cycle per case</span></div>
-                <div class="df-cat-schemas"><span class="df-cat-sl">due_date</span> <span class="df-cat-sd">Payment due date</span> · <span class="df-cat-sl">paid_date</span> <span class="df-cat-sd">Actual payment date</span> · <span class="df-cat-sl">amount</span> <span class="df-cat-sd">Payment amount ($)</span> · <span class="df-cat-sl">status</span> <span class="df-cat-sd">on_time / late / missed</span></div>
+                <div class="df-cat-row"><span class="df-cat-tbl">spends</span><span class="df-cat-desc">Transaction-level spend — multiple rows per case, one row per transaction</span></div>
+                <div class="df-cat-schemas"><span class="df-cat-sl">spend_date</span> <span class="df-cat-sd">Transaction date</span> · <span class="df-cat-sl">amount</span> <span class="df-cat-sd">Spend amount ($)</span> · <span class="df-cat-sl">merchant_industry</span> <span class="df-cat-sd">SIC4 industry</span> · <span class="df-cat-sl">merchant_risk_score</span> <span class="df-cat-sd">Risk score (0–1)</span></div>
               </div>
               <div class="df-cat-entry">
-                <div class="df-cat-row"><span class="df-cat-tbl">model_scores</span><span class="df-cat-desc">Internal model outputs — one row per model per scoring run</span></div>
-                <div class="df-cat-schemas"><span class="df-cat-sl">model_id</span> <span class="df-cat-sd">Model identifier</span> · <span class="df-cat-sl">score</span> <span class="df-cat-sd">Raw score value</span> · <span class="df-cat-sl">percentile</span> <span class="df-cat-sd">Population percentile</span> · <span class="df-cat-sl">timestamp</span> <span class="df-cat-sd">Scoring date</span></div>
+                <div class="df-cat-row"><span class="df-cat-tbl">payments</span><span class="df-cat-desc">Payment records — one row per payment attempt, successful and returned</span></div>
+                <div class="df-cat-schemas"><span class="df-cat-sl">payment_date</span> <span class="df-cat-sd">Attempt date</span> · <span class="df-cat-sl">payment_amount</span> <span class="df-cat-sd">Amount ($)</span> · <span class="df-cat-sl">return_flag</span> <span class="df-cat-sd">success / returned</span> · <span class="df-cat-sl">return_reason</span> <span class="df-cat-sd">Reason if returned</span></div>
               </div>
               <div class="df-cat-entry">
-                <div class="df-cat-row"><span class="df-cat-tbl">wcc_flags</span><span class="df-cat-desc">Watch-list / credit control flags — event-level, one row per flag</span></div>
+                <div class="df-cat-row"><span class="df-cat-tbl">model_scores</span><span class="df-cat-desc">Internal model scoring features — one row per scoring run per case; 200+ input variables</span></div>
+                <div class="df-cat-schemas"><span class="df-cat-sl">trans_month</span> <span class="df-cat-sd">Scoring month</span> · <span class="df-cat-sl">credit_loss_prob</span> <span class="df-cat-sd">Default probability</span> · <span class="df-cat-sl">tot_struct_risk_score</span> <span class="df-cat-sd">Structural risk</span> · <span class="df-cat-sl">positive_events</span> <span class="df-cat-sd">Positive event count</span></div>
+              </div>
+              <div class="df-cat-entry">
+                <div class="df-cat-row"><span class="df-cat-tbl">score_drivers</span><span class="df-cat-desc">Top score drivers per model run — explains why a model scored the case risky/safe</span></div>
+                <div class="df-cat-schemas"><span class="df-cat-sl">model_id</span> <span class="df-cat-sd">Model identifier</span> · <span class="df-cat-sl">driver_rank</span> <span class="df-cat-sd">1 = most influential</span> · <span class="df-cat-sl">driver_variable</span> <span class="df-cat-sd">Feature name</span> · <span class="df-cat-sl">driver_contribution</span> <span class="df-cat-sd">SHAP-like contribution</span></div>
+              </div>
+              <div class="df-cat-entry">
+                <div class="df-cat-row"><span class="df-cat-tbl">wcc_flags</span><span class="df-cat-desc">Watch-list / credit concern flags — event-level, one row per flag</span></div>
                 <div class="df-cat-schemas"><span class="df-cat-sl">flag_type</span> <span class="df-cat-sd">Flag category</span> · <span class="df-cat-sl">trigger_date</span> <span class="df-cat-sd">Date flag raised</span> · <span class="df-cat-sl">severity</span> <span class="df-cat-sd">low / medium / high / critical</span></div>
               </div>
               <div class="df-cat-entry">
                 <div class="df-cat-row"><span class="df-cat-tbl">xbu_summary</span><span class="df-cat-desc">Cross-BU exposure — one row per product per case</span></div>
-                <div class="df-cat-schemas"><span class="df-cat-sl">product</span> <span class="df-cat-sd">Product name</span> · <span class="df-cat-sl">exposure</span> <span class="df-cat-sd">Total exposure ($)</span> · <span class="df-cat-sl">utilization</span> <span class="df-cat-sd">Limit utilization %</span></div>
+                <div class="df-cat-schemas"><span class="df-cat-sl">product</span> <span class="df-cat-sd">Product type</span> · <span class="df-cat-sl">exposure</span> <span class="df-cat-sd">Total exposure ($)</span> · <span class="df-cat-sl">utilization</span> <span class="df-cat-sd">balance / limit</span></div>
               </div>
               <div class="df-cat-entry">
                 <div class="df-cat-row"><span class="df-cat-tbl">cust_tenure</span><span class="df-cat-desc">Customer relationship — one row per case</span></div>
-                <div class="df-cat-schemas"><span class="df-cat-sl">tenure_months</span> <span class="df-cat-sd">Months as customer</span> · <span class="df-cat-sl">products_held</span> <span class="df-cat-sd">Active product count</span> · <span class="df-cat-sl">segment</span> <span class="df-cat-sd">Customer segment</span></div>
+                <div class="df-cat-schemas"><span class="df-cat-sl">tenure_months</span> <span class="df-cat-sd">Months as customer</span> · <span class="df-cat-sl">products_held</span> <span class="df-cat-sd">Active product count</span> · <span class="df-cat-sl">segment</span> <span class="df-cat-sd">Wealth segment</span></div>
               </div>
               <div class="df-cat-entry">
                 <div class="df-cat-row"><span class="df-cat-tbl">income_dti</span><span class="df-cat-desc">Income &amp; capacity — one row per case</span></div>
-                <div class="df-cat-schemas"><span class="df-cat-sl">income_est</span> <span class="df-cat-sd">Estimated income ($)</span> · <span class="df-cat-sl">total_debt</span> <span class="df-cat-sd">Total debt obligations ($)</span> · <span class="df-cat-sl">dti_ratio</span> <span class="df-cat-sd">Debt-to-income ratio</span></div>
+                <div class="df-cat-schemas"><span class="df-cat-sl">income_est</span> <span class="df-cat-sd">Estimated income ($)</span> · <span class="df-cat-sl">total_debt</span> <span class="df-cat-sd">Total debt ($)</span> · <span class="df-cat-sl">dti_ratio</span> <span class="df-cat-sd">Debt-to-income ratio</span></div>
               </div>
             </div>
-            <div class="df-catalog-note">+ additional tables as onboarded. Catalog grows independently of pillar YAML or specialist code.</div>
+            <div class="df-catalog-note">11 tables total · see <a href="data_catalog.html" style="color:var(--blue);text-decoration:none;border-bottom:1px dashed var(--blue)">full catalog →</a>. Catalog grows independently of pillar YAML or specialist code.</div>
           </div>
 
-          <!-- RIGHT: Flow steps -->
+          <!-- RIGHT: Flow steps — Q1 walk-through -->
           <div class="df-flow">
 
+            <!-- Phase banner -->
+            <div style="padding:8px 10px;background:#EEF5FF;border:1px solid #93C5FD;border-left:3px solid var(--blue);border-radius:2px;margin-bottom:10px">
+              <div style="font-size:8px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:var(--blue)">Example walk-through</div>
+              <div style="font-size:11px;color:var(--navy);font-weight:700;margin-top:2px">Q1 + follow-up · Case CASE-00001 · Pillar credit_risk · Mode chat</div>
+            </div>
+
+            <!-- Step 1: Q1 arrives -->
             <div class="df-step">
-              <div class="df-step-num" style="background:var(--purple)">1</div>
+              <div class="df-step-num" style="background:var(--navy)">1</div>
               <div class="df-step-body">
-                <div class="df-step-label">Specialist Emits Data Request</div>
-                <div class="df-step-desc">Specialist describes <strong>what data it needs</strong> semantically — analytical intent, potential variables (not exact column names), and desired operations. May or may not reference specific tables — the Text-to-SQL skill resolves the rest.</div>
+                <div class="df-step-label">Reviewer asks Q1</div>
+                <div class="df-step-desc">"How frequent were positive events (e.g. limit increases) in the last 18 months?"</div>
+              </div>
+            </div>
+
+            <div class="df-arrow">↓</div>
+
+            <!-- Step 2: Team Construction reads Catalog -->
+            <div class="df-step">
+              <div class="df-step-num" style="background:var(--blue)">2</div>
+              <div class="df-step-body">
+                <div class="df-step-label">Team Constructor — reads Data Catalog <span style="font-weight:400;color:var(--blue)">← left panel</span></div>
+                <div class="df-step-desc">For each specialist, pulls table + column names from the Catalog, then asks the LLM which specialist's data matches the question.</div>
                 <div class="df-example">
-                  <span class="tag tag-skill-alt" style="font-size:8px">Data Request</span>
-                  <code class="df-code">{ intent: "delinquency history last 18 months", variables: ["delinquency count", "credit score", "severity"], ops: "filter 18 months, group by severity" }</code>
+                  <span class="tag tag-yaml" style="font-size:8px">Catalog match</span>
+                  <code class="df-code">"positive events" → model_scores.positive_events, trans_month</code>
                 </div>
+                <div style="margin-top:4px;font-size:10px"><strong style="color:var(--green)">→ invokes: modeling</strong></div>
               </div>
             </div>
 
             <div class="df-arrow">↓</div>
 
-            <div class="df-step">
-              <div class="df-step-num" style="background:var(--red)">2</div>
-              <div class="df-step-body">
-                <div class="df-step-label">Repository Agent — Gates &amp; Redacts</div>
-                <div class="df-step-desc">Checks <strong>Pillar Access Control</strong> (silenced tables/schemas for this pillar), gates access by user role, redacts sensitive fields. Passes only clean requests downstream to Data Agents.</div>
-              </div>
-            </div>
-
-            <div class="df-arrow">↓</div>
-
+            <!-- Step 3: Modeling Specialist runs -->
             <div class="df-step">
               <div class="df-step-num" style="background:var(--green)">3</div>
               <div class="df-step-body">
-                <div class="df-step-label">Data Agent Executes</div>
-                <div class="df-step-desc"><strong>Text-to-SQL</strong> reads the Data Catalog's schema descriptions to resolve which tables and columns match the specialist's semantic variables (e.g. "delinquency count" → <code style="font-size:8px">bureau_full.derog_count</code>). If no match found, returns a <em>data unavailable</em> notice. Otherwise → <strong>Execute</strong> in sandbox → <strong>Retrieve</strong> structured results.</div>
-                <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">
-                  <span class="tag tag-skill" style="font-size:8px">Text-to-SQL</span>
-                  <span class="tag tag-skill" style="font-size:8px">Execute</span>
-                  <span class="tag tag-skill" style="font-size:8px">Retrieve</span>
+                <div class="df-step-label">Modeling Specialist runs — 3-step chain</div>
+                <div class="df-step-desc">Injected: modeling skill prompt + credit_risk pillar context. Requests data via tools, synthesizes, emits findings.</div>
+                <div class="df-example">
+                  <span class="tag tag-skill" style="font-size:8px">tool</span>
+                  <code class="df-code">query_table('model_scores', columns='trans_month,positive_events')</code>
                 </div>
+                <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">
+                  <span class="tag tag-skill" style="font-size:8px">Data</span>
+                  <span class="tag tag-skill" style="font-size:8px">Synthesize</span>
+                  <span class="tag tag-skill" style="font-size:8px">Answer</span>
+                </div>
+                <div style="margin-top:4px;font-size:10px;color:var(--gray-text);font-style:italic">Answer returned → reviewer; modeling stays warm in Session Registry.</div>
               </div>
             </div>
 
-            <div class="df-arrow">↑</div>
+            <!-- Follow-up divider -->
+            <div style="margin:14px 0 10px;display:flex;align-items:center;gap:10px">
+              <span style="font-size:9px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:var(--gray-text);white-space:nowrap">Follow-up turn →</span>
+              <span style="flex:1;height:1px;background:var(--gray-border)"></span>
+            </div>
 
-            <div class="df-step df-return">
-              <div class="df-step-num" style="background:var(--purple)">4</div>
+            <!-- Step 4: Follow-up arrives -->
+            <div class="df-step">
+              <div class="df-step-num" style="background:var(--navy)">4</div>
               <div class="df-step-body">
-                <div class="df-step-label">Results Returned To Specialist</div>
-                <div class="df-step-desc">Structured results (or <em>data unavailable</em> notices) flow back → specialist uses data in its output, and explicitly reports any missing tables/schemas: <strong>"certain information is not available at this time."</strong></div>
+                <div class="df-step-label">Reviewer asks follow-up</div>
+                <div class="df-step-desc">"Are the positive events consistent with the bureau scores?"</div>
+              </div>
+            </div>
+
+            <div class="df-arrow">↓</div>
+
+            <!-- Step 5: Team Construction again -->
+            <div class="df-step">
+              <div class="df-step-num" style="background:var(--blue)">5</div>
+              <div class="df-step-body">
+                <div class="df-step-label">Team Constructor — consults Catalog again <span style="font-weight:400;color:var(--blue)">← left panel</span></div>
+                <div class="df-step-desc">Warm specialists get preference. Catalog matches "bureau scores" → <code style="font-size:8px">bureau</code> table columns.</div>
+                <div class="df-example">
+                  <span class="tag tag-yaml" style="font-size:8px">Catalog match</span>
+                  <code class="df-code">"bureau scores" → bureau.{fico_score, sbfe_score, paydex_score, ...}</code>
+                </div>
+                <div style="margin-top:4px;font-size:10px"><strong style="color:var(--green)">→ additionally invokes: bureau</strong> · <strong style="color:var(--blue)">keeps warm: modeling</strong></div>
+              </div>
+            </div>
+
+            <div class="df-arrow">↓</div>
+
+            <!-- Step 6: Bureau specialist runs (+ modeling reuses) -->
+            <div class="df-step">
+              <div class="df-step-num" style="background:var(--green)">6</div>
+              <div class="df-step-body">
+                <div class="df-step-label">Bureau Specialist runs <span style="font-weight:400;color:var(--gray-text)">· modeling re-runs with its rolling summary</span></div>
+                <div class="df-step-desc">Bureau is cold → skill prompt + pillar injected fresh. Modeling carries prior Q1 context via its rolling summary. Both emit findings.</div>
+                <div class="df-example">
+                  <span class="tag tag-skill" style="font-size:8px">tool</span>
+                  <code class="df-code">query_table('bureau', columns='fico_score,sbfe_score,paydex_score')</code>
+                </div>
+                <div style="margin-top:4px;font-size:10px;color:var(--gray-text);font-style:italic">Next: General Specialist compares modeling ↔ bureau outputs → Orchestrator synthesizes.</div>
               </div>
             </div>
 

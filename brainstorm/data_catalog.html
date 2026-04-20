@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Data Catalog — Agentic Case Review</title>
+<style>
+:root {
+  --navy: #00175A; --blue: #006FCF; --white: #FFFFFF;
+  --gray-light: #F4F6F9; --gray-text: #4A5568; --gray-border: #E2E8F0;
+  --gray-bg: #FAFBFC;
+  --green: #166534; --green-bg: #DCFCE7; --green-border: #86EFAC;
+  --purple: #4C1D95; --purple-bg: #EDE9FE; --purple-border: #A78BFA;
+  --amber: #92400E; --amber-bg: #FEF3C7; --amber-border: #FCD34D;
+  --red: #991B1B; --red-bg: #FEE2E2; --red-border: #FCA5A5;
+  --slate: #334155;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #fff; color: var(--navy); }
+
+/* ── HERO ── */
+.hero { background: var(--navy); color: white; padding: 26px 60px 24px; position: relative; }
+.blue-stripe { position: absolute; top: 0; left: 0; right: 0; height: 4px; background: var(--blue); }
+.hero-row { display: flex; align-items: center; gap: 24px; }
+.amex-logo { background: var(--blue); padding: 6px 12px; display: inline-flex; flex-direction: column; line-height: 1.1; flex-shrink: 0; }
+.logo-american, .logo-express { color: white; font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+.hero h1 { font-family: Georgia, serif; font-size: 26px; font-weight: 700; letter-spacing: -0.01em; }
+.hero-sub { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 255, 255, 0.55); font-weight: 600; margin-top: 4px; }
+
+/* stats strip */
+.stats { display: flex; align-items: baseline; gap: 18px; margin-top: 20px; padding-top: 18px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.stat { display: flex; align-items: baseline; gap: 10px; }
+.stat-num { font-family: Georgia, serif; font-size: 30px; font-weight: 700; color: var(--white); letter-spacing: -0.02em; }
+.stat-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: rgba(255, 255, 255, 0.6); }
+.stat-dot { font-size: 22px; color: rgba(255, 255, 255, 0.3); font-weight: 400; }
+
+/* ── LAYOUT ── */
+.page { max-width: 1600px; margin: 0 auto; padding: 0; display: grid; grid-template-columns: 260px 1fr; gap: 32px; padding: 24px 60px 60px; }
+
+/* ── SIDEBAR ── */
+.sidebar { position: sticky; top: 24px; align-self: start; max-height: calc(100vh - 48px); display: flex; flex-direction: column; gap: 12px; }
+.search-wrap { position: relative; }
+.search-wrap input {
+  width: 100%; padding: 10px 12px 10px 34px; font-size: 13px; font-family: inherit;
+  border: 1px solid var(--gray-border); border-radius: 2px; background: var(--white); color: var(--navy);
+  outline: none; transition: border-color 0.15s;
+}
+.search-wrap input:focus { border-color: var(--blue); }
+.search-wrap::before {
+  content: ""; position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  width: 14px; height: 14px; border: 1.5px solid var(--gray-text); border-radius: 50%;
+  box-shadow: 7px 7px 0 -6px var(--gray-text);
+}
+.side-controls { display: flex; gap: 4px; }
+.side-controls button {
+  flex: 1; padding: 7px 10px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
+  background: var(--white); color: var(--gray-text); border: 1px solid var(--gray-border); border-radius: 2px;
+  cursor: pointer; font-family: inherit; transition: all 0.15s;
+}
+.side-controls button:hover { background: var(--gray-light); color: var(--navy); }
+
+.table-nav { display: flex; flex-direction: column; overflow-y: auto; border: 1px solid var(--gray-border); border-radius: 2px; background: var(--white); }
+.nav-header { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em; color: var(--gray-text); padding: 10px 12px 8px; border-bottom: 1px solid var(--gray-border); background: var(--gray-light); }
+.nav-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 9px 12px; font-size: 12px; color: var(--slate); cursor: pointer;
+  border-left: 2px solid transparent; border-bottom: 1px solid var(--gray-border);
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  text-decoration: none; font-family: inherit;
+}
+.nav-item:last-child { border-bottom: none; }
+.nav-item:hover { background: var(--gray-light); color: var(--navy); }
+.nav-item.active { background: var(--gray-light); border-left-color: var(--blue); color: var(--navy); font-weight: 700; }
+.nav-item-name { font-family: 'SF Mono', 'Monaco', 'Consolas', monospace; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav-item-count { font-size: 10px; color: var(--gray-text); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.nav-item.hidden { display: none; }
+
+/* ── MAIN ── */
+.cards { display: flex; flex-direction: column; gap: 14px; }
+.no-match { padding: 40px; text-align: center; color: var(--gray-text); background: var(--gray-light); border: 1px solid var(--gray-border); border-radius: 2px; font-size: 13px; display: none; }
+.no-match.show { display: block; }
+
+/* ── TABLE CARD ── */
+.card { background: var(--white); border: 1px solid var(--gray-border); border-left: 3px solid var(--blue); border-radius: 2px; overflow: hidden; transition: box-shadow 0.15s; }
+.card:hover { box-shadow: 0 2px 10px rgba(0, 23, 90, 0.06); }
+.card.hidden { display: none; }
+
+.card-head { display: flex; align-items: flex-start; gap: 14px; padding: 16px 18px; cursor: pointer; user-select: none; }
+.card-head:hover .chevron { color: var(--blue); }
+.card-title-wrap { flex: 1; min-width: 0; }
+.card-title-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.card-title { font-family: 'SF Mono', 'Monaco', 'Consolas', monospace; font-size: 18px; font-weight: 700; color: var(--navy); }
+.col-count-pill {
+  display: inline-flex; align-items: center; font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 3px 8px; background: var(--gray-light); color: var(--gray-text); border: 1px solid var(--gray-border); border-radius: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.card-desc { font-size: 13px; line-height: 1.5; color: var(--gray-text); }
+.chevron { font-size: 20px; color: var(--gray-text); line-height: 1; transition: transform 0.2s, color 0.15s; flex-shrink: 0; padding-top: 2px; user-select: none; }
+.card.expanded .chevron { transform: rotate(90deg); color: var(--blue); }
+
+.card-body { border-top: 1px solid var(--gray-border); background: var(--gray-bg); display: none; }
+.card.expanded .card-body { display: block; }
+
+/* column table */
+.col-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.col-table thead th {
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--gray-text); padding: 10px 18px; text-align: left;
+  border-bottom: 1px solid var(--gray-border); background: var(--gray-light);
+}
+.col-table tbody tr { border-bottom: 1px solid var(--gray-border); }
+.col-table tbody tr:last-child { border-bottom: none; }
+.col-table tbody tr:hover { background: var(--white); }
+.col-table tbody tr.hidden { display: none; }
+.col-table td { padding: 9px 18px; vertical-align: top; line-height: 1.45; }
+.col-name { font-family: 'SF Mono', 'Monaco', 'Consolas', monospace; font-size: 12.5px; color: var(--navy); font-weight: 600; white-space: nowrap; }
+.col-desc { color: var(--gray-text); }
+
+.col-type {
+  display: inline-flex; align-items: center; font-size: 9px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 3px 7px; border-radius: 2px; white-space: nowrap; border: 1px solid;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+.col-type.t-int      { background: #DBEAFE; color: var(--blue); border-color: #93C5FD; }
+.col-type.t-float    { background: var(--purple-bg); color: var(--purple); border-color: var(--purple-border); }
+.col-type.t-string   { background: var(--gray-light); color: var(--slate); border-color: var(--gray-border); }
+.col-type.t-date     { background: var(--amber-bg); color: var(--amber); border-color: var(--amber-border); }
+.col-type.t-categorical { background: var(--green-bg); color: var(--green); border-color: var(--green-border); }
+
+/* column widths */
+.col-table colgroup .w-name { width: 260px; }
+.col-table colgroup .w-type { width: 120px; }
+
+/* search highlight */
+mark { background: #FFF3BF; color: inherit; padding: 0 1px; border-radius: 1px; }
+
+@media (max-width: 980px) {
+  .page { grid-template-columns: 1fr; padding: 20px 24px 40px; }
+  .sidebar { position: static; max-height: none; }
+  .hero { padding: 22px 24px 20px; }
+  .col-table colgroup .w-name { width: 200px; }
+  .col-table colgroup .w-type { width: 100px; }
+}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="blue-stripe"></div>
+  <div class="hero-row">
+    <div class="amex-logo">
+      <span class="logo-american">American</span>
+      <span class="logo-express">Express</span>
+    </div>
+    <div>
+      <h1>Data Catalog</h1>
+      <div class="hero-sub">Agentic Case Review · Simulated Data Profiles</div>
+    </div>
+  </div>
+  <div class="stats">
+    <div class="stat"><span class="stat-num" id="stat-tables">0</span><span class="stat-label">Tables</span></div>
+    <span class="stat-dot">·</span>
+    <div class="stat"><span class="stat-num" id="stat-columns">0</span><span class="stat-label">Columns</span></div>
+    <span class="stat-dot">·</span>
+    <div class="stat"><span class="stat-num" id="stat-corr">0</span><span class="stat-label">Correlations</span></div>
+  </div>
+</div>
+
+<div class="page">
+  <aside class="sidebar">
+    <div class="search-wrap">
+      <input type="text" id="search" placeholder="Search tables and columns…" autocomplete="off">
+    </div>
+    <div class="side-controls">
+      <button id="expand-all">Expand all</button>
+      <button id="collapse-all">Collapse all</button>
+    </div>
+    <nav class="table-nav" id="table-nav">
+      <div class="nav-header">Tables</div>
+    </nav>
+  </aside>
+
+  <main class="cards" id="cards">
+    <div class="no-match" id="no-match">No tables or columns match your search.</div>
+  </main>
+</div>
+
+<script>
+const CATALOG = [{"table": "bureau", "description": "Credit bureau data — one row per external tradeline per case. Each row carries the case-level aggregated scores (FICO, SBFE, LN, CSS, FSS, Paydex) plus the tradeline-specific details (balance, limit, utilization, DPD status). Case-level fields repeat across rows for the same case.", "columns": [{"name": "case_id", "type": "string", "description": "Foreign key to case"}, {"name": "fico_score", "type": "int", "description": "FICO Score — industry-standard credit risk score. Values below 721 are risky."}, {"name": "sbfe_score", "type": "int", "description": "SBFE Score — business credit score predicting financial delinquency or failure. Values below 863 are risky."}, {"name": "ln_credit_score", "type": "int", "description": "LexisNexis Credit Score — predicts consumer likelihood of default. Values below 681 are risky."}, {"name": "ln_blended_score", "type": "int", "description": "LexisNexis Blended Score — combines traditional credit data with alternative data. Values below 694 are risky."}, {"name": "css_score", "type": "int", "description": "CSS Score — business credit risk score using commercial trade data and financials. Values below 71 are risky."}, {"name": "fss_score", "type": "int", "description": "FSS Score — business financial strength/stability score. Values below 51 are risky."}, {"name": "paydex_score", "type": "int", "description": "Paydex Score — business payment performance score. Values below 61 are risky."}, {"name": "delinquent_external_trades", "type": "int", "description": "Total count of external credit lines on which the customer defaulted."}, {"name": "external_delinquency_amount", "type": "float", "description": "Total default amount on external credit lines (USD)."}, {"name": "total_tradelines", "type": "int", "description": "Overall count of external credit lines linked to the customer."}, {"name": "overall_external_exposure", "type": "float", "description": "Total outstanding balance on all external credit lines (USD)."}, {"name": "overall_external_revolving_balance", "type": "float", "description": "Total revolving balance on all external credit lines (USD)."}, {"name": "avg_external_utilization", "type": "float", "description": "Average utilization across all external credit lines."}, {"name": "amex_primary_lender_indicator", "type": "int", "description": "1 = Amex is primary lender (>= 40% of overall exposure). Considered risky."}, {"name": "ln_business_value", "type": "float", "description": "LexisNexis Business Value — total tax-assessed value of business address (USD). Decrement is a negative sign."}, {"name": "judgements_org_count", "type": "int", "description": "Number of court judgments filed against the organization."}, {"name": "lien_org_count", "type": "int", "description": "Number of active liens filed against the organization's assets."}, {"name": "score_date", "type": "date", "description": "Date of last bureau score refresh"}, {"name": "trade_type", "type": "categorical", "description": "Type of external credit line"}, {"name": "balance", "type": "float", "description": "Current outstanding balance on this tradeline (USD)"}, {"name": "credit_limit", "type": "float", "description": "Credit limit or original loan amount (USD)"}, {"name": "utilization", "type": "float", "description": "Utilization rate for this tradeline (balance / credit_limit). Above 1.0 = overlimit."}, {"name": "dpd_status", "type": "categorical", "description": "Days-past-due status of the tradeline"}, {"name": "delinquency_amount", "type": "float", "description": "Delinquent amount on this tradeline (USD). 0 for current tradelines."}, {"name": "is_revolving", "type": "int", "description": "1 if this is a revolving credit line, 0 otherwise"}, {"name": "open_date", "type": "date", "description": "Date the tradeline was originally opened"}, {"name": "last_reported_date", "type": "date", "description": "Date the tradeline was last reported to the bureau"}], "correlations_count": 10}, {"table": "cross_bu", "description": "Cross-business-unit view — one row per card per case. Contains details about all cards held by the customer and their merchant relationship with Amex (if any), covering 12 months of history before default on business credit card.", "columns": [{"name": "case_id", "type": "string", "description": "Foreign key to case"}, {"name": "card_name", "type": "categorical", "description": "Name of the card used by the customer"}, {"name": "card_type", "type": "categorical", "description": "Type of card — Charge (pay-in-full), Lending (revolving credit), or LOC (line of credit)"}, {"name": "card_portfolio", "type": "categorical", "description": "Amex portfolio to which the card belongs"}, {"name": "card_limit", "type": "float", "description": "Credit card limit in USD. Charge cards may have no preset spending limit (NPSL) — represented as high values."}, {"name": "balance", "type": "float", "description": "Outstanding exposure on the card in USD"}, {"name": "card_tenure", "type": "int", "description": "Tenure of the card account in months"}, {"name": "account_status", "type": "categorical", "description": "Account status — 'Current' means up to date, 30/60/90/120 DPB means days past billing due"}, {"name": "past_delinquencies_12m", "type": "int", "description": "Count of past delinquencies (30 DPB) on the card in the last 12 months"}, {"name": "merchant_name", "type": "categorical", "description": "Name of the customer's business that has a merchant relationship with Amex (accepts Amex for payments). Empty if no merchant relationship."}, {"name": "merchant_industry", "type": "categorical", "description": "Industry of the customer's business that has a merchant relationship with Amex"}, {"name": "merchant_charge_volume", "type": "float", "description": "Estimated payments (USD) made at the customer's business that accepts Amex — a source of revenue for the customer's business. 0 if no merchant relationship."}], "correlations_count": 3}, {"table": "cust_tenure", "description": "Customer relationship, one row per case", "columns": [{"name": "case_id", "type": "string", "description": "Unique case identifier"}, {"name": "tenure_months", "type": "int", "description": "Length of customer relationship in months"}, {"name": "products_held", "type": "int", "description": "Number of distinct products the customer currently holds"}, {"name": "segment", "type": "categorical", "description": "Customer wealth segment"}], "correlations_count": 0}, {"table": "income_dti", "description": "Income & capacity, one row per case", "columns": [{"name": "case_id", "type": "string", "description": "Unique case identifier"}, {"name": "income_est", "type": "float", "description": "Estimated annual income used for credit decisioning (USD)"}, {"name": "total_debt", "type": "float", "description": "Total outstanding debt obligations across all lenders (USD)"}, {"name": "dti_ratio", "type": "float", "description": "Debt-to-income ratio (total monthly debt payments / gross monthly income)"}], "correlations_count": 2}, {"table": "model_scores", "description": "Internal model scoring features — one row per scoring run per case. Contains 264 model input variables covering bureau scores, delinquency indicators, exposure ratios, payment behavior, spend patterns, and third-party risk scores.", "columns": [{"name": "case_id", "type": "string", "description": "Foreign key to case"}, {"name": "trans_month", "type": "categorical", "description": "Transaction month label (e.g. October'2025). Range: 2024-2025. Indicates the month of the scoring run."}, {"name": "last_cycle_cut_revolve_rate", "type": "float", "description": "last cycle cut revolve rate. Values below 0.46 are risky"}, {"name": "times_30_dpd", "type": "int", "description": "No. of times 30 days past due. Values above 1 are risky."}, {"name": "cust_expsr_avg_rem_12m_ratio", "type": "float", "description": "Customer Exposure / (Average Remit In 2-12 Months). Values above 3.15 are risky."}, {"name": "cust_lndexpsr_minloc_6m_ratio", "type": "float", "description": "customer lending exposure minloc 6 months ratio"}, {"name": "max_agec_agel_dyldage", "type": "int", "description": "Customer daily Age"}, {"name": "cb_ten_to_amex_tenure", "type": "int", "description": "Credit bureau tenure to company tenure"}, {"name": "tpf_internal_delinq_idx", "type": "float", "description": "Internal Delinquency Index. Values above 5.8 are considered risky."}, {"name": "tpf_cust_mod_tenure", "type": "int", "description": "Customer Tenure"}, {"name": "ratio_30_90dys_trig_amt", "type": "float", "description": "ratio of 30-90 days trigger amount. Values above 0 are considered risky."}, {"name": "avutil_exrvlv_balgt50", "type": "float", "description": "Average utilization in all the external consumer revolving trades with balance more than US$ 50. Values above 75 are risky."}, {"name": "calx_ratio_daily_max_age", "type": "float", "description": "Ratio of Daily delinquency age by Max delinquency age in last 6 months"}, {"name": "hcam_src_trnd_indx", "type": "float", "description": "FICO Trend Index. Values below -19 are risky."}, {"name": "lvrg_debt_remit", "type": "float", "description": "leverage commercial debt"}, {"name": "sum_tot_rsky_evnt", "type": "int", "description": "total risky events"}, {"name": "delnqncy_ind_intrnl", "type": "float", "description": "internal delinquency indicator. Values above 0.5 are risky."}, {"name": "cust_debt_pymcpty_tm_inc", "type": "float", "description": "debt to payment capacity"}, {"name": "cbr_score", "type": "int", "description": "customer credit bureau score (FICO)"}, {"name": "credit_loss_prob", "type": "float", "description": "ML model score predicting likelihood of default in next 18 months. Scores from 10-100 are considered risky."}, {"name": "tot_struct_risk_score", "type": "float", "description": "ML model score predicting likelihood of default on internal/external trades in next 18 months. Scores from 20-100 are considered risky."}, {"name": "avg_remit_minus_max", "type": "int", "description": "average remit"}, {"name": "positive_events", "type": "int", "description": "positive events"}, {"name": "tpf_cust_hi_rvlv_line_am", "type": "int", "description": "The amount of a customer's highest revolving lines. Values below 77 are risky."}, {"name": "oop_interaction", "type": "float", "description": "Out of Pattern Spend index wrt to Exposure. Values above 28 are risky."}, {"name": "sum_o30dn_o60dn_o90dn", "type": "int", "description": "No of triggers greater than 30 days with amount > $500. Values on or above 1 are risky"}, {"name": "ons_30_trd", "type": "int", "description": "ons 30 trades"}, {"name": "tot_cons_comm_trds_g75", "type": "int", "description": "Total External Consumer and commercial trades utilized more than 75%. Values above 1 are risky."}, {"name": "hcam_bal_trnd_indx", "type": "float", "description": "hcam balance trend index. Values above 2.65 are risky."}, {"name": "product_risk_attribute", "type": "float", "description": "product risk attribute"}, {"name": "cust_ext_delinq_idx", "type": "float", "description": "External Delinquency Index. Values above 5 are risky."}, {"name": "tm_wt_q_score", "type": "float", "description": "Time Weighted United Q Score (only for low tenure)"}, {"name": "cust_eff_se_cdss_5_180_day_score", "type": "float", "description": "Merchant Risk Score. Values above 2 are risky."}, {"name": "cust_expr_to_arb_inc_ratio", "type": "float", "description": "Total exposure to arbitrated income ratio. Values above 0.08 are risky."}, {"name": "cust_lend_acct_paydown", "type": "float", "description": "customer level paydown on lending account. Values below 0.1 are risky."}, {"name": "cust_experian_trans_union_inq_idx", "type": "float", "description": "risk based index of inquiries from credit bureau. Values above 4.65 are considered risky."}, {"name": "cust_intr_extnl_unscr_tt_debt_srvc_rt1", "type": "float", "description": "Customer total debt servicing ratio. Values above 0.15 are considered risky."}, {"name": "cust_open_acct_paydown", "type": "float", "description": "customer level paydown on open account. Values below 0.3 are risky."}, {"name": "cust_old_rec_age", "type": "int", "description": "time since the oldest recorded event for the card member"}, {"name": "cust_atp_arb_incom_am", "type": "int", "description": "Arbitrated income"}, {"name": "exp_pif", "type": "float", "description": "pay in full exposure"}, {"name": "cust_cash_tot_liab_yr1_rt", "type": "float", "description": "ratio of cash to total liability corresponding to latest full year financial"}, {"name": "cust_pymt_chan_risk_score", "type": "float", "description": "Customer payment channel risk score. Values above 0.05 are considered risky."}, {"name": "cust_lexis_nexis_tot_tax_assess_val_am", "type": "int", "description": "total tax assessed value of the input business address from lexis nexis"}, {"name": "cust_enhnc_one_way_spend_concentration_30day_rt1", "type": "float", "description": "one way spend concentration risk rate. Values above 2.4 are considered risky."}, {"name": "time_wtd_return_index", "type": "float", "description": "Internal Payment Return Index. Values above 0.2 are considered risky."}, {"name": "cust_rnn_score", "type": "float", "description": "Timeseries Spend Variable. Values above 0.028 are considered risky."}, {"name": "cust_min_due_12mo_avg", "type": "float", "description": "average number of only minimum due paid in last 12 months. Values above 0.08 are considered risky."}, {"name": "gam_clr_erly_risk_score", "type": "float", "description": "clear early risk score. Values below 785 are risky."}, {"name": "gam_mtge_loan_actl_pymt_am", "type": "float", "description": "Mortgage Loan (Actual Payment Amount). Sentinel -99999999999 = no mortgage on file"}, {"name": "se_no_norm_wtd_pd_unpaid_amt", "type": "float", "description": "normalised accum amount weighted by merchant percentage. Values above 0 are risky."}, {"name": "cust_net_pymt_unbl1", "type": "float", "description": "net remit done by a customer in the unbilled period"}, {"name": "cust_lexis_nexis_blended_score", "type": "int", "description": "score merges business and owner credit data. Values below 693 are risky."}, {"name": "cust_sbfe_score", "type": "int", "description": "Business credit score. Values below 863 are risky."}, {"name": "cust_dnb_paydex_score", "type": "int", "description": "Paydex score measures payment performance. Values below 61 are risky."}, {"name": "csbs_tot_expsr", "type": "float", "description": "total exposure - charge and lend"}, {"name": "airline_30_180d_amt", "type": "float", "description": "airline 30-180 days amount"}, {"name": "cust_mnth_since_60d_cnt", "type": "int", "description": "customer month since 60 days count"}, {"name": "csbs_lend_on_chrg_expsr", "type": "float", "description": "csbs lend on charge exposure"}, {"name": "inquiry_30day_cnt", "type": "int", "description": "inquiry 30 days count"}, {"name": "csbs_key", "type": "int", "description": "csbs key"}, {"name": "bf_opn_rvtrd_utl75pct_ct", "type": "int", "description": "bf open revolving trade utilization 75% count"}, {"name": "tpf_cus_no_acct_rvlv_1_12", "type": "int", "description": "triumph cus no account revolve in 1-12 months"}, {"name": "best_tenr_in_mnth", "type": "int", "description": "best tenure in month"}, {"name": "lstpayamt_no_rtns_15dys", "type": "float", "description": "last payment no returns 15 days"}, {"name": "accum_cash_txn_in_unpaid", "type": "float", "description": "accumulate cash transaction in unpaid"}, {"name": "tpf_cust_finchg_mx_1_6_rt", "type": "float", "description": "triumph customer finance charge max 1-6 rate"}, {"name": "tpf_cust_no_cons_rev_18", "type": "int", "description": "triumph customer no consecutive revenue 18"}, {"name": "tpf_cust_neg_pub_rec_ct", "type": "int", "description": "triumph customer negative public record count"}, {"name": "tpf_cust_no_tl_util_75", "type": "int", "description": "triumph customer no tradeline utilization 75"}, {"name": "hm_equity_loc_otb", "type": "float", "description": "home equity line of credit open to buy"}, {"name": "bal_xfr_lst_12_moct", "type": "int", "description": "balance cross reference last 12 months count"}, {"name": "nbr_mjr_derog_l12m", "type": "int", "description": "number of major derogatory in last 12 months"}, {"name": "tpf_cust_avg_bbal_30_cur", "type": "float", "description": "triumph customer average billed balance 30 current"}, {"name": "risky_ev_hi_revol", "type": "int", "description": "risky event high revolve"}, {"name": "mr_index", "type": "float", "description": "membership rewards index"}, {"name": "lowdeb_to_income", "type": "float", "description": "low debt to income"}, {"name": "calx_high_age_ratio", "type": "float", "description": "calx high age ratio"}, {"name": "tot_cons_comm_trds_g30", "type": "int", "description": "total consumer and commercial trades greater than 30"}, {"name": "rat_csbs_exps_smrt_rvn", "type": "float", "description": "ratio of csbs exposure and smart revenue"}, {"name": "tpf_cu_plum_rvlv_indx", "type": "float", "description": "tpf cu plum revolve index"}, {"name": "ext_rvlv_bhvr", "type": "float", "description": "external revolve behavior"}, {"name": "commercial_utilization", "type": "float", "description": "commercial utilization"}, {"name": "tpf_cu_mths_snc_30", "type": "int", "description": "triumph cu months since 30"}, {"name": "dif_na_cbs_fico_low_ten", "type": "float", "description": "difference in na and dba fico for low tenure"}, {"name": "ratio_expr_rptd_incm_5yr", "type": "float", "description": "ratio exposure reported income with tenure < 60 months"}, {"name": "cust_behav_ind", "type": "float", "description": "customer behaviour indicator"}, {"name": "open_stdnt_tot_loan_bal_am", "type": "float", "description": "total balance amount for open student loan"}, {"name": "open_rcnt_auto_loan_trd_mo_ct", "type": "int", "description": "months since most recent open auto trade"}, {"name": "paydex_scr", "type": "int", "description": "paydex score"}, {"name": "delinq_trig_other_loc_30d_cnt", "type": "int", "description": "count of delinquency trigger other line of credit for 30 days"}, {"name": "csbs_chrg_expsr", "type": "float", "description": "csbs charge exposure"}, {"name": "amt_inst_atm_p14d", "type": "float", "description": "amount in-state atm p14d"}, {"name": "crosbin_se_low_fico_sp", "type": "float", "description": "cross bin service establishment low fico sp"}, {"name": "crosbin_seplt_spend", "type": "float", "description": "cross bin seplt spend"}, {"name": "clav_se_pctlofico_g30p_zt", "type": "float", "description": "clav service establishment percentage low fico g30 zt"}, {"name": "crosbin_amx_rev_bal", "type": "float", "description": "cross bin amex revenue balance"}, {"name": "bf_tot_open_rvlv_trd_am", "type": "float", "description": "bf total open revolve trade amount"}, {"name": "tpf_cust_max_debits_1_6", "type": "float", "description": "triumph customer max debits 1-6 months"}, {"name": "tpf_rvlv_idx", "type": "float", "description": "triumph revolve index"}, {"name": "day_sin_lst_derog_rtn", "type": "int", "description": "day since last derogatory return"}, {"name": "cb_sow_rev_util", "type": "float", "description": "credit bureau size of wallet revenue utilization"}, {"name": "amt_wwic_grp11_se_rat_u", "type": "float", "description": "amount worldwide industry code group 11 service establishment rat u"}, {"name": "sbfe_term_loan_bal", "type": "float", "description": "sbfe term loan balance"}, {"name": "ttl_nonp_inq_ons_grms", "type": "int", "description": "total non-promotional inquiry ons grms"}, {"name": "tpf_cu_sow_pay01", "type": "float", "description": "triumph cu size of wallet pay01"}, {"name": "tpf_cb_mx_rt_cur_60_1_12", "type": "float", "description": "triumph credit bureau max rate current 60 1-12"}, {"name": "tot30dpd_totintextpay_rt", "type": "float", "description": "total 30 days past due total intextpay rate"}, {"name": "share_plastic_debt", "type": "float", "description": "share plastic debt"}, {"name": "nr_crds_accel_rev", "type": "int", "description": "# of cards with accelerated revolve"}, {"name": "sum_o30dt_o60dt_o90dt", "type": "int", "description": "sum of o30dt o60dt o90dt"}, {"name": "auto_pay_trans", "type": "int", "description": "auto pay transaction"}, {"name": "sudden_drop_in_fico1", "type": "int", "description": "sudden drop in fico 1"}, {"name": "avgutl_comm_rev_trdb", "type": "float", "description": "average utilization commercial revenue trdb"}, {"name": "ext_bal_low_tnur", "type": "float", "description": "external balance for low tenure"}, {"name": "sumatn_risky_evnt", "type": "int", "description": "summation of risky events"}, {"name": "tpf_ccm_tm_wt_pydw_1_12", "type": "float", "description": "tpf ccm time wtd paydown rate for 1-12 months"}, {"name": "spend_concentration", "type": "float", "description": "spend concentration"}, {"name": "accm_wgtd_by_avsecdss", "type": "float", "description": "accum $ weighted by avsecdss for the accum"}, {"name": "accm_wgtd_by_mxsecdss", "type": "float", "description": "accum $ weighted by mxsecdss for the accum"}, {"name": "open_auto_tot_trd_bal_am", "type": "float", "description": "total balance amount for all open auto tradelines"}, {"name": "open_rcnt_pers_loan_trd_mo_ct", "type": "int", "description": "months since most recent open personal loan trade"}, {"name": "open_rcnt_stdnt_loan_trd_mo_ct", "type": "int", "description": "months since most recent open student loan trade"}, {"name": "open_stdnt_loan_trd_ct", "type": "int", "description": "total number of open student loan trades"}, {"name": "smart_revenue", "type": "float", "description": "smart revenue"}, {"name": "subj_addr_change_index", "type": "float", "description": "index indicating how often subject has changed address"}, {"name": "cust_cbr_intr_inq_idx", "type": "float", "description": "customer credit bureau internal inquiry index"}, {"name": "cust_dumas_bal", "type": "float", "description": "dumas balance"}, {"name": "psa_tot_bal", "type": "float", "description": "total balance on all personal savings accounts"}, {"name": "cust_sbfe_rnn_score", "type": "float", "description": "recurrent neural network leveraging small business financial exchange"}, {"name": "cust_aggr_first_5trans_eff_se_risk_score", "type": "float", "description": "customer level aggregated effective se10 risk score using first 5 transactions"}, {"name": "cust_sic2_indus_lvl_risk", "type": "float", "description": "average external normalized default risk of sic 2 industry level peers"}, {"name": "cust_rcnt_mo_loc_paydown_rt", "type": "float", "description": "customer level recent month loc paydown rate"}, {"name": "cust_avg_peer_set_apr", "type": "float", "description": "aggregated average annual percentage rate across sbfe term loan peers"}, {"name": "cust_sbfe_avg_term_loan_apr", "type": "float", "description": "average annual percentage rate across all sbfe term loans"}, {"name": "cust_bkc_debt_to_arb_inc_ratio", "type": "float", "description": "customer level total bank card debt to arbitrated income ratio"}, {"name": "cust_intr_extnl_unscr_tt_mo_due_am1", "type": "float", "description": "customer total monthly due amount for all internal and external unsecured trades"}, {"name": "cust_experian_derog_liab_am1", "type": "float", "description": "experian derogatory liability amount"}, {"name": "cust_extnl_plstc_excs_pymt_am1", "type": "float", "description": "customer amount paid over minimum due on external plastic trades"}, {"name": "cust_lexis_nexis_hi_risk_lien_judge_am1", "type": "float", "description": "total amount of federal tax lien and civil judgement"}, {"name": "cust_experian_6mo_inq_ct1", "type": "int", "description": "experian total inquiry count in last 6 months"}, {"name": "cust_extnl_jnt_bankcard_tot_trd_bal_rt1", "type": "float", "description": "customer external joint bankcard total trades balance ratio"}, {"name": "cust_experian_bal_delinq_idx1", "type": "float", "description": "experian risk weighted balance delinquency index"}, {"name": "cust_lexis_nexis_inq_12mo_ct1", "type": "int", "description": "count of all inquiries for the business within last 12 months"}, {"name": "cust_experian_comb_trd_ct1", "type": "int", "description": "experian total number of combined trades"}, {"name": "cust_glbl_home_equty_am1", "type": "float", "description": "customer home equity amount in USD"}, {"name": "cust_experian_lgl_item_ct1", "type": "int", "description": "experian legal item count"}, {"name": "cust_experian_lst_pub_rec_ms1", "type": "int", "description": "experian public record most recent age in months"}, {"name": "cust_experian_comb_trd_bal1", "type": "float", "description": "experian total combined trade balance"}, {"name": "cust_experian_add_trd_bal1", "type": "float", "description": "total balance for additional trades reported within last 4 months"}, {"name": "cust_extnl_bankcard_supp_tot_bal_rt1", "type": "float", "description": "customer external bankcard supplementary total balance ratio"}, {"name": "cust_intr_extnl_tt_debt_srvc_rt1", "type": "float", "description": "proportion of total monthly minimum due for all trades by income"}, {"name": "cust_auto_trd_close_lst_24mo_ctgy", "type": "categorical", "description": "tag presence of closed autoloans"}, {"name": "cust_spend_act_supp_ct", "type": "int", "description": "number of supplementary cards with spend in past 6 months"}, {"name": "cust_supp_spend_rt", "type": "float", "description": "ratio of supplementary card spend versus total spend"}, {"name": "cust_extnl_min_otb_am", "type": "float", "description": "min open to buy across external plastic tradelines"}, {"name": "cust_debt_incom_oop", "type": "float", "description": "debt income out of pattern"}, {"name": "cust_annual_air_mile_trvl", "type": "float", "description": "total annual miles travelled"}, {"name": "cust_sbfe_paydown_trend_12mo_cc", "type": "float", "description": "12 months time weighted paydown on external commercial cards"}, {"name": "cust_sbfe_min_due_12mo_cc_in", "type": "int", "description": "12 months time weighted min due indicator on external commercial cards"}, {"name": "spend_low_tenure_ctmr", "type": "float", "description": "spend % low tenure customer"}, {"name": "spend_diverge_non_corp", "type": "float", "description": "spend divergence variable for non corp cards"}, {"name": "all_liens_tot_am", "type": "float", "description": "total dollar amount of all liens filed"}, {"name": "subj_most_rec_attend_4_yr_pgm", "type": "int", "description": "indicates if subject attended 4 year program"}, {"name": "tot_cnt_liens_filed_60_days", "type": "int", "description": "liens filed in last 60 months"}, {"name": "cust_tot_pers_loan_bal_am", "type": "float", "description": "outstanding balance on personal loans"}, {"name": "new_adj_home_val_am", "type": "float", "description": "new home value"}, {"name": "glbl_enter_tsa_pre_in", "type": "int", "description": "global entry & tsa pre indicator"}, {"name": "cust_loan_repaid_dumas_acct_pct", "type": "float", "description": "percentage of dumas loan repaid"}, {"name": "cust_competitive_ucc_fl", "type": "int", "description": "competitive standing UCC flag"}, {"name": "cust_home_own_sta_cd", "type": "categorical", "description": "home ownership status"}, {"name": "cust_lexis_nexis_b2b_opr_seg_act_bal_am1", "type": "float", "description": "total active b2b trade line balances in operations segment"}, {"name": "cust_extnl_supp_bankcard_trd_ct1", "type": "int", "description": "customer external supplementary bankcard trades count"}, {"name": "cust_experian_trd_delinq_idx1", "type": "float", "description": "experian risk weighted trade delinquency index"}, {"name": "cust_lexis_nexis_b2b_tm_wt_wp_2yr_idx1", "type": "float", "description": "time weighted b2b tradeline worst performance index in past 2 years"}, {"name": "cust_extnl_plstc_pay_down_rt1", "type": "float", "description": "proportion of total monthly balance paid on external plastic trades"}, {"name": "cust_lexis_nexis_b2b_grow_delinq_1yr_idx1", "type": "float", "description": "lexis nexis b2b growth in delinquency index"}, {"name": "cust_lexis_nexis_b2b_bal_wt_delinq_idx1", "type": "float", "description": "lexis nexis b2b balance weighted delinquency index"}, {"name": "cust_experian_intelli_blend_score1", "type": "int", "description": "experian intelli blended score"}, {"name": "cust_experian_intelli_cmrcl_score1", "type": "int", "description": "experian intelli commercial score"}, {"name": "cust_mtge_trd_close_lst_120mo_ctgy", "type": "categorical", "description": "tag presence of closed mortgage loans"}, {"name": "cust_extnl_post_line_dcr_otb_am", "type": "float", "description": "open to buy given a line decrease trigger"}, {"name": "cust_pers_loan_trd_close_lst_24mo_ctgy", "type": "categorical", "description": "tag presence of closed personal loans"}, {"name": "cust_out_pat_spend_rt", "type": "float", "description": "out of pattern spend ratio"}, {"name": "cust_mtge_avg_paydown_1mo", "type": "float", "description": "principal paydown monthly average on mortgage trades"}, {"name": "cust_open_acct_shr_expsr", "type": "float", "description": "ratio of open account exposure to total exposure"}, {"name": "cust_annual_avg_rm_rt_pd", "type": "float", "description": "total room rent paid for accommodation in hotel in a year"}, {"name": "cust_6mo_hist_loc_pydn", "type": "float", "description": "6 months time weighted paydown for open sbs and cps customers"}, {"name": "cust_intr_rvlv_paydown_idx", "type": "float", "description": "customer revolve index using revolve paydown"}, {"name": "cust_revn_net_worth_yr1_rt", "type": "float", "description": "ratio of total revenue to net worth"}, {"name": "cust_bill_bal_hi_cr_rt", "type": "float", "description": "ratio of amex balance to highest credit reported to D&B"}, {"name": "cust_srce_cnfr_id_ad_ct", "type": "int", "description": "number of sources confirming identity and address"}, {"name": "se_no_norm_wtd_pd_unpaid_cnt", "type": "int", "description": "normalized accum number weighted by merchant percentage for unpaid"}, {"name": "norm_amt_maxsectg_unpaid", "type": "float", "description": "normalised accum dollars weighted by avgsectg for unpaid"}, {"name": "cust_quick_yr1_rt", "type": "float", "description": "quick ratio for latest full year financial"}, {"name": "cust_bill_bal_pay_expc_rt", "type": "float", "description": "ratio of amex balance to payment experiences at D&B"}, {"name": "cust_bus_cola_in", "type": "int", "description": "customer level no pre-set spend limit indicator"}, {"name": "cust_revn_grow_yr1_rt", "type": "float", "description": "year on year revenue growth rate"}, {"name": "cust_sbfe_fin_trd_bal_am", "type": "float", "description": "total balance on financial trades at sbfe"}, {"name": "cust_max_lend_util", "type": "float", "description": "maximum utilization across all lending accounts"}, {"name": "cust_subj_ad_ct", "type": "int", "description": "unique addresses found with customer"}, {"name": "cust_ebit_intrst_expn_yr1_rt", "type": "float", "description": "ratio of ebit to interest expense"}, {"name": "cust_sbfe_loan_max_tenure", "type": "int", "description": "maximum tenure of term loans at sbfe"}, {"name": "cust_ebitda_revn_yr1_rt", "type": "float", "description": "ratio of ebitda to revenue"}, {"name": "cust_crnt_ad_old_rec_age", "type": "int", "description": "time since first reported at current address"}, {"name": "cust_sbfe_trd_pymt_am", "type": "float", "description": "total payments on all trades at sbfe"}, {"name": "cust_dnb_pymt_expc_ct", "type": "int", "description": "total payment experiences at D&B"}, {"name": "cust_appl_risk_card_type_cd", "type": "categorical", "description": "code to identify card type and risk"}, {"name": "cust_spend_rnn_model_score", "type": "float", "description": "spend rnn score predicting risk probability"}, {"name": "cust_lexis_nexis_sos_corp_mo_ct", "type": "int", "description": "months since sos official incorporation filing"}, {"name": "cust_bus_core_b2b_spend_pct", "type": "float", "description": "core business to business percentage"}, {"name": "gam_bal_dcr_trgr_30d_ct", "type": "int", "description": "balance decrease triggers in 30 days from bureau"}, {"name": "cust_tot_delta_flght_grp_cd", "type": "categorical", "description": "delta cobrand total flights bucket"}, {"name": "cust_lexis_nexis_assoc_bus_lien_ct", "type": "int", "description": "count of liens for associates of the business"}, {"name": "cust_tot_delta_prog_mile_ct", "type": "int", "description": "delta cobrand accumulated miles"}, {"name": "cust_bus_core_b2b_spend_pct_chng", "type": "float", "description": "core b2b percentage change"}, {"name": "cust_dda_1yr_ct", "type": "int", "description": "count of distinct bank accounts used for payments in past year"}, {"name": "gam_util_dcr_trgr_30d_ct", "type": "int", "description": "utilization decrease triggers in 30 days from bureau"}, {"name": "cust_bus_non_cncl_acct_ct", "type": "int", "description": "total active small business account counts"}, {"name": "cust_lexis_nexis_ucc_fl_ct", "type": "int", "description": "count of ucc filings for the business"}, {"name": "cust_sac_in", "type": "int", "description": "strategic alliance cobrand card indicator"}, {"name": "static_value_of_18_ind_duratind", "type": "int", "description": "static value of 18 for performance window"}, {"name": "ratio_of_mr_bal_cust_curr_exp_cumrblrt", "type": "float", "description": "ratio of MR balance to current exposure"}, {"name": "atic_pymnt_in_nxt_stmt_loc_enbl_cust_potpaysh", "type": "float", "description": "anticipated payments in next statement for loc customers"}, {"name": "cust_talx_max_srvc_lgth_mo_ct", "type": "int", "description": "maximum service tenure from talx"}, {"name": "cust_talx_incom_am", "type": "float", "description": "customer talx income amount"}, {"name": "cust_dnbplus_gbr_risk_pred_score", "type": "float", "description": "predicts likelihood of risk outcome"}, {"name": "cust_dnbplus_pymt_expc_ct", "type": "int", "description": "total payment experiences at D&B"}, {"name": "cust_se_react_risk_score", "type": "float", "description": "customer level MRS score"}, {"name": "cust_dnbplus_amex_bal_hi_cr_rt", "type": "float", "description": "ratio of balance to highest credit at D&B"}, {"name": "gam_bal_increase_trgr_30d_ct", "type": "int", "description": "balance increased triggers in 30 days from bureau"}, {"name": "cust_extnl_cpr_exit_seg_cd", "type": "categorical", "description": "external CPR exit segment code"}, {"name": "sow_arbtr_line", "type": "float", "description": "arbitrated external line"}, {"name": "gam_clrty_non_traditional_inq_ds", "type": "int", "description": "days since clarity last seen non-traditional inquiry"}, {"name": "cust_unsol_cross_sell_inq_ct", "type": "int", "description": "count of unsolicited cross sell inquiries in last 30 days"}, {"name": "gam_old_auto_loan_open_ms", "type": "int", "description": "months since oldest open auto tradeline"}, {"name": "cust_crnt_yr1_rt", "type": "float", "description": "current ratio for latest full year financial"}, {"name": "cust_pers_loan_repay_pct", "type": "float", "description": "percentage of personal loan debt repaid"}, {"name": "cust_inq_other_rcnt_12mo_in", "type": "int", "description": "indicates if other inquiries in last 12 months"}, {"name": "gam_acct_clsd_trgr_30d_ct", "type": "int", "description": "account closed triggers in 30 days from bureau"}, {"name": "norm_amt_avgsectg_unpaid", "type": "float", "description": "normalised accum dollars weighted by avgsectg for unpaid"}, {"name": "cust_asset_own_in", "type": "int", "description": "indicates if customer owns assets"}, {"name": "cust_ffo_tot_brrw_debt_yr1_rt", "type": "float", "description": "ratio of funds from operations to total borrowed debt"}, {"name": "gam_auto_loan_actl_pymt_am", "type": "float", "description": "actual payment amount for open auto trades / 100"}, {"name": "gam_stdnt_loan_actl_pymt_am", "type": "float", "description": "actual payment amount for open student loan trades / 100"}, {"name": "cust_inp_ad_old_rec_age", "type": "int", "description": "time since first reported at input address"}, {"name": "cust_cash_tot_asset_yr1_rt", "type": "float", "description": "ratio of cash to total assets"}, {"name": "exp_rev", "type": "float", "description": "revolve exposure"}, {"name": "cust_auto_loan_repay_pct", "type": "float", "description": "percentage of auto loan debt repaid"}, {"name": "cust_risk_calc_yr1_edf_score", "type": "float", "description": "risk calc score for default in next year"}, {"name": "cust_debt_cptl_yr1_rt", "type": "float", "description": "debt to capital ratio"}, {"name": "cust_enhnc_spnd_conctrtn", "type": "float", "description": "customer enhanced spend concentration"}, {"name": "cust_mr_pt_rdm_12mo_rt", "type": "float", "description": "membership reward points redemption ratio"}, {"name": "cust_act_corp_rel_ind", "type": "int", "description": "corporate card indicator"}, {"name": "cust_lexis_nexis_rct_lien_mo_ct", "type": "int", "description": "months since most recent lien"}, {"name": "cust_lexis_nexis_asset_prop_size", "type": "int", "description": "combined building size in sq ft"}, {"name": "cust_bus_trvl_ent_spend_pct_chng", "type": "float", "description": "travel and entertainment percentage change"}, {"name": "cust_delta_elite_sta_cd", "type": "categorical", "description": "delta elite status code"}, {"name": "cust_cmpst_emp_idx", "type": "float", "description": "customer composite employment index"}, {"name": "cust_lexis_nexis_cr_score", "type": "int", "description": "credit score of the business from lexis nexis"}, {"name": "cust_lexis_nexis_consm_ad_mtch_ct", "type": "int", "description": "count of consumers with matching address"}, {"name": "cust_vlnrbl_seg_extnl_cpr_risk_cd", "type": "categorical", "description": "external CPR risk code"}, {"name": "share_pay_over_tm_bal_in_tot_pay_potsobal", "type": "float", "description": "share of pay over time balance in total"}, {"name": "pay_over_limit_util_in_curr_mon_potlutil", "type": "float", "description": "pay over time limit utilization"}, {"name": "cust_sandbox_cmrcl_bur_score", "type": "int", "description": "inhouse commercial credit score"}, {"name": "cust_dnbplus_tot_emp_ct", "type": "int", "description": "total number of employees from D&B"}], "correlations_count": 0}, {"table": "payments", "description": "Payment records — one row per payment attempt per case. Contains successful payments and returned payments with reasons. Covers 2024-2025 with data cut-off 2025-12.", "columns": [{"name": "case_id", "type": "string", "description": "Foreign key to case"}, {"name": "card_number", "type": "categorical", "description": "Masked card number the payment was applied to (last 4 digits shown)"}, {"name": "payment_date", "type": "date", "description": "Date the payment was attempted (YYYY-MM-DD). Range: 2024-2025; data cut-off is 2025-12."}, {"name": "payment_amount", "type": "float", "description": "Payment amount in USD"}, {"name": "payment_bank_account", "type": "categorical", "description": "Bank account the payment was drawn from (masked)"}, {"name": "return_flag", "type": "categorical", "description": "Whether the payment cleared (success) or was returned (returned)"}, {"name": "return_reason", "type": "categorical", "description": "Reason for return. Empty when return_flag = success."}], "correlations_count": 0}, {"table": "score_drivers", "description": "Top score drivers per model scoring run — shows which variables contributed most to each model's risk score, with direction and magnitude. Used to explain why a model scored a customer as risky or safe.", "columns": [{"name": "case_id", "type": "string", "description": "Foreign key to case"}, {"name": "model_id", "type": "categorical", "description": "Which model this driver belongs to"}, {"name": "driver_rank", "type": "int", "description": "Rank of this driver within the model (1 = most influential)"}, {"name": "driver_variable", "type": "categorical", "description": "Name of the model input variable driving the score"}, {"name": "driver_direction", "type": "categorical", "description": "Whether this driver is pushing the score toward higher or lower risk"}, {"name": "driver_value", "type": "float", "description": "The actual value of the driver variable for this case (standardized)"}, {"name": "driver_contribution", "type": "float", "description": "SHAP-like contribution of this driver to the final score (positive = increases risk, negative = decreases risk)"}, {"name": "driver_description", "type": "categorical", "description": "Human-readable explanation of what this driver means for risk"}], "correlations_count": 1}, {"table": "spends", "description": "Transaction-level spend data — multiple rows per case. Each row is one transaction (spend) with merchant details and risk scores.", "columns": [{"name": "case_id", "type": "string", "description": "Foreign key to case"}, {"name": "spend_date", "type": "date", "description": "Date of the spend transaction (YYYY-MM-DD). Dates range within 2024-2025; the data cut-off is 2025-12."}, {"name": "month", "type": "string", "description": "Month name of spend_date (e.g. October). DERIVED from spend_date — always consistent with it. Use for seasonal analysis; for point-in-time filtering, use spend_date."}, {"name": "amount", "type": "float", "description": "Spend amount in USD"}, {"name": "merchant_name", "type": "categorical", "description": "Name of the merchant where spend was made"}, {"name": "merchant_industry", "type": "categorical", "description": "Merchant industry based on SIC4 code. Some rows may be empty — search industry via merchant name if needed."}, {"name": "merchant_risk_score", "type": "float", "description": "Risk score of the merchant (0-1). Values above 0.7 are considered risky."}, {"name": "spend_concentration", "type": "float", "description": "One-way spend concentration risk rate of a customer at merchants in last 30 days. Values above 2.4 are considered risky."}, {"name": "rnn_spend_score", "type": "float", "description": "RNN risk score for spend patterns. Values above 0.017 are considered risky."}, {"name": "spend_divergence_index", "type": "float", "description": "Index for spend divergence from historical patterns. Values below 1.0 are considered risky (indicating abnormal deviation)."}, {"name": "customer_industry", "type": "categorical", "description": "The industry in which the customer's business operates"}], "correlations_count": 3}, {"table": "txn_monthly", "description": "Monthly transaction aggregates, multiple rows", "columns": [{"name": "case_id", "type": "string", "description": "Unique case identifier"}, {"name": "month", "type": "date", "description": "Calendar month of the transaction aggregate (YYYY-MM-DD). Range: 2024-2025; data cut-off is 2025-12."}, {"name": "spend_total", "type": "float", "description": "Total spend amount for the month (USD)"}, {"name": "txn_count", "type": "int", "description": "Number of individual transactions in the month"}, {"name": "category", "type": "categorical", "description": "Merchant category of the aggregated transactions"}], "correlations_count": 0}, {"table": "wcc_flags", "description": "WCC flags, multiple rows", "columns": [{"name": "case_id", "type": "string", "description": "Unique case identifier"}, {"name": "flag_type", "type": "categorical", "description": "Type of watchlist / credit concern flag triggered"}, {"name": "trigger_date", "type": "date", "description": "Date the flag was triggered"}, {"name": "severity", "type": "categorical", "description": "Severity level assigned to the flag"}], "correlations_count": 0}, {"table": "xbu_summary", "description": "Cross-BU exposure, multiple rows", "columns": [{"name": "case_id", "type": "string", "description": "Unique case identifier"}, {"name": "product", "type": "categorical", "description": "Product type across business units"}, {"name": "exposure", "type": "float", "description": "Total exposure (outstanding balance + committed undrawn) for this product (USD)"}, {"name": "utilization", "type": "float", "description": "Utilization rate (balance / limit); values above 1.0 indicate overlimit"}], "correlations_count": 0}];
+
+const TYPES = ['int', 'float', 'string', 'date', 'categorical'];
+
+const escapeHtml = (s) => String(s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+function typeTag(t) {
+  const cls = TYPES.includes(t) ? `t-${t}` : 't-string';
+  return `<span class="col-type ${cls}">${escapeHtml(t || 'unknown')}</span>`;
+}
+
+// ── Stats ──
+document.getElementById('stat-tables').textContent = CATALOG.length;
+document.getElementById('stat-columns').textContent = CATALOG.reduce((n, t) => n + t.columns.length, 0);
+document.getElementById('stat-corr').textContent = CATALOG.reduce((n, t) => n + (t.correlations_count || 0), 0);
+
+// ── Render sidebar ──
+const nav = document.getElementById('table-nav');
+CATALOG.forEach((t, i) => {
+  const a = document.createElement('a');
+  a.className = 'nav-item';
+  a.href = `#card-${t.table}`;
+  a.dataset.table = t.table;
+  a.innerHTML = `<span class="nav-item-name">${escapeHtml(t.table)}</span><span class="nav-item-count">${t.columns.length}</span>`;
+  a.addEventListener('click', (e) => {
+    e.preventDefault();
+    const card = document.getElementById(`card-${t.table}`);
+    if (card) {
+      if (!card.classList.contains('expanded')) card.classList.add('expanded');
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+  nav.appendChild(a);
+});
+
+// ── Render cards ──
+const cardsRoot = document.getElementById('cards');
+const noMatch = document.getElementById('no-match');
+
+CATALOG.forEach((t, i) => {
+  const card = document.createElement('article');
+  card.className = 'card' + (i === 0 ? ' expanded' : '');
+  card.id = `card-${t.table}`;
+  card.dataset.table = t.table;
+
+  const rows = t.columns.map(c => `
+    <tr data-col-name="${escapeHtml(c.name.toLowerCase())}" data-col-desc="${escapeHtml((c.description || '').toLowerCase())}">
+      <td><span class="col-name">${escapeHtml(c.name)}</span></td>
+      <td>${typeTag(c.type)}</td>
+      <td class="col-desc">${escapeHtml(c.description || '')}</td>
+    </tr>`).join('');
+
+  card.innerHTML = `
+    <div class="card-head">
+      <div class="card-title-wrap">
+        <div class="card-title-row">
+          <span class="card-title">${escapeHtml(t.table)}</span>
+          <span class="col-count-pill">${t.columns.length} columns</span>
+        </div>
+        <div class="card-desc">${escapeHtml(t.description || '')}</div>
+      </div>
+      <span class="chevron">›</span>
+    </div>
+    <div class="card-body">
+      <table class="col-table">
+        <colgroup><col class="w-name"><col class="w-type"><col></colgroup>
+        <thead><tr><th>Column</th><th>Type</th><th>Description</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+  card.querySelector('.card-head').addEventListener('click', () => {
+    card.classList.toggle('expanded');
+  });
+  cardsRoot.insertBefore(card, noMatch);
+});
+
+// ── Expand / collapse all ──
+document.getElementById('expand-all').addEventListener('click', () => {
+  document.querySelectorAll('.card').forEach(c => c.classList.add('expanded'));
+});
+document.getElementById('collapse-all').addEventListener('click', () => {
+  document.querySelectorAll('.card').forEach(c => c.classList.remove('expanded'));
+});
+
+// ── Search ──
+const searchInput = document.getElementById('search');
+searchInput.addEventListener('input', () => {
+  const q = searchInput.value.trim().toLowerCase();
+  let anyVisible = false;
+
+  CATALOG.forEach(t => {
+    const card = document.getElementById(`card-${t.table}`);
+    const navItem = nav.querySelector(`.nav-item[data-table="${t.table}"]`);
+    const tableNameMatch = !q || t.table.toLowerCase().includes(q);
+    const tableDescMatch = !q || (t.description || '').toLowerCase().includes(q);
+
+    let anyColMatch = false;
+    const rows = card.querySelectorAll('tbody tr');
+    rows.forEach(r => {
+      const nameMatch = r.dataset.colName.includes(q);
+      const descMatch = r.dataset.colDesc.includes(q);
+      const show = !q || nameMatch || descMatch || tableNameMatch || tableDescMatch;
+      r.classList.toggle('hidden', !show);
+      if (!q || nameMatch || descMatch) anyColMatch = true;
+    });
+
+    const cardVisible = !q || tableNameMatch || tableDescMatch || anyColMatch;
+    card.classList.toggle('hidden', !cardVisible);
+    navItem.classList.toggle('hidden', !cardVisible);
+    if (cardVisible) anyVisible = true;
+
+    // when searching, auto-expand cards with column matches
+    if (q && anyColMatch) card.classList.add('expanded');
+  });
+
+  noMatch.classList.toggle('show', !anyVisible);
+});
+
+// ── Active section tracking via IntersectionObserver ──
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      const table = entry.target.dataset.table;
+      document.querySelectorAll('.nav-item').forEach(a => a.classList.remove('active'));
+      const navItem = nav.querySelector(`.nav-item[data-table="${table}"]`);
+      if (navItem) navItem.classList.add('active');
+    }
+  });
+}, { rootMargin: '-20% 0px -70% 0px', threshold: 0 });
+
+document.querySelectorAll('.card').forEach(c => observer.observe(c));
+</script>
+</body>
+</html>

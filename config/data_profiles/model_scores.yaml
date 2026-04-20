@@ -10,33 +10,9 @@ columns:
     description: "Foreign key to case"
 
   trans_month:
-    dtype: categorical
-    categories:
-      "January'2024": 0.0417
-      "February'2024": 0.0417
-      "March'2024": 0.0417
-      "April'2024": 0.0417
-      "May'2024": 0.0417
-      "June'2024": 0.0417
-      "July'2024": 0.0417
-      "August'2024": 0.0417
-      "September'2024": 0.0417
-      "October'2024": 0.0417
-      "November'2024": 0.0417
-      "December'2024": 0.0417
-      "January'2025": 0.0417
-      "February'2025": 0.0417
-      "March'2025": 0.0417
-      "April'2025": 0.0417
-      "May'2025": 0.0417
-      "June'2025": 0.0417
-      "July'2025": 0.0417
-      "August'2025": 0.0417
-      "September'2025": 0.0417
-      "October'2025": 0.0417
-      "November'2025": 0.0417
-      "December'2025": 0.0409
-    description: "Transaction month label (e.g. October'2025). Range: 2024-2025. Indicates the month of the scoring run."
+    dtype: date
+    year: [2024, 2025]
+    description: "Date of the model scoring run (YYYY-MM-DD). Use this for time-range filtering."
 
   # ── 1. last_cycle_cut_revolve_rate ──────────────────────────────
   last_cycle_cut_revolve_rate:
