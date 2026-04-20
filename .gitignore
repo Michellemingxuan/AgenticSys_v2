@@ -3,7 +3,7 @@ __pycache__/
 *.pyc
 .env
 logs/
-# data/simulated/
+data/simulated/
 .superpowers/
 venv/
 .venv/

@@ -53,8 +53,17 @@ def query_table(
     table_name: str,
     filter_column: str = "",
     filter_value: str = "",
+    columns: str = "",
 ) -> str:
-    """Query a data table for the current case. All data is scoped to the active case."""
+    """Query a data table for the current case. All data is scoped to the active case.
+
+    Args:
+        table_name: the table to query
+        filter_column, filter_value: optional row filter
+        columns: comma-separated list of column names to return (e.g. "fico_score,derog_count").
+                 Leave empty to return all columns. REQUIRED for wide tables like model_scores
+                 (266 cols) to avoid slow processing — request only the columns you need.
+    """
     if _gateway is None:
         return "Data unavailable"
 
@@ -69,6 +78,15 @@ def query_table(
     if not rows:
         return f"No rows matching filter in '{table_name}'."
 
+    # Column projection — select only requested columns
+    if columns:
+        requested = [c.strip() for c in columns.split(",") if c.strip()]
+        if requested:
+            # Always keep case_id-like identifier columns if present
+            rows = [{k: row[k] for k in requested if k in row} for row in rows]
+            if not rows or not rows[0]:
+                return f"No requested columns {requested} found in '{table_name}'."
+
     total_rows = len(rows)
     total_cols = len(rows[0]) if rows else 0
     truncation_notes: list[str] = []
@@ -77,7 +95,6 @@ def query_table(
     if total_cols > 0:
         single_row_size = len(json.dumps([rows[0]], indent=2, default=str))
         if single_row_size > _MAX_CHARS - 200:
-            # Each row is too wide — trim columns on all rows
             keys = list(rows[0].keys())
             keep_keys: list[str] = []
             for k in keys:
@@ -99,7 +116,6 @@ def query_table(
     if shown_rows < total_rows:
         truncation_notes.append(f"showing {shown_rows}/{total_rows} rows")
 
-    # Append truncation metadata as a final element (valid JSON)
     if truncation_notes:
         rows.append({"_truncated": ", ".join(truncation_notes)})
 
