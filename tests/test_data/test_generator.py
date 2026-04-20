@@ -21,11 +21,11 @@ def gen():
 
 class TestLoadProfiles:
     def test_loads_all_profiles(self, gen: DataGenerator):
-        assert len(gen.profiles) == 11
+        assert len(gen.profiles) == 10
 
     def test_profile_names(self, gen: DataGenerator):
         expected = {
-            "bureau_full", "bureau_trades", "txn_monthly", "pmts_detail",
+            "bureau", "txn_monthly", "pmts_detail",
             "model_scores", "score_drivers", "wcc_flags", "xbu_summary",
             "cust_tenure", "income_dti", "cross_bu",
         }
@@ -47,19 +47,19 @@ class TestGeneration:
 
     def test_respects_int_range(self, gen: DataGenerator):
         tables = gen.generate_all()
-        # bureau_full.fico_score should be in [300, 850]
-        scores = tables["bureau_full"]["fico_score"]
+        # bureau.fico_score should be in [300, 850]
+        scores = tables["bureau"]["fico_score"]
         assert all(300 <= s <= 850 for s in scores), "fico_score out of range"
 
     def test_categorical_values(self, gen: DataGenerator):
         tables = gen.generate_all()
-        trade_types = set(tables["bureau_trades"]["trade_type"])
+        trade_types = set(tables["bureau"]["trade_type"])
         valid = {"revolving", "installment", "mortgage", "commercial", "other"}
         assert trade_types.issubset(valid), f"Unexpected trade_type values: {trade_types - valid}"
 
     def test_sequential_case_ids(self, gen: DataGenerator):
         tables = gen.generate_all()
-        ids = tables["bureau_full"]["case_id"]
+        ids = tables["bureau"]["case_id"]
         assert ids[0] == "CASE-00001"
         assert ids[1] == "CASE-00002"
         assert ids[-1] == "CASE-00050"
@@ -89,7 +89,7 @@ class TestDumpCSV:
         gen.generate_all()
         with tempfile.TemporaryDirectory() as tmpdir:
             paths = gen.dump_csv(tmpdir)
-            assert len(paths) == 11
+            assert len(paths) == 10
             for p in paths:
                 assert os.path.exists(p)
                 # Check file has header + data rows

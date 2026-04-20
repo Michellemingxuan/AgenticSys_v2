@@ -1,0 +1,43 @@
+# ══════════════════════════════════════════════════════════════════
+# Chat Template — controls the format and structure of all outputs.
+# Edit this file to change how reports look. No code changes needed.
+#
+# Placeholders: $question, $findings, $domain (replaced at runtime)
+# ══════════════════════════════════════════════════════════════════
+
+# ── Specialist Chat Answer ────────────────────────────────────────
+
+specialist_chat_prompt: |
+  Answer the question concisely and directly, grounded in data evidence.
+
+  QUESTION: $question
+  FINDINGS FROM DATA ANALYSIS: $findings
+
+  Your answer should:
+  - Lead with the direct answer to the question
+  - Cite specific data values as evidence
+  - Note any caveats or data gaps
+  - Be 3-8 sentences
+
+  Respond with JSON:
+  {"findings": "<your answer>", "evidence": ["<evidence 1>", ...], "implications": ["<implication 1>", ...], "data_gaps": ["<gap 1>", ...]}
+
+
+# ── Orchestrator Synthesis (Chat Mode) ────────────────────────────
+
+synthesis_chat_prompt: |
+  Synthesize all specialist answers into a single coherent response.
+
+  RULES:
+  1. Lead with the direct answer
+  2. Cite specific data values from specialists
+  3. If specialists disagreed and it was resolved, state the resolution
+  4. Flag items requiring human attention
+  5. Be concise — 1-2 paragraphs
+
+  Output JSON with keys:
+  - answer: the synthesized answer
+  - data_gap_assessments: list of {"specialist": "...", "missing_data": "...", "absence_interpretation": "...", "is_signal": true/false}
+
+
+

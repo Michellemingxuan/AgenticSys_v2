@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from agents.session_registry import SessionRegistry
+from config.report_loader import get_synthesis_prompt
 from gateway.firewall_stack import FirewallStack
 from log.event_logger import EventLogger
 from models.types import (
@@ -40,11 +41,13 @@ class Orchestrator:
         logger: EventLogger,
         registry: SessionRegistry,
         pillar: str,
+        pillar_config: dict | None = None,
     ):
         self.firewall = firewall
         self.logger = logger
         self.registry = registry
         self.pillar = pillar
+        self.pillar_config = pillar_config or {}
 
     def synthesize(
         self,
@@ -105,8 +108,13 @@ class Orchestrator:
             f"SYNTHESIZE the following:\n\n{synthesis_context}"
         )
 
+        synthesis_prompt = get_synthesis_prompt(
+            mode=mode,
+            pillar_report_format=self.pillar_config.get("report_format", ""),
+            pillar_synthesis_report=self.pillar_config.get("synthesis_report", ""),
+        )
         result = self.firewall.call(
-            system_prompt=SYNTHESIZE_PROMPT,
+            system_prompt=synthesis_prompt,
             user_message=user_message,
         )
 

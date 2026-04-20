@@ -1,0 +1,40 @@
+# ══════════════════════════════════════════════════════════════════
+# Common Format Instructions — shared across report and chat modes.
+# Format rules that apply to ALL specialist outputs regardless of mode.
+#
+# Placeholders: $question, $findings, $domain
+# ══════════════════════════════════════════════════════════════════
+
+common_format_instructions: |
+  - Use structured sections exactly as specified.
+  - Use bullet points ("•") where required.
+  - Each bullet MUST:
+    • Be a single paragraph
+    • Be self-contained and complete
+    • Represent exactly ONE concrete observation/event
+  - Do NOT use:
+    • Sub-bullets
+    • Numbering inside bullets (unless explicitly required)
+    • Nested hierarchy
+    • Fragmented sentences
+  - Maintain strict one-to-one mapping between bullet and idea.
+
+  - Use exact variable / metric / score names as provided.
+  - When mentioning variables:
+    • Provide short natural language description (3-8 words)
+    • Immediately follow with original variable name in parentheses
+    • Do NOT rename or alter original names
+    • Do NOT introduce assumptions
+
+  - Use cautious, evidence-grounded language:
+    • "suggests...", "indicates...", "points to..."
+
+  - Quantitative specificity is mandatory:
+    • Include values, ranges, dates wherever available
+
+  - Markdown formatting:
+    • Use ONLY **bold**
+    • Bold minimal meaningful phrases (nouns only)
+    • Do NOT bold full sentences, clauses, punctuation, filler text, or variable names
+
+  - Do NOT include tables unless explicitly required.

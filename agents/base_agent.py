@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from config.report_loader import get_specialist_prompt
 from gateway.firewall_stack import FirewallStack
 from log.event_logger import EventLogger
 from models.types import DomainSkill, LLMResult, SpecialistOutput
@@ -99,18 +100,17 @@ class BaseSpecialistAgent:
         if step2.status == "blocked":
             return self._blocked_output(question, mode, "synthesis", step2.error)
 
-        # Step 3: Report or answer
+        # Step 3: Report or answer — uses templates from config/prompts/{report,chat}.yaml
+        # Assembles: common format + mode instructions + pillar-specific instructions
         findings = str(step2.data) if step2.data else "No findings"
-        if mode == "report":
-            step3_msg = (
-                f"Produce a detailed report section for: {question}\n\n"
-                f"Findings: {findings}"
-            )
-        else:
-            step3_msg = (
-                f"Answer the question concisely: {question}\n\n"
-                f"Findings: {findings}"
-            )
+        pillar_instructions = self.pillar.get("report_instructions", "")
+        step3_msg = get_specialist_prompt(
+            mode=mode,
+            question=question,
+            findings=findings,
+            domain=self.skill.name,
+            pillar_report_instructions=pillar_instructions,
+        )
 
         step3 = self.firewall.call(
             system_prompt=system_prompt,

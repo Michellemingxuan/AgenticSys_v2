@@ -38,7 +38,12 @@
       "Bash(rm config/data_profiles/modeling.yaml config/data_profiles/score_drivers.yaml)",
       "Bash(mv config/data_profiles/pmts.yaml config/data_profiles/pmts_detail.yaml)",
       "Bash(rm -rf data/simulated/)",
-      "Bash(venv/bin/python -m data --output data/simulated/ --seed 42 --cases 5)"
+      "Bash(venv/bin/python -m data --output data/simulated/ --seed 42 --cases 5)",
+      "Bash(venv/bin/pip list *)",
+      "Bash(venv/bin/pip install *)",
+      "Bash(venv/bin/python -c \"import yaml; yaml.safe_load\\(open\\('config/pillars/credit_risk.yaml'\\)\\); print\\('credit_risk.yaml: OK'\\)\")",
+      "Bash(venv/bin/python -c \"import yaml; yaml.safe_load\\(open\\('config/prompts/common.yaml'\\)\\); print\\('common.yaml: OK'\\)\")",
+      "Bash(venv/bin/python -c \"import yaml; yaml.safe_load\\(open\\('config/pillars/credit_risk.yaml'\\)\\); print\\('OK'\\)\")"
     ],
     "additionalDirectories": [
       "/Users/mingxuanliu/Library/CloudStorage/GoogleDrive-mingxuan99michelle@gmail.com/My\\ Drive/Projs/AgenticSys_v1"

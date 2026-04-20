@@ -82,7 +82,7 @@ def run_question(
     review_report = general.compare(specialist_outputs, question)
 
     # Synthesis
-    orchestrator = Orchestrator(firewall, logger, registry, pillar)
+    orchestrator = Orchestrator(firewall, logger, registry, pillar, pillar_config=pillar_yaml)
     final = orchestrator.synthesize(specialist_outputs, review_report, question, mode)
 
     return final

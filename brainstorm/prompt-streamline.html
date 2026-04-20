@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prompt Streamline — Agentic Case Review v7</title>
+<style>
+:root {
+  --navy: #00175A; --blue: #006FCF; --white: #FFFFFF;
+  --gray-light: #F4F6F9; --gray-text: #4A5568; --gray-border: #E2E8F0;
+  --green: #166534; --green-bg: #DCFCE7; --green-border: #86EFAC;
+  --purple: #4C1D95; --purple-bg: #EDE9FE; --purple-border: #A78BFA;
+  --amber: #92400E; --amber-bg: #FEF3C7; --amber-border: #FCD34D;
+  --red: #991B1B; --red-bg: #FEE2E2; --red-border: #FCA5A5;
+  --slate: #334155;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #fff; color: var(--navy); }
+
+.hero { background: var(--navy); color: white; padding: 30px 60px 26px; position: relative; }
+.blue-stripe { position: absolute; top: 0; left: 0; right: 0; height: 4px; background: var(--blue); }
+.hero h1 { font-family: Georgia, serif; font-size: 28px; font-weight: 700; }
+.hero-sub { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255,255,255,0.5); font-weight: 600; margin-top: 6px; }
+
+.page { max-width: 1400px; margin: 0 auto; padding: 30px 60px 60px; }
+
+/* SECTION HEADERS */
+.sh { display: flex; align-items: center; gap: 14px; margin: 36px 0 16px; }
+.sh-label { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--gray-text); white-space: nowrap; }
+.sh-line { flex: 1; height: 1px; background: var(--gray-border); }
+
+/* FILE CARDS */
+.file-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+.fc { border: 1px solid var(--gray-border); border-radius: 6px; padding: 18px 22px; background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+.fc-file { font-size: 14px; font-family: 'Courier New', monospace; font-weight: 700; color: var(--navy); margin-bottom: 6px; }
+.fc-desc { font-size: 13px; color: var(--gray-text); line-height: 1.6; margin-bottom: 10px; }
+.fc-keys { display: flex; flex-wrap: wrap; gap: 6px; }
+.fc-key { font-size: 11px; font-family: 'Courier New', monospace; font-weight: 600; padding: 3px 10px; border-radius: 3px; }
+.fc-key.blue { background: #DBEAFE; color: var(--blue); border: 1px solid #93C5FD; }
+.fc-key.purple { background: var(--purple-bg); color: var(--purple); border: 1px solid var(--purple-border); }
+.fc-key.green { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+
+/* ASSEMBLY */
+.asm-row { display: flex; gap: 12px; align-items: stretch; margin: 20px 0; }
+.asm-box { flex: 1; border: 1px solid var(--gray-border); border-radius: 6px; padding: 20px 22px; background: white; position: relative; }
+.asm-box.b-blue { border-top: 4px solid var(--blue); }
+.asm-box.b-purple { border-top: 4px solid var(--purple); }
+.asm-box.b-green { border-top: 4px solid var(--green); }
+.asm-num { position: absolute; top: -12px; left: 16px; background: var(--navy); color: white; font-size: 11px; font-weight: 700; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+.asm-title { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+.asm-title.c-blue { color: var(--blue); }
+.asm-title.c-purple { color: var(--purple); }
+.asm-title.c-green { color: var(--green); }
+.asm-src { font-size: 11px; font-family: 'Courier New', monospace; color: var(--gray-text); margin-bottom: 10px; }
+.asm-items { font-size: 13px; color: var(--slate); line-height: 2; list-style: none; padding: 0; }
+.asm-items li { padding-left: 16px; position: relative; }
+.asm-items li::before { content: '→'; position: absolute; left: 0; color: var(--gray-text); }
+.asm-plus { display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 700; color: var(--gray-text); padding: 0 4px; flex-shrink: 0; }
+
+/* CONTENT PREVIEW */
+.preview { margin-top: 12px; padding: 14px 16px; background: var(--gray-light); border: 1px solid var(--gray-border); border-radius: 4px; font-size: 12px; color: var(--slate); line-height: 1.7; font-family: 'Courier New', monospace; white-space: pre-wrap; }
+
+/* MODE COMPARISON */
+.mode-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+.mode-card { border: 1px solid var(--gray-border); border-radius: 6px; padding: 20px 22px; background: white; }
+.mode-card.m-report { border-top: 4px solid var(--navy); }
+.mode-card.m-chat { border-top: 4px solid var(--blue); }
+.mc-title { font-size: 16px; font-weight: 700; color: var(--navy); margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+.mc-icon { font-size: 18px; }
+.mc-sub { font-size: 12px; color: var(--gray-text); margin-bottom: 12px; }
+.mc-section { margin-bottom: 10px; }
+.mc-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--gray-text); margin-bottom: 4px; }
+.mc-content { font-size: 13px; color: var(--slate); line-height: 1.7; }
+.mc-content strong { color: var(--navy); }
+
+/* PILLAR INSTRUCTIONS */
+.pillar-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 16px 0; }
+.pi-card { border: 1px solid var(--green-border); border-radius: 6px; padding: 16px 18px; background: var(--green-bg); }
+.pi-domain { font-size: 14px; font-weight: 700; color: var(--green); margin-bottom: 6px; }
+.pi-content { font-size: 12px; color: var(--slate); line-height: 1.7; }
+.pi-content li { margin-bottom: 3px; }
+
+/* EDIT TABLE */
+table.edit-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.edit-table th { text-align: left; padding: 10px 14px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--gray-text); border-bottom: 2px solid var(--gray-border); }
+table.edit-table td { padding: 10px 14px; border-bottom: 1px solid var(--gray-light); color: var(--slate); line-height: 1.5; vertical-align: top; }
+table.edit-table td:nth-child(2) { font-family: 'Courier New', monospace; font-size: 12px; }
+
+/* CALLOUT */
+.callout { padding: 16px 20px; border-radius: 0 4px 4px 0; font-size: 13px; line-height: 1.7; margin: 16px 0; }
+.callout.blue { background: #EEF3FB; border-left: 4px solid var(--blue); color: var(--navy); }
+.callout strong { color: var(--blue); }
+.callout code { font-size: 11px; background: rgba(0,0,0,0.06); padding: 2px 6px; border-radius: 3px; font-family: 'Courier New', monospace; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="blue-stripe"></div>
+  <h1>Prompt Streamline</h1>
+  <p class="hero-sub">How Specialist & Synthesis Prompts Are Assembled · Report & Chat Modes</p>
+</div>
+
+<div class="page">
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="sh"><span class="sh-label">Prompt Source Files</span><div class="sh-line"></div></div>
+
+<div class="file-grid">
+  <div class="fc" style="border-top: 4px solid var(--blue)">
+    <div class="fc-file">config/prompts/common.yaml</div>
+    <div class="fc-desc">Shared format rules for <strong>all specialist outputs</strong> in both modes. Controls how evidence is cited, how thresholds are referenced, how absent data is flagged. Edit this to change the "voice" of all specialists at once.</div>
+    <div class="fc-keys"><span class="fc-key blue">common_format_instructions</span></div>
+  </div>
+  <div class="fc" style="border-top: 4px solid var(--green)">
+    <div class="fc-file">config/pillars/{pillar}.yaml</div>
+    <div class="fc-desc">Per-specialist instructions that vary by pillar. Each domain (bureau, crossbu, modeling, ...) has a <code>report_instructions</code> field telling the specialist what to compare, which thresholds to flag, and what cross-references to make — <strong>specific to this pillar's analytical lens</strong>.</div>
+    <div class="fc-keys"><span class="fc-key green">bureau.report_instructions</span> <span class="fc-key green">crossbu.report_instructions</span> <span class="fc-key green">modeling.report_instructions</span> <span class="fc-key green">...</span></div>
+  </div>
+  <div class="fc" style="border-top: 4px solid var(--purple)">
+    <div class="fc-file">config/prompts/report.yaml</div>
+    <div class="fc-desc"><strong>Report mode</strong> prompts. Specialist section structure (Key Findings / Evidence / Implications as bullets). Synthesis report assembly (Detailed Findings / Cross-Domain / Items Requiring Attention / Summary).</div>
+    <div class="fc-keys"><span class="fc-key purple">specialist</span> <span class="fc-key purple">synthesis</span></div>
+  </div>
+  <div class="fc" style="border-top: 4px solid var(--purple)">
+    <div class="fc-file">config/prompts/chat.yaml</div>
+    <div class="fc-desc"><strong>Chat mode</strong> prompts. Specialist answer format (concise, direct, 3-8 sentences). Synthesis assembly (1-2 paragraphs, lead with answer, cite evidence, flag attention items).</div>
+    <div class="fc-keys"><span class="fc-key purple">specialist</span> <span class="fc-key purple">synthesis</span></div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="sh"><span class="sh-label">Specialist Prompt Assembly</span><div class="sh-line"></div></div>
+
+<p style="font-size:14px;color:var(--gray-text);margin-bottom:20px;line-height:1.7">
+  When a specialist produces its output, the prompt is assembled from <strong style="color:var(--navy)">3 layers</strong>.
+  The same Base Agent receives different prompts depending on mode and pillar — <strong style="color:var(--navy)">no code changes needed</strong>.
+</p>
+
+<div class="asm-row">
+  <div class="asm-box b-blue">
+    <div class="asm-num">1</div>
+    <div class="asm-title c-blue">Common Format Rules</div>
+    <div class="asm-src">config/prompts/common.yaml</div>
+    <ul class="asm-items">
+      <li>Bullet format: one idea per bullet, self-contained</li>
+      <li>Use exact variable/metric names as provided</li>
+      <li>Provide short description + original name in parentheses</li>
+      <li>Cautious language: "suggests...", "indicates..."</li>
+      <li>Include values, ranges, dates wherever available</li>
+      <li>Bold minimal meaningful phrases only</li>
+      <li>No tables unless explicitly required</li>
+    </ul>
+  </div>
+  <div class="asm-plus">+</div>
+  <div class="asm-box b-purple">
+    <div class="asm-num">2</div>
+    <div class="asm-title c-purple">Mode Instructions</div>
+    <div class="asm-src">config/prompts/{report|chat}.yaml → specialist</div>
+    <ul class="asm-items">
+      <li><strong style="color:var(--navy)">Report:</strong> ## Domain / Key Findings / Evidence / Implications</li>
+      <li><strong style="color:var(--navy)">Chat:</strong> Direct answer, 3-8 sentences, concise</li>
+      <li>JSON output schema for structured parsing</li>
+      <li>Placeholders: $question, $findings, $domain</li>
+    </ul>
+  </div>
+  <div class="asm-plus">+</div>
+  <div class="asm-box b-green">
+    <div class="asm-num">3</div>
+    <div class="asm-title c-green">Pillar-Specific Instructions</div>
+    <div class="asm-src">config/pillars/{pillar}.yaml → {domain}.report_instructions</div>
+    <ul class="asm-items">
+      <li>What scores/metrics to compare against thresholds</li>
+      <li>What cross-references to make with other domains</li>
+      <li>What specific patterns to flag</li>
+      <li>Different per pillar × domain combination</li>
+      <li>Optional — omitted if not set</li>
+    </ul>
+  </div>
+</div>
+
+<div class="callout blue">
+  <strong>Example:</strong> Bureau specialist under <code>credit_risk</code> pillar in <strong>report mode</strong> receives:<br><br>
+  <span style="color:var(--blue)">Layer 1:</span> "Use bullet points, one idea per bullet, cite exact variable names, use cautious language..."<br>
+  <span style="color:var(--purple)">Layer 2:</span> "Produce a structured report section: ## Bureau / Key Findings / Evidence / Implications..."<br>
+  <span style="color:var(--green)">Layer 3:</span> "Compare FICO, SBFE, LN, CSS, FSS, Paydex scores against thresholds. Flag if Amex is primary lender. Note judgment and lien counts..."
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="sh"><span class="sh-label">Report Mode vs Chat Mode — Side by Side</span><div class="sh-line"></div></div>
+
+<div class="mode-row">
+  <div class="mode-card m-report">
+    <div class="mc-title"><span class="mc-icon">📄</span> Report Mode</div>
+    <div class="mc-sub">Full structured report for case review — detail for analysts, summary for supervisors.</div>
+
+    <div class="mc-section">
+      <div class="mc-section-title">Specialist Output</div>
+      <div class="mc-content">
+        Structured section per domain:<br>
+        <strong>## Domain Name</strong><br>
+        <strong>Key Findings:</strong> 3-5 bullets with data citations<br>
+        <strong>Supporting Evidence:</strong> Exact sources, trends, recency<br>
+        <strong>Implications:</strong> Risk meaning, suggested actions
+      </div>
+    </div>
+
+    <div class="mc-section">
+      <div class="mc-section-title">Synthesis Output</div>
+      <div class="mc-content">
+        <strong>## Detailed Findings</strong> — per-domain subsections with bullets, cross-validated notes<br>
+        <strong>## Cross-Domain Insights</strong> — patterns across specialists<br>
+        <strong>## Items Requiring Attention</strong> — open conflicts + absence signals<br>
+        <strong>## Summary</strong> — 3-5 sentences for supervisors: posture, concerns, next steps
+      </div>
+    </div>
+
+    <div class="mc-section">
+      <div class="mc-section-title">Contradiction Handling</div>
+      <div class="mc-content">Resolutions <strong>woven into domain findings</strong> with "Cross-validated with [other domain]" notes. No separate contradictions section.</div>
+    </div>
+  </div>
+
+  <div class="mode-card m-chat">
+    <div class="mc-title"><span class="mc-icon">💬</span> Chat Mode</div>
+    <div class="mc-sub">Concise direct answer for specific reviewer questions.</div>
+
+    <div class="mc-section">
+      <div class="mc-section-title">Specialist Output</div>
+      <div class="mc-content">
+        Direct answer in <strong>3-8 sentences</strong>:<br>
+        Lead with the answer, cite data values, note caveats and gaps.
+      </div>
+    </div>
+
+    <div class="mc-section">
+      <div class="mc-section-title">Synthesis Output</div>
+      <div class="mc-content">
+        <strong>1-2 paragraphs</strong>:<br>
+        Lead with direct answer, weave in evidence from specialists, note contradictions, flag attention items.
+      </div>
+    </div>
+
+    <div class="mc-section">
+      <div class="mc-section-title">Contradiction Handling</div>
+      <div class="mc-content">If resolved: state the resolution inline. If unresolved: note it as a caveat.</div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="sh"><span class="sh-label">Pillar-Specific Instructions (credit_risk example)</span><div class="sh-line"></div></div>
+
+<p style="font-size:14px;color:var(--gray-text);margin-bottom:16px;line-height:1.7">
+  Each specialist gets <strong style="color:var(--green)">pillar-specific instructions</strong> on top of the common + mode prompts. These tell the specialist what to look for <em>under this pillar's analytical lens</em>. The same Bureau specialist gets different instructions under credit_risk vs. escalation vs. cbo.
+</p>
+
+<div class="pillar-grid">
+  <div class="pi-card">
+    <div class="pi-domain">Bureau</div>
+    <div class="pi-content">
+      <ul>
+        <li>Compare FICO, SBFE, LN Credit, LN Blended, CSS, FSS, Paydex scores against their thresholds</li>
+        <li>Highlight any score that has declined over time</li>
+        <li>Flag if Amex is the primary lender (≥ 40% exposure)</li>
+        <li>Note judgment and lien counts — even 1 is significant</li>
+        <li>If tradeline-level data shows 90D+ DPD, call it out explicitly</li>
+      </ul>
+    </div>
+  </div>
+  <div class="pi-card">
+    <div class="pi-domain">Cross-BU</div>
+    <div class="pi-content">
+      <ul>
+        <li>List each card with type, limit, balance, and status</li>
+        <li>Flag any card with account_status other than "current"</li>
+        <li>Calculate total internal exposure across all cards</li>
+        <li>Note merchant relationship with Amex (revenue offset)</li>
+        <li>Flag if past_delinquencies_12m > 0 on any card</li>
+      </ul>
+    </div>
+  </div>
+  <div class="pi-card">
+    <div class="pi-domain">Modeling</div>
+    <div class="pi-content">
+      <ul>
+        <li>Reference score drivers — which variables push risk up vs down</li>
+        <li>Compare credit_loss_prob and tot_struct_risk_score against thresholds (10 and 20)</li>
+        <li>Note positive_events count — low count may indicate stagnating relationship</li>
+        <li>Flag any variable where the value crosses its risk threshold</li>
+      </ul>
+    </div>
+  </div>
+  <div class="pi-card">
+    <div class="pi-domain">Spend & Payments</div>
+    <div class="pi-content">
+      <ul>
+        <li>Summarize spend volume and merchant concentration</li>
+        <li>Flag transactions with merchant_risk_score > 0.7</li>
+        <li>Note if spend_concentration > 2.4 or rnn_spend_score > 0.017</li>
+        <li>Flag if spend_divergence_index < 1.0 (abnormal pattern)</li>
+        <li>Look for spend spikes or sudden changes in merchant mix</li>
+      </ul>
+    </div>
+  </div>
+  <div class="pi-card">
+    <div class="pi-domain">WCC</div>
+    <div class="pi-content">
+      <ul>
+        <li>List each active flag with type, date, and severity</li>
+        <li>Critical and high severity require explicit callout</li>
+        <li>Note if multiple flags cluster in time (acute event)</li>
+        <li>Cross-reference flags with other domain findings</li>
+      </ul>
+    </div>
+  </div>
+  <div class="pi-card">
+    <div class="pi-domain">Capacity & Affordability</div>
+    <div class="pi-content">
+      <ul>
+        <li>State DTI ratio and compare against 0.43 threshold</li>
+        <li>Compare total_debt to income_est</li>
+        <li>Flag if total debt exceeds annual income</li>
+        <li>Note whether income estimate appears current or stale</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="sh"><span class="sh-label">What to Edit Where</span><div class="sh-line"></div></div>
+
+<table class="edit-table">
+  <thead>
+    <tr>
+      <th>What You Want to Change</th>
+      <th>File to Edit</th>
+      <th>Key</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Bullet format, variable naming, bold rules, language tone — <strong>all specialists, all modes</strong></td>
+      <td style="color:var(--blue)">config/prompts/common.yaml</td>
+      <td><span class="fc-key blue">common_format_instructions</span></td>
+    </tr>
+    <tr>
+      <td>Report section headings, bullet structure, evidence format</td>
+      <td style="color:var(--purple)">config/prompts/report.yaml</td>
+      <td><span class="fc-key purple">specialist</span></td>
+    </tr>
+    <tr>
+      <td>Final report sections, order, summary format, contradiction weaving rules</td>
+      <td style="color:var(--purple)">config/prompts/report.yaml</td>
+      <td><span class="fc-key purple">synthesis</span></td>
+    </tr>
+    <tr>
+      <td>Chat answer length, directness, style</td>
+      <td style="color:var(--purple)">config/prompts/chat.yaml</td>
+      <td><span class="fc-key purple">specialist</span></td>
+    </tr>
+    <tr>
+      <td>Chat synthesis conciseness, paragraph count</td>
+      <td style="color:var(--purple)">config/prompts/chat.yaml</td>
+      <td><span class="fc-key purple">synthesis</span></td>
+    </tr>
+    <tr>
+      <td>Bureau: which scores to compare, what thresholds</td>
+      <td style="color:var(--green)">config/pillars/credit_risk.yaml</td>
+      <td><span class="fc-key green">bureau.report_instructions</span></td>
+    </tr>
+    <tr>
+      <td>CrossBU: card listing format, merchant checks</td>
+      <td style="color:var(--green)">config/pillars/credit_risk.yaml</td>
+      <td><span class="fc-key green">crossbu.report_instructions</span></td>
+    </tr>
+    <tr>
+      <td>Same specialist, different pillar behavior</td>
+      <td style="color:var(--green)">config/pillars/escalation.yaml</td>
+      <td><span class="fc-key green">bureau.report_instructions</span></td>
+    </tr>
+    <tr>
+      <td>Add a new specialist's pillar instructions</td>
+      <td style="color:var(--green)">config/pillars/{pillar}.yaml</td>
+      <td><span class="fc-key green">{domain}.report_instructions</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout blue" style="margin-top:24px">
+  <strong>No code changes needed.</strong> All prompt content is loaded from YAML at runtime.
+  Edit the YAML files, re-run, and prompts update automatically.
+  Use <code>config.report_loader.reload()</code> to force reload in a running session.
+</div>
+
+</div>
+</body>
+</html>

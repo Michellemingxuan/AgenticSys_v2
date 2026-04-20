@@ -1,27 +1,373 @@
 pillar: credit_risk
 display_name: "Credit & Risk"
-focus: "Delinquency risk, bureau scores, cross-BU exposure, model scores, spend patterns, WCC flags, capacity & affordability"
+focus: "Delinquency risk, bureau scores, cross-BU exposure, internal model scores and score drivers, spend patterns, WCC flags, capacity & affordability"
+
 specialists:
   bureau:
     focus: "Delinquency Risk"
     prompt_overlay: "Flag 90D+ Marks"
+    report_instructions: |
+      [Bureau Credit Scores]
+      - Bullet format:
+        • <Score name> — <value/range> (<start → end>): <threshold comparison>; <risk interpretation>
+      - Use arrows (→) for time progression only
+      - One-line interpretation only
+
+      [External Tradelines]
+      - Bullet format:
+        • <Metric name> — <value/range> (<start → end>): <factual condition>; <risk interpretation>
+
+      [Summary Diagnosis]
+      - EXACTLY ONE bullet
+      - ONE sentence only
+      - Must synthesize (not list)
+
+      [Default Journey]
+      - Chronological bullets only
+      - Bullet format:
+        • <YYYY-MM or range>: <event>; <evidence>; <implication>
+      - Final bullet = synthesis only (no new info)
+
   crossbu:
     focus: "Cross-BU Exposure"
     prompt_overlay: "Multi-product overlap"
+    report_instructions: |
+      [Card-Level Summary]
+      - Output ONLY one markdown table
+      - No bullets allowed
+
+      [Merchant Relationships]
+      - Bullet format:
+        • <observation>
+      - Must include:
+        • merchant count
+        • charge volume trend
+      - Explicit “No data” statements required when missing
+
   modeling:
     focus: "Score Trajectories"
     prompt_overlay: "Trend vs threshold; top and bottom drivers, in late and early time windows."
+    report_instructions: |
+      ############### Modeling variables
+      [Key Highlights]
+      - Bullet format:
+        • <label>: <evidence>; <implication>
+      - ONE sentence per bullet
+      - Final bullet must be “Summary:”
+
+      [Top Predictors]
+      - Numbered format ONLY:
+        • 1. <variable> — <behavior>. Reason: <interpretation>
+      - Separate sections:
+        • Top 5 Early
+        • Top 5 Late
+
+      [Notes & Reasoning]
+      - Bullet format:
+        • <summary>: <explanation> - <evidence>
+
+      [Default Journey]
+      - Same timeline format
+      ############### Drivers
+      [Executive Summary]
+      - ONE paragraph only (no bullets)
+
+      [Key Risk Drivers]
+      - Bullet format:
+        • <variable> — Frequency: <...>; Month range: <...>. Reason: <...>
+      - Max 5 bullets
+
+      [Protective Drivers]
+      - Same format as above
+
+      [Temporal Insights]
+      - EXACTLY 3 bullets:
+        • Early window
+        • Mid window
+        • Late window
+
+      [Orthogonal Insights]
+      - Unlimited bullets
+      - Must include:
+        • label:
+        • interaction
+        • implication
+
+      [Diagnosis]
+      - ONE bullet
+      - ONE sentence
+
+      [Default Journey]
+      - Same timeline format as bureau
+
   spend_payments:
     focus: "Payment Behavior"
     prompt_overlay: "6M rolling trends"
+    report_instructions: |
+      [Dataset Overview]
+      - EXACTLY 6 bullets
+      - Fixed labels (must match exactly)
+
+      [Account-Level Insights]
+      - Bullet format:
+        • <Account>: had <$Amount> returned payment on <date> with reason <reason> — <interpretation>
+
+      [Return Insights]
+      - Bullet format:
+        • <date> — <$Amount> — <account> — <reason>: <explanation>
+
+      [Spend Insights]
+      - Bullet format:
+        • <label> — <merchant>: <explanation>; <date> — <merchant> — <$amount>; <interpretation>
+
+      [Temporal Pattern]
+      - EXACTLY 3 bullets:
+        • Spending
+        • Payment
+        • Combined
+      - Strict label format required
+
   wcc:
     focus: "Watch-list Flags"
     prompt_overlay: "Standalone signals"
+    report_instructions: |
+      [Monthly Headers]
+      - Format: <Mon’YYYY>
+      - Must include ALL months
+      - No bullets in headers
+
+      [Bullets]
+      - EXACT single-line format:
+        • <Event type> — <date>; What happened: <...>; Why it matters: <...>
+
+      - Rules:
+        • One line ONLY (no line breaks)
+        • Semicolons separate components
+        • Each event = one bullet
+        • Must include numeric values if present
+
+      - If no events:
+        • “No material events recorded.”
+
   customer_rel:
     focus: "Relationship Depth"
     prompt_overlay: "Product breadth"
+    report_instructions: |
+      When producing the customer relationship section:
+      - State tenure in months and customer segment
+      - Note number of products held
+      - Short tenure (< 12 months) with multiple products is a risk signal
+      - Long tenure with deteriorating indicators may signal relationship at risk
+
   capacity_afford:
     focus: "Capacity Headroom"
     prompt_overlay: "Limit vs DTI"
+    report_instructions: |
+      When producing the capacity section:
+      - State DTI ratio and compare against 0.43 threshold
+      - Compare total_debt to income_est
+      - Flag if total debt exceeds annual income
+      - Note whether income estimate appears current or stale
+
+# ── Pillar-Level Report Format ────────────────────────────────────
+# Controls the overall structure of the final assembled report for this pillar.
+# Overrides or extends the base report structure from config/prompts/report.yaml.
+
+report_format: |
+  The final Credit & Risk report MUST contain these sections in this order:
+
+  ## Bureau Credit Scores
+  ## External Tradelines
+  ## Cross-BU Card Portfolio
+  ## Modeling & Score Drivers
+  ## Spend & Payment Behavior
+  ## Watch-list & Credit Control
+  ## Customer Relationship
+  ## Capacity & Affordability
+  ## Cross-Domain Insights
+  ## Items Requiring Attention
+  ## Summary
+
+  Rules:
+  - Each domain section uses the specialist's own sub-structure
+    (e.g. Bureau has [Bureau Credit Scores] / [External Tradelines] / [Summary Diagnosis] / [Default Journey])
+  - Domain sections appear in the order listed above, NOT alphabetical
+  - Cross-Domain Insights synthesizes patterns across domains
+  - Items Requiring Attention includes open conflicts AND absence-as-signal flags
+  - Summary is 3-5 sentences for supervisors: posture, key concerns, recommended next steps
+
+# ── Pillar-Level Synthesis Instructions ───────────────────────────
+# Additional instructions for the orchestrator when synthesizing
+# specialist outputs for this pillar.
+
+synthesis_report: 
+  instructions: |
+    For Credit & Risk pillar synthesis:
+    - For report, there should be an overview chapter for the following sections:
+      ## 1. Why and how the default occurred?
+      ## 2. Early risk indicators (>6m before default)
+      ## 3. How did modeling scores react?
+      ## 4. Major behavioral changes towards default (<6 m)
+    - The overview chapter is followed by the output from each specialist avaiable for this pillar.
+    - Cross-domain analysis:
+      - Lead with the most critical risk signals across all domains
+      - Highlight score divergences (e.g. FICO vs internal model scores)
+      - Cross-reference bureau delinquency with payment behavior and WCC flags
+      - If multiple domains flag the same risk, state it once with cross-validation notes
+      - When bureau scores conflict with spend patterns, note the recency of each data source
+    - Include Default Journey timeline if multiple domains provide temporal data
+    - The Summary must include a clear recommendation: further review / approve / escalate / decline
+
+  early_risk_prediction_section: 
+    report_instructions: |
+      SECTION: Early risk indicators (>6m before default)
+
+      CONTENT RULES
+      - Only include data before cutoff_date (>6m before default).
+      - Output ONLY top 5 bullets.
+      - Remove:
+        • missing information
+        • zero / null signals
+      - Focus on:
+        • modelling threshold breaches
+        • bureau signals (balances, concentration, etc.)
+
+      BULLET STRUCTURE
+      • <short summarization>: <explanation with date or date range>, <risk implication>
+
+      DATE FORMAT
+      - Must be:
+        • Mon’YYYY
+        • OR Mon’YYYY to Mon’YYYY
+
+      FORMAT RULES
+      - Use bullet points only.
+      - One paragraph per bullet.
+      - No variable names (use business language).
+      - Keep concise and senior-leadership friendly.
+
+  modeling_reaction_section: 
+      report_instructions: |
+        SECTION: How did modeling scores react?
+
+        STRUCTURE
+        - Early window (>6m)
+        - Late window (<6m)
+        - Takeaway
+
+        EARLY & LATE WINDOWS
+
+        Each window MUST contain EXACTLY 3 primary bullets:
+        • Score Behavior:
+        • Risk Drivers:
+        • Bottom Drivers:
+
+        SUB-BULLETS RULE
+        - Under Risk Drivers and Bottom Drivers:
+            ◦ <short label> <implication sentence>
+        - Each ◦:
+          • Single sentence
+          • Must include “suggests…”, “indicates…”, or “points to…”
+
+        CONSTRAINTS
+        - Do NOT mention variable names.
+        - Score Behavior:
+          • Describe TSR & CDSS behavior (thresholds: 10, 20)
+        - Risk Drivers:
+          • Describe dominant risk themes
+        - Bottom Drivers:
+          • Describe stabilizing factors
+
+        FORMAT RULES
+        - EXACT indentation:
+            ◦ must start with 4 spaces + "◦ "
+        - No extra bullets beyond defined structure
+
+        TAKEAWAY
+        - ONE bullet only
+        - Integrated comparison Early vs Late
+
+  behavior_change_section: 
+      report_instructions: |
+        SECTION: Major behavioral changes (<6m)
+
+        SUBSECTIONS
+        - Spends & Payments
+        - Revenue
+        - Utilization History Trend
+        - Liquidity Posture
+
+        ------------------------
+        SPENDS & PAYMENTS
+        ------------------------
+        - EXACTLY 3 bullets:
+          • Spends
+          • Payments
+          • Joint behavior
+
+        BULLET STRUCTURE
+        • <label>; <data-backed explanation>; <interpretation>
+
+        RULES
+        - Include:
+          • amounts, dates, merchants (for spends)
+          • directional changes
+        - Highlight:
+          • volatility
+          • concentration
+          • large-ticket spend
+          • spend vs payment divergence
+
+        ------------------------
+        REVENUE
+        ------------------------
+        - Describe trend (flat / growing / declining)
+        - Use ONLY business_revenue
+
+        ------------------------
+        UTILIZATION
+        ------------------------
+        - Describe utilization spikes, band movement
+        - Use ONLY avutil_exrvlv_balgt50_max
+
+        ------------------------
+        LIQUIDITY POSTURE
+        ------------------------
+        - EXACTLY 1 bullet summarizing last 6 months
+
+        GLOBAL RULES
+        - No variable names in output
+        - Business language only
+        - Emphasize directional shifts
+
+  wcc_overview_section:
+      report_instructions: |
+        SECTION: Why and how the default occurred?
+
+        STRUCTURE
+        - Two-level hierarchy REQUIRED:
+
+        PRIMARY BULLETS
+        • <Event theme>
+
+        SECOND-LEVEL BULLETS
+            ◦ <Mon’YYYY or range>: <event explanation>, <risk implication>
+
+        RULES
+        - Each primary bullet MUST have ≥1 sub-bullet.
+        - No standalone primary bullets.
+        - Group related events under same theme.
+        - Chronological ordering within group.
+
+        CONSTRAINTS
+        - Do NOT use abbreviations in primary bullet labels.
+        - Use business event descriptions (themes).
+        - Dates must be:
+          • Mon’YYYY
+          • OR Mon’YYYY to Mon’YYYY
+
+        DECISION RULE
+        - Before creating new primary bullet:
+          → Check if event fits existing theme
 silenced_tables: []
 silenced_columns: {}

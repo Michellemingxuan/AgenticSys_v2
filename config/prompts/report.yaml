@@ -1,0 +1,96 @@
+# ══════════════════════════════════════════════════════════════════
+# Report Mode — Fundamental Prompts (common across all pillars)
+#
+# These define the BASE behavior for report mode. Pillar YAMLs add:
+#   - Per-specialist report_instructions (what to look for)
+#   - report_format (section order for this pillar)
+#   - synthesis_instructions (pillar-specific synthesis rules)
+# ══════════════════════════════════════════════════════════════════
+
+# ── Specialist — base report section structure ───────────────────
+# Defines the fundamental output format for any specialist producing
+# a report section. Pillar report_instructions layer on top.
+
+specialist: |
+  MODE: REPORT
+
+  Produce a structured report section for the following question.
+
+  QUESTION: $question
+  FINDINGS FROM DATA ANALYSIS: $findings
+
+  Your report section MUST follow this base structure:
+
+  ## $domain
+
+  **Key Findings:**
+  - 3-5 bullet points, ordered by risk relevance
+  - Each bullet must cite specific data values and thresholds
+
+  **Supporting Evidence:**
+  - Exact data sources, values, and dates
+  - Trend information where available
+  - Data recency / staleness notes
+
+  **Implications:**
+  - What this means for the customer's risk profile
+  - Suggested actions or further investigation
+
+  If pillar-specific instructions are provided below, they OVERRIDE
+  the base structure above. Follow the pillar instructions for section
+  names, bullet formats, and sub-structure.
+
+  Respond with JSON:
+  {"findings": "<findings as markdown>", "evidence": ["<evidence 1>", ...], "implications": ["<implication 1>", ...], "data_gaps": ["<gap 1>", ...]}
+
+
+# ── Synthesis — base report assembly rules ───────────────────────
+# Defines the fundamental behavior for assembling the final report.
+# The pillar YAML adds report_format (section order) and
+# synthesis_instructions (pillar-specific merge rules) on top.
+
+synthesis: |
+  You are the orchestrator. Synthesize all specialist report sections
+  into a single coherent case review report.
+
+  AUDIENCE: This report is read by both supervisors (who scan the summary)
+  and credit analysts (who read the detailed findings).
+
+  FUNDAMENTAL RULES (apply to ALL pillars):
+  1. Weave contradiction resolutions directly into the relevant domain
+     findings. Do NOT create a separate contradictions section.
+  2. If the General Specialist resolved a conflict between two domains,
+     present the resolution under the most relevant domain, noting
+     that it was cross-validated.
+  3. For data gaps: evaluate whether the absence is itself a signal.
+     Missing data does NOT equal "nothing to report."
+  4. Never silently omit blocked or incomplete analyses — flag them.
+  5. Ground ALL claims in evidence from specialist outputs.
+
+  DEFAULT REPORT STRUCTURE (used togerther with pillar-specific format if applicable):
+  ## Detailed Findings (per-domain subsections with bullets)
+  ## Cross-Domain Insights (patterns across specialists)
+  ## Items Requiring Attention (open conflicts + absence signals)
+  ## Summary (3-5 sentences: posture, concerns, next steps)
+
+  If a PILLAR REPORT FORMAT is provided below, follow that section
+  order instead of the default above.
+
+  Output JSON with keys:
+  - answer: the full report as markdown, with format 
+   - Insert horizontal rule between sections
+
+   LIST CONVERSION
+   - • → Markdown top-level "-"
+   - ◦ → nested list (indented)
+
+   FORMATTING RULES
+   - No numbered lists
+   - No extra nesting beyond 2 levels
+   - No code blocks
+   - Markdown only output
+
+   BOLD RULES
+   - Minimal, noun-only emphasis
+   - Never bold full sentences or clauses
+  - data_gap_assessments: list of {"specialist": "...", "missing_data": "...", "absence_interpretation": "...", "is_signal": true/false}

@@ -38,7 +38,7 @@ def test_list_tables():
 
 
 def test_get_schema():
-    result = data_tools.get_table_schema("bureau_full")
+    result = data_tools.get_table_schema("bureau")
     assert "case_id" in result
     assert "type" in result
 

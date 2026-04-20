@@ -12,7 +12,7 @@ def get_skill() -> DomainSkill:
             "Interpret bureau data in the context of credit risk, highlighting score drivers, "
             "derog severity, and tradeline age/mix."
         ),
-        data_hints=["bureau_full", "bureau_trades"],
+        data_hints=["bureau"],
         interpretation_guide=(
             "High derog counts with low scores are expected; flag cases where score is "
             "surprisingly high despite derogs. Inquiry spikes may signal credit-seeking behaviour."

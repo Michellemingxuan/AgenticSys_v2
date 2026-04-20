@@ -47,11 +47,11 @@ def test_catalog_lists_tables(catalog):
     tables = catalog.list_tables()
     assert isinstance(tables, list)
     assert len(tables) > 0
-    assert "bureau_full" in tables
+    assert "bureau" in tables
 
 
 def test_catalog_get_schema(catalog):
-    schema = catalog.get_schema("bureau_full")
+    schema = catalog.get_schema("bureau")
     assert schema is not None
     assert "case_id" in schema
     assert "type" in schema["case_id"]
