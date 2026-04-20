@@ -35,7 +35,7 @@ class DataGateway(ABC):
 
     @abstractmethod
     def query(
-        self, table: str, filters: dict[str, Any] | None = None, limit: int = 100
+        self, table: str, filters: dict[str, Any] | None = None,
     ) -> list[dict] | None:
         """Query a table for the current case. Returns None if table doesn't exist."""
         ...
@@ -66,7 +66,7 @@ class SimulatedDataGateway(DataGateway):
         return sorted(self._case_data.keys())
 
     def query(
-        self, table: str, filters: dict[str, Any] | None = None, limit: int = 100
+        self, table: str, filters: dict[str, Any] | None = None,
     ) -> list[dict] | None:
         if self._current_case is None:
             return None
@@ -80,10 +80,10 @@ class SimulatedDataGateway(DataGateway):
         if filters:
             rows = [
                 r for r in rows
-                if all(r.get(k) == v for k, v in filters.items())
+                if all(str(r.get(k, "")) == str(v) for k, v in filters.items())
             ]
 
-        return rows[:limit]
+        return rows
 
     def list_tables(self) -> list[str]:
         if self._current_case is None:

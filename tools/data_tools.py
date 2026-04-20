@@ -53,7 +53,6 @@ def query_table(
     table_name: str,
     filter_column: str = "",
     filter_value: str = "",
-    limit: int = 50,
 ) -> str:
     """Query a data table for the current case. All data is scoped to the active case."""
     if _gateway is None:
@@ -61,9 +60,9 @@ def query_table(
 
     filters: dict[str, Any] | None = None
     if filter_column and filter_value:
-        filters = {filter_column: filter_value}
+        filters = {filter_column: str(filter_value)}
 
-    rows = _gateway.query(table_name, filters=filters, limit=limit)
+    rows = _gateway.query(table_name, filters=filters)
     if rows is None:
         return f"Data unavailable: table '{table_name}' not found for current case."
 
