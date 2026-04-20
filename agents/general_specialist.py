@@ -93,6 +93,25 @@ class GeneralSpecialist:
             )
         return "\n".join(parts)
 
+    @staticmethod
+    def _as_str(v) -> str:
+        """Coerce LLM output to string — LLMs sometimes return bool/None/etc for fields."""
+        if v is None or v is False:
+            return ""
+        if v is True:
+            return "true"
+        if isinstance(v, str):
+            return v
+        return str(v)
+
+    @staticmethod
+    def _as_str_list(v) -> list[str]:
+        if not v:
+            return []
+        if isinstance(v, list):
+            return [GeneralSpecialist._as_str(x) for x in v if x]
+        return [GeneralSpecialist._as_str(v)]
+
     def _parse_compare_result(self, result: LLMResult) -> ReviewReport:
         if result.status == "blocked" or result.data is None:
             return ReviewReport()
@@ -101,33 +120,48 @@ class GeneralSpecialist:
 
         resolved = []
         for r in data.get("resolved", []):
+            if not isinstance(r, dict):
+                continue
+            # Skip entries where there's no actual contradiction (LLM sometimes emits {"contradiction": false})
+            contradiction = self._as_str(r.get("contradiction", ""))
+            if not contradiction:
+                continue
             pair = r.get("pair", ["", ""])
+            if not isinstance(pair, list):
+                pair = ["", ""]
             resolved.append(
                 Resolution(
-                    pair=tuple(pair[:2]) if len(pair) >= 2 else ("", ""),
-                    contradiction=r.get("contradiction", ""),
-                    question_raised=r.get("question_raised", ""),
-                    answer=r.get("answer", ""),
-                    supporting_evidence=r.get("supporting_evidence", []),
-                    conclusion=r.get("conclusion", ""),
+                    pair=tuple(self._as_str(p) for p in pair[:2]) if len(pair) >= 2 else ("", ""),
+                    contradiction=contradiction,
+                    question_raised=self._as_str(r.get("question_raised", "")),
+                    answer=self._as_str(r.get("answer", "")),
+                    supporting_evidence=self._as_str_list(r.get("supporting_evidence", [])),
+                    conclusion=self._as_str(r.get("conclusion", "")),
                 )
             )
 
         open_conflicts = []
         for c in data.get("open_conflicts", []):
+            if not isinstance(c, dict):
+                continue
+            contradiction = self._as_str(c.get("contradiction", ""))
+            if not contradiction:
+                continue
             pair = c.get("pair", ["", ""])
+            if not isinstance(pair, list):
+                pair = ["", ""]
             open_conflicts.append(
                 Conflict(
-                    pair=tuple(pair[:2]) if len(pair) >= 2 else ("", ""),
-                    contradiction=c.get("contradiction", ""),
-                    question_raised=c.get("question_raised", ""),
-                    reason_unresolved=c.get("reason_unresolved", ""),
-                    evidence_from_both=c.get("evidence_from_both", []),
+                    pair=tuple(self._as_str(p) for p in pair[:2]) if len(pair) >= 2 else ("", ""),
+                    contradiction=contradiction,
+                    question_raised=self._as_str(c.get("question_raised", "")),
+                    reason_unresolved=self._as_str(c.get("reason_unresolved", "")),
+                    evidence_from_both=self._as_str_list(c.get("evidence_from_both", [])),
                 )
             )
 
         return ReviewReport(
             resolved=resolved,
             open_conflicts=open_conflicts,
-            cross_domain_insights=data.get("cross_domain_insights", []),
+            cross_domain_insights=self._as_str_list(data.get("cross_domain_insights", [])),
         )
