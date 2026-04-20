@@ -46,12 +46,13 @@ def run_question(
     logger: EventLogger,
     registry: SessionRegistry,
     pillar_yaml: dict,
+    catalog=None,
 ) -> FinalOutput:
     """Run the full pipeline for a single question."""
     available = list_domain_skills()
 
-    # Team construction
-    team_constructor = TeamConstructor(firewall, logger)
+    # Team construction — pass catalog so LLM sees column names
+    team_constructor = TeamConstructor(firewall, logger, catalog=catalog)
     active = registry.list_active()
     selected = team_constructor.select_specialists(
         question=question,
@@ -192,6 +193,7 @@ def main():
         final = run_question(
             args.question, args.mode, args.pillar,
             firewall, logger, registry, pillar_yaml,
+            catalog=catalog,
         )
         formatted = chat_agent.format_for_reviewer(final)
         print(formatted)
@@ -225,6 +227,7 @@ def main():
             final = run_question(
                 question, args.mode, args.pillar,
                 firewall, logger, registry, pillar_yaml,
+                catalog=catalog,
             )
             formatted = chat_agent.format_for_reviewer(final)
             last_context = formatted

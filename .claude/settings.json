@@ -43,7 +43,8 @@
       "Bash(venv/bin/pip install *)",
       "Bash(venv/bin/python -c \"import yaml; yaml.safe_load\\(open\\('config/pillars/credit_risk.yaml'\\)\\); print\\('credit_risk.yaml: OK'\\)\")",
       "Bash(venv/bin/python -c \"import yaml; yaml.safe_load\\(open\\('config/prompts/common.yaml'\\)\\); print\\('common.yaml: OK'\\)\")",
-      "Bash(venv/bin/python -c \"import yaml; yaml.safe_load\\(open\\('config/pillars/credit_risk.yaml'\\)\\); print\\('OK'\\)\")"
+      "Bash(venv/bin/python -c \"import yaml; yaml.safe_load\\(open\\('config/pillars/credit_risk.yaml'\\)\\); print\\('OK'\\)\")",
+      "Bash(xargs -I{} head -1 {})"
     ],
     "additionalDirectories": [
       "/Users/mingxuanliu/Library/CloudStorage/GoogleDrive-mingxuan99michelle@gmail.com/My\\ Drive/Projs/AgenticSys_v1"

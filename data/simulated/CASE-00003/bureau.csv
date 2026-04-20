@@ -1,0 +1,5 @@
+fico_score,sbfe_score,ln_credit_score,ln_blended_score,css_score,fss_score,paydex_score,delinquent_external_trades,external_delinquency_amount,total_tradelines,overall_external_exposure,overall_external_revolving_balance,avg_external_utilization,amex_primary_lender_indicator,ln_business_value,judgements_org_count,lien_org_count,score_date,trade_type,balance,credit_limit,utilization,dpd_status,delinquency_amount,is_revolving,open_date,last_reported_date
+678,912,677,728,73,57,75,0,0.0,22,81636.1017,13303.274,0.2764,0,1381574.8677,0,0,2024-10-26,commercial,16362.8176,38735.8475,0.4687,current,3691.5546,1,2022-07-26,2024-09-08
+748,886,721,697,78,63,54,0,3380.7033,7,85110.313,20680.8901,0.4204,0,1663997.7419,0,0,2024-05-13,mortgage,1423.3595,0.0,0.1864,current,0.0,0,2016-08-29,2024-07-06
+623,860,637,674,72,56,82,1,12448.0139,14,36045.6473,0.0,0.3811,1,1469337.8271,0,0,2024-12-17,revolving,11938.1706,13354.0302,0.3172,current,1055.9769,0,2024-07-31,2024-11-02
+808,850,785,728,63,51,85,2,14286.0479,12,54129.1332,5470.0903,0.5055,1,2366155.8027,0,0,2024-06-09,mortgage,20807.9271,53839.6472,0.7802,current,8293.0212,1,2024-11-26,2024-10-25
