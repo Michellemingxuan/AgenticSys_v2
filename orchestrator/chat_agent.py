@@ -38,14 +38,16 @@ class ChatAgent:
                 )
                 parts.append(f"    Reason unresolved: {conflict.reason_unresolved}")
 
-        # Data gaps
-        if final_output.data_gaps:
-            parts.append("\n--- DATA GAPS ---")
-            for gap in final_output.data_gaps:
-                signal_note = " [SIGNAL]" if gap.is_signal else ""
-                parts.append(
-                    f"  {gap.specialist}: {gap.missing_data}{signal_note}"
-                )
+        # Data gap summary (concise high-level) — preferred when available
+        if final_output.data_gap_summary:
+            parts.append(f"\n--- DATA GAP SUMMARY ---\n{final_output.data_gap_summary}")
+
+        # Only show detailed list for gaps flagged as SIGNALS (avoid noise)
+        signal_gaps = [g for g in final_output.data_gaps if g.is_signal]
+        if signal_gaps:
+            parts.append("\n--- DATA GAPS (flagged as signals) ---")
+            for gap in signal_gaps:
+                parts.append(f"  {gap.specialist}: {gap.missing_data}")
                 if gap.absence_interpretation:
                     parts.append(f"    Interpretation: {gap.absence_interpretation}")
 

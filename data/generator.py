@@ -64,16 +64,72 @@ class DataGenerator:
         columns: dict[str, list] = {}
         col_specs = profile["columns"]
 
-        # First pass: generate independent columns
+        # First pass: generate non-derived columns
+        derived_specs: dict[str, dict] = {}
         for col_name, spec in col_specs.items():
+            if "derive_from" in spec:
+                derived_specs[col_name] = spec
+                continue
             columns[col_name] = self._generate_column(spec, n, rng, profile)
 
-        # Apply correlations
+        # Apply correlations (only on base columns)
         correlations = profile.get("correlations", [])
         if correlations:
             self._apply_correlations(columns, correlations, col_specs, n, rng)
 
+        # Second pass: derived columns, computed from already-generated source columns
+        for col_name, spec in derived_specs.items():
+            columns[col_name] = self._derive_column(spec, columns, n)
+
         return columns
+
+    def _derive_column(self, spec: dict, columns: dict, n: int) -> list:
+        """Compute a column from another column using a transform."""
+        source = spec["derive_from"]
+        transform = spec.get("transform", "identity")
+        if source not in columns:
+            raise ValueError(f"derive_from source '{source}' not found in columns")
+        source_values = columns[source]
+
+        if transform == "month_name":
+            # Convert YYYY-MM-DD (or date string) to month name (e.g. "October")
+            from datetime import date
+            months = [
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December",
+            ]
+            result = []
+            for v in source_values:
+                try:
+                    if isinstance(v, str):
+                        d = date.fromisoformat(v)
+                    else:
+                        d = v  # already a date
+                    result.append(months[d.month - 1])
+                except Exception:
+                    result.append("")
+            return result
+
+        if transform == "month_year":
+            # e.g. "October'2024"
+            from datetime import date
+            months = [
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December",
+            ]
+            result = []
+            for v in source_values:
+                try:
+                    d = date.fromisoformat(v) if isinstance(v, str) else v
+                    result.append(f"{months[d.month - 1]}'{d.year}")
+                except Exception:
+                    result.append("")
+            return result
+
+        if transform == "identity":
+            return list(source_values)
+
+        raise ValueError(f"Unknown transform: {transform}")
 
     def _generate_column(
         self, spec: dict, n: int, rng: np.random.Generator, profile: dict

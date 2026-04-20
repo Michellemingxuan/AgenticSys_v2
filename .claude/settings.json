@@ -44,7 +44,9 @@
       "Bash(venv/bin/python -c \"import yaml; yaml.safe_load\\(open\\('config/pillars/credit_risk.yaml'\\)\\); print\\('credit_risk.yaml: OK'\\)\")",
       "Bash(venv/bin/python -c \"import yaml; yaml.safe_load\\(open\\('config/prompts/common.yaml'\\)\\); print\\('common.yaml: OK'\\)\")",
       "Bash(venv/bin/python -c \"import yaml; yaml.safe_load\\(open\\('config/pillars/credit_risk.yaml'\\)\\); print\\('OK'\\)\")",
-      "Bash(xargs -I{} head -1 {})"
+      "Bash(xargs -I{} head -1 {})",
+      "Bash(venv/bin/pytest tests/test_data/test_generator.py::TestGeneration::test_deterministic_with_seed --tb=short)",
+      "Bash(git rm *)"
     ],
     "additionalDirectories": [
       "/Users/mingxuanliu/Library/CloudStorage/GoogleDrive-mingxuan99michelle@gmail.com/My\\ Drive/Projs/AgenticSys_v1"

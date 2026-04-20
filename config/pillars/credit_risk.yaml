@@ -2,6 +2,9 @@ pillar: credit_risk
 display_name: "Credit & Risk"
 focus: "Delinquency risk, bureau scores, cross-BU exposure, internal model scores and score drivers, spend patterns, WCC flags, capacity & affordability"
 
+# Data collection cut-off — "recent" is relative to this date
+cut_off_date: "2025-12-01"
+
 specialists:
   bureau:
     focus: "Delinquency Risk"

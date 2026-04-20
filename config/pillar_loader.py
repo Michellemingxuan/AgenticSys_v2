@@ -42,10 +42,22 @@ class PillarLoader:
     def get_specialist_config(self, pillar_name: str, domain: str) -> dict | None:
         """Return the specialist config dict for a given domain within a pillar.
 
+        Automatically injects pillar-level fields (cut_off_date, etc.) into
+        the specialist config so they are available in the specialist prompt.
+
         Returns None if the pillar or domain does not exist.
         """
         pillar = self.load(pillar_name)
         if pillar is None:
             return None
         specialists = pillar.get("specialists", {})
-        return specialists.get(domain)
+        spec_config = specialists.get(domain)
+        if spec_config is None:
+            return None
+
+        # Inject pillar-level fields that specialists need
+        result = dict(spec_config)
+        for key in ("cut_off_date",):
+            if key in pillar and key not in result:
+                result[key] = pillar[key]
+        return result

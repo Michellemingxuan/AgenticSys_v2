@@ -1,6 +1,6 @@
-table: pmts_detail
-description: "Transaction-level spend and payment detail — multiple rows per case. Contains merchant details, spend amounts, and risk scores."
-rows_per_case: 100              # TUNE: number of transaction rows per case
+table: spends
+description: "Transaction-level spend data — multiple rows per case. Each row is one transaction (spend) with merchant details and risk scores."
+rows_per_case: 100              # TUNE: number of spend rows per case
 one_row_per_case: false
 
 columns:
@@ -9,27 +9,16 @@ columns:
     format: "CASE-{seq:05d}"
     description: "Foreign key to case"
 
-  date:
+  spend_date:
     dtype: date
-    year: [2023, 2024]
-    description: "Transaction date"
+    year: [2024, 2025]
+    description: "Date of the spend transaction (YYYY-MM-DD). Dates range within 2024-2025; the data cut-off is 2025-12."
 
   month:
-    dtype: categorical
-    categories:
-      "January": 0.083
-      "February": 0.083
-      "March": 0.083
-      "April": 0.083
-      "May": 0.083
-      "June": 0.083
-      "July": 0.083
-      "August": 0.083
-      "September": 0.084
-      "October": 0.084
-      "November": 0.084
-      "December": 0.084
-    description: "Transaction month"
+    dtype: string
+    derive_from: spend_date
+    transform: month_name
+    description: "Month name of spend_date (e.g. October). DERIVED from spend_date — always consistent with it. Use for seasonal analysis; for point-in-time filtering, use spend_date."
 
   amount:
     dtype: float

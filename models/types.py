@@ -93,6 +93,7 @@ class BlockedStep(BaseModel):
 
 class FinalOutput(BaseModel):
     answer: str
+    data_gap_summary: str = ""   # one concise summary of missing data across specialists
     resolved_contradictions: list[Resolution] = Field(default_factory=list)
     open_conflicts: list[Conflict] = Field(default_factory=list)
     data_gaps: list[DataGap] = Field(default_factory=list)

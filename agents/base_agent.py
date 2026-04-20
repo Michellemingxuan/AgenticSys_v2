@@ -59,6 +59,12 @@ class BaseSpecialistAgent:
                 parts.append(f"Pillar focus: {self.pillar['focus']}")
             if "overlay" in self.pillar:
                 parts.append(f"Pillar overlay: {self.pillar['overlay']}")
+            if "cut_off_date" in self.pillar:
+                parts.append(
+                    f"DATA CUT-OFF DATE: {self.pillar['cut_off_date']}\n"
+                    f"Interpret 'recent' and 'current' relative to this date. "
+                    f"No data exists beyond this cut-off."
+                )
 
         # Rolling summary
         if self.rolling_summary:

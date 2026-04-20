@@ -49,4 +49,8 @@ synthesis: |
 
   Output JSON with keys:
   - answer: the synthesized answer
+  - data_gap_summary: ONE SHORT SENTENCE summarizing the high-level missing
+    data, if any. Example: "Payment data for the last 3 months is unavailable."
+    Empty string if no material gaps.
   - data_gap_assessments: list of {"specialist": "...", "missing_data": "...", "absence_interpretation": "...", "is_signal": true/false}
+    Keep SHORT — only genuine signals or gaps that materially affect the answer.

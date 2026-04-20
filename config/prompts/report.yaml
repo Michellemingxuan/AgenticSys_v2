@@ -93,4 +93,10 @@ synthesis: |
    BOLD RULES
    - Minimal, noun-only emphasis
    - Never bold full sentences or clauses
+  - data_gap_summary: ONE CONCISE PARAGRAPH (3-5 sentences max) summarizing
+    the high-level missing data across ALL specialists. Group similar gaps
+    (e.g. "payment data for Oct-Dec 2025 is missing across spends and payments
+    tables"). Do NOT list every gap — synthesize.
   - data_gap_assessments: list of {"specialist": "...", "missing_data": "...", "absence_interpretation": "...", "is_signal": true/false}
+    Keep this list SHORT — only include gaps that are genuine signals or
+    materially affect the conclusion. Do NOT include minor/expected absences.

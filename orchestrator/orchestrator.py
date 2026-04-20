@@ -127,6 +127,7 @@ class Orchestrator:
 
         data = result.data
         answer = data.get("answer", data.get("response", "No answer generated"))
+        data_gap_summary = data.get("data_gap_summary", "")
 
         # Parse data gap assessments
         data_gaps: list[DataGap] = []
@@ -175,6 +176,7 @@ class Orchestrator:
 
         return FinalOutput(
             answer=answer,
+            data_gap_summary=data_gap_summary,
             resolved_contradictions=review_report.resolved,
             open_conflicts=review_report.open_conflicts,
             data_gaps=data_gaps,
