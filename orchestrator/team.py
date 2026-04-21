@@ -102,7 +102,7 @@ class TeamConstructor:
                 for table in skill.data_hints:
                     schema = self.catalog.get_schema(table)
                     if schema:
-                        col_names = [c for c in schema.keys() if c != "case_id"]
+                        col_names = list(schema.keys())
                         # Show first 15 columns to keep prompt manageable
                         if len(col_names) > 15:
                             desc += f"\n    Columns ({table}): {', '.join(col_names[:15])}... (+{len(col_names)-15} more)"

@@ -80,7 +80,7 @@ def query_table(
     if columns:
         requested = [c.strip() for c in columns.split(",") if c.strip()]
         if requested:
-            # Always keep case_id-like identifier columns if present
+            # Project requested columns only.
             rows = [{k: row[k] for k in requested if k in row} for row in rows]
             if not rows or not rows[0]:
                 return f"No requested columns {requested} found in '{table_name}'."
