@@ -4,11 +4,6 @@ rows_per_case: 12               # TUNE: number of score rows per case
 one_row_per_case: false
 
 columns:
-  case_id:
-    dtype: string
-    format: "CASE-{seq:05d}"
-    description: "Foreign key to case"
-
   trans_month:
     dtype: date
     year: [2024, 2025]

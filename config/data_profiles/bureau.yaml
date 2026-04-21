@@ -4,11 +4,6 @@ rows_per_case: 4
 one_row_per_case: false
 
 columns:
-  case_id:
-    dtype: string
-    format: "CASE-{seq:05d}"
-    description: "Foreign key to case"
-
   # ── Case-Level Credit Scores (same value across all tradelines for a case) ──
 
   fico_score:

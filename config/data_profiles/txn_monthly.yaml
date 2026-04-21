@@ -4,11 +4,6 @@ rows_per_case: 10              # TUNE: number of monthly transaction rows per ca
 one_row_per_case: false
 
 columns:
-  case_id:
-    dtype: string
-    format: "CASE-{seq:05d}"
-    description: "Unique case identifier"
-
   month:
     dtype: date
     year: [2024, 2025]

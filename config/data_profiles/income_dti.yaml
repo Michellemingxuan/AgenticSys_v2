@@ -4,11 +4,6 @@ rows_per_case: 1
 one_row_per_case: true
 
 columns:
-  case_id:
-    dtype: string
-    format: "CASE-{seq:05d}"
-    description: "Unique case identifier"
-
   income_est:
     dtype: float
     distribution: normal

@@ -86,6 +86,20 @@ class TestGeneration:
             assert len(first_col) == 10, f"{name} override failed"
 
 
+class TestDumpCSV:
+    def test_dumps_csv(self, gen: DataGenerator):
+        gen.generate_all()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = gen.dump_csv(tmpdir)
+            assert len(paths) == 11
+            for p in paths:
+                assert os.path.exists(p)
+                # Check file has header + data rows
+                with open(p) as f:
+                    lines = f.readlines()
+                assert len(lines) > 1, f"CSV {p} has no data rows"
+
+
 def test_generator_injects_case_id_column(tmp_path):
     """Generator adds a case_id column to every table, even when the YAML profile does not declare it."""
     profile_dir = tmp_path / "profiles"
@@ -149,15 +163,28 @@ def test_generator_preserves_profile_declared_case_id(tmp_path):
     assert cols["case_id"] == ["CUSTOM-0001", "CUSTOM-0002", "CUSTOM-0003"]
 
 
-class TestDumpCSV:
-    def test_dumps_csv(self, gen: DataGenerator):
-        gen.generate_all()
-        with tempfile.TemporaryDirectory() as tmpdir:
-            paths = gen.dump_csv(tmpdir)
-            assert len(paths) == 11
-            for p in paths:
-                assert os.path.exists(p)
-                # Check file has header + data rows
-                with open(p) as f:
-                    lines = f.readlines()
-                assert len(lines) > 1, f"CSV {p} has no data rows"
+def test_generator_full_suite_no_profile_case_id():
+    """All 11 real profiles generate correctly with case_id removed from YAMLs.
+
+    After Task 2, no profile declares case_id. The generator should still produce
+    a case_id column in every table (via the infrastructure injection from Task 1).
+    """
+    from data.generator import DataGenerator, CASE_ID_COLUMN
+
+    gen = DataGenerator(profile_dir=PROFILE_DIR, seed=42, cases=5)
+    gen.load_profiles()
+
+    # Sanity: no profile declares case_id anymore
+    for table_name, profile in gen.profiles.items():
+        assert CASE_ID_COLUMN not in profile["columns"], (
+            f"{table_name}.yaml still declares case_id — remove it"
+        )
+
+    tables = gen.generate_all()
+    # Every generated table has case_id with the right format
+    import re
+    pattern = re.compile(r"^CASE-\d{5}$")
+    for table_name, cols in tables.items():
+        assert CASE_ID_COLUMN in cols, f"{table_name} missing case_id column"
+        for v in cols[CASE_ID_COLUMN]:
+            assert pattern.match(v), f"{table_name} has bad case_id: {v!r}"
