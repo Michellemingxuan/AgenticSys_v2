@@ -10,6 +10,9 @@ from typing import Any
 import numpy as np
 import yaml
 
+CASE_ID_COLUMN = "case_id"
+CASE_ID_FORMAT = "CASE-{seq:05d}"
+
 
 class DataGenerator:
     """Generates simulated tabular data from YAML profile definitions.
@@ -57,6 +60,9 @@ class DataGenerator:
         elif "rows_per_case" in profile:
             # rows_per_case × number of cases = total rows
             n = profile["rows_per_case"] * self._get_case_count()
+        elif profile.get("one_row_per_case", False):
+            # Convenience: one_row_per_case without an explicit rows_per_case → 1 row per case
+            n = self._get_case_count()
         else:
             n = profile["row_count"]
         rng = np.random.default_rng(self.seed)
@@ -80,6 +86,15 @@ class DataGenerator:
         # Second pass: derived columns, computed from already-generated source columns
         for col_name, spec in derived_specs.items():
             columns[col_name] = self._derive_column(spec, columns, n)
+
+        # Inject case_id column as generator infrastructure (idempotent — skip if profile still declares it).
+        if CASE_ID_COLUMN not in columns:
+            one_row = profile.get("one_row_per_case", False)
+            case_count = self._get_case_count()
+            if one_row:
+                columns[CASE_ID_COLUMN] = [CASE_ID_FORMAT.format(seq=i + 1) for i in range(n)]
+            else:
+                columns[CASE_ID_COLUMN] = [CASE_ID_FORMAT.format(seq=(i % case_count) + 1) for i in range(n)]
 
         return columns
 

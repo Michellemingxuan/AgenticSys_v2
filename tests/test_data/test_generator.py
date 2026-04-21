@@ -84,6 +84,38 @@ class TestGeneration:
             assert len(first_col) == 10, f"{name} override failed"
 
 
+def test_generator_injects_case_id_column(tmp_path):
+    """Generator adds a case_id column to every table, even when the YAML profile does not declare it."""
+    profile_dir = tmp_path / "profiles"
+    profile_dir.mkdir()
+    (profile_dir / "noop.yaml").write_text(
+        "table: noop\n"
+        "description: minimal fixture with no case_id column\n"
+        "one_row_per_case: true\n"
+        "columns:\n"
+        "  value:\n"
+        "    dtype: int\n"
+        "    distribution: uniform\n"
+        "    min: 0\n"
+        "    max: 10\n"
+        "    description: placeholder\n"
+    )
+
+    from data.generator import DataGenerator, CASE_ID_COLUMN, CASE_ID_FORMAT
+    gen = DataGenerator(profile_dir=str(profile_dir), seed=1, cases=3)
+    gen.load_profiles()
+    tables = gen.generate_all()
+
+    cols = tables["noop"]
+    assert CASE_ID_COLUMN in cols
+    # 3 cases, one_row_per_case → 3 rows with CASE-00001..CASE-00003
+    assert cols[CASE_ID_COLUMN] == [
+        CASE_ID_FORMAT.format(seq=1),
+        CASE_ID_FORMAT.format(seq=2),
+        CASE_ID_FORMAT.format(seq=3),
+    ]
+
+
 class TestDumpCSV:
     def test_dumps_csv(self, gen: DataGenerator):
         gen.generate_all()
