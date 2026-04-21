@@ -136,11 +136,7 @@ class SafeChainAdapter(BaseLLMAdapter):
             for m in messages
         )
 
-        # Mask long digit sequences (potential account numbers / PII)
-        combined = re.sub(r"\b\d{8,}\b", "***MASKED***", combined)
-
-        # Strip code execution keywords from tool results
-        combined = re.sub(r"\b(exec|eval|import|__\w+__)\b", "[FILTERED]", combined)
+        combined = self._pre_sanitize(combined)
 
         def _call(active_llm: Any) -> str:
             chain = ValidChatPromptTemplate.from_messages([
@@ -162,6 +158,21 @@ class SafeChainAdapter(BaseLLMAdapter):
             elif "400" in error_str:
                 raise FirewallRejection(400, f"Bad request: {error_str}")
             raise
+
+    @staticmethod
+    def _pre_sanitize(text: str) -> str:
+        """All defenses applied before the LLM sees the combined prompt.
+
+        Order: case scrub → digit mask → exec keyword filter. Case scrubbing
+        runs first because the digit mask could otherwise mangle a case-ID
+        suffix (e.g., CASE-12345678 with an 8-digit run) before the case
+        pattern matches.
+        """
+        from gateway.case_scrubber import scrub as case_scrub
+        text = case_scrub(text)
+        text = re.sub(r"\b\d{8,}\b", "***MASKED***", text)
+        text = re.sub(r"\b(exec|eval|import|__\w+__)\b", "[FILTERED]", text)
+        return text
 
     def _refresh_llm(self) -> None:
         """Refresh the LLM instance from safechain."""
