@@ -40,6 +40,8 @@ class TestGeneration:
             profile = gen.profiles[name]
             if "rows_per_case" in profile:
                 expected = profile["rows_per_case"] * case_count
+            elif profile.get("one_row_per_case", False):
+                expected = case_count
             else:
                 expected = profile["row_count"]
             first_col = next(iter(cols.values()))
@@ -114,6 +116,37 @@ def test_generator_injects_case_id_column(tmp_path):
         CASE_ID_FORMAT.format(seq=2),
         CASE_ID_FORMAT.format(seq=3),
     ]
+
+
+def test_generator_preserves_profile_declared_case_id(tmp_path):
+    """If the profile already declares case_id, the generator must leave it untouched (idempotency)."""
+    profile_dir = tmp_path / "profiles"
+    profile_dir.mkdir()
+    (profile_dir / "custom.yaml").write_text(
+        "table: custom\n"
+        "description: profile with its own case_id declaration\n"
+        "one_row_per_case: true\n"
+        "columns:\n"
+        "  case_id:\n"
+        "    dtype: string\n"
+        "    format: \"CUSTOM-{seq:04d}\"\n"
+        "    description: custom case id format\n"
+        "  value:\n"
+        "    dtype: int\n"
+        "    distribution: uniform\n"
+        "    min: 0\n"
+        "    max: 10\n"
+        "    description: placeholder\n"
+    )
+
+    from data.generator import DataGenerator
+    gen = DataGenerator(profile_dir=str(profile_dir), seed=1, cases=3)
+    gen.load_profiles()
+    tables = gen.generate_all()
+
+    cols = tables["custom"]
+    # Generator must not overwrite the profile-declared case_id.
+    assert cols["case_id"] == ["CUSTOM-0001", "CUSTOM-0002", "CUSTOM-0003"]
 
 
 class TestDumpCSV:
