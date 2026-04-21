@@ -42,10 +42,12 @@ class SafeChainAdapter(BaseLLMAdapter):
         llm: Any | None = None,
         model_name: str = "gpt-4.1",
         max_iterations: int = 12,
+        gateway: Any | None = None,
     ):
         self.llm = llm
         self.model_name = model_name
         self.max_iterations = max_iterations
+        self.gateway = gateway
 
     def run(
         self,
@@ -136,7 +138,8 @@ class SafeChainAdapter(BaseLLMAdapter):
             for m in messages
         )
 
-        combined = self._pre_sanitize(combined)
+        current_case_id = self.gateway.get_case_id() if self.gateway is not None else None
+        combined = self._pre_sanitize(combined, current_case_id)
 
         def _call(active_llm: Any) -> str:
             chain = ValidChatPromptTemplate.from_messages([
@@ -160,16 +163,16 @@ class SafeChainAdapter(BaseLLMAdapter):
             raise
 
     @staticmethod
-    def _pre_sanitize(text: str) -> str:
+    def _pre_sanitize(text: str, case_id: str | None = None) -> str:
         """All defenses applied before the LLM sees the combined prompt.
 
         Order: case scrub → digit mask → exec keyword filter. Case scrubbing
-        runs first because the digit mask could otherwise mangle a case-ID
-        suffix (e.g., CASE-12345678 with an 8-digit run) before the case
-        pattern matches.
+        runs first because the production case-ID format is a pure digit run
+        (11 digits); the digit mask would otherwise swallow it first and
+        prevent the informative <case> label from ever being applied.
         """
         from gateway.case_scrubber import scrub as case_scrub
-        text = case_scrub(text)
+        text = case_scrub(text, case_id)
         text = re.sub(r"\b\d{8,}\b", "***MASKED***", text)
         text = re.sub(r"\b(exec|eval|import|__\w+__)\b", "[FILTERED]", text)
         return text

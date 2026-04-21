@@ -11,7 +11,7 @@ import numpy as np
 import yaml
 
 CASE_ID_COLUMN = "case_id"
-CASE_ID_FORMAT = "CASE-{seq:05d}"
+CASE_ID_FORMAT = "{seq:011d}"   # 11-digit zero-padded, matches production case ID shape
 
 
 class DataGenerator:

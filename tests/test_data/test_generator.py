@@ -62,9 +62,9 @@ class TestGeneration:
     def test_sequential_case_ids(self, gen: DataGenerator):
         tables = gen.generate_all()
         ids = tables["bureau"]["case_id"]
-        assert ids[0] == "CASE-00001"
-        assert ids[1] == "CASE-00002"
-        assert ids[-1] == "CASE-00050"
+        assert ids[0] == "00000000001"
+        assert ids[1] == "00000000002"
+        assert ids[-1] == "00000000050"
 
     def test_deterministic_with_seed(self):
         g1 = DataGenerator(profile_dir=PROFILE_DIR, seed=99)
@@ -192,7 +192,7 @@ def test_generator_full_suite_no_profile_case_id():
     tables = gen.generate_all()
     # Every generated table has case_id with the right format
     import re
-    pattern = re.compile(r"^CASE-\d{5}$")
+    pattern = re.compile(r"^\d{11}$")
     for table_name, cols in tables.items():
         assert CASE_ID_COLUMN in cols, f"{table_name} missing case_id column"
         for v in cols[CASE_ID_COLUMN]:

@@ -125,6 +125,15 @@ def scrub(text: str) -> str:
 - `SafeChainAdapter` is where pre-sanitization already lives (per existing [firewall_overview.html](../../brainstorm/firewall_overview.html) documentation). Case scrubbing is adjacent to the digit mask.
 - `OpenAIAdapter` is the "dev bypass — no firewall simulation" path per existing convention, so the scrubber is not invoked there. Local dev logs may still contain raw case IDs, which is acceptable.
 
+### 5. Case-ID format correction
+
+**Production case ID format is an 11-digit number (e.g., `77165907010`), NOT `CASE-\d+`.** This invalidates the original scrubber design (a `CASE-` prefix is what let the scrubber selectively match only case IDs). Since an 11-digit run is indistinguishable from any other digit sequence, the scrubber became **context-aware**:
+
+- `gateway/case_scrubber.py::scrub(text, case_id)` replaces the specific active case-ID literal with `<case>`.
+- `SafeChainAdapter` holds an optional `gateway` reference; on every `_invoke`, it calls `gateway.get_case_id()` and passes it to `_pre_sanitize`.
+- The existing `\b\d{8,}\b → ***MASKED***` digit rule still runs *after* the case scrubber, so any OTHER 8+-digit run (account numbers, other large numerics) is masked as `***MASKED***`, while the active case ID is informatively labeled `<case>`.
+- Generator constant: `CASE_ID_FORMAT = "{seq:011d}"` (was `"CASE-{seq:05d}"`).
+
 ## Non-changes (explicit)
 
 - Event logger, `step_history`, and internal session state keep the **raw case ID** — needed for debugging and audit trails. Only LLM-bound content is scrubbed.
