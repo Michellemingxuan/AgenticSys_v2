@@ -1,0 +1,3 @@
+# Single source of truth for data-generation parameters.
+# Overridden by CLI flags in `python -m data`.
+n_cases: 50
