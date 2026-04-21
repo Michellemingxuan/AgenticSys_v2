@@ -28,14 +28,12 @@ def list_available_tables() -> str:
     """List all data tables available for the current case."""
     if _catalog is None:
         return "Data unavailable"
+    if _gateway is not None and _gateway.get_case_id() is not None:
+        case_tables = _gateway.list_tables()
+        if case_tables:
+            return "Tables for the current case:\n" + "\n".join(case_tables)
+        return "No tables available for the current case."
     tables = _catalog.list_tables()
-    if _gateway is not None:
-        case_id = _gateway.get_case_id()
-        if case_id:
-            # Show only tables that exist for this case
-            case_tables = _gateway.list_tables()
-            header = f"Tables for case {case_id}:\n"
-            return header + "\n".join(case_tables) if case_tables else header + "No tables available"
     return "\n".join(tables) if tables else "No tables available"
 
 
