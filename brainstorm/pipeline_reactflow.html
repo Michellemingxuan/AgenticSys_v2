@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pipeline — React Flow</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reactflow@11/dist/style.css">
+<style>
+  :root {
+    --navy: #00175A; --blue: #006FCF; --white: #FFFFFF;
+    --gray-light: #F4F6F9; --gray-text: #4A5568; --gray-border: #E2E8F0;
+    --green: #166534; --green-bg: #DCFCE7; --green-border: #86EFAC;
+    --amber: #92400E; --amber-bg: #FEF3C7; --amber-border: #FCD34D;
+    --purple: #4C1D95; --purple-bg: #EDE9FE; --purple-border: #A78BFA;
+  }
+  * { box-sizing: border-box; }
+  html, body, #root { height: 100%; margin: 0; padding: 0; }
+  body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #fff; color: var(--navy); }
+
+  /* HERO */
+  .hero { background: var(--navy); color: white; padding: 18px 40px 16px; position: relative; }
+  .blue-stripe { position: absolute; top: 0; left: 0; right: 0; height: 4px; background: var(--blue); }
+  .hero-row { display: flex; align-items: center; gap: 20px; }
+  .amex-logo { background: var(--blue); padding: 5px 10px; display: inline-flex; flex-direction: column; line-height: 1.1; }
+  .logo-american, .logo-express { color: white; font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+  .hero h1 { font-family: Georgia, serif; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+  .hero-sub { font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 255, 255, 0.55); font-weight: 600; margin-top: 2px; }
+
+  /* LEGEND BAR */
+  .legend-bar { padding: 10px 40px; background: var(--gray-light); border-bottom: 1px solid var(--gray-border); display: flex; gap: 16px; align-items: center; flex-wrap: wrap; font-size: 11px; }
+  .legend-label { font-size: 9px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gray-text); }
+  .legend-item { display: inline-flex; align-items: center; gap: 6px; color: var(--gray-text); }
+  .legend-swatch { width: 10px; height: 10px; border-radius: 2px; border: 1.5px solid; }
+  .sw-agent   { background: #DBEAFE; border-color: var(--blue); }
+  .sw-spec    { background: var(--green-bg); border-color: var(--green); }
+  .sw-review  { background: var(--purple-bg); border-color: var(--purple); }
+  .sw-synth   { background: var(--amber-bg); border-color: var(--amber); }
+  .sw-data    { background: var(--amber-bg); border-color: var(--amber); border-style: dashed; }
+  .sw-infra   { background: var(--gray-light); border-color: var(--gray-border); }
+
+  /* CANVAS */
+  .canvas { height: calc(100vh - 110px); width: 100%; }
+
+  /* NODE CONTENT (applied via React node content — referenced by className) */
+  .node-body { padding: 8px 10px; font-size: 11.5px; line-height: 1.35; }
+  .node-title { font-weight: 700; font-size: 12.5px; color: var(--navy); display: flex; align-items: center; gap: 6px; }
+  .node-role  { font-size: 8px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gray-text); margin-top: 2px; }
+  .node-q1    { font-size: 10px; color: var(--gray-text); margin-top: 4px; font-style: italic; }
+  .react-flow__node { font-family: inherit; }
+  .react-flow__edge-text { font-size: 10px; font-weight: 600; font-family: inherit; }
+  .react-flow__edge-textbg { fill: #ffffff; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="blue-stripe"></div>
+  <div class="hero-row">
+    <div class="amex-logo">
+      <span class="logo-american">American</span>
+      <span class="logo-express">Express</span>
+    </div>
+    <div>
+      <h1>Pipeline · Interactive</h1>
+      <div class="hero-sub">Agentic Case Review · React Flow · Q1 walk-through</div>
+    </div>
+  </div>
+</div>
+
+<div class="legend-bar">
+  <span class="legend-label">Legend</span>
+  <span class="legend-item"><span class="legend-swatch sw-agent"></span>Agent</span>
+  <span class="legend-item"><span class="legend-swatch sw-spec"></span>Specialist</span>
+  <span class="legend-item"><span class="legend-swatch sw-review"></span>Reviewer</span>
+  <span class="legend-item"><span class="legend-swatch sw-synth"></span>Synthesis</span>
+  <span class="legend-item"><span class="legend-swatch sw-data"></span>Data / Catalog</span>
+  <span class="legend-item"><span class="legend-swatch sw-infra"></span>Infra</span>
+  <span style="margin-left:auto;color:var(--gray-text);font-size:11px;font-style:italic">Drag · zoom · pan · minimap bottom-right</span>
+</div>
+
+<div id="root" class="canvas"></div>
+
+<script type="module">
+import React from 'https://esm.sh/react@18.3.1';
+import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client';
+import {
+  ReactFlow, Background, Controls, MiniMap, Position, MarkerType
+} from 'https://esm.sh/reactflow@11.11.4?deps=react@18.3.1,react-dom@18.3.1';
+
+const h = React.createElement;
+
+// ─── Style presets ─────────────────────────────────────────────────────────
+const S = {
+  endpoint: { background: '#F4F6F9', border: '1.5px solid #CBD5E1', borderRadius: 999, color: '#334155', width: 120, padding: 0 },
+  agent:    { background: '#DBEAFE', border: '1.5px solid #006FCF', color: '#00175A', borderRadius: 4, width: 160, padding: 0 },
+  spec:     { background: '#DCFCE7', border: '1.5px solid #166534', color: '#00175A', borderRadius: 4, width: 170, padding: 0 },
+  review:   { background: '#EDE9FE', border: '1.5px solid #4C1D95', color: '#00175A', borderRadius: 4, width: 160, padding: 0 },
+  synth:    { background: '#FEF3C7', border: '1.5px solid #92400E', color: '#00175A', borderRadius: 4, width: 160, padding: 0 },
+  data:     { background: '#FEF3C7', border: '1.5px dashed #92400E', color: '#92400E', borderRadius: 4, width: 170, padding: 0 },
+  infra:    { background: '#F4F6F9', border: '1px solid #CBD5E1', color: '#334155', borderRadius: 4, width: 160, padding: 0 },
+};
+
+// ─── Node content helpers ──────────────────────────────────────────────────
+function body(title, role, q1) {
+  return h('div', { className: 'node-body' },
+    h('div', { className: 'node-title' }, title),
+    role ? h('div', { className: 'node-role' }, role) : null,
+    q1   ? h('div', { className: 'node-q1'   }, q1)  : null
+  );
+}
+
+// ─── Nodes ─────────────────────────────────────────────────────────────────
+const nodes = [
+  // Main horizontal flow (y ≈ 240)
+  { id: 'in',       position: { x:  20, y: 240 }, data: { label: body('👤 Reviewer', 'Asks Q1', null) }, style: S.endpoint,
+    sourcePosition: Position.Right, targetPosition: Position.Left },
+  { id: 'chat1',    position: { x: 180, y: 240 }, data: { label: body('💬 Chat Agent', 'Entry', 'Pass Q1 through') }, style: S.agent,
+    sourcePosition: Position.Right, targetPosition: Position.Left },
+  { id: 'team',     position: { x: 380, y: 240 }, data: { label: body('🧭 Team Constructor', 'Planner', 'Reads Catalog → picks specialists') }, style: S.agent,
+    sourcePosition: Position.Right, targetPosition: Position.Left },
+  { id: 'modeling', position: { x: 620, y: 140 }, data: { label: body('🤖 modeling', 'Specialist · Q1', 'query positive_events') }, style: S.spec,
+    sourcePosition: Position.Right, targetPosition: Position.Left },
+  { id: 'bureau',   position: { x: 620, y: 340 }, data: { label: body('🤖 bureau', 'Specialist · follow-up', 'query fico + sbfe') }, style: S.spec,
+    sourcePosition: Position.Right, targetPosition: Position.Left },
+  { id: 'general',  position: { x: 860, y: 240 }, data: { label: body('⚖️ General Specialist', 'Cross-review', 'pairs · conflicts · insights') }, style: S.review,
+    sourcePosition: Position.Right, targetPosition: Position.Left },
+  { id: 'orch',     position: { x: 1080, y: 240 }, data: { label: body('🎯 Orchestrator', 'Synthesis', 'merge · data-gap assess') }, style: S.synth,
+    sourcePosition: Position.Right, targetPosition: Position.Left },
+  { id: 'chat2',    position: { x: 1280, y: 240 }, data: { label: body('💬 Chat Agent', 'Format', 'render answer') }, style: S.agent,
+    sourcePosition: Position.Right, targetPosition: Position.Left },
+  { id: 'out',      position: { x: 1460, y: 240 }, data: { label: body('👤 Reviewer', 'Answer', null) }, style: S.endpoint,
+    sourcePosition: Position.Right, targetPosition: Position.Left },
+
+  // Top row — data sources (feed Team + Specialists)
+  { id: 'catalog',  position: { x: 380, y:  40 }, data: { label: body('📚 Data Catalog', '11 tables · YAML', 'source of truth for columns') }, style: S.data,
+    sourcePosition: Position.Bottom, targetPosition: Position.Top },
+  { id: 'gateway',  position: { x: 620, y:  40 }, data: { label: body('💾 Data Gateway', 'Tools · case-scoped', 'list · schema · query') }, style: S.data,
+    sourcePosition: Position.Bottom, targetPosition: Position.Top },
+
+  // Bottom row — context / registry
+  { id: 'pillar',   position: { x: 380, y: 460 }, data: { label: body('🏛 credit_risk', 'Pillar overlay', 'focus · cut-off · report rules') }, style: S.infra,
+    sourcePosition: Position.Top, targetPosition: Position.Bottom },
+  { id: 'registry', position: { x: 620, y: 460 }, data: { label: body('🧠 Session Registry', 'Warm agents', 'modeling reused on follow-up') }, style: S.infra,
+    sourcePosition: Position.Top, targetPosition: Position.Bottom },
+];
+
+// ─── Edges ─────────────────────────────────────────────────────────────────
+const mainEdge = (id, s, t, label) => ({
+  id, source: s, target: t, label, animated: true, type: 'smoothstep',
+  markerEnd: { type: MarkerType.ArrowClosed, color: '#006FCF' },
+  style: { stroke: '#006FCF', strokeWidth: 2 },
+  labelBgStyle: { fill: '#ffffff' },
+  labelStyle: { fill: '#00175A', fontWeight: 700 },
+});
+
+const dashedEdge = (id, s, t, label, color) => ({
+  id, source: s, target: t, label, type: 'smoothstep',
+  style: { stroke: color, strokeWidth: 1.5, strokeDasharray: '5 4' },
+  markerEnd: { type: MarkerType.ArrowClosed, color },
+  labelBgStyle: { fill: '#ffffff' },
+  labelStyle: { fill: color, fontWeight: 600 },
+});
+
+const edges = [
+  // Main pipeline
+  mainEdge('e-in-chat1',     'in',       'chat1',    'Q1'),
+  mainEdge('e-chat1-team',   'chat1',    'team',     null),
+  mainEdge('e-team-modeling','team',     'modeling', 'picks (Q1)'),
+  mainEdge('e-team-bureau',  'team',     'bureau',   'adds (follow-up)'),
+  mainEdge('e-modeling-gen', 'modeling', 'general',  null),
+  mainEdge('e-bureau-gen',   'bureau',   'general',  null),
+  mainEdge('e-gen-orch',     'general',  'orch',     null),
+  mainEdge('e-orch-chat2',   'orch',     'chat2',    null),
+  mainEdge('e-chat2-out',    'chat2',    'out',      'answer'),
+
+  // Catalog feeds
+  dashedEdge('e-cat-team',     'catalog', 'team',     'columns', '#92400E'),
+  dashedEdge('e-cat-modeling', 'catalog', 'modeling', 'lookup',  '#92400E'),
+  dashedEdge('e-cat-bureau',   'catalog', 'bureau',   'lookup',  '#92400E'),
+
+  // Gateway feeds
+  dashedEdge('e-gw-modeling',  'gateway', 'modeling', 'query', '#92400E'),
+  dashedEdge('e-gw-bureau',    'gateway', 'bureau',   'query', '#92400E'),
+
+  // Pillar + registry (from bottom)
+  dashedEdge('e-pillar-modeling', 'pillar', 'modeling', 'overlay', '#4A5568'),
+  dashedEdge('e-pillar-bureau',   'pillar', 'bureau',   'overlay', '#4A5568'),
+  dashedEdge('e-reg-modeling',    'registry', 'modeling', 'warm', '#4A5568'),
+];
+
+// ─── App ───────────────────────────────────────────────────────────────────
+function App() {
+  return h(ReactFlow, {
+    nodes, edges,
+    fitView: true,
+    fitViewOptions: { padding: 0.15 },
+    minZoom: 0.3, maxZoom: 1.6,
+    proOptions: { hideAttribution: true },
+    defaultEdgeOptions: { type: 'smoothstep' },
+  },
+    h(Background, { color: '#E2E8F0', gap: 20, size: 1 }),
+    h(Controls, { showInteractive: false }),
+    h(MiniMap, {
+      nodeColor: (n) => {
+        if (n.style?.background) return n.style.background;
+        return '#F4F6F9';
+      },
+      maskColor: 'rgba(0,23,90,0.06)',
+      style: { background: '#fff', border: '1px solid #E2E8F0' },
+    }),
+  );
+}
+
+const root = createRoot(document.getElementById('root'));
+root.render(h(App));
+</script>
+</body>
+</html>
