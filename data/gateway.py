@@ -25,8 +25,21 @@ class DataGateway(ABC):
 
     @abstractmethod
     def get_case_id(self) -> str | None:
-        """Return the currently active case_id."""
+        """Return the currently active case_id.
+
+        WARNING: The return value MUST NOT be included in any LLM-bound string
+        (tool result, prompt, error message). Use ``_display_path()`` or the
+        ``<case>`` literal when composing LLM-bound content.
+        """
         ...
+
+    def _display_path(self, table: str) -> str:
+        """Render a path for user/LLM-facing messages without leaking the raw case ID.
+
+        Real filesystem paths stay internal; any string that can flow back to a caller,
+        tool result, or LLM prompt should use this helper instead.
+        """
+        return f"<case>/{table}.csv"
 
     @abstractmethod
     def list_case_ids(self) -> list[str]:

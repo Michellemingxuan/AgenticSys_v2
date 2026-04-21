@@ -153,3 +153,15 @@ def test_gateway_from_generated():
 
     pmts = gw.query("pmts_detail")
     assert len(pmts) == 2
+
+
+def test_gateway_error_uses_neutral_path_token():
+    """Error strings surfaced to callers must use <case> token, not the raw case ID."""
+    from data.gateway import SimulatedDataGateway
+
+    gw = SimulatedDataGateway(case_data={"CASE-00001": {"payments": [{"amt": 100}]}})
+    gw.set_case("CASE-00001")
+
+    # _display_path returns the neutral form regardless of the current case.
+    assert gw._display_path("payments") == "<case>/payments.csv"
+    assert "CASE-" not in gw._display_path("payments")
