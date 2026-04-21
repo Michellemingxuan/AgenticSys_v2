@@ -9,7 +9,7 @@ import pytest
 from agents.base_agent import BaseSpecialistAgent
 from agents.session_registry import SessionRegistry
 from gateway.firewall_stack import FirewallStack
-from log.event_logger import EventLogger
+from logger.event_logger import EventLogger
 from models.types import DomainSkill
 
 

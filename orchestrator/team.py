@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from gateway.firewall_stack import FirewallStack
-from log.event_logger import EventLogger
+from logger.event_logger import EventLogger
 from skills.domain.loader import load_domain_skill
 
 

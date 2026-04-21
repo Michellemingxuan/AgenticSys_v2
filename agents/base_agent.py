@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from config.report_loader import get_specialist_prompt
 from gateway.firewall_stack import FirewallStack
-from log.event_logger import EventLogger
+from logger.event_logger import EventLogger
 from models.types import DomainSkill, LLMResult, SpecialistOutput
 from tools.data_tools import list_available_tables, get_table_schema, query_table
 

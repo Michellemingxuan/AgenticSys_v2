@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Firewall Handling — At a Glance</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+:root {
+  --navy: #00175A; --blue: #006FCF; --white: #FFFFFF;
+  --gray-light: #F4F6F9; --gray-text: #4A5568; --gray-border: #E2E8F0;
+  --gray-bg: #FAFBFC;
+  --green: #166534; --green-bg: #DCFCE7; --green-border: #86EFAC;
+  --amber: #92400E; --amber-bg: #FEF3C7; --amber-border: #FCD34D;
+  --purple: #4C1D95; --purple-bg: #EDE9FE; --purple-border: #A78BFA;
+  --red: #991B1B; --red-bg: #FEE2E2; --red-border: #FCA5A5;
+  --slate: #334155;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #fff; color: var(--navy); line-height: 1.5; }
+
+.hero { background: var(--navy); color: white; padding: 24px 60px 20px; position: relative; }
+.blue-stripe { position: absolute; top: 0; left: 0; right: 0; height: 4px; background: var(--blue); }
+.hero-row { display: flex; align-items: center; gap: 20px; }
+.amex-logo { background: var(--blue); padding: 6px 12px; display: inline-flex; flex-direction: column; line-height: 1.1; flex-shrink: 0; }
+.logo-american, .logo-express { color: white; font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+.hero h1 { font-family: Georgia, serif; font-size: 24px; font-weight: 700; letter-spacing: -0.01em; }
+.hero-sub { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 255, 255, 0.55); font-weight: 600; margin-top: 3px; }
+
+.page { max-width: 1280px; margin: 0 auto; padding: 24px 60px 48px; }
+
+/* STRATEGY BANNER */
+.strategy {
+  background: linear-gradient(to right, #F8FAFC, #fff);
+  border: 1px solid var(--gray-border); border-left: 4px solid var(--red); border-radius: 3px;
+  padding: 14px 18px; margin-bottom: 26px;
+  display: flex; gap: 16px; align-items: center;
+}
+.strategy-icon { flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%; background: var(--red-bg); display: flex; align-items: center; justify-content: center; color: var(--red); }
+.strategy-body { flex: 1; min-width: 0; }
+.strategy-label { font-size: 9px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--red); }
+.strategy-title { font-family: Georgia, serif; font-size: 17px; font-weight: 700; color: var(--navy); margin-top: 2px; line-height: 1.35; }
+.strategy-pills { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.pill {
+  display: inline-flex; align-items: center;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+  padding: 3px 8px; border-radius: 2px; font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  background: var(--gray-light); color: var(--slate); border: 1px solid var(--gray-border);
+}
+
+.section { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; padding-top: 4px; }
+.section-label { font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gray-text); white-space: nowrap; }
+.section-line { flex: 1; height: 1px; background: var(--gray-border); }
+.section-note { font-size: 11px; color: var(--gray-text); font-style: italic; }
+.mono { font-family: 'SF Mono', 'Monaco', 'Consolas', monospace; font-size: 11px; color: var(--navy); background: #EEF2F7; padding: 1px 5px; border-radius: 2px; }
+
+/* FLOW DIAGRAM */
+.flow-wrap { background: var(--white); border: 1px solid var(--gray-border); border-radius: 3px; padding: 18px; margin-bottom: 28px; overflow-x: auto; }
+.flow-wrap .mermaid { display: flex; justify-content: center; min-width: 820px; }
+
+/* LAYER CARDS — 2 columns */
+.layers { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 28px; }
+.layer {
+  background: var(--white); border: 1px solid var(--gray-border); border-left: 3px solid var(--blue); border-radius: 3px;
+  padding: 14px 16px;
+}
+.layer.red   { border-left-color: var(--red); }
+.layer.amber { border-left-color: var(--amber); }
+.layer-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.layer-icon { width: 32px; height: 32px; border-radius: 3px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: #DBEAFE; color: var(--blue); }
+.layer.red .layer-icon   { background: var(--red-bg); color: var(--red); }
+.layer.amber .layer-icon { background: var(--amber-bg); color: var(--amber); }
+.layer-title { font-size: 13px; font-weight: 700; color: var(--navy); font-family: 'SF Mono', 'Monaco', 'Consolas', monospace; }
+.layer-sub { font-size: 9px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gray-text); margin-top: 1px; }
+.layer-desc { font-size: 12px; color: var(--slate); line-height: 1.5; margin-bottom: 10px; }
+.layer-rules { display: flex; flex-direction: column; gap: 6px; }
+.rule { display: flex; align-items: flex-start; gap: 8px; font-size: 11.5px; line-height: 1.45; }
+.rule-dot { flex-shrink: 0; width: 5px; height: 5px; border-radius: 50%; background: var(--blue); margin-top: 7px; }
+.layer.red   .rule-dot { background: var(--red); }
+.layer.amber .rule-dot { background: var(--amber); }
+.rule-text { color: var(--slate); flex: 1; }
+.rule-text strong { color: var(--navy); font-weight: 700; }
+
+/* SANITIZATION TABLE */
+.sanit {
+  background: var(--white); border: 1px solid var(--gray-border); border-radius: 3px; overflow: hidden;
+  margin-bottom: 28px;
+}
+.sanit table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.sanit th {
+  background: var(--gray-light); color: var(--gray-text);
+  font-size: 9px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+  text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--gray-border);
+}
+.sanit td { padding: 9px 14px; color: var(--slate); line-height: 1.5; border-bottom: 1px solid var(--gray-border); vertical-align: top; }
+.sanit tr:last-child td { border-bottom: none; }
+.sanit-layer { font-weight: 700; color: var(--navy); font-family: 'SF Mono', 'Monaco', 'Consolas', monospace; font-size: 11.5px; }
+.always { display: inline-flex; padding: 2px 7px; border-radius: 2px; font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.always.every { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+.always.retry { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); }
+
+/* BLOCK PROPAGATION */
+.block-wrap { background: var(--white); border: 1px solid var(--gray-border); border-radius: 3px; padding: 16px; margin-bottom: 28px; overflow-x: auto; }
+.block-wrap .mermaid { display: flex; justify-content: center; min-width: 700px; }
+
+/* OBSERVABILITY */
+.obs {
+  background: var(--gray-light); border: 1px solid var(--gray-border); border-radius: 3px; padding: 14px 16px;
+  display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+}
+.obs-icon { width: 30px; height: 30px; background: var(--white); border: 1px solid var(--gray-border); border-radius: 3px; display: flex; align-items: center; justify-content: center; color: var(--slate); flex-shrink: 0; }
+.obs-label { font-size: 9px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gray-text); }
+.obs-events { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.obs-event {
+  font-size: 10.5px; font-weight: 700; padding: 3px 8px; border-radius: 2px;
+  background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+.obs-desc { font-size: 11.5px; color: var(--gray-text); line-height: 1.5; flex: 1; min-width: 260px; }
+
+@media (max-width: 980px) {
+  .layers { grid-template-columns: 1fr; }
+  .page, .hero { padding-left: 24px; padding-right: 24px; }
+}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="blue-stripe"></div>
+  <div class="hero-row">
+    <div class="amex-logo">
+      <span class="logo-american">American</span>
+      <span class="logo-express">Express</span>
+    </div>
+    <div>
+      <h1>Firewall Handling</h1>
+      <div class="hero-sub">Agentic Case Review · At a Glance</div>
+    </div>
+  </div>
+</div>
+
+<div class="page">
+
+  <!-- STRATEGY BANNER -->
+  <div class="strategy">
+    <div class="strategy-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+    </div>
+    <div class="strategy-body">
+      <div class="strategy-label">Strategy</div>
+      <div class="strategy-title">Defense in depth · graceful degradation · every LLM call</div>
+      <div class="strategy-pills">
+        <span class="pill">exception-based detect</span>
+        <span class="pill">retry + guidance</span>
+        <span class="pill">multi-layer sanitize</span>
+        <span class="pill">neutral role labels</span>
+        <span class="pill">block propagates, never silent</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- CALL-FLOW DIAGRAM -->
+  <div class="section">
+    <span class="section-label">The call flow</span>
+    <span class="section-line"></span>
+    <span class="section-note">One LLM call · success path + retry loop</span>
+  </div>
+
+  <div class="flow-wrap">
+    <div class="mermaid">
+flowchart TD
+    C["Caller<br/><i>specialist · team constructor · orchestrator</i>"]:::caller
+    FS["FirewallStack.call"]:::fw
+    AD["Adapter.run"]:::adapt
+    PRE["SafeChain pre-sanitize<br/><i>mask 8+ digits · filter exec/eval/import<br/>neutral role labels · collapse to single msg</i>"]:::sanit
+    LLM["LLM API"]:::llm
+    OK["LLMResult status=success"]:::ok
+    REJ["FirewallRejection 403/400"]:::bad
+    R41["HTTP 401"]:::bad
+    REF["refresh token · retry once"]:::soft
+    RETRY{"retries ≤ 2 ?"}
+    INJ["inject FIREWALL_GUIDANCE into system prompt<br/>mask 6+ digits in user message"]:::retryStep
+    BLK["LLMResult status=blocked"]:::blocked
+
+    C --> FS
+    FS -->|"attempt"| AD
+    AD -->|"SafeChain path"| PRE --> LLM
+    AD -.->|"OpenAI path · direct"| LLM
+    LLM -->|"success"| OK --> C
+    LLM -->|"403 / 400"| REJ --> RETRY
+    LLM -.->|"401"| R41 --> REF -.-> AD
+    RETRY -->|"yes"| INJ --> FS
+    RETRY -->|"no"| BLK --> C
+
+    classDef caller fill:#F4F6F9,stroke:#CBD5E1,color:#334155;
+    classDef fw fill:#DBEAFE,stroke:#006FCF,color:#00175A,stroke-width:1.5px;
+    classDef adapt fill:#DBEAFE,stroke:#006FCF,color:#00175A,stroke-width:1.5px;
+    classDef sanit fill:#FEF3C7,stroke:#92400E,color:#00175A,stroke-width:1.5px;
+    classDef llm fill:#EDE9FE,stroke:#4C1D95,color:#00175A,stroke-width:1.5px;
+    classDef ok fill:#DCFCE7,stroke:#166534,color:#00175A,stroke-width:1.5px;
+    classDef bad fill:#FEE2E2,stroke:#991B1B,color:#991B1B,stroke-width:1.5px;
+    classDef soft fill:#F4F6F9,stroke:#CBD5E1,color:#334155;
+    classDef retryStep fill:#FEF3C7,stroke:#92400E,color:#00175A,stroke-width:1.5px;
+    classDef blocked fill:#991B1B,stroke:#991B1B,color:#fff,stroke-width:1.5px;
+    </div>
+  </div>
+
+  <!-- LAYER CARDS -->
+  <div class="section">
+    <span class="section-label">Two layers · what each owns</span>
+    <span class="section-line"></span>
+  </div>
+
+  <div class="layers">
+    <!-- FirewallStack -->
+    <div class="layer">
+      <div class="layer-head">
+        <div class="layer-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M12 7v5l3 3"/></svg>
+        </div>
+        <div>
+          <div class="layer-title">FirewallStack</div>
+          <div class="layer-sub">Generic retry wrapper</div>
+        </div>
+      </div>
+      <div class="layer-desc">Wraps every LLM call. Catches <span class="mono">FirewallRejection</span>, decides whether to retry, and bubbles blocks up as a structured <span class="mono">LLMResult</span>.</div>
+      <div class="layer-rules">
+        <div class="rule"><span class="rule-dot"></span><span class="rule-text"><strong>max_retries = 2</strong> — three total attempts per call.</span></div>
+        <div class="rule"><span class="rule-dot"></span><span class="rule-text">On retry, <strong>appends FIREWALL_GUIDANCE</strong> to the system prompt (avoid PII, role patterns, exec keywords).</span></div>
+        <div class="rule"><span class="rule-dot"></span><span class="rule-text">On retry, <strong>masks 6+ digit runs</strong> in the user message.</span></div>
+        <div class="rule"><span class="rule-dot"></span><span class="rule-text">Exhausted → returns <span class="mono">LLMResult(status="blocked")</span> — callers treat as partial output.</span></div>
+        <div class="rule"><span class="rule-dot"></span><span class="rule-text">Keeps a <span class="mono">step_history</span> of every prompt / message / attempt.</span></div>
+      </div>
+    </div>
+
+    <!-- SafeChainAdapter -->
+    <div class="layer red">
+      <div class="layer-head">
+        <div class="layer-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <div>
+          <div class="layer-title">SafeChainAdapter</div>
+          <div class="layer-sub">SafeChain-specific translate + pre-sanitize</div>
+        </div>
+      </div>
+      <div class="layer-desc">Translates platform errors into <span class="mono">FirewallRejection</span> and pre-cleans the prompt <strong>every</strong> call. OpenAI adapter is the dev bypass — no firewall simulation.</div>
+      <div class="layer-rules">
+        <div class="rule"><span class="rule-dot"></span><span class="rule-text"><strong>403 → FirewallRejection(403)</strong> · <strong>400 → FirewallRejection(400)</strong>.</span></div>
+        <div class="rule"><span class="rule-dot"></span><span class="rule-text"><strong>401 → silent token refresh</strong> + one local retry — never bubbles up.</span></div>
+        <div class="rule"><span class="rule-dot"></span><span class="rule-text">Pre-call: <strong>mask 8+ digit runs</strong>; replace <span class="mono">exec</span>/<span class="mono">eval</span>/<span class="mono">import</span>/<span class="mono">__dunder__</span> with <span class="mono">[FILTERED]</span>.</span></div>
+        <div class="rule"><span class="rule-dot"></span><span class="rule-text">Collapses <span class="mono">[system, user, …]</span> into a <strong>single human message</strong> — SafeChain pipeline requirement.</span></div>
+        <div class="rule"><span class="rule-dot"></span><span class="rule-text">Neutral role labels: <span class="mono">Context:</span> / <span class="mono">Request:</span> / <span class="mono">Response:</span> instead of <span class="mono">[SYSTEM]</span>/<span class="mono">[USER]</span>.</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SANITIZATION RULES TABLE -->
+  <div class="section">
+    <span class="section-label">Sanitization rules · where + when</span>
+    <span class="section-line"></span>
+  </div>
+
+  <div class="sanit">
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 200px">Layer</th>
+          <th style="width: 120px">Runs</th>
+          <th>Rule</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="sanit-layer">SafeChainAdapter</span></td>
+          <td><span class="always every">Every call</span></td>
+          <td>Mask runs of <strong>8+ digits</strong> with <span class="mono">***MASKED***</span> · filter <span class="mono">exec</span>/<span class="mono">eval</span>/<span class="mono">import</span>/<span class="mono">__dunder__</span> → <span class="mono">[FILTERED]</span>.</td>
+        </tr>
+        <tr>
+          <td><span class="sanit-layer">SafeChainAdapter</span></td>
+          <td><span class="always every">Every call</span></td>
+          <td>Collapse all messages into a single human message with neutral role labels (<span class="mono">Context</span> / <span class="mono">Request</span> / <span class="mono">Response</span>).</td>
+        </tr>
+        <tr>
+          <td><span class="sanit-layer">FirewallStack</span></td>
+          <td><span class="always retry">On retry</span></td>
+          <td>Additionally mask runs of <strong>6+ digits</strong> in the user message (tighter threshold than SafeChain's 8+).</td>
+        </tr>
+        <tr>
+          <td><span class="sanit-layer">FirewallStack</span></td>
+          <td><span class="always retry">On retry</span></td>
+          <td>Append <span class="mono">FIREWALL_GUIDANCE</span> to the system prompt — tells the model to avoid PII, <span class="mono">[SYSTEM]</span>/<span class="mono">[USER]</span> markers, code-exec keywords.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- BLOCK PROPAGATION -->
+  <div class="section">
+    <span class="section-label">When a call is ultimately blocked</span>
+    <span class="section-line"></span>
+    <span class="section-note">Never silent — the block propagates as a visible marker to the reviewer</span>
+  </div>
+
+  <div class="block-wrap">
+    <div class="mermaid">
+flowchart LR
+    BLK["LLMResult<br/>status=blocked"]:::blk
+    SP["Specialist<br/>_blocked_output()"]:::agent
+    PARTIAL["SpecialistOutput<br/><i>findings: 'blocked at {step}'</i>"]:::out
+    ORCH["Orchestrator<br/>detects &quot;blocked&quot; + &quot;incomplete&quot;"]:::agent
+    BS["BlockedStep<br/><i>specialist · step · attempts</i>"]:::out
+    CHAT["Chat Agent<br/>renders section"]:::agent
+    USER["--- INCOMPLETE ANALYSES ---<br/>{specialist}: blocked by firewall"]:::final
+
+    BLK --> SP --> PARTIAL --> ORCH --> BS --> CHAT --> USER
+
+    classDef blk fill:#991B1B,stroke:#991B1B,color:#fff,stroke-width:1.5px;
+    classDef agent fill:#DBEAFE,stroke:#006FCF,color:#00175A,stroke-width:1.5px;
+    classDef out fill:#FEF3C7,stroke:#92400E,color:#00175A,stroke-width:1.5px;
+    classDef final fill:#FEE2E2,stroke:#991B1B,color:#991B1B,stroke-width:1.5px;
+    </div>
+  </div>
+
+  <!-- OBSERVABILITY -->
+  <div class="obs">
+    <div class="obs-icon">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 12l4-4 4 4 5-5"/></svg>
+    </div>
+    <span class="obs-label">Observability</span>
+    <div class="obs-events">
+      <span class="obs-event">firewall_rejection</span>
+      <span class="obs-event">firewall_blocked</span>
+      <span class="obs-event">data_gap_flagged</span>
+    </div>
+    <span class="obs-desc">Every retry attempt and every exhausted block is logged with code + message + attempt number. Downstream gap / blocked-step events link the firewall signal to the reviewer-facing output.</span>
+  </div>
+
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      fontFamily: 'Helvetica Neue, Helvetica, Arial, sans-serif',
+      fontSize: '12px',
+      primaryColor: '#DBEAFE',
+      primaryBorderColor: '#006FCF',
+      primaryTextColor: '#00175A',
+      lineColor: '#4A5568',
+      edgeLabelBackground: '#ffffff',
+    },
+    flowchart: { curve: 'basis', nodeSpacing: 40, rankSpacing: 55, padding: 12 }
+  });
+</script>
+</body>
+</html>

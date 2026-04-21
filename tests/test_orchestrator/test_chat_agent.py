@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from gateway.firewall_stack import FirewallStack
-from log.event_logger import EventLogger
+from logger.event_logger import EventLogger
 from models.types import FinalOutput, LLMResult
 from orchestrator.chat_agent import ChatAgent
 

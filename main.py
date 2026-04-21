@@ -13,7 +13,7 @@ from data.catalog import DataCatalog
 from data.gateway import SimulatedDataGateway
 from data.generator import DataGenerator
 from gateway.firewall_stack import FirewallStack
-from log.event_logger import EventLogger
+from logger.event_logger import EventLogger
 from models.types import FinalOutput, ReviewReport
 from orchestrator.chat_agent import ChatAgent
 from orchestrator.orchestrator import Orchestrator

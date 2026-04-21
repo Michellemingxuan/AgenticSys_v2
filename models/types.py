@@ -96,6 +96,8 @@ class FinalOutput(BaseModel):
     data_gap_summary: str = ""   # one concise summary of missing data across specialists
     resolved_contradictions: list[Resolution] = Field(default_factory=list)
     open_conflicts: list[Conflict] = Field(default_factory=list)
+    cross_domain_insights: list[str] = Field(default_factory=list)
+    data_requests_made: list[dict] = Field(default_factory=list)
     data_gaps: list[DataGap] = Field(default_factory=list)
     blocked_steps: list[BlockedStep] = Field(default_factory=list)
     specialists_consulted: list[str] = Field(default_factory=list)

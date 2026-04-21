@@ -7,4 +7,4 @@ data/simulated/
 .superpowers/
 venv/
 .venv/
-.claude
+.claude/

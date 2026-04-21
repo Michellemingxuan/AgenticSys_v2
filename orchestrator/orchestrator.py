@@ -7,7 +7,7 @@ import json
 from agents.session_registry import SessionRegistry
 from config.report_loader import get_synthesis_prompt
 from gateway.firewall_stack import FirewallStack
-from log.event_logger import EventLogger
+from logger.event_logger import EventLogger
 from models.types import (
     BlockedStep,
     Conflict,
@@ -179,6 +179,8 @@ class Orchestrator:
             data_gap_summary=data_gap_summary,
             resolved_contradictions=review_report.resolved,
             open_conflicts=review_report.open_conflicts,
+            cross_domain_insights=review_report.cross_domain_insights,
+            data_requests_made=review_report.data_requests_made,
             data_gaps=data_gaps,
             blocked_steps=blocked_steps,
             specialists_consulted=list(specialist_outputs.keys()),

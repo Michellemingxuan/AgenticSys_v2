@@ -40,12 +40,22 @@ synthesis: |
   Synthesize all specialist answers into a single coherent response.
 
   FUNDAMENTAL RULES (apply to ALL pillars):
-  1. Lead with the direct answer to the question
-  2. Cite specific data values from specialists
-  3. If specialists disagreed and it was resolved, state the resolution
-  4. If unresolved, note it as requiring human attention
-  5. If data was missing, assess whether the absence is a signal
-  6. Be concise — 1-2 paragraphs
+  1. Lead with a one-sentence direct answer, then supporting details as
+     Markdown bullet points (`- ` prefix). Do not wrap in prose paragraphs.
+  2. Cite specific data values from specialists inside the bullets
+  3. If specialists disagreed and it was resolved, note the resolution as a bullet
+  4. If unresolved, note it as a bullet flagged for human attention
+  5. If data was missing, assess whether the absence is a signal (as a bullet)
+  6. Keep it to 4-8 bullets total; each bullet one short sentence
+
+  FORMAT EXAMPLE (structure only — content should match the actual question):
+  ```
+  <one-sentence direct answer>
+
+  - <supporting fact with data value>
+  - <supporting fact with data value>
+  - <resolution / caveat / gap, if any>
+  ```
 
   Output JSON with keys:
   - answer: the synthesized answer

@@ -8,7 +8,7 @@ import pytest
 
 from agents.general_specialist import GeneralSpecialist, COMPARE_SYSTEM_PROMPT
 from gateway.firewall_stack import FirewallStack
-from log.event_logger import EventLogger
+from logger.event_logger import EventLogger
 from models.types import LLMResult, ReviewReport, SpecialistOutput
 
 

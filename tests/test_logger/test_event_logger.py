@@ -1,7 +1,7 @@
 import json
 import os
 import pytest
-from log.event_logger import EventLogger
+from logger.event_logger import EventLogger
 
 
 @pytest.fixture

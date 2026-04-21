@@ -6,7 +6,7 @@ import itertools
 import json
 
 from gateway.firewall_stack import FirewallStack
-from log.event_logger import EventLogger
+from logger.event_logger import EventLogger
 from models.types import (
     Conflict,
     LLMResult,
