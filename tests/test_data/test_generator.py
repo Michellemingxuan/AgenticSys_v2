@@ -163,6 +163,15 @@ def test_generator_preserves_profile_declared_case_id(tmp_path):
     assert cols["case_id"] == ["CUSTOM-0001", "CUSTOM-0002", "CUSTOM-0003"]
 
 
+def test_catalog_prompt_context_has_no_case_id():
+    from data.catalog import DataCatalog
+    cat = DataCatalog(profile_dir=PROFILE_DIR)
+    ctx = cat.to_prompt_context()
+    # No profile declares case_id anymore; catalog must not mention it either.
+    assert "case_id" not in ctx
+    assert "CASE-" not in ctx
+
+
 def test_generator_full_suite_no_profile_case_id():
     """All 11 real profiles generate correctly with case_id removed from YAMLs.
 

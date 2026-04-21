@@ -91,8 +91,6 @@ class DataCatalog:
             details = self.get_column_details(table)
             if details:
                 for col, info in details.items():
-                    if col == "case_id":
-                        continue  # case_id is implicit from context
                     col_desc = info.get("description", "")
                     col_type = info["type"]
                     extras = []

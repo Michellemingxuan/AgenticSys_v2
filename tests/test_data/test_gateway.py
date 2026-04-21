@@ -53,8 +53,11 @@ def test_catalog_lists_tables(catalog):
 def test_catalog_get_schema(catalog):
     schema = catalog.get_schema("bureau")
     assert schema is not None
-    assert "case_id" in schema
-    assert "type" in schema["case_id"]
+    # case_id is generator infrastructure, not table schema — must not surface here.
+    assert "case_id" not in schema
+    # Spot-check that a real bureau column IS present with its metadata.
+    assert "fico_score" in schema
+    assert "type" in schema["fico_score"]
 
 
 def test_catalog_get_schema_missing(catalog):
