@@ -33,7 +33,12 @@ def get_skill() -> DomainSkill:
             "as an absent window. Look at what dates ARE present.\n"
             "4. When reporting 'no successful payments', double-check: count rows with "
             "return_flag=success inside the window. Do NOT confuse 'no returned payments' "
-            "(good) with 'no successful payments' (bad, usually wrong)."
+            "(good) with 'no successful payments' (bad, usually wrong).\n"
+            "5. DATE ACCURACY: payment_date spans 2024 AND 2025. When you cite a "
+            "date in your findings/evidence, copy the YYYY-MM-DD string verbatim "
+            "from the query result — do NOT change the year. A row with "
+            "payment_date='2024-09-24' must be cited as 2024-09-24, NEVER as "
+            "2025-09-24. Re-check the year before every date citation."
         ),
         data_hints=["txn_monthly", "spends", "payments"],
         interpretation_guide=(

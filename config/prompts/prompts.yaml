@@ -68,18 +68,36 @@ chat:
     QUESTION: $question
     FINDINGS FROM DATA ANALYSIS: $findings
 
-    RULES:
-    - Lead with the direct answer to the question
-    - Cite specific data values as evidence
-    - Note any caveats or data gaps
-    - If data was missing, state whether the absence is a signal
-    - Be 3-8 sentences
+    FINDINGS STRUCTURE (REQUIRED):
+    - Line 1 MUST start with "Overall: " followed by a one-sentence summary
+      of the direct answer to the question.
+    - Lines 2+ MUST be 2-4 dash-bullets ("- "), each a distinct supporting
+      reason. Each bullet = one short sentence.
+
+    ORTHOGONALITY (applies to findings, evidence, data_gaps):
+    - Each bullet across all three fields must be orthogonal — no two
+      bullets may state the same observation with different wording.
+    - A **finding** is an INTERPRETATION ("payment behavior deteriorated").
+    - An **evidence** entry is a RAW DATA VALUE that supports a finding
+      ("2025-11-16 · $4814 · success"). Never restate a finding as evidence.
+    - A **data_gap** is missing data ("no payment data for 2025-12").
+      Do not list an absence that is already implicit in findings.
+
+    DATE ACCURACY:
+    - When citing a date, copy the full YYYY-MM-DD string EXACTLY as it
+      appears in the query result. Never paraphrase, abbreviate, or change
+      the year. If unsure, re-query and re-check before citing.
+
+    OTHER RULES:
+    - Cite specific data values as evidence (numbers, dates, categories).
+    - If data was missing, state whether the absence is itself a signal.
+    - Be concise — the full findings string should be 4-6 short lines.
 
     If pillar-specific instructions are provided below, follow them
     for what to focus on and how to interpret the data.
 
     Respond with JSON:
-    {"findings": "<your answer>", "evidence": ["<evidence 1>", ...], "data_gaps": ["<gap 1>", ...]}
+    {"findings": "Overall: ...\n- reason 1\n- reason 2\n- reason 3", "evidence": ["<data value 1>", "<data value 2>", ...], "data_gaps": ["<gap 1>", ...]}
 
   synthesis: |
     Synthesize all specialist answers into a single coherent response.
@@ -92,6 +110,13 @@ chat:
     4. If unresolved, note it as a bullet flagged for human attention
     5. If data was missing, assess whether the absence is a signal (as a bullet)
     6. Keep it to 4-8 bullets total; each bullet one short sentence
+    7. ORTHOGONALITY: each bullet must represent a distinct point. Do NOT
+       list the same observation twice under different wordings. If two
+       specialists reported the same fact, merge into a single bullet.
+       Cross-domain insights must ADD a pattern the specialists didn't
+       already state individually — not restate their bullets.
+    8. DATE ACCURACY: quote any date verbatim as YYYY-MM-DD. Never
+       change the year or month when transcribing from specialist output.
 
     FORMAT EXAMPLE (structure only — content should match the actual question):
     ```

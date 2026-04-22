@@ -9,23 +9,33 @@ from logger.event_logger import EventLogger
 from models.types import FinalOutput, SpecialistOutput
 
 
-def _as_bullets(text: str) -> list[str]:
-    """Split a findings string into clean bullet lines.
+_BULLET_PREFIX = re.compile(r"^\s*[-•◦*]\s+")
 
-    Handles three common shapes the LLM may return:
-      - already-bulleted markdown ("- foo\\n- bar")
-      - • / ◦ bullets ("• foo\\n• bar")
-      - prose (one or more sentences; returned as a single bullet)
+
+def _split_findings(text: str) -> tuple[str, list[str]]:
+    """Split a findings string into a lead line and reason bullets.
+
+    Expected shape (per chat.specialist prompt):
+        Overall: <one-sentence summary>
+        - reason 1
+        - reason 2
+
+    Returns (lead, bullets). For prose input with no bullet markers, the
+    whole text becomes the lead and bullets is empty. For pure bullets
+    with no lead, lead is empty.
     """
     if not text:
-        return []
+        return "", []
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    bullet_prefix = re.compile(r"^[-•◦*]\s+")
-    bullets = [bullet_prefix.sub("", ln) for ln in lines if bullet_prefix.match(ln)]
-    if bullets:
-        return bullets
-    # No bullet markers — treat as a single findings blob.
-    return [" ".join(lines)]
+    lead_parts: list[str] = []
+    bullets: list[str] = []
+    for ln in lines:
+        if _BULLET_PREFIX.match(ln):
+            bullets.append(_BULLET_PREFIX.sub("", ln).strip())
+        else:
+            lead_parts.append(ln)
+    lead = " ".join(lead_parts).strip()
+    return lead, bullets
 
 
 CHAT_SYSTEM_PROMPT = (
@@ -81,11 +91,20 @@ class ChatAgent:
             parts.append("\n## Per-specialist findings")
             for domain, output in specialist_outputs.items():
                 parts.append(f"\n**{domain}**")
-                # Findings — render as bullets (findings field may be prose or
-                # pre-bulleted; split on newlines that start with "-" or "•").
-                parts.append("- **Findings**:")
-                for item in _as_bullets(output.findings):
-                    parts.append(f"  - {item}")
+                # Findings: "Overall: <summary>" on the header line, reasons as
+                # indented bullets below. Fallback to prose-as-lead if the model
+                # didn't structure the output as prompted.
+                lead, reasons = _split_findings(output.findings)
+                if lead and reasons:
+                    parts.append(f"- **Findings**: {lead}")
+                    for reason in reasons:
+                        parts.append(f"  - {reason}")
+                elif lead:
+                    parts.append(f"- **Findings**: {lead}")
+                elif reasons:
+                    parts.append("- **Findings**:")
+                    for reason in reasons:
+                        parts.append(f"  - {reason}")
                 if output.evidence:
                     parts.append("- **Evidence**:")
                     for ev in output.evidence:
