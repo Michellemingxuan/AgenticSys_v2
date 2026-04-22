@@ -34,37 +34,52 @@ SYNTHESIZE_PROMPT = (
 )
 
 
-PLAN_TEAM_PROMPT = (
-    "You are the orchestrator. Given a reviewer's ROOT question and a "
-    "description of each available specialist (data tables and columns), "
-    "produce a team plan: pick the specialists whose data can answer the "
-    "root question, AND rewrite the root question into a focused sub-question "
-    "for each.\n\n"
+SELECT_TEAM_PROMPT = (
+    "You are the orchestrator's TEAM SELECTION step. Given a reviewer's "
+    "root question and a description of each available specialist (data "
+    "tables and columns), pick the specialists whose data can directly "
+    "contribute to answering the root.\n\n"
+    "RULES:\n"
+    "- Select a specialist only if its DATA contains fields that the root "
+    "question depends on. Prefer 1-3 specialists over a broad sweep.\n"
+    "- Do NOT pick a specialist for 'additional context' or 'completeness'. "
+    "Every pick must carry its weight in the final answer.\n"
+    "- Prefer warm specialists (already active in session) when they are "
+    "relevant — but do not pick a warm specialist whose data is unrelated.\n"
+    "- For broad questions (e.g. 'full report'), select all specialists.\n"
+    "- Return at least one specialist.\n\n"
+    "Return a JSON object: {\"specialists\": [\"<domain1>\", \"<domain2>\"]}"
+)
+
+
+SPLIT_SUBQUESTIONS_PROMPT = (
+    "You are the orchestrator's SUB-QUESTION DECOMPOSITION step. The team "
+    "has already been selected. For each selected specialist, rewrite the "
+    "root question into a focused sub-question.\n\n"
     "GOVERNING PRINCIPLE — sub-questions must be IN SERVICE of the root:\n"
     "- Every sub-question MUST be a piece of evidence whose answer directly "
     "contributes to answering the root question. If an answer to a sub-question "
-    "would NOT change or support the answer to the root, the sub-question does "
-    "not belong in the plan. Drop it.\n"
+    "would NOT change or support the answer to the root, it does not belong in "
+    "the plan. Do not emit it.\n"
     "- Do NOT add sub-questions that merely expand scope, explore adjacent "
     "topics, or satisfy curiosity. No 'while we're at it' questions.\n"
-    "- Before including a sub-question, silently ask yourself: \"If the "
+    "- Before emitting each sub-question, silently ask yourself: \"If the "
     "specialist answers this, does it help the reviewer answer the root?\" "
-    "If the honest answer is 'maybe' or 'only indirectly', drop it.\n\n"
-    "OTHER GUIDELINES:\n"
-    "- Select specialists whose DATA contains fields directly relevant to the "
-    "root question. Prefer 1-3 specialists over a broad sweep.\n"
-    "- Prefer warm specialists (already active in session) when relevant.\n"
-    "- For broad questions (e.g. 'full report'), select all specialists.\n"
-    "- Each sub-question must focus ONLY on the aspect that specialist's data "
-    "can address. Do not ask a specialist about data they don't have.\n"
-    "- If the question is atomic or can be answered by one specialist, the "
-    "sub-question may equal the root question verbatim.\n"
-    "- Sub-questions should be short (one sentence), grounded in the "
-    "specialist's data vocabulary, and phrased so the answer slots directly "
-    "into the root-question synthesis.\n\n"
+    "If 'maybe' or 'only indirectly', skip or rewrite until tight.\n\n"
+    "PHRASING RULES:\n"
+    "- One sentence per sub-question.\n"
+    "- Grounded in the specialist's data vocabulary (use column/table names "
+    "from its data description where relevant).\n"
+    "- Focused ONLY on the aspect that specialist's data can address — do not "
+    "ask a specialist about data it doesn't have.\n"
+    "- Orthogonal across specialists — two specialists must not be asked the "
+    "same thing. Each sub-question gives the synthesizer a distinct piece.\n"
+    "- Phrased so the answer slots directly into the root-question synthesis.\n"
+    "- If only one specialist was selected, its sub-question may equal the "
+    "root question verbatim.\n\n"
     "Return a JSON object: "
     "{\"plan\": [{\"specialist\": \"<domain>\", \"sub_question\": \"<...>\"}, ...]}\n"
-    "Always return at least one plan entry."
+    "Produce exactly one entry per selected specialist, in the same order."
 )
 
 
@@ -88,8 +103,13 @@ class Orchestrator:
         self.catalog = catalog
 
     # ──────────────────────────────────────────────────────────────
-    # Team planning — selects specialists AND decomposes the question
-    # into per-specialist sub-questions in a single LLM call.
+    # Team planning — two sequential LLM calls:
+    #   1. _select_team()         → which specialists?
+    #   2. _split_sub_questions() → what does each answer?
+    # Kept as separate steps so the selection prompt stays focused on
+    # data relevance and the decomposition prompt stays focused on
+    # answer-quality + orthogonality. Report mode and single-specialist
+    # cases short-circuit to avoid unnecessary LLM calls.
     # ──────────────────────────────────────────────────────────────
 
     def plan_team(
@@ -116,7 +136,50 @@ class Orchestrator:
                              "reason": "report mode — all specialists, root question"})
             return plan
 
-        spec_descriptions = self._build_specialist_descriptions(available_specialists)
+        # Step 1: team selection.
+        selected = self._select_team(question, available_specialists, active_specialists)
+
+        # Single-specialist shortcut: no decomposition needed.
+        if len(selected) <= 1:
+            plan = [TeamAssignment(specialist=s, sub_question=question)
+                    for s in selected]
+            self.logger.log("plan_team_done",
+                            {"plan": [p.model_dump() for p in plan],
+                             "reason": "single specialist — sub-question equals root"})
+            return plan
+
+        # Step 2: sub-question decomposition for the selected team.
+        plan = self._split_sub_questions(question, selected)
+        self.logger.log("plan_team_done",
+                        {"plan": [p.model_dump() for p in plan]})
+        return plan
+
+    def _select_team(
+        self,
+        question: str,
+        available_specialists: list[str],
+        active_specialists: list[dict],
+    ) -> list[str]:
+        """LLM call #1: pick specialists whose data serves the root question.
+
+        Shows the FULL data catalog (every table + every column with
+        descriptions) plus a specialist→tables roster. This is the only
+        step that sees the complete catalog; step 2 narrows to per-
+        specialist detail via ``_build_specialist_descriptions``.
+        """
+        catalog_view = ""
+        if self.catalog is not None:
+            catalog_view = self.catalog.to_prompt_context() + "\n"
+
+        roster_lines = ["=== SPECIALIST ROSTER ==="]
+        for domain in available_specialists:
+            skill = load_domain_skill(domain)
+            if skill is None:
+                roster_lines.append(f"- {domain}: (no skill loaded)")
+                continue
+            tables = ", ".join(skill.data_hints) if skill.data_hints else "(no tables)"
+            roster_lines.append(f"- {domain} — tables: {tables}")
+        roster = "\n".join(roster_lines)
 
         active_info = ""
         if active_specialists:
@@ -125,27 +188,55 @@ class Orchestrator:
                 active_info += f"  - {a['domain']} ({a['questions_answered']} questions answered)\n"
 
         user_message = (
-            f"Question: {question}\n"
+            f"Root question: {question}\n"
             f"Pillar: {self.pillar}\n\n"
-            f"Available specialists and their data:\n{spec_descriptions}\n"
+            f"{catalog_view}"
+            f"{roster}\n"
             f"{active_info}\n"
-            "Produce the team plan."
+            "Pick the specialists whose data directly contributes to the root."
         )
 
         result = self.firewall.call(
-            system_prompt=PLAN_TEAM_PROMPT,
+            system_prompt=SELECT_TEAM_PROMPT,
             user_message=user_message,
         )
 
         if result.status == "blocked" or result.data is None:
-            self.logger.log("plan_team_fallback", {"reason": "blocked"})
-            return [TeamAssignment(specialist=s, sub_question=question)
-                    for s in available_specialists]
+            self.logger.log("select_team_fallback",
+                            {"reason": "blocked — defaulting to all"})
+            return list(available_specialists)
 
-        plan = self._parse_plan(result.data, available_specialists, question)
-        self.logger.log("plan_team_done",
-                        {"plan": [p.model_dump() for p in plan]})
-        return plan
+        selected = self._parse_team_selection(result.data, available_specialists)
+        self.logger.log("select_team_done", {"selected": selected})
+        return selected
+
+    def _split_sub_questions(
+        self,
+        question: str,
+        selected_specialists: list[str],
+    ) -> list[TeamAssignment]:
+        """LLM call #2: given the already-selected team, write per-specialist sub-questions."""
+        spec_descriptions = self._build_specialist_descriptions(selected_specialists)
+
+        user_message = (
+            f"Root question: {question}\n"
+            f"Pillar: {self.pillar}\n\n"
+            f"Selected specialists (exactly these, in order):\n{spec_descriptions}\n\n"
+            "Produce one sub-question per specialist, each in service of the root."
+        )
+
+        result = self.firewall.call(
+            system_prompt=SPLIT_SUBQUESTIONS_PROMPT,
+            user_message=user_message,
+        )
+
+        if result.status == "blocked" or result.data is None:
+            self.logger.log("split_sub_questions_fallback",
+                            {"reason": "blocked — using root for each"})
+            return [TeamAssignment(specialist=s, sub_question=question)
+                    for s in selected_specialists]
+
+        return self._parse_plan(result.data, selected_specialists, question)
 
     def _build_specialist_descriptions(self, available: list[str]) -> str:
         lines: list[str] = []
@@ -173,6 +264,35 @@ class Orchestrator:
             lines.append(desc)
 
         return "\n".join(lines)
+
+    def _parse_team_selection(
+        self,
+        data: dict,
+        available: list[str],
+    ) -> list[str]:
+        """Parse the JSON returned by the SELECT_TEAM_PROMPT step."""
+        raw = data.get("specialists", data.get("response", []))
+
+        if isinstance(raw, str):
+            try:
+                parsed_outer = json.loads(raw)
+                raw = parsed_outer.get("specialists", [])
+            except (json.JSONDecodeError, AttributeError):
+                return list(available)
+
+        if not isinstance(raw, list):
+            return list(available)
+
+        validated: list[str] = []
+        seen: set[str] = set()
+        for name in raw:
+            if isinstance(name, str) and name in available and name not in seen:
+                validated.append(name)
+                seen.add(name)
+
+        if not validated:
+            return list(available)
+        return validated
 
     def _parse_plan(
         self,

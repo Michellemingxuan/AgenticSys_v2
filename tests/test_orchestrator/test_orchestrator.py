@@ -47,16 +47,22 @@ def _make_output(domain: str, findings: str, data_gaps=None) -> SpecialistOutput
 
 
 def test_plan_team_parses_plan(firewall, logger):
+    # plan_team now makes two sequential LLM calls:
+    #   1. SELECT_TEAM → {"specialists": [...]}
+    #   2. SPLIT_SUBQUESTIONS → {"plan": [...]}
     firewall.call = MagicMock(
-        return_value=LLMResult(
-            status="success",
-            data={
-                "plan": [
-                    {"specialist": "bureau", "sub_question": "What is the current FICO?"},
-                    {"specialist": "modeling", "sub_question": "What is the PD score?"},
-                ]
-            },
-        )
+        side_effect=[
+            LLMResult(status="success", data={"specialists": ["bureau", "modeling"]}),
+            LLMResult(
+                status="success",
+                data={
+                    "plan": [
+                        {"specialist": "bureau", "sub_question": "What is the current FICO?"},
+                        {"specialist": "modeling", "sub_question": "What is the PD score?"},
+                    ]
+                },
+            ),
+        ]
     )
 
     registry = SessionRegistry()
@@ -72,6 +78,32 @@ def test_plan_team_parses_plan(firewall, logger):
     assert plan[0].specialist == "bureau"
     assert "FICO" in plan[0].sub_question
     assert plan[1].specialist == "modeling"
+    # Two LLM calls: one per step.
+    assert firewall.call.call_count == 2
+
+
+def test_plan_team_single_specialist_skips_split_call(firewall, logger):
+    """When team-selection returns exactly one specialist, the sub-question
+    decomposition step is skipped — sub-question equals the root verbatim,
+    saving one LLM call."""
+    firewall.call = MagicMock(
+        return_value=LLMResult(status="success", data={"specialists": ["bureau"]}),
+    )
+
+    registry = SessionRegistry()
+    orch = Orchestrator(firewall, logger, registry, "credit_risk")
+    root = "What is the current bureau score?"
+    plan = orch.plan_team(
+        question=root,
+        available_specialists=["bureau", "modeling"],
+        active_specialists=[],
+    )
+
+    assert len(plan) == 1
+    assert plan[0].specialist == "bureau"
+    assert plan[0].sub_question == root
+    # Only the selection call fired — decomposition short-circuited.
+    assert firewall.call.call_count == 1
 
 
 def test_plan_team_report_mode_returns_all_with_root_question(firewall, logger):

@@ -25,8 +25,17 @@ def _mock_firewall_call(system_prompt: str, user_message: str, **kwargs) -> LLMR
     """Route mock responses based on prompt content."""
     combined = (system_prompt + " " + user_message).lower()
 
-    if ("produce the team plan" in combined
-            or ("select" in combined and "specialist" in combined)):
+    # Step 1 of plan_team → team selection
+    if "team selection step" in combined or (
+        "pick the specialists" in combined and "plan" not in user_message.lower()
+    ):
+        return LLMResult(
+            status="success",
+            data={"specialists": ["bureau", "spend_payments"]},
+        )
+
+    # Step 2 of plan_team → sub-question decomposition
+    if "sub-question decomposition step" in combined or "one sub-question per specialist" in combined:
         return LLMResult(
             status="success",
             data={

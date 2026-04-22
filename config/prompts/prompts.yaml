@@ -68,36 +68,43 @@ chat:
     QUESTION: $question
     FINDINGS FROM DATA ANALYSIS: $findings
 
-    FINDINGS STRUCTURE (REQUIRED):
-    - Line 1 MUST start with "Overall: " followed by a one-sentence summary
-      of the direct answer to the question.
-    - Lines 2+ MUST be 2-4 dash-bullets ("- "), each a distinct supporting
-      reason. Each bullet = one short sentence.
+    FINDINGS — ONE SENTENCE (REQUIRED):
+    - `findings` MUST be exactly ONE sentence starting with "Overall: "
+      that directly answers the question. No bullets, no multi-line content.
+    - Treat findings as the headline interpretation; all supporting
+      detail belongs in `evidence`.
 
-    ORTHOGONALITY (applies to findings, evidence, data_gaps):
-    - Each bullet across all three fields must be orthogonal — no two
-      bullets may state the same observation with different wording.
-    - A **finding** is an INTERPRETATION ("payment behavior deteriorated").
-    - An **evidence** entry is a RAW DATA VALUE that supports a finding
-      ("2025-11-16 · $4814 · success"). Never restate a finding as evidence.
-    - A **data_gap** is missing data ("no payment data for 2025-12").
-      Do not list an absence that is already implicit in findings.
+    EVIDENCE — ORTHOGONAL SUPPORTING REASONS:
+    - `evidence` is a list of 2-5 bullets. Each bullet is a distinct
+      REASON (data-grounded) that supports the Overall finding.
+    - ORTHOGONALITY IS MANDATORY: each evidence entry must address a
+      different angle, time slice, or data point. Do not list two
+      bullets that rephrase the same fact. If two candidate bullets
+      hinge on the same observation, merge them.
+    - Each bullet must cite specific data values (dates, amounts,
+      categories, scores) — no vague prose.
+    - Examples of ORTHOGONAL evidence for "payment behavior was stable":
+        ✓ "One successful payment on 2025-11-16 for $4814"
+        ✓ "Zero returned payments across Sep-Nov 2025"
+        ✓ "Payment cadence matches prior 3-month baseline (~1/mo)"
+      (Each bullet is a different slice: instance · failure rate · cadence.)
+    - Examples of NON-orthogonal (bad):
+        ✗ "One successful payment on 2025-11-16 for $4814"
+        ✗ "Most recent payment was $4814 and cleared" (same fact, reworded)
+
+    DATA GAPS:
+    - `data_gaps` lists missing data not already implicit in the
+      evidence. Do not restate evidence bullets here as absences.
 
     DATE ACCURACY:
-    - When citing a date, copy the full YYYY-MM-DD string EXACTLY as it
-      appears in the query result. Never paraphrase, abbreviate, or change
-      the year. If unsure, re-query and re-check before citing.
-
-    OTHER RULES:
-    - Cite specific data values as evidence (numbers, dates, categories).
-    - If data was missing, state whether the absence is itself a signal.
-    - Be concise — the full findings string should be 4-6 short lines.
+    - When citing a date, copy the exact string from the query result.
+      Never paraphrase, abbreviate, or change the year.
 
     If pillar-specific instructions are provided below, follow them
     for what to focus on and how to interpret the data.
 
     Respond with JSON:
-    {"findings": "Overall: ...\n- reason 1\n- reason 2\n- reason 3", "evidence": ["<data value 1>", "<data value 2>", ...], "data_gaps": ["<gap 1>", ...]}
+    {"findings": "Overall: <one-sentence answer>", "evidence": ["<orthogonal reason 1 with data value>", "<orthogonal reason 2>", "<orthogonal reason 3>"], "data_gaps": ["<gap 1>", ...]}
 
   synthesis: |
     Synthesize all specialist answers into a single coherent response.
