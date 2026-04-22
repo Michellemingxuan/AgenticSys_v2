@@ -159,7 +159,7 @@ def main():
     # Build per-case gateway from generated data
     gateway = SimulatedDataGateway.from_generated(tables_raw)
     catalog = DataCatalog()
-    init_tools(gateway, catalog)
+    init_tools(gateway, catalog, logger=logger)
 
     # Case selection
     available_cases = gateway.list_case_ids()

@@ -97,8 +97,14 @@ chat:
       evidence. Do not restate evidence bullets here as absences.
 
     DATE ACCURACY:
-    - When citing a date, copy the exact string from the query result.
-      Never paraphrase, abbreviate, or change the year.
+    - When citing a date, copy the exact string from a row the query
+      actually RETURNED. Never paraphrase, abbreviate, or change the year.
+    - NEVER cite the filter-window boundaries you passed to query_table
+      (e.g. 2025-09-01 or 2025-11-30) — those are what you ASKED for, not
+      what came back. If every date you're about to cite ends in -01 or
+      -30/-31, stop: you are almost certainly echoing the window instead
+      of reading the result. Re-scan the returned rows for actual dates
+      like 2024-09-24 or 2025-11-16.
 
     If pillar-specific instructions are provided below, follow them
     for what to focus on and how to interpret the data.

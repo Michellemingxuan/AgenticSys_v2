@@ -16,8 +16,10 @@ from data.gateway import DataGateway
 
 _gateway: DataGateway | None = None
 _catalog: DataCatalog | None = None
+_logger: Any = None  # logger.event_logger.EventLogger when wired; None = silent
 
 _MAX_CHARS = 3000
+_LOG_PREVIEW_CHARS = 500  # how much of tool output to snapshot in tool_result events
 
 _FILTER_OPS: dict[str, Callable[[Any, Any], bool]] = {
     "eq": operator.eq,
@@ -150,16 +152,64 @@ def _apply_filter(
     return out
 
 
-def init_tools(gateway: DataGateway, catalog: DataCatalog) -> None:
-    global _gateway, _catalog
+def init_tools(gateway: DataGateway, catalog: DataCatalog, logger: Any = None) -> None:
+    """Initialize the module-level tool state.
+
+    ``logger`` is optional; when provided (typically an ``EventLogger``),
+    every tool invocation emits a ``tool_call`` event (with args) and a
+    ``tool_result`` event (with row count + preview of the returned string)
+    so the data pipeline is visible in the session log.
+    """
+    global _gateway, _catalog, _logger
     _gateway = gateway
     _catalog = catalog
+    _logger = logger
+
+
+def set_logger(logger: Any) -> None:
+    """Attach (or detach) a logger after ``init_tools`` has been called.
+
+    Useful in notebooks where data is loaded before the session logger is
+    constructed. Pass ``None`` to silence logging.
+    """
+    global _logger
+    _logger = logger
+
+
+def _log_call(tool: str, args: dict[str, Any]) -> None:
+    if _logger is not None:
+        _logger.log("tool_call", {"tool": tool, "args": args})
+
+
+def _log_result(
+    tool: str,
+    *,
+    result: str,
+    rows_returned: int | None = None,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    if _logger is None:
+        return
+    preview = result if len(result) <= _LOG_PREVIEW_CHARS else result[:_LOG_PREVIEW_CHARS] + "…"
+    payload: dict[str, Any] = {
+        "tool": tool,
+        "result_preview": preview,
+        "result_chars": len(result),
+    }
+    if rows_returned is not None:
+        payload["rows_returned"] = rows_returned
+    if extra:
+        payload.update(extra)
+    _logger.log("tool_result", payload)
 
 
 def list_available_tables() -> str:
     """List all data tables available for the current case, each with its description."""
+    _log_call("list_available_tables", {})
     if _catalog is None:
-        return "Data unavailable"
+        out = "Data unavailable"
+        _log_result("list_available_tables", result=out)
+        return out
 
     def _render(tables: list[str]) -> str:
         lines: list[str] = []
@@ -174,20 +224,40 @@ def list_available_tables() -> str:
     if _gateway is not None and _gateway.get_case_id() is not None:
         case_tables = _gateway.list_tables()
         if case_tables:
-            return "Tables for the current case:\n" + _render(case_tables)
-        return "No tables available for the current case."
+            out = "Tables for the current case:\n" + _render(case_tables)
+            _log_result("list_available_tables", result=out,
+                        extra={"table_count": len(case_tables)})
+            return out
+        out = "No tables available for the current case."
+        _log_result("list_available_tables", result=out,
+                    extra={"table_count": 0})
+        return out
+
     tables = _catalog.list_tables()
-    return _render(tables) if tables else "No tables available"
+    out = _render(tables) if tables else "No tables available"
+    _log_result("list_available_tables", result=out,
+                extra={"table_count": len(tables)})
+    return out
 
 
 def get_table_schema(table_name: str) -> str:
     """Get the column schema for a specific table."""
+    _log_call("get_table_schema", {"table_name": table_name})
     if _catalog is None:
-        return "Data unavailable"
+        out = "Data unavailable"
+        _log_result("get_table_schema", result=out)
+        return out
     schema = _catalog.get_schema(table_name)
     if schema is None:
-        return "Data unavailable"
-    return json.dumps(schema, indent=2)
+        out = "Data unavailable"
+        _log_result("get_table_schema", result=out,
+                    extra={"table_name": table_name, "found": False})
+        return out
+    out = json.dumps(schema, indent=2)
+    _log_result("get_table_schema", result=out,
+                extra={"table_name": table_name, "found": True,
+                       "column_count": len(schema)})
+    return out
 
 
 def query_table(
@@ -216,23 +286,47 @@ def query_table(
             REQUIRED for wide tables like model_scores (266 cols) to avoid
             slow processing — request only the columns you need.
     """
+    _log_call("query_table", {
+        "table_name": table_name,
+        "filter_column": filter_column,
+        "filter_value": filter_value,
+        "filter_op": filter_op if (filter_column and filter_value) else None,
+        "columns": columns,
+    })
+
     if _gateway is None:
-        return "Data unavailable"
+        out = "Data unavailable"
+        _log_result("query_table", result=out)
+        return out
 
     # Fetch ALL rows for this case, then apply the filter in Python so we
     # can support range operators. The gateway itself only knows exact match.
     rows = _gateway.query(table_name, filters=None)
     if rows is None:
-        return f"Data unavailable: table '{table_name}' not found for current case."
+        out = f"Data unavailable: table '{table_name}' not found for current case."
+        _log_result("query_table", result=out,
+                    extra={"table_name": table_name, "found": False})
+        return out
 
+    total_before_filter = len(rows)
     if filter_column and filter_value:
         rows = _apply_filter(rows, filter_column, str(filter_value), filter_op)
+    rows_after_filter = len(rows)
 
     if not rows:
-        return (
+        out = (
             f"No rows matching filter ({filter_column} {filter_op} "
             f"{filter_value!r}) in '{table_name}'."
         )
+        _log_result(
+            "query_table", result=out, rows_returned=0,
+            extra={
+                "table_name": table_name,
+                "rows_before_filter": total_before_filter,
+                "rows_after_filter": 0,
+            },
+        )
+        return out
 
     # Column projection — select only requested columns
     if columns:
@@ -241,7 +335,17 @@ def query_table(
             # Project requested columns only.
             rows = [{k: row[k] for k in requested if k in row} for row in rows]
             if not rows or not rows[0]:
-                return f"No requested columns {requested} found in '{table_name}'."
+                out = f"No requested columns {requested} found in '{table_name}'."
+                _log_result(
+                    "query_table", result=out, rows_returned=0,
+                    extra={
+                        "table_name": table_name,
+                        "rows_before_filter": total_before_filter,
+                        "rows_after_filter": rows_after_filter,
+                        "reason": "no_requested_columns_present",
+                    },
+                )
+                return out
 
     total_rows = len(rows)
     total_cols = len(rows[0]) if rows else 0
@@ -275,4 +379,16 @@ def query_table(
     if truncation_notes:
         rows.append({"_truncated": ", ".join(truncation_notes)})
 
-    return json.dumps(rows, indent=2, default=str)
+    out = json.dumps(rows, indent=2, default=str)
+    _log_result(
+        "query_table", result=out, rows_returned=shown_rows,
+        extra={
+            "table_name": table_name,
+            "rows_before_filter": total_before_filter,
+            "rows_after_filter": rows_after_filter,
+            "rows_shown": shown_rows,
+            "total_rows": total_rows,
+            "truncation": truncation_notes or None,
+        },
+    )
+    return out
