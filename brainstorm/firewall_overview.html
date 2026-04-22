@@ -99,6 +99,37 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 .always.every { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
 .always.retry { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); }
 
+/* DIGIT-THRESHOLD RULER */
+.ruler-box { background: var(--white); border: 1px solid var(--gray-border); border-radius: 3px; padding: 18px; margin-bottom: 28px; }
+.ruler-title { font-size: 12px; font-weight: 700; color: var(--navy); margin-bottom: 14px; letter-spacing: 0.02em; }
+.ruler-stage { position: relative; padding: 22px 30px 32px; }
+.fw-ruler { position: relative; height: 28px; border-radius: 3px; border: 1px solid var(--gray-border); overflow: visible;
+  background: linear-gradient(to right, var(--green-bg) 0%, var(--green-bg) 36%, var(--amber-bg) 36%, var(--amber-bg) 60%, var(--red-bg) 60%, var(--red-bg) 100%); }
+.fw-tick { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--gray-text); z-index: 1; }
+.fw-tick-label { position: absolute; top: -22px; left: 50%; transform: translateX(-50%); font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--gray-text); white-space: nowrap; }
+.fw-tick-digits { position: absolute; bottom: -22px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 700; color: var(--navy); white-space: nowrap; }
+.fw-marker { position: absolute; top: -4px; width: 14px; height: 14px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: white;
+  transform: translateX(-50%); border: 2px solid white; z-index: 2; }
+.fw-legend { display: flex; gap: 18px; margin-top: 6px; font-size: 11px; color: var(--slate); flex-wrap: wrap; }
+.fw-legend-item { display: flex; align-items: center; gap: 6px; }
+.fw-legend-dot { width: 10px; height: 10px; border-radius: 2px; border: 1px solid; }
+.fw-ok-dot   { background: var(--green-bg); border-color: var(--green-border); }
+.fw-mask-dot { background: var(--amber-bg); border-color: var(--amber-border); }
+.fw-block-dot{ background: var(--red-bg); border-color: var(--red-border); }
+
+/* CROSS-REF CARD */
+.xref {
+  margin-top: 22px; padding: 14px 18px; background: var(--white);
+  border: 1px solid var(--gray-border); border-left: 3px solid var(--amber); border-radius: 3px;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+}
+.xref-icon { width: 32px; height: 32px; background: var(--amber-bg); border-radius: 3px; display: flex; align-items: center; justify-content: center; color: var(--amber); flex-shrink: 0; }
+.xref-body { flex: 1; min-width: 240px; font-size: 12px; color: var(--slate); line-height: 1.5; }
+.xref-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em; color: var(--amber); display: block; margin-bottom: 2px; }
+.xref-link { color: var(--blue); text-decoration: none; border-bottom: 1px dashed var(--blue); font-weight: 700; font-family: 'SF Mono', 'Monaco', 'Consolas', monospace; font-size: 11.5px; }
+.xref-link:hover { color: var(--navy); border-bottom-color: var(--navy); }
+
 /* BLOCK PROPAGATION */
 .block-wrap { background: var(--white); border: 1px solid var(--gray-border); border-radius: 3px; padding: 16px; margin-bottom: 28px; overflow-x: auto; }
 .block-wrap .mermaid { display: flex; justify-content: center; min-width: 700px; }
@@ -294,6 +325,57 @@ flowchart TD
         </tr>
       </tbody>
     </table>
+  </div>
+
+  <!-- DIGIT THRESHOLD RULER -->
+  <div class="section">
+    <span class="section-label">Digit-masking thresholds · visual</span>
+    <span class="section-line"></span>
+    <span class="section-note">Where each sanitizer starts to bite</span>
+  </div>
+
+  <div class="ruler-box">
+    <div class="ruler-title">Digit-run length</div>
+    <div class="ruler-stage">
+      <div class="fw-ruler">
+        <div class="fw-tick" style="left: 0%">
+          <span class="fw-tick-label">0 digits</span>
+          <span class="fw-tick-digits">0</span>
+        </div>
+        <div class="fw-tick" style="left: 36%">
+          <span class="fw-tick-label" style="color: var(--amber)">retry masks ≥ 6</span>
+          <span class="fw-tick-digits">6</span>
+        </div>
+        <div class="fw-tick" style="left: 60%">
+          <span class="fw-tick-label" style="color: var(--red)">SafeChain masks ≥ 8</span>
+          <span class="fw-tick-digits">8</span>
+        </div>
+        <div class="fw-tick" style="left: 100%">
+          <span class="fw-tick-label">15+</span>
+          <span class="fw-tick-digits">15</span>
+        </div>
+        <!-- example markers -->
+        <div class="fw-marker" style="left: 30%; background: var(--green)" title="CASE-00001 (5 digits)">●</div>
+        <div class="fw-marker" style="left: 50%; background: var(--amber)" title="7-digit ID — masked on retry">●</div>
+        <div class="fw-marker" style="left: 100%; background: var(--red)" title="15-digit account number — always masked">●</div>
+      </div>
+    </div>
+    <div class="fw-legend">
+      <div class="fw-legend-item"><span class="fw-legend-dot fw-ok-dot"></span>0–5 digits · passes untouched (<span class="mono">CASE-00001</span> lives here)</div>
+      <div class="fw-legend-item"><span class="fw-legend-dot fw-mask-dot"></span>6–7 digits · masked by FirewallStack on retry</div>
+      <div class="fw-legend-item"><span class="fw-legend-dot fw-block-dot"></span>8+ digits · masked by SafeChain on every call</div>
+    </div>
+  </div>
+
+  <!-- CROSS-REF -->
+  <div class="xref">
+    <div class="xref-icon">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+    </div>
+    <div class="xref-body">
+      <span class="xref-label">See also · companion page</span>
+      <a href="data_agent_overview.html" class="xref-link">data_agent_overview.html →</a> covers how the case ID is kept out of tool args and why the <span class="mono">CASE-{seq:05d}</span> format was chosen to stay under these thresholds.
+    </div>
   </div>
 
   <!-- BLOCK PROPAGATION -->

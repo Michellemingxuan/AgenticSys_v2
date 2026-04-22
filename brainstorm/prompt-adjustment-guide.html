@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prompt Adjustment Guide</title>
+<style>
+  :root {
+    --navy: #00175A; --blue: #006FCF; --white: #FFFFFF;
+    --gray-light: #F4F6F9; --gray-text: #4A5568; --gray-border: #E2E8F0;
+    --gray-bg: #FAFBFC; --slate: #334155;
+    --green: #166534; --green-bg: #DCFCE7; --green-border: #86EFAC;
+    --amber: #92400E; --amber-bg: #FEF3C7; --amber-border: #FCD34D;
+    --purple: #4C1D95; --purple-bg: #EDE9FE; --purple-border: #A78BFA;
+    --red: #991B1B; --red-bg: #FEE2E2; --red-border: #FCA5A5;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    background: #fff;
+    color: var(--navy);
+    line-height: 1.55;
+  }
+
+  /* HERO */
+  .hero { background: var(--navy); color: white; padding: 24px 60px 20px; position: relative; }
+  .blue-stripe { position: absolute; top: 0; left: 0; right: 0; height: 4px; background: var(--blue); }
+  .hero-row { display: flex; align-items: center; gap: 20px; }
+  .amex-logo { background: var(--blue); padding: 6px 12px; display: inline-flex; flex-direction: column; line-height: 1.1; flex-shrink: 0; }
+  .logo-american, .logo-express { color: white; font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+  .hero h1 { font-family: Georgia, serif; font-size: 24px; font-weight: 700; letter-spacing: -0.01em; }
+  .hero-sub { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 255, 255, 0.55); font-weight: 600; margin-top: 3px; }
+
+  /* TAGLINE */
+  .tagline {
+    background: linear-gradient(to right, #F8FAFC, #fff);
+    border-bottom: 1px solid var(--gray-border);
+    border-left: 4px solid var(--blue);
+    padding: 12px 60px;
+    color: var(--gray-text);
+    font-size: 13px;
+  }
+  .tagline strong { color: var(--navy); font-weight: 700; }
+
+  /* PAGE */
+  .page { max-width: 1180px; margin: 0 auto; padding: 32px 60px 64px; }
+
+  /* SECTION */
+  section { margin-bottom: 44px; }
+  .section-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--gray-border); }
+  .section-num {
+    background: var(--navy); color: white;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+    padding: 4px 9px; border-radius: 2px; flex-shrink: 0;
+  }
+  .section-head h2 { font-family: Georgia, serif; font-size: 20px; font-weight: 700; color: var(--navy); }
+  .section-head .sub { font-size: 12px; color: var(--gray-text); font-style: italic; margin-left: auto; }
+
+  /* TABLES */
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 6px; }
+  th {
+    background: var(--gray-light); color: var(--gray-text);
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+    text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--gray-border);
+    vertical-align: bottom;
+  }
+  td { padding: 11px 14px; color: var(--slate); line-height: 1.5; border-bottom: 1px solid var(--gray-border); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td strong { color: var(--navy); font-weight: 700; }
+
+  .table-wrap { background: var(--white); border: 1px solid var(--gray-border); border-radius: 3px; overflow: hidden; }
+
+  /* INLINE CODE + PATHS */
+  code, .mono {
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    font-size: 11.5px;
+    background: #EEF2F7;
+    color: var(--navy);
+    padding: 1px 5px;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+  .path {
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    font-size: 11.5px;
+    color: var(--blue);
+    background: transparent;
+    padding: 0;
+    white-space: nowrap;
+  }
+
+  /* PRE / CODE BLOCKS */
+  pre {
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    font-size: 11.5px;
+    background: var(--gray-bg);
+    color: var(--slate);
+    padding: 12px 14px;
+    border: 1px solid var(--gray-border);
+    border-left: 3px solid var(--blue);
+    border-radius: 3px;
+    overflow-x: auto;
+    line-height: 1.55;
+    margin: 10px 0;
+  }
+  pre code { background: transparent; padding: 0; color: inherit; white-space: pre; }
+
+  /* ASSEMBLY STEPS (numbered) */
+  .assembly {
+    background: var(--gray-bg);
+    border: 1px solid var(--gray-border);
+    border-radius: 3px;
+    padding: 14px 18px;
+    margin: 10px 0;
+  }
+  .assembly .asm-title {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--blue); margin-bottom: 8px;
+  }
+  .assembly ol { list-style: none; counter-reset: step; }
+  .assembly li {
+    counter-increment: step;
+    padding: 4px 0 4px 34px;
+    position: relative;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    font-size: 11.5px;
+    color: var(--slate);
+  }
+  .assembly li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0; top: 4px;
+    width: 22px; height: 22px;
+    background: var(--navy); color: white;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 10px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 50%;
+  }
+  .assembly .join {
+    padding: 8px 0 4px 34px; font-family: inherit; font-size: 11px; color: var(--gray-text); font-style: italic;
+  }
+
+  /* WRENCH/INJECT CALLOUT */
+  .callout {
+    background: #F8FAFC;
+    border: 1px solid var(--gray-border);
+    border-left: 3px solid var(--amber);
+    border-radius: 3px;
+    padding: 10px 14px;
+    margin: 10px 0;
+    font-size: 12px;
+    color: var(--slate);
+  }
+  .callout strong { color: var(--navy); }
+
+  /* GOTCHAS LIST */
+  .gotchas { list-style: none; padding: 0; }
+  .gotchas li {
+    padding: 10px 12px 10px 32px;
+    position: relative;
+    border-bottom: 1px solid var(--gray-border);
+    font-size: 12.5px;
+    color: var(--slate);
+    line-height: 1.55;
+  }
+  .gotchas li:last-child { border-bottom: none; }
+  .gotchas li::before {
+    content: "⚠";
+    position: absolute;
+    left: 10px; top: 10px;
+    color: var(--amber);
+    font-size: 14px;
+  }
+  .gotchas li strong { color: var(--navy); font-weight: 700; }
+
+  /* FOOTER */
+  footer {
+    padding: 18px 60px;
+    border-top: 1px solid var(--gray-border);
+    font-size: 11px;
+    color: var(--gray-text);
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 10px;
+  }
+
+  @media (max-width: 820px) {
+    .page, .hero, .tagline, footer { padding-left: 24px; padding-right: 24px; }
+    table, .assembly { font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="blue-stripe"></div>
+  <div class="hero-row">
+    <div class="amex-logo">
+      <span class="logo-american">American</span>
+      <span class="logo-express">Express</span>
+    </div>
+    <div>
+      <h1>Prompt Adjustment Guide</h1>
+      <div class="hero-sub">Agentic Case Review · Where to edit what</div>
+    </div>
+  </div>
+</div>
+
+<div class="tagline">
+  <strong>How to change what the agents say to the LLM.</strong>
+  Prompts live in three layers: a single base YAML, per-pillar YAMLs, and per-specialist Python skills — plus a handful of hardcoded constants for orchestration agents.
+</div>
+
+<div class="page">
+
+  <!-- ─── SECTION 1 ─────────────────────────────────────────── -->
+  <section>
+    <div class="section-head">
+      <span class="section-num">Section 1</span>
+      <h2>Where each prompt lives</h2>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 18%">Layer</th>
+            <th style="width: 26%">Location</th>
+            <th style="width: 30%">What it controls</th>
+            <th style="width: 26%">When to edit</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Base prompts</strong><br><span style="font-size:10.5px;color:var(--gray-text)">all modes</span></td>
+            <td><span class="path">config/prompts/prompts.yaml</span></td>
+            <td>
+              <code>common.format_instructions</code> — universal format rules<br>
+              <code>chat.specialist</code> / <code>chat.synthesis</code> — chat mode<br>
+              <code>report.specialist</code> / <code>report.synthesis</code> — report mode
+            </td>
+            <td>Change the base behavior of <em>any</em> specialist or the synthesis step</td>
+          </tr>
+          <tr>
+            <td><strong>Pillar overlay</strong></td>
+            <td><span class="path">config/pillars/credit_risk.yaml</span><br><span class="path">config/pillars/escalation.yaml</span><br><span class="path">config/pillars/cbo.yaml</span></td>
+            <td>Per-specialist <code>report_instructions</code> (what to look for, bullet templates), plus pillar-level <code>report_format</code> and <code>synthesis_report</code></td>
+            <td><strong>Most common edit</strong> — change what a specialist produces in this pillar</td>
+          </tr>
+          <tr>
+            <td><strong>Domain skill</strong></td>
+            <td><span class="path">skills/domain/bureau.py</span>, <span class="path">modeling.py</span>, etc.</td>
+            <td>Each returns a <code>DomainSkill</code> with <code>name</code>, <code>system_prompt</code>, <code>data_hints</code>, <code>interpretation_guide</code>, <code>risk_signals</code></td>
+            <td>Change a specialist's <em>identity</em> — expertise framing, tables it reads, its risk signals</td>
+          </tr>
+          <tr>
+            <td><strong>Orchestration prompts</strong><br><span style="font-size:10.5px;color:var(--gray-text)">hardcoded</span></td>
+            <td><code>.py</code> constants — see §4</td>
+            <td>Team planning prompt, synthesis scaffold, cross-review prompt, chat-agent system prompt, base 3-step scaffold, firewall-retry guidance</td>
+            <td>Change the <em>control-flow</em> behavior of agents that aren't specialists</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ─── SECTION 2 ─────────────────────────────────────────── -->
+  <section>
+    <div class="section-head">
+      <span class="section-num">Section 2</span>
+      <h2>Assembly order</h2>
+      <span class="sub">Two assembly points, both in <span class="path">config/report_loader.py</span></span>
+    </div>
+
+    <h3 style="font-size:14px;color:var(--navy);margin:12px 0 6px">Specialist prompt</h3>
+    <div class="callout">
+      <strong>Called by:</strong> <code>get_specialist_prompt(mode, question, findings, domain, pillar_report_instructions)</code><br>
+      <strong>Injected at:</strong> Step-3 user message in <span class="path">agents/base_agent.py</span>
+    </div>
+    <div class="assembly">
+      <div class="asm-title">Composition order</div>
+      <ol>
+        <li>prompts.yaml / common.format_instructions</li>
+        <li>prompts.yaml / {chat|report}.specialist &nbsp;<span style="color:var(--gray-text)">← $question, $findings, $domain substituted</span></li>
+        <li>pillar.yaml / specialists.{domain}.report_instructions</li>
+      </ol>
+      <div class="join">Joined with <code>\n\n</code>.</div>
+    </div>
+
+    <h3 style="font-size:14px;color:var(--navy);margin:24px 0 6px">Synthesis prompt</h3>
+    <div class="callout">
+      <strong>Called by:</strong> <code>get_synthesis_prompt(mode, pillar_report_format, pillar_synthesis_report)</code><br>
+      <strong>Injected at:</strong> system prompt for <code>Orchestrator.synthesize()</code> in <span class="path">orchestrator/orchestrator.py</span>
+    </div>
+    <div class="assembly">
+      <div class="asm-title">Composition order</div>
+      <ol>
+        <li>prompts.yaml / {chat|report}.synthesis</li>
+        <li>pillar.yaml / report_format &nbsp;<span style="color:var(--gray-text)">← top-level, optional</span></li>
+        <li>pillar.yaml / synthesis_report.instructions</li>
+        <li>pillar.yaml / synthesis_report.{section_key}.report_instructions &nbsp;<span style="color:var(--gray-text)">← per section</span></li>
+        <li>pillar.yaml / synthesis_report.formatter_report</li>
+      </ol>
+      <div class="join">Joined with <code>\n\n</code>.</div>
+    </div>
+  </section>
+
+  <!-- ─── SECTION 3 ─────────────────────────────────────────── -->
+  <section>
+    <div class="section-head">
+      <span class="section-num">Section 3</span>
+      <h2>Common edit scenarios</h2>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 50%">You want to…</th>
+            <th style="width: 50%">Edit this file</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Make chat answers use dash-bullets instead of paragraphs</td>
+            <td><span class="path">config/prompts/prompts.yaml</span> → <code>chat.synthesis</code></td>
+          </tr>
+          <tr>
+            <td>Make <em>all</em> specialists cite a cut-off date differently</td>
+            <td><span class="path">config/prompts/prompts.yaml</span> → <code>common.format_instructions</code></td>
+          </tr>
+          <tr>
+            <td>Change what the bureau specialist reports for <strong>credit_risk</strong></td>
+            <td><span class="path">config/pillars/credit_risk.yaml</span> → <code>specialists.bureau.report_instructions</code></td>
+          </tr>
+          <tr>
+            <td>Change the bureau specialist's expertise framing (every pillar)</td>
+            <td><span class="path">skills/domain/bureau.py</span> → <code>system_prompt</code> and <code>risk_signals</code></td>
+          </tr>
+          <tr>
+            <td>Add a new specialist</td>
+            <td>
+              (a) new <span class="path">skills/domain/new_domain.py</span> returning <code>DomainSkill(...)</code><br>
+              (b) register in <span class="path">skills/domain/loader.py</span> → <code>_DOMAIN_MODULES</code><br>
+              (c) add per-pillar overlay in <span class="path">config/pillars/*.yaml</span> under <code>specialists.new_domain</code>
+            </td>
+          </tr>
+          <tr>
+            <td>Change a specialist's data tables</td>
+            <td><span class="path">skills/domain/&lt;name&gt;.py</span> → <code>data_hints</code></td>
+          </tr>
+          <tr>
+            <td>Change how the orchestrator picks specialists / splits into sub-questions</td>
+            <td><span class="path">orchestrator/orchestrator.py</span> → <code>PLAN_TEAM_PROMPT</code> constant</td>
+          </tr>
+          <tr>
+            <td>Change the synthesis merge behavior for every pillar</td>
+            <td><span class="path">config/prompts/prompts.yaml</span> → <code>chat.synthesis</code> or <code>report.synthesis</code></td>
+          </tr>
+          <tr>
+            <td>Change firewall-retry guidance (what the model sees after a block)</td>
+            <td><span class="path">gateway/firewall_stack.py</span> → <code>FIREWALL_GUIDANCE</code></td>
+          </tr>
+          <tr>
+            <td>Change the chat-follow-up system prompt</td>
+            <td><span class="path">orchestrator/chat_agent.py</span> → <code>CHAT_SYSTEM_PROMPT</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ─── SECTION 4 ─────────────────────────────────────────── -->
+  <section>
+    <div class="section-head">
+      <span class="section-num">Section 4</span>
+      <h2>Hardcoded prompts</h2>
+      <span class="sub">Python string constants</span>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 20%">Constant</th>
+            <th style="width: 32%">File</th>
+            <th>Role</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>PLAN_TEAM_PROMPT</code></td>
+            <td><span class="path">orchestrator/orchestrator.py</span></td>
+            <td>How Orchestrator picks specialists + decomposes the question into sub-questions</td>
+          </tr>
+          <tr>
+            <td><code>SYNTHESIZE_PROMPT</code></td>
+            <td><span class="path">orchestrator/orchestrator.py</span></td>
+            <td>Legacy module-level constant; the assembled <code>get_synthesis_prompt(...)</code> from <code>prompts.yaml</code> is what's actually sent</td>
+          </tr>
+          <tr>
+            <td><code>BASE_INSTRUCTIONS</code></td>
+            <td><span class="path">agents/base_agent.py</span></td>
+            <td>The 3-step scaffold ("identify data, synthesize, produce report") that every specialist's system prompt starts with</td>
+          </tr>
+          <tr>
+            <td><code>CHAT_SYSTEM_PROMPT</code></td>
+            <td><span class="path">orchestrator/chat_agent.py</span></td>
+            <td>System prompt for the follow-up <code>/chat</code> conversation (not the initial answer)</td>
+          </tr>
+          <tr>
+            <td><code>FIREWALL_GUIDANCE</code></td>
+            <td><span class="path">gateway/firewall_stack.py</span></td>
+            <td>Injected into the system prompt on retry after a firewall block</td>
+          </tr>
+          <tr>
+            <td><code>COMPARE_PROMPT</code> (or similar)</td>
+            <td><span class="path">agents/general_specialist.py</span></td>
+            <td>Cross-review prompt — how the General Specialist pairs / contradicts / produces insights across specialist outputs</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ─── SECTION 5 ─────────────────────────────────────────── -->
+  <section>
+    <div class="section-head">
+      <span class="section-num">Section 5</span>
+      <h2>Testing a prompt change</h2>
+    </div>
+
+<pre><code># 1. Edit the relevant file above.
+
+# 2. If running in a notebook kernel, reload the YAML cache:
+from config import report_loader
+report_loader.reload()
+#    (.py constant changes are picked up automatically by %autoreload 2.)
+
+# 3. Run the smoke test to verify nothing structural broke:
+pytest tests/ -q
+
+# 4. Run the relevant notebook for a live LLM check:
+#    notebooks/test_chat_mode.ipynb  —  or  —  notebooks/test_report_mode.ipynb</code></pre>
+  </section>
+
+  <!-- ─── SECTION 6 ─────────────────────────────────────────── -->
+  <section>
+    <div class="section-head">
+      <span class="section-num">Section 6</span>
+      <h2>Gotchas</h2>
+    </div>
+
+    <div class="table-wrap">
+      <ul class="gotchas">
+        <li>
+          <strong>Placeholder substitution.</strong> <code>$question</code>, <code>$findings</code>, <code>$domain</code> in <code>specialist:</code> templates are replaced via simple <code>.replace()</code> in <span class="path">report_loader.py</span>. Don't use <code>${question}</code> — no shell expansion, no Python format strings.
+        </li>
+        <li>
+          <strong>YAML cache.</strong> <code>_load_prompts()</code> caches the file read. Call <code>report_loader.reload()</code> after editing <code>prompts.yaml</code> if the process is long-running.
+        </li>
+        <li>
+          <strong><code>synthesis_report</code> can be string or dict.</strong> The dict form supports per-section prompts (<code>early_risk_prediction_section: { report_instructions: ... }</code>) plus a final <code>formatter_report</code>. See <span class="path">config/pillars/credit_risk.yaml</span> for the dict pattern.
+        </li>
+        <li>
+          <strong>Pillar overlay edits only affect that pillar.</strong> If a change should apply everywhere, it belongs in <code>prompts.yaml</code> (<code>common.*</code> or <code>{mode}.*</code>), not in a pillar file.
+        </li>
+        <li>
+          <strong>Skill <code>system_prompt</code> is truncated to 150 chars</strong> when shown to the orchestrator's <code>plan_team()</code> — see <code>_build_specialist_descriptions</code> in <span class="path">orchestrator/orchestrator.py</span>. Keep the most distinctive part in the first sentence.
+        </li>
+        <li>
+          <strong>Case-ID tokens</strong> in prompt text get scrubbed to <code>&lt;case&gt;</code> before the LLM sees them (firewall layer). Don't hard-code a real case ID in any prompt — it'll show as <code>&lt;case&gt;</code> at runtime.
+        </li>
+        <li>
+          <strong>Sub-questions.</strong> When <code>plan_team()</code> decomposes the user question, each specialist receives a tailored sub-question via <code>agent.run(sub_question, mode, root_question=original)</code>. The base agent's prompts include both the root question and the sub-question as context — see <span class="path">agents/base_agent.py</span> for the exact framing.
+        </li>
+      </ul>
+    </div>
+  </section>
+
+</div>
+
+<footer>
+  <span>Agentic Case Review · Prompt Adjustment Guide</span>
+  <span>Companion markdown: <span class="path">brainstorm/prompt-adjustment-guide.md</span></span>
+</footer>
+
+</body>
+</html>

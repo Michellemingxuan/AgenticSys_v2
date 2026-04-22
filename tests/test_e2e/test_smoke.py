@@ -17,7 +17,6 @@ from logger.event_logger import EventLogger
 from models.types import FinalOutput, LLMResult, ReviewReport, SpecialistOutput
 from orchestrator.chat_agent import ChatAgent
 from orchestrator.orchestrator import Orchestrator
-from orchestrator.team import TeamConstructor
 from skills.domain.loader import list_domain_skills, load_domain_skill
 from tools.data_tools import init_tools
 
@@ -26,10 +25,16 @@ def _mock_firewall_call(system_prompt: str, user_message: str, **kwargs) -> LLMR
     """Route mock responses based on prompt content."""
     combined = (system_prompt + " " + user_message).lower()
 
-    if "select" in combined and "specialist" in combined:
+    if ("produce the team plan" in combined
+            or ("select" in combined and "specialist" in combined)):
         return LLMResult(
             status="success",
-            data={"specialists": ["bureau", "spend_payments"]},
+            data={
+                "plan": [
+                    {"specialist": "bureau", "sub_question": "What does bureau data say?"},
+                    {"specialist": "spend_payments", "sub_question": "What do spend/payment data say?"},
+                ]
+            },
         )
 
     if "data_request" in combined or "what data do you need" in combined:
@@ -132,33 +137,32 @@ def test_full_pipeline_smoke(mock_firewall, logger, tmp_path):
     pillar = "credit_risk"
     question = "What is the overall credit risk for this applicant?"
 
-    # Step 1: Team construction
-    team_constructor = TeamConstructor(mock_firewall, logger)
+    # Step 1: Team planning (specialist selection + sub-question decomposition)
+    orchestrator = Orchestrator(mock_firewall, logger, registry, pillar)
     available = list_domain_skills()
-    selected = team_constructor.select_specialists(
+    plan = orchestrator.plan_team(
         question=question,
-        pillar=pillar,
         available_specialists=available,
         active_specialists=[],
     )
-    assert len(selected) >= 1
+    assert len(plan) >= 1
 
     # Step 2: Specialist dispatch
     specialist_outputs = {}
-    for domain in selected:
-        skill = load_domain_skill(domain)
+    for assignment in plan:
+        skill = load_domain_skill(assignment.specialist)
         if skill is None:
             continue
         agent = registry.get_or_create(
-            domain=domain,
+            domain=assignment.specialist,
             pillar=pillar,
             domain_skill=skill,
             pillar_yaml={},
             firewall=mock_firewall,
             logger=logger,
         )
-        output = agent.run(question, mode="chat")
-        specialist_outputs[domain] = output
+        output = agent.run(assignment.sub_question, mode="chat", root_question=question)
+        specialist_outputs[assignment.specialist] = output
 
     assert len(specialist_outputs) >= 1
 
@@ -167,9 +171,10 @@ def test_full_pipeline_smoke(mock_firewall, logger, tmp_path):
     review_report = general.compare(specialist_outputs, question)
     assert isinstance(review_report, ReviewReport)
 
-    # Step 4: Synthesize
-    orchestrator = Orchestrator(mock_firewall, logger, registry, pillar)
-    final = orchestrator.synthesize(specialist_outputs, review_report, question, "chat")
+    # Step 4: Synthesize — reuse the orchestrator instance from Step 1.
+    final = orchestrator.synthesize(
+        specialist_outputs, review_report, question, "chat", team_plan=plan,
+    )
 
     assert isinstance(final, FinalOutput)
     assert len(final.answer) > 0

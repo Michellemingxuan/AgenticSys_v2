@@ -17,7 +17,6 @@ from logger.event_logger import EventLogger
 from models.types import FinalOutput, ReviewReport
 from orchestrator.chat_agent import ChatAgent
 from orchestrator.orchestrator import Orchestrator
-from orchestrator.team import TeamConstructor
 from skills.domain.loader import list_domain_skills, load_domain_skill
 from tools.data_tools import init_tools
 
@@ -51,41 +50,46 @@ def run_question(
     """Run the full pipeline for a single question."""
     available = list_domain_skills()
 
-    # Team construction — pass catalog so LLM sees column names
-    team_constructor = TeamConstructor(firewall, logger, catalog=catalog)
+    # Orchestrator owns team planning (selection + sub-question split) and synthesis.
+    orchestrator = Orchestrator(
+        firewall, logger, registry, pillar,
+        pillar_config=pillar_yaml, catalog=catalog,
+    )
+
+    # Team planning — one LLM call returns specialist selection + per-specialist sub-questions.
     active = registry.list_active()
-    selected = team_constructor.select_specialists(
+    plan = orchestrator.plan_team(
         question=question,
-        pillar=pillar,
         available_specialists=available,
         active_specialists=active,
         mode=mode,
     )
 
-    # Specialist dispatch
+    # Specialist dispatch — each specialist sees its sub-question + the root question.
     specialist_outputs = {}
-    for domain in selected:
-        skill = load_domain_skill(domain)
+    for assignment in plan:
+        skill = load_domain_skill(assignment.specialist)
         if skill is None:
             continue
         agent = registry.get_or_create(
-            domain=domain,
+            domain=assignment.specialist,
             pillar=pillar,
             domain_skill=skill,
             pillar_yaml=pillar_yaml,
             firewall=firewall,
             logger=logger,
         )
-        output = agent.run(question, mode=mode)
-        specialist_outputs[domain] = output
+        output = agent.run(assignment.sub_question, mode=mode, root_question=question)
+        specialist_outputs[assignment.specialist] = output
 
     # Cross-domain comparison
     general = GeneralSpecialist(firewall, logger)
     review_report = general.compare(specialist_outputs, question)
 
     # Synthesis
-    orchestrator = Orchestrator(firewall, logger, registry, pillar, pillar_config=pillar_yaml)
-    final = orchestrator.synthesize(specialist_outputs, review_report, question, mode)
+    final = orchestrator.synthesize(
+        specialist_outputs, review_report, question, mode, team_plan=plan,
+    )
 
     return final
 

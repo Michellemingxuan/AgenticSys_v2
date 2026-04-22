@@ -60,10 +60,15 @@ class BaseSpecialistAgent:
             if "overlay" in self.pillar:
                 parts.append(f"Pillar overlay: {self.pillar['overlay']}")
             if "cut_off_date" in self.pillar:
+                cutoff = self.pillar["cut_off_date"]
                 parts.append(
-                    f"DATA CUT-OFF DATE: {self.pillar['cut_off_date']}\n"
-                    f"Interpret 'recent' and 'current' relative to this date. "
-                    f"No data exists beyond this cut-off."
+                    f"DATA CUT-OFF DATE: {cutoff}\n"
+                    f"CRITICAL — Interpret ALL time-window language ('recent', "
+                    f"'current', 'last 3 months', 'this year') relative to this "
+                    f"cut-off, NEVER relative to today's calendar date.\n"
+                    f"Example: 'recent 3 months' means the three months ending on "
+                    f"{cutoff} (i.e., roughly the 3 months immediately preceding it), "
+                    f"NOT the 3 months before today. No data exists beyond {cutoff}."
                 )
 
         # Rolling summary
@@ -78,15 +83,42 @@ class BaseSpecialistAgent:
         if len(self.rolling_summary) > _MAX_ROLLING_SUMMARY:
             self.rolling_summary = self.rolling_summary[-_MAX_ROLLING_SUMMARY:]
 
-    def run(self, question: str, mode: str = "chat") -> SpecialistOutput:
+    def run(
+        self,
+        question: str,
+        mode: str = "chat",
+        root_question: str | None = None,
+    ) -> SpecialistOutput:
+        """Run the 3-step specialist chain.
+
+        Args:
+            question: the (sub-)question this specialist is responsible for.
+            mode: "chat" or "report".
+            root_question: the reviewer's original question, if it was
+                decomposed into sub-questions by the orchestrator. When
+                provided and different from ``question``, it is included in
+                prompts as context so the specialist understands how its
+                sub-question relates to the broader ask.
+        """
         system_prompt = self._build_system_prompt()
         tools = [list_available_tables, get_table_schema, query_table]
 
+        if root_question and root_question != question:
+            question_header = (
+                f"Root question (reviewer's original ask): {root_question}\n"
+                f"Your sub-question: {question}"
+            )
+        else:
+            question_header = f"Question: {question}"
+
         # Step 1: Data request
-        self.logger.log("data_request", {"domain": self.skill.name, "question": question})
+        self.logger.log(
+            "data_request",
+            {"domain": self.skill.name, "question": question, "root_question": root_question},
+        )
         step1 = self.firewall.call(
             system_prompt=system_prompt,
-            user_message=f"What data do you need to answer: {question}",
+            user_message=f"{question_header}\n\nWhat data do you need to answer your sub-question?",
             tools=tools,
         )
         self.logger.log("data_response", {"domain": self.skill.name, "status": step1.status})
@@ -98,7 +130,8 @@ class BaseSpecialistAgent:
         step2 = self.firewall.call(
             system_prompt=system_prompt,
             user_message=(
-                f"Based on the following data, synthesise findings for: {question}\n\n"
+                f"{question_header}\n\n"
+                f"Based on the following data, synthesise findings for your sub-question.\n\n"
                 f"Data: {data_context}"
             ),
         )
@@ -117,6 +150,11 @@ class BaseSpecialistAgent:
             domain=self.skill.name,
             pillar_report_instructions=pillar_instructions,
         )
+        if root_question and root_question != question:
+            step3_msg = (
+                f"Root question (reviewer's original ask): {root_question}\n\n"
+                + step3_msg
+            )
 
         step3 = self.firewall.call(
             system_prompt=system_prompt,

@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pipeline v2 — React Flow</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reactflow@11/dist/style.css">
+<style>
+  :root {
+    --navy: #00175A; --blue: #006FCF; --white: #FFFFFF;
+    --gray-light: #F4F6F9; --gray-text: #4A5568; --gray-border: #E2E8F0;
+    --green: #166534; --green-bg: #DCFCE7; --green-border: #86EFAC;
+    --amber: #92400E; --amber-bg: #FEF3C7; --amber-border: #FCD34D;
+    --purple: #4C1D95; --purple-bg: #EDE9FE; --purple-border: #A78BFA;
+    --red: #991B1B; --red-bg: #FEE2E2; --red-border: #FCA5A5;
+  }
+  * { box-sizing: border-box; }
+  html, body, #root { height: 100%; margin: 0; padding: 0; }
+  body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #fff; color: var(--navy); }
+
+  /* HERO */
+  .hero { background: var(--navy); color: white; padding: 18px 40px 16px; position: relative; }
+  .blue-stripe { position: absolute; top: 0; left: 0; right: 0; height: 4px; background: var(--blue); }
+  .hero-row { display: flex; align-items: center; gap: 20px; }
+  .amex-logo { background: var(--blue); padding: 5px 10px; display: inline-flex; flex-direction: column; line-height: 1.1; }
+  .logo-american, .logo-express { color: white; font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+  .hero h1 { font-family: Georgia, serif; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+  .hero-sub { font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 255, 255, 0.55); font-weight: 600; margin-top: 2px; }
+  .hero-version { display: inline-block; background: var(--blue); color: white; font-size: 9px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; padding: 2px 7px; border-radius: 2px; margin-left: 8px; vertical-align: middle; }
+
+  /* CHANGE BANNER (what's new in v2) */
+  .what-new {
+    background: linear-gradient(to right, #F8FAFC, #fff);
+    border-bottom: 1px solid var(--gray-border); border-left: 4px solid var(--blue);
+    padding: 10px 40px; font-size: 11.5px; color: var(--gray-text);
+    display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+  }
+  .what-new strong { color: var(--navy); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; font-size: 10px; }
+  .what-new .pill { display: inline-flex; align-items: center; font-size: 10.5px; padding: 2px 8px; border-radius: 2px; background: var(--gray-light); border: 1px solid var(--gray-border); color: var(--navy); font-weight: 600; }
+
+  /* LEGEND BAR */
+  .legend-bar { padding: 10px 40px; background: var(--gray-light); border-bottom: 1px solid var(--gray-border); display: flex; gap: 16px; align-items: center; flex-wrap: wrap; font-size: 11px; }
+  .legend-label { font-size: 9px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gray-text); }
+  .legend-item { display: inline-flex; align-items: center; gap: 6px; color: var(--gray-text); }
+  .legend-swatch { width: 10px; height: 10px; border-radius: 2px; border: 1.5px solid; }
+  .sw-agent    { background: #DBEAFE; border-color: var(--blue); }
+  .sw-orch     { background: var(--amber-bg); border-color: var(--amber); }
+  .sw-spec     { background: var(--green-bg); border-color: var(--green); }
+  .sw-review   { background: var(--purple-bg); border-color: var(--purple); }
+  .sw-firewall { background: var(--red-bg); border-color: var(--red); }
+  .sw-data     { background: var(--amber-bg); border-color: var(--amber); border-style: dashed; }
+  .sw-infra    { background: var(--gray-light); border-color: var(--gray-border); }
+
+  /* CANVAS */
+  .canvas { height: calc(100vh - 150px); width: 100%; }
+
+  /* NODE CONTENT */
+  .node-body { padding: 8px 10px; font-size: 11.5px; line-height: 1.35; }
+  .node-title { font-weight: 700; font-size: 12.5px; color: var(--navy); display: flex; align-items: center; gap: 6px; }
+  .node-role  { font-size: 8px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gray-text); margin-top: 2px; }
+  .node-q1    { font-size: 10px; color: var(--gray-text); margin-top: 4px; font-style: italic; }
+  .node-tag   { display: inline-block; font-size: 8.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; padding: 1px 5px; border-radius: 2px; background: var(--blue); color: white; margin-left: 6px; }
+  .react-flow__node { font-family: inherit; }
+  .react-flow__edge-text { font-size: 10px; font-weight: 600; font-family: inherit; }
+  .react-flow__edge-textbg { fill: #ffffff; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="blue-stripe"></div>
+  <div class="hero-row">
+    <div class="amex-logo">
+      <span class="logo-american">American</span>
+      <span class="logo-express">Express</span>
+    </div>
+    <div>
+      <h1>Pipeline · Interactive<span class="hero-version">v2</span></h1>
+      <div class="hero-sub">Agentic Case Review · React Flow · Orchestrator owns team planning + synthesis</div>
+    </div>
+  </div>
+</div>
+
+<div class="what-new">
+  <strong>What's new in v2:</strong>
+  <span class="pill">Team Constructor absorbed into Orchestrator</span>
+  <span class="pill">plan_team() = select + split into sub-questions</span>
+  <span class="pill">Each specialist gets its own sub-question (plus root for context)</span>
+  <span class="pill">Case-ID scrubber + digit mask at every LLM boundary</span>
+</div>
+
+<div class="legend-bar">
+  <span class="legend-label">Legend</span>
+  <span class="legend-item"><span class="legend-swatch sw-agent"></span>Agent</span>
+  <span class="legend-item"><span class="legend-swatch sw-orch"></span>Orchestrator</span>
+  <span class="legend-item"><span class="legend-swatch sw-spec"></span>Specialist</span>
+  <span class="legend-item"><span class="legend-swatch sw-review"></span>Reviewer</span>
+  <span class="legend-item"><span class="legend-swatch sw-firewall"></span>Firewall / Scrubber</span>
+  <span class="legend-item"><span class="legend-swatch sw-data"></span>Data / Catalog</span>
+  <span class="legend-item"><span class="legend-swatch sw-infra"></span>Infra</span>
+  <span style="margin-left:auto;color:var(--gray-text);font-size:11px;font-style:italic">Drag · zoom · pan · minimap bottom-right</span>
+</div>
+
+<div id="root" class="canvas"></div>
+
+<script type="module">
+import React from 'https://esm.sh/react@18.3.1';
+import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client';
+import {
+  ReactFlow, Background, Controls, MiniMap, Position, MarkerType
+} from 'https://esm.sh/reactflow@11.11.4?deps=react@18.3.1,react-dom@18.3.1';
+
+const h = React.createElement;
+
+// ─── Style presets ─────────────────────────────────────────────────────────
+const S = {
+  endpoint: { background: '#F4F6F9', border: '1.5px solid #CBD5E1', borderRadius: 999, color: '#334155', width: 120, padding: 0 },
+  agent:    { background: '#DBEAFE', border: '1.5px solid #006FCF', color: '#00175A', borderRadius: 4, width: 160, padding: 0 },
+  orch:     { background: '#FEF3C7', border: '1.5px solid #92400E', color: '#00175A', borderRadius: 4, width: 180, padding: 0 },
+  spec:     { background: '#DCFCE7', border: '1.5px solid #166534', color: '#00175A', borderRadius: 4, width: 190, padding: 0 },
+  review:   { background: '#EDE9FE', border: '1.5px solid #4C1D95', color: '#00175A', borderRadius: 4, width: 160, padding: 0 },
+  firewall: { background: '#FEE2E2', border: '1.5px solid #991B1B', color: '#991B1B', borderRadius: 4, width: 180, padding: 0 },
+  data:     { background: '#FEF3C7', border: '1.5px dashed #92400E', color: '#92400E', borderRadius: 4, width: 170, padding: 0 },
+  infra:    { background: '#F4F6F9', border: '1px solid #CBD5E1', color: '#334155', borderRadius: 4, width: 160, padding: 0 },
+};
+
+// ─── Node content helpers ──────────────────────────────────────────────────
+function body(title, role, extra, tag) {
+  return h('div', { className: 'node-body' },
+    h('div', { className: 'node-title' },
+      title,
+      tag ? h('span', { className: 'node-tag' }, tag) : null,
+    ),
+    role ? h('div', { className: 'node-role' }, role) : null,
+    extra ? h('div', { className: 'node-q1' }, extra) : null,
+  );
+}
+
+// ─── Nodes ─────────────────────────────────────────────────────────────────
+// Layout is horizontal flow (y≈260 main row); data/firewall on top, infra on bottom.
+const nodes = [
+  // ── Main flow (y = 260) ──────────────────────────────────────────────
+  { id: 'in', position: { x: 20, y: 260 },
+    data: { label: body('👤 Reviewer', 'Asks Q', null) }, style: S.endpoint,
+    sourcePosition: Position.Right, targetPosition: Position.Left },
+
+  { id: 'chat1', position: { x: 180, y: 260 },
+    data: { label: body('💬 Chat Agent', 'Entry', 'passes Q through') }, style: S.agent,
+    sourcePosition: Position.Right, targetPosition: Position.Left },
+
+  { id: 'orch_plan', position: { x: 380, y: 260 },
+    data: { label: body('🎯 Orchestrator', 'plan_team() · 1st pass',
+                        'selects specialists + decomposes Q into sub-questions', 'plan') },
+    style: S.orch,
+    sourcePosition: Position.Right, targetPosition: Position.Left },
+
+  { id: 'modeling', position: { x: 640, y: 140 },
+    data: { label: body('🤖 modeling', 'Specialist',
+                        'sub-q: "positive events in last 18 mo?"') }, style: S.spec,
+    sourcePosition: Position.Right, targetPosition: Position.Left },
+
+  { id: 'bureau', position: { x: 640, y: 380 },
+    data: { label: body('🤖 bureau', 'Specialist',
+                        'sub-q: "current bureau scores?"') }, style: S.spec,
+    sourcePosition: Position.Right, targetPosition: Position.Left },
+
+  { id: 'general', position: { x: 920, y: 260 },
+    data: { label: body('⚖️ General Specialist', 'Cross-review',
+                        'pairs · conflicts · insights') }, style: S.review,
+    sourcePosition: Position.Right, targetPosition: Position.Left },
+
+  { id: 'orch_synth', position: { x: 1140, y: 260 },
+    data: { label: body('🎯 Orchestrator', 'synthesize() · 2nd pass',
+                        'merge · sub-qs · gaps · blocked', 'synth') },
+    style: S.orch,
+    sourcePosition: Position.Right, targetPosition: Position.Left },
+
+  { id: 'chat2', position: { x: 1360, y: 260 },
+    data: { label: body('💬 Chat Agent', 'Format',
+                        'bullet answer + 9 sections') }, style: S.agent,
+    sourcePosition: Position.Right, targetPosition: Position.Left },
+
+  { id: 'out', position: { x: 1560, y: 260 },
+    data: { label: body('👤 Reviewer', 'Answer', null) }, style: S.endpoint,
+    sourcePosition: Position.Right, targetPosition: Position.Left },
+
+  // ── Top row — data + firewall (y = 40) ───────────────────────────────
+  { id: 'catalog', position: { x: 380, y: 40 },
+    data: { label: body('📚 Data Catalog', '11 tables · YAML',
+                        'column coverage for planner') }, style: S.data,
+    sourcePosition: Position.Bottom, targetPosition: Position.Top },
+
+  { id: 'gateway', position: { x: 640, y: 40 },
+    data: { label: body('💾 Data Gateway', 'Case-scoped tools',
+                        'list · schema · query (truncated)') }, style: S.data,
+    sourcePosition: Position.Bottom, targetPosition: Position.Top },
+
+  { id: 'firewall', position: { x: 960, y: 40 },
+    data: { label: body('🛡 Firewall · Scrubber', 'SafeChainAdapter',
+                        '<case> · mask 8+ digits · filter exec/eval/import') },
+    style: S.firewall,
+    sourcePosition: Position.Bottom, targetPosition: Position.Top },
+
+  // ── Bottom row — infra (y = 500) ─────────────────────────────────────
+  { id: 'pillar', position: { x: 380, y: 500 },
+    data: { label: body('🏛 credit_risk', 'Pillar overlay',
+                        'focus · cut-off · report rules') }, style: S.infra,
+    sourcePosition: Position.Top, targetPosition: Position.Bottom },
+
+  { id: 'registry', position: { x: 640, y: 500 },
+    data: { label: body('🧠 Session Registry', 'Warm agents',
+                        'reused across questions') }, style: S.infra,
+    sourcePosition: Position.Top, targetPosition: Position.Bottom },
+];
+
+// ─── Edges ─────────────────────────────────────────────────────────────────
+const mainEdge = (id, s, t, label) => ({
+  id, source: s, target: t, label, animated: true, type: 'smoothstep',
+  markerEnd: { type: MarkerType.ArrowClosed, color: '#006FCF' },
+  style: { stroke: '#006FCF', strokeWidth: 2 },
+  labelBgStyle: { fill: '#ffffff' },
+  labelStyle: { fill: '#00175A', fontWeight: 700 },
+});
+
+const subQEdge = (id, s, t, label) => ({
+  id, source: s, target: t, label, animated: true, type: 'smoothstep',
+  markerEnd: { type: MarkerType.ArrowClosed, color: '#166534' },
+  style: { stroke: '#166534', strokeWidth: 2 },
+  labelBgStyle: { fill: '#ffffff' },
+  labelStyle: { fill: '#166534', fontWeight: 700 },
+});
+
+const dashedEdge = (id, s, t, label, color) => ({
+  id, source: s, target: t, label, type: 'smoothstep',
+  style: { stroke: color, strokeWidth: 1.5, strokeDasharray: '5 4' },
+  markerEnd: { type: MarkerType.ArrowClosed, color },
+  labelBgStyle: { fill: '#ffffff' },
+  labelStyle: { fill: color, fontWeight: 600 },
+});
+
+const edges = [
+  // Main pipeline (blue solid, animated)
+  mainEdge('e-in-chat1',         'in',         'chat1',      'Q'),
+  mainEdge('e-chat1-orchplan',   'chat1',      'orch_plan',  null),
+
+  // Sub-question fan-out (green, labeled with the role of each sub-q)
+  subQEdge('e-plan-modeling',    'orch_plan',  'modeling',   'sub-q · modeling'),
+  subQEdge('e-plan-bureau',      'orch_plan',  'bureau',     'sub-q · bureau'),
+
+  // Specialists → review → synth → format → out (main blue again)
+  mainEdge('e-modeling-general', 'modeling',   'general',    null),
+  mainEdge('e-bureau-general',   'bureau',     'general',    null),
+  mainEdge('e-general-synth',    'general',    'orch_synth', null),
+  mainEdge('e-synth-chat2',      'orch_synth', 'chat2',      'FinalOutput'),
+  mainEdge('e-chat2-out',        'chat2',      'out',        'answer + details'),
+
+  // Root-question reference — dashed, same orchestrator → specialist lane
+  dashedEdge('e-root-modeling',  'orch_plan',  'modeling',   'root Q (context)',  '#4A5568'),
+  dashedEdge('e-root-bureau',    'orch_plan',  'bureau',     'root Q (context)',  '#4A5568'),
+
+  // Catalog feeds planner + specialists
+  dashedEdge('e-cat-plan',       'catalog',    'orch_plan',  'columns',  '#92400E'),
+  dashedEdge('e-cat-modeling',   'catalog',    'modeling',   'schema',   '#92400E'),
+  dashedEdge('e-cat-bureau',     'catalog',    'bureau',     'schema',   '#92400E'),
+
+  // Gateway serves specialist queries (case-scoped)
+  dashedEdge('e-gw-modeling',    'gateway',    'modeling',   'query',    '#92400E'),
+  dashedEdge('e-gw-bureau',      'gateway',    'bureau',     'query',    '#92400E'),
+
+  // Firewall — applies to every LLM call; show as dashed red gates
+  // to the key LLM-calling nodes (all 4 LLM-touching agents).
+  dashedEdge('e-fw-plan',        'firewall',   'orch_plan',  'every LLM call', '#991B1B'),
+  dashedEdge('e-fw-modeling',    'firewall',   'modeling',   null,            '#991B1B'),
+  dashedEdge('e-fw-bureau',      'firewall',   'bureau',     null,            '#991B1B'),
+  dashedEdge('e-fw-general',     'firewall',   'general',    null,            '#991B1B'),
+  dashedEdge('e-fw-synth',       'firewall',   'orch_synth', null,            '#991B1B'),
+
+  // Pillar + registry (from bottom)
+  dashedEdge('e-pillar-modeling','pillar',     'modeling',   'overlay',  '#4A5568'),
+  dashedEdge('e-pillar-bureau',  'pillar',     'bureau',     'overlay',  '#4A5568'),
+  dashedEdge('e-reg-modeling',   'registry',   'modeling',   'warm',     '#4A5568'),
+];
+
+// ─── App ───────────────────────────────────────────────────────────────────
+function App() {
+  return h(ReactFlow, {
+    nodes, edges,
+    fitView: true,
+    fitViewOptions: { padding: 0.15 },
+    minZoom: 0.3, maxZoom: 1.6,
+    proOptions: { hideAttribution: true },
+    defaultEdgeOptions: { type: 'smoothstep' },
+  },
+    h(Background, { color: '#E2E8F0', gap: 20, size: 1 }),
+    h(Controls, { showInteractive: false }),
+    h(MiniMap, {
+      nodeColor: (n) => {
+        if (n.style?.background) return n.style.background;
+        return '#F4F6F9';
+      },
+      maskColor: 'rgba(0,23,90,0.06)',
+      style: { background: '#fff', border: '1px solid #E2E8F0' },
+    }),
+  );
+}
+
+const root = createRoot(document.getElementById('root'));
+root.render(h(App));
+</script>
+</body>
+</html>

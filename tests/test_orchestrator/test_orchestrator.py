@@ -1,4 +1,4 @@
-"""Tests for orchestrator.team and orchestrator.orchestrator."""
+"""Tests for orchestrator.orchestrator (team planning + synthesis)."""
 
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ from models.types import (
     LLMResult,
     ReviewReport,
     SpecialistOutput,
+    TeamAssignment,
 )
 from orchestrator.orchestrator import Orchestrator
-from orchestrator.team import TeamConstructor
 
 
 @pytest.fixture
@@ -43,27 +43,73 @@ def _make_output(domain: str, findings: str, data_gaps=None) -> SpecialistOutput
     )
 
 
-# ---- TeamConstructor tests ----
+# ---- plan_team tests (team selection + sub-question decomposition) ----
 
 
-def test_team_constructor_selects_specialists(firewall, logger):
+def test_plan_team_parses_plan(firewall, logger):
     firewall.call = MagicMock(
         return_value=LLMResult(
             status="success",
-            data={"specialists": ["bureau", "modeling"]},
+            data={
+                "plan": [
+                    {"specialist": "bureau", "sub_question": "What is the current FICO?"},
+                    {"specialist": "modeling", "sub_question": "What is the PD score?"},
+                ]
+            },
         )
     )
 
-    tc = TeamConstructor(firewall, logger)
-    selected = tc.select_specialists(
+    registry = SessionRegistry()
+    orch = Orchestrator(firewall, logger, registry, "credit_risk")
+    plan = orch.plan_team(
         question="What is the credit risk?",
-        pillar="credit_risk",
         available_specialists=["bureau", "modeling", "spend_payments", "wcc"],
         active_specialists=[],
     )
 
-    assert selected == ["bureau", "modeling"]
-    firewall.call.assert_called_once()
+    assert len(plan) == 2
+    assert all(isinstance(p, TeamAssignment) for p in plan)
+    assert plan[0].specialist == "bureau"
+    assert "FICO" in plan[0].sub_question
+    assert plan[1].specialist == "modeling"
+
+
+def test_plan_team_report_mode_returns_all_with_root_question(firewall, logger):
+    # Report mode must not call the LLM — it picks every specialist with root question.
+    firewall.call = MagicMock()
+    registry = SessionRegistry()
+    orch = Orchestrator(firewall, logger, registry, "credit_risk")
+    available = ["bureau", "modeling"]
+
+    plan = orch.plan_team(
+        question="Full report please",
+        available_specialists=available,
+        active_specialists=[],
+        mode="report",
+    )
+
+    firewall.call.assert_not_called()
+    assert [p.specialist for p in plan] == available
+    assert all(p.sub_question == "Full report please" for p in plan)
+
+
+def test_plan_team_fallback_on_block(firewall, logger):
+    firewall.call = MagicMock(
+        return_value=LLMResult(status="blocked", error="denied")
+    )
+    registry = SessionRegistry()
+    orch = Orchestrator(firewall, logger, registry, "credit_risk")
+    available = ["bureau", "modeling"]
+
+    plan = orch.plan_team(
+        question="anything",
+        available_specialists=available,
+        active_specialists=[],
+    )
+
+    # Fallback: every available specialist, each with the root question verbatim.
+    assert [p.specialist for p in plan] == available
+    assert all(p.sub_question == "anything" for p in plan)
 
 
 # ---- Orchestrator synthesize tests ----

@@ -91,6 +91,16 @@ class BlockedStep(BaseModel):
     attempts: int
 
 
+class TeamAssignment(BaseModel):
+    """One specialist's slot in the orchestrator's team plan: the specialist
+    picked for a question, and the tailored sub-question that specialist
+    should answer. For atomic questions with a single specialist, sub_question
+    equals the root question."""
+
+    specialist: str
+    sub_question: str
+
+
 class FinalOutput(BaseModel):
     answer: str
     data_gap_summary: str = ""   # one concise summary of missing data across specialists
@@ -101,6 +111,7 @@ class FinalOutput(BaseModel):
     data_gaps: list[DataGap] = Field(default_factory=list)
     blocked_steps: list[BlockedStep] = Field(default_factory=list)
     specialists_consulted: list[str] = Field(default_factory=list)
+    sub_questions: list[TeamAssignment] = Field(default_factory=list)
 
 
 class LLMResult(BaseModel):

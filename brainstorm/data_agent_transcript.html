@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Data Agent — What the LLM Sees</title>
+<style>
+:root {
+  --navy: #00175A; --blue: #006FCF; --white: #FFFFFF;
+  --gray-light: #F4F6F9; --gray-text: #4A5568; --gray-border: #E2E8F0;
+  --gray-bg: #FAFBFC;
+  --green: #166534; --green-bg: #DCFCE7; --green-border: #86EFAC;
+  --amber: #92400E; --amber-bg: #FEF3C7; --amber-border: #FCD34D;
+  --purple: #4C1D95; --purple-bg: #EDE9FE; --purple-border: #A78BFA;
+  --red: #991B1B; --red-bg: #FEE2E2; --red-border: #FCA5A5;
+  --slate: #334155;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #fff; color: var(--navy); line-height: 1.5; }
+
+.hero { background: var(--navy); color: white; padding: 24px 60px 20px; position: relative; }
+.blue-stripe { position: absolute; top: 0; left: 0; right: 0; height: 4px; background: var(--blue); }
+.hero-row { display: flex; align-items: center; gap: 20px; }
+.amex-logo { background: var(--blue); padding: 6px 12px; display: inline-flex; flex-direction: column; line-height: 1.1; flex-shrink: 0; }
+.logo-american, .logo-express { color: white; font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+.hero h1 { font-family: Georgia, serif; font-size: 24px; font-weight: 700; letter-spacing: -0.01em; }
+.hero-sub { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 255, 255, 0.55); font-weight: 600; margin-top: 3px; }
+
+.page { max-width: 1180px; margin: 0 auto; padding: 24px 60px 48px; }
+
+/* Q1 BANNER */
+.example {
+  background: linear-gradient(to right, #F8FAFC, #fff);
+  border: 1px solid var(--gray-border); border-left: 4px solid var(--blue); border-radius: 3px;
+  padding: 14px 18px; margin-bottom: 24px;
+  display: flex; gap: 16px; align-items: center;
+}
+.example-icon { flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%; background: #DBEAFE; display: flex; align-items: center; justify-content: center; color: var(--blue); }
+.example-body { flex: 1; min-width: 0; }
+.example-label { font-size: 9px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--blue); }
+.example-q { font-family: Georgia, serif; font-size: 16px; font-weight: 700; color: var(--navy); margin-top: 2px; line-height: 1.35; }
+.example-meta { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.meta-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+  padding: 3px 8px; border-radius: 2px; font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+.meta-pill-key { color: var(--gray-text); }
+.meta-pill-val { color: var(--navy); }
+.meta-pill.spec { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+
+/* INTRO NOTE */
+.intro {
+  background: var(--gray-bg); border: 1px dashed var(--gray-border); border-radius: 3px;
+  padding: 10px 14px; margin-bottom: 26px; font-size: 12px; color: var(--slate); line-height: 1.55;
+}
+.intro strong { color: var(--navy); }
+.mono-sm { font-family: 'SF Mono', 'Monaco', 'Consolas', monospace; font-size: 11px; color: var(--navy); background: #EEF2F7; padding: 1px 5px; border-radius: 2px; }
+
+/* STAGE SECTION */
+.stage { margin-bottom: 26px; }
+.stage-head {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
+}
+.stage-num {
+  width: 28px; height: 28px; background: var(--navy); color: var(--white); border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  flex-shrink: 0;
+}
+.stage-num.n0 { background: var(--slate); }
+.stage-title { font-size: 14px; font-weight: 700; color: var(--navy); }
+.stage-sub { font-size: 11px; color: var(--gray-text); font-style: italic; }
+.stage-line { flex: 1; height: 1px; background: var(--gray-border); }
+
+.stage-body {
+  border: 1px solid var(--gray-border); border-radius: 3px; background: var(--white);
+  padding: 14px; display: flex; flex-direction: column; gap: 10px;
+}
+
+/* MESSAGE BOXES */
+.msg { border: 1px solid var(--gray-border); border-left: 3px solid var(--slate); border-radius: 3px; overflow: hidden; }
+.msg.system    { border-left-color: var(--slate); }
+.msg.user      { border-left-color: var(--blue); }
+.msg.assistant { border-left-color: var(--green); }
+.msg.toolcall  { border-left-color: var(--purple); }
+.msg.tool      { border-left-color: var(--amber); }
+
+.msg-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--gray-border); background: var(--gray-bg);
+}
+.msg-role {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 2px;
+  border: 1px solid;
+}
+.msg.system    .msg-role { background: #F4F6F9; color: var(--slate); border-color: var(--gray-border); }
+.msg.user      .msg-role { background: #DBEAFE; color: var(--blue); border-color: #93C5FD; }
+.msg.assistant .msg-role { background: var(--green-bg); color: var(--green); border-color: var(--green-border); }
+.msg.toolcall  .msg-role { background: var(--purple-bg); color: var(--purple); border-color: var(--purple-border); }
+.msg.tool      .msg-role { background: var(--amber-bg); color: var(--amber); border-color: var(--amber-border); }
+
+.msg-sub { font-size: 10px; color: var(--gray-text); font-family: 'SF Mono', 'Monaco', 'Consolas', monospace; }
+.msg-tag { margin-left: auto; font-size: 9px; color: var(--gray-text); font-style: italic; }
+
+.msg-body {
+  padding: 10px 14px;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-size: 11.5px; line-height: 1.55;
+  color: var(--navy);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.msg-body .c-key { color: var(--blue); font-weight: 700; }
+.msg-body .c-str { color: var(--green); }
+.msg-body .c-num { color: var(--amber); }
+.msg-body .c-comm { color: var(--gray-text); font-style: italic; }
+.msg-body .placeholder {
+  display: inline-block; background: var(--gray-light); color: var(--gray-text);
+  padding: 1px 6px; border-radius: 2px; border: 1px dashed var(--gray-border); font-size: 10.5px;
+  font-style: italic;
+}
+
+/* SYSTEM PROMPT — structured sections view */
+.sysp-sections {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  padding: 10px 14px;
+}
+.sysp-sec {
+  background: var(--gray-bg); border: 1px solid var(--gray-border); border-radius: 2px;
+  padding: 8px 10px;
+}
+.sysp-sec-title {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--gray-text); margin-bottom: 4px;
+}
+.sysp-sec-body {
+  font-size: 11px; color: var(--slate); line-height: 1.5;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+.sysp-sec-body strong { color: var(--navy); font-weight: 700; }
+
+/* ASSISTANT TEXT — softer rendering for synthesized findings */
+.prose-body {
+  padding: 10px 14px; font-size: 12px; color: var(--slate); line-height: 1.55;
+  background: linear-gradient(to right, #F6FBF6, #ffffff);
+}
+
+/* STEP CONNECTOR */
+.connector {
+  display: flex; justify-content: center; align-items: center; gap: 6px;
+  padding: 4px 0; color: var(--gray-text); font-size: 18px;
+}
+
+/* KEY CALLOUT */
+.callout {
+  margin-top: 10px; padding: 10px 12px; background: var(--amber-bg); border: 1px solid var(--amber-border); border-radius: 2px;
+  font-size: 11.5px; color: var(--amber); line-height: 1.5;
+}
+.callout strong { color: var(--amber); font-weight: 700; }
+
+/* LEGEND */
+.legend { display: flex; gap: 14px; padding: 8px 12px; background: var(--gray-light); border-radius: 3px; margin-bottom: 22px; flex-wrap: wrap; font-size: 11px; }
+.legend-label { font-size: 9px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gray-text); }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; color: var(--slate); }
+.legend-swatch { width: 10px; height: 10px; border-radius: 2px; border: 2px solid; }
+.sw-sys   { border-color: var(--slate); background: var(--gray-light); }
+.sw-usr   { border-color: var(--blue); background: #DBEAFE; }
+.sw-asst  { border-color: var(--green); background: var(--green-bg); }
+.sw-call  { border-color: var(--purple); background: var(--purple-bg); }
+.sw-tool  { border-color: var(--amber); background: var(--amber-bg); }
+
+@media (max-width: 980px) {
+  .sysp-sections { grid-template-columns: 1fr; }
+  .page, .hero { padding-left: 24px; padding-right: 24px; }
+}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="blue-stripe"></div>
+  <div class="hero-row">
+    <div class="amex-logo">
+      <span class="logo-american">American</span>
+      <span class="logo-express">Express</span>
+    </div>
+    <div>
+      <h1>Data Agent · What the LLM Sees</h1>
+      <div class="hero-sub">Message-by-message transcript · Q1 walk-through</div>
+    </div>
+  </div>
+</div>
+
+<div class="page">
+
+  <!-- Q1 BANNER -->
+  <div class="example">
+    <div class="example-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    </div>
+    <div class="example-body">
+      <div class="example-label">Walk-through · specialist = modeling</div>
+      <div class="example-q">“How frequent were positive events (e.g. limit increases) in the last 18 months?”</div>
+      <div class="example-meta">
+        <span class="meta-pill"><span class="meta-pill-key">Pillar</span><span class="meta-pill-val">credit_risk</span></span>
+        <span class="meta-pill"><span class="meta-pill-key">Mode</span><span class="meta-pill-val">chat</span></span>
+        <span class="meta-pill spec">modeling specialist</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- LEGEND -->
+  <div class="legend">
+    <span class="legend-label">Message roles</span>
+    <span class="legend-item"><span class="legend-swatch sw-sys"></span>System — context injected</span>
+    <span class="legend-item"><span class="legend-swatch sw-usr"></span>User — request to LLM</span>
+    <span class="legend-item"><span class="legend-swatch sw-asst"></span>Assistant — LLM response</span>
+    <span class="legend-item"><span class="legend-swatch sw-call"></span>Tool call — LLM invokes a tool</span>
+    <span class="legend-item"><span class="legend-swatch sw-tool"></span>Tool result — back to LLM</span>
+  </div>
+
+  <!-- INTRO -->
+  <div class="intro">
+    <strong>Setup.</strong> Before step 1 runs, <span class="mono-sm">BaseSpecialistAgent._build_system_prompt()</span> assembles one system prompt that's reused across all three steps. Steps 1–3 add fresh user messages; tool call rounds happen inside step 1.
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- STAGE 0 — SYSTEM PROMPT ASSEMBLY -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="stage">
+    <div class="stage-head">
+      <div class="stage-num n0">0</div>
+      <div class="stage-title">System prompt · assembled once, shared by all steps</div>
+      <div class="stage-sub">navy sections = from domain skill · amber = from pillar YAML</div>
+      <div class="stage-line"></div>
+    </div>
+
+    <div class="msg system">
+      <div class="msg-head">
+        <span class="msg-role">system</span>
+        <span class="msg-sub">role=system</span>
+        <span class="msg-tag">single message, reused</span>
+      </div>
+      <div class="sysp-sections">
+        <div class="sysp-sec">
+          <div class="sysp-sec-title">Base instructions</div>
+          <div class="sysp-sec-body">You are a specialist analyst. Follow these steps precisely: (1) Identify the data you need and request it. (2) Synthesise the data into findings. (3) Produce a report or answer the question.</div>
+        </div>
+        <div class="sysp-sec">
+          <div class="sysp-sec-title">Domain</div>
+          <div class="sysp-sec-body"><strong>Domain:</strong> modeling</div>
+        </div>
+        <div class="sysp-sec">
+          <div class="sysp-sec-title">Expertise (from skill.system_prompt)</div>
+          <div class="sysp-sec-body">Model-performance analyst. Interprets scores, score migration, trajectory. <strong>PERFORMANCE:</strong> model_scores has ~265 cols — always use the <span class="mono-sm">columns</span> param. <strong>TIME:</strong> trans_month is YYYY-MM-DD; for "last 18 mo" retrieve rows with trans_month then aggregate.</div>
+        </div>
+        <div class="sysp-sec">
+          <div class="sysp-sec-title">Data hints</div>
+          <div class="sysp-sec-body">Data hints: <strong>model_scores</strong> <span class="c-comm"># table names only · no columns, no rows</span></div>
+        </div>
+        <div class="sysp-sec">
+          <div class="sysp-sec-title">Interpretation guide</div>
+          <div class="sysp-sec-body">Falling scores over consecutive periods signal deterioration. Key columns: trans_month, credit_loss_prob, tot_struct_risk_score, cbr_score, positive_events, times_30_dpd.</div>
+        </div>
+        <div class="sysp-sec">
+          <div class="sysp-sec-title">Risk signals</div>
+          <div class="sysp-sec-body">• score drop > 50 pts in 3 months<br>• model score diverges from bureau score > 100 pts<br>• score in bottom decile</div>
+        </div>
+        <div class="sysp-sec" style="background: var(--amber-bg); border-color: var(--amber-border);">
+          <div class="sysp-sec-title" style="color: var(--amber);">Pillar focus / overlay</div>
+          <div class="sysp-sec-body">Pillar focus: Delinquency risk, bureau scores, model scores, spend patterns, capacity & affordability.</div>
+        </div>
+        <div class="sysp-sec" style="background: var(--amber-bg); border-color: var(--amber-border);">
+          <div class="sysp-sec-title" style="color: var(--amber);">Data cut-off date</div>
+          <div class="sysp-sec-body"><strong>DATA CUT-OFF DATE: 2025-12-01.</strong> Interpret 'recent' and 'current' relative to this date.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- STAGE 1 — DATA REQUEST -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="stage">
+    <div class="stage-head">
+      <div class="stage-num">1</div>
+      <div class="stage-title">Data · LLM decides what to fetch</div>
+      <div class="stage-sub">tool-calling loop · up to 12 iterations</div>
+      <div class="stage-line"></div>
+    </div>
+
+    <div class="stage-body">
+
+      <div class="msg user">
+        <div class="msg-head">
+          <span class="msg-role">user</span>
+          <span class="msg-sub">role=user · tools=[list_available_tables, get_table_schema, query_table]</span>
+        </div>
+        <div class="msg-body">What data do you need to answer: How frequent were positive events (e.g. limit increases) in the last 18 months?</div>
+      </div>
+
+      <div class="connector">↓</div>
+
+      <div class="msg toolcall">
+        <div class="msg-head">
+          <span class="msg-role">assistant · tool_call</span>
+          <span class="msg-sub">round 1</span>
+        </div>
+        <div class="msg-body"><span class="c-key">list_available_tables</span>()</div>
+      </div>
+      <div class="msg tool">
+        <div class="msg-head">
+          <span class="msg-role">tool result</span>
+          <span class="msg-sub">list_available_tables</span>
+        </div>
+        <div class="msg-body">Tables for case <span class="placeholder">&lt;case_id&gt;</span>:
+bureau
+cross_bu
+cust_tenure
+income_dti
+model_scores
+payments
+score_drivers
+spends
+txn_monthly
+wcc_flags
+xbu_summary</div>
+      </div>
+
+      <div class="connector">↓</div>
+
+      <div class="msg toolcall">
+        <div class="msg-head">
+          <span class="msg-role">assistant · tool_call</span>
+          <span class="msg-sub">round 2</span>
+        </div>
+        <div class="msg-body"><span class="c-key">get_table_schema</span>(<span class="c-str">"model_scores"</span>)</div>
+      </div>
+      <div class="msg tool">
+        <div class="msg-head">
+          <span class="msg-role">tool result</span>
+          <span class="msg-sub">get_table_schema · JSON</span>
+        </div>
+        <div class="msg-body">{
+  <span class="c-key">"trans_month"</span>: { "type": "date", "description": "Transaction month (YYYY-MM-DD)" },
+  <span class="c-key">"positive_events"</span>: { "type": "int", "description": "positive events" },
+  <span class="c-key">"credit_loss_prob"</span>: { "type": "float", "description": "ML model score predicting default in next 18 months" },
+  <span class="c-key">"tot_struct_risk_score"</span>: { "type": "float", "description": "Structural risk score" },
+  <span class="c-comm">… +260 more columns</span>
+}</div>
+      </div>
+
+      <div class="connector">↓</div>
+
+      <div class="msg toolcall">
+        <div class="msg-head">
+          <span class="msg-role">assistant · tool_call</span>
+          <span class="msg-sub">round 3 · uses <strong>columns</strong> param per skill guidance</span>
+        </div>
+        <div class="msg-body"><span class="c-key">query_table</span>(
+  table_name = <span class="c-str">"model_scores"</span>,
+  columns    = <span class="c-str">"trans_month,positive_events"</span>
+)</div>
+      </div>
+      <div class="msg tool">
+        <div class="msg-head">
+          <span class="msg-role">tool result</span>
+          <span class="msg-sub">JSON rows · capped ~3000 chars</span>
+        </div>
+        <div class="msg-body">[
+  { <span class="c-key">"trans_month"</span>: <span class="c-str">"2024-07-01"</span>, <span class="c-key">"positive_events"</span>: <span class="c-num">0</span> },
+  { <span class="c-key">"trans_month"</span>: <span class="c-str">"2024-09-01"</span>, <span class="c-key">"positive_events"</span>: <span class="c-num">1</span> },
+  { <span class="c-key">"trans_month"</span>: <span class="c-str">"2024-11-01"</span>, <span class="c-key">"positive_events"</span>: <span class="c-num">0</span> },
+  { <span class="c-key">"trans_month"</span>: <span class="c-str">"2025-02-01"</span>, <span class="c-key">"positive_events"</span>: <span class="c-num">2</span> },
+  { <span class="c-key">"trans_month"</span>: <span class="c-str">"2025-05-01"</span>, <span class="c-key">"positive_events"</span>: <span class="c-num">0</span> },
+  { <span class="c-key">"trans_month"</span>: <span class="c-str">"2025-07-01"</span>, <span class="c-key">"positive_events"</span>: <span class="c-num">1</span> },
+  { <span class="c-key">"trans_month"</span>: <span class="c-str">"2025-10-01"</span>, <span class="c-key">"positive_events"</span>: <span class="c-num">0</span> },
+  <span class="c-comm">… remaining rows truncated if response grows past ~3000 chars</span>
+]</div>
+      </div>
+
+      <div class="callout">
+        <strong>Budget.</strong> <span class="mono-sm">query_table</span> trims columns first, then halves rows until the JSON fits 3000 chars; appends <span class="mono-sm">{"_truncated": "..."}</span> as a marker row so the LLM knows the result was cut.
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- STAGE 2 — SYNTHESIZE -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="stage">
+    <div class="stage-head">
+      <div class="stage-num">2</div>
+      <div class="stage-title">Synthesize · turn data into findings</div>
+      <div class="stage-sub">single LLM call, no tools</div>
+      <div class="stage-line"></div>
+    </div>
+
+    <div class="stage-body">
+
+      <div class="msg user">
+        <div class="msg-head">
+          <span class="msg-role">user</span>
+          <span class="msg-sub">role=user · no tools</span>
+        </div>
+        <div class="msg-body">Based on the following data, synthesise findings for: How frequent were positive events (e.g. limit increases) in the last 18 months?
+
+Data: <span class="placeholder">{step 1 collected output — rows JSON from query_table}</span></div>
+      </div>
+
+      <div class="connector">↓</div>
+
+      <div class="msg assistant">
+        <div class="msg-head">
+          <span class="msg-role">assistant</span>
+          <span class="msg-sub">findings text</span>
+        </div>
+        <div class="prose-body">
+          In the 18 months preceding the data cut-off (2025-12-01), the customer had positive events in 3 of the 17 available model-score runs — <strong>2024-09 (1 event), 2025-02 (2 events), and 2025-07 (1 event)</strong>. No positive events in the remaining months. Frequency: ~18%, trending flat with no recent cluster. Bureau-consistency check not yet performed.
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- STAGE 3 — ANSWER -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="stage">
+    <div class="stage-head">
+      <div class="stage-num">3</div>
+      <div class="stage-title">Answer · chat-mode template</div>
+      <div class="stage-sub">template from <span class="mono-sm">config/prompts/chat.yaml</span> · JSON output</div>
+      <div class="stage-line"></div>
+    </div>
+
+    <div class="stage-body">
+
+      <div class="msg user">
+        <div class="msg-head">
+          <span class="msg-role">user</span>
+          <span class="msg-sub">specialist template · $question + $findings injected</span>
+        </div>
+        <div class="msg-body"><span class="c-comm">MODE: CHAT
+
+Answer the question concisely and directly, grounded in data evidence.
+
+QUESTION:</span> How frequent were positive events …?
+<span class="c-comm">FINDINGS FROM DATA ANALYSIS:</span> <span class="placeholder">{step 2 output}</span>
+
+<span class="c-comm">RULES:
+- Lead with the direct answer to the question
+- Cite specific data values as evidence
+- Note any caveats or data gaps
+- If data was missing, state whether the absence is a signal
+- Be 3-8 sentences
+
+Respond with JSON:</span>
+{"findings": "&lt;your answer&gt;", "evidence": ["&lt;evidence 1&gt;", ...], "implications": [...], "data_gaps": [...]}
+
+<span class="c-comm">Pillar report_instructions (optional) appended here.</span></div>
+      </div>
+
+      <div class="connector">↓</div>
+
+      <div class="msg assistant">
+        <div class="msg-head">
+          <span class="msg-role">assistant</span>
+          <span class="msg-sub">JSON · parsed into SpecialistOutput</span>
+        </div>
+        <div class="msg-body">{
+  <span class="c-key">"findings"</span>: <span class="c-str">"Positive events occurred in 3 of 17 model runs in the last 18 months, roughly 18% frequency, with no recent clustering."</span>,
+  <span class="c-key">"evidence"</span>: [
+    <span class="c-str">"2024-09: 1 positive event"</span>,
+    <span class="c-str">"2025-02: 2 positive events"</span>,
+    <span class="c-str">"2025-07: 1 positive event"</span>
+  ],
+  <span class="c-key">"implications"</span>: [
+    <span class="c-str">"Frequency is low; no sustained trajectory of limit-increase activity"</span>
+  ],
+  <span class="c-key">"data_gaps"</span>: []
+}</div>
+      </div>
+
+      <div class="callout">
+        <strong>Next.</strong> This <span class="mono-sm">SpecialistOutput</span> is added to <span class="mono-sm">specialist_outputs["modeling"]</span>. If other specialists also ran (e.g. <span class="mono-sm">bureau</span> on the follow-up), the General Specialist compares them pairwise before the Orchestrator synthesises.
+      </div>
+
+    </div>
+  </div>
+
+  <!-- FOOTER NOTE -->
+  <div class="intro" style="margin-top: 10px;">
+    <strong>What the LLM never sees:</strong> the whole <span class="mono-sm">model_scores</span> table (264 cols × N rows), raw customer identifiers, any field outside those returned by the specialist's own <span class="mono-sm">query_table</span> call. Every row that does arrive flows through the SafeChain sanitizer first — 8+ digit runs masked, code-exec keywords filtered.
+  </div>
+
+</div>
+
+</body>
+</html>

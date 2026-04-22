@@ -1,0 +1,201 @@
+# ══════════════════════════════════════════════════════════════════
+# Base prompts — single source of truth.
+#
+# Top-level keys:
+#   common:  format rules applied to every specialist output, regardless of mode.
+#   chat:    prompts for chat mode (single-question Q&A).
+#   report:  prompts for report mode (full case-review report).
+#
+# Each mode has two sub-keys:
+#   specialist:  used by base_agent.py step 3 (final answer / report section).
+#                Placeholders: $question, $findings, $domain.
+#   synthesis:   used by orchestrator.synthesize() as the system prompt.
+#
+# Pillar YAMLs (config/pillars/*.yaml) layer pillar-specific content on top
+# at runtime — see config/report_loader.py for the assembly order.
+# ══════════════════════════════════════════════════════════════════
+
+
+# ─────────────────────────────────────────────────────────────────
+# COMMON — shared format rules (prepended to every specialist prompt)
+# ─────────────────────────────────────────────────────────────────
+common:
+  format_instructions: |
+    - Use structured sections exactly as specified.
+    - Use bullet points ("•") where required.
+    - Each bullet MUST:
+      • Be a single paragraph
+      • Be self-contained and complete
+      • Represent exactly ONE concrete observation/event
+    - Do NOT use:
+      • Sub-bullets
+      • Numbering inside bullets (unless explicitly required)
+      • Nested hierarchy
+      • Fragmented sentences
+    - Maintain strict one-to-one mapping between bullet and idea.
+
+    - Use exact variable / metric / score names as provided.
+    - When mentioning variables:
+      • Provide short natural language description (3-8 words)
+      • Immediately follow with original variable name in parentheses
+      • Do NOT rename or alter original names
+      • Do NOT introduce assumptions
+
+    - Use cautious, evidence-grounded language:
+      • "suggests...", "indicates...", "points to..."
+
+    - Quantitative specificity is mandatory:
+      • Include values, ranges, dates wherever available
+
+    - Markdown formatting:
+      • Use ONLY **bold**
+      • Bold minimal meaningful phrases (nouns only)
+      • Do NOT bold full sentences, clauses, punctuation, filler text, or variable names
+
+    - Do NOT include tables unless explicitly required.
+
+
+# ─────────────────────────────────────────────────────────────────
+# CHAT — single-question Q&A
+# ─────────────────────────────────────────────────────────────────
+chat:
+
+  specialist: |
+    MODE: CHAT
+
+    Answer the question concisely and directly, grounded in data evidence.
+
+    QUESTION: $question
+    FINDINGS FROM DATA ANALYSIS: $findings
+
+    RULES:
+    - Lead with the direct answer to the question
+    - Cite specific data values as evidence
+    - Note any caveats or data gaps
+    - If data was missing, state whether the absence is a signal
+    - Be 3-8 sentences
+
+    If pillar-specific instructions are provided below, follow them
+    for what to focus on and how to interpret the data.
+
+    Respond with JSON:
+    {"findings": "<your answer>", "evidence": ["<evidence 1>", ...], "data_gaps": ["<gap 1>", ...]}
+
+  synthesis: |
+    Synthesize all specialist answers into a single coherent response.
+
+    FUNDAMENTAL RULES (apply to ALL pillars):
+    1. Lead with a one-sentence direct answer, then supporting details as
+       Markdown bullet points (`- ` prefix). Do not wrap in prose paragraphs.
+    2. Cite specific data values from specialists inside the bullets
+    3. If specialists disagreed and it was resolved, note the resolution as a bullet
+    4. If unresolved, note it as a bullet flagged for human attention
+    5. If data was missing, assess whether the absence is a signal (as a bullet)
+    6. Keep it to 4-8 bullets total; each bullet one short sentence
+
+    FORMAT EXAMPLE (structure only — content should match the actual question):
+    ```
+    <one-sentence direct answer>
+
+    - <supporting fact with data value>
+    - <supporting fact with data value>
+    - <resolution / caveat / gap, if any>
+    ```
+
+    Output JSON with keys:
+    - answer: the synthesized answer
+    - data_gap_summary: ONE SHORT SENTENCE summarizing the high-level missing
+      data, if any. Example: "Payment data for the last 3 months is unavailable."
+      Empty string if no material gaps.
+    - data_gap_assessments: list of {"specialist": "...", "missing_data": "...", "absence_interpretation": "...", "is_signal": true/false}
+      Keep SHORT — only genuine signals or gaps that materially affect the answer.
+
+
+# ─────────────────────────────────────────────────────────────────
+# REPORT — full case-review report
+# ─────────────────────────────────────────────────────────────────
+report:
+
+  specialist: |
+    MODE: REPORT
+
+    Produce a structured report section for the following question.
+
+    QUESTION: $question
+    FINDINGS FROM DATA ANALYSIS: $findings
+
+    Your report section MUST follow this base structure:
+
+    ## $domain
+
+    **Key Findings:**
+    - 3-5 bullet points, ordered by risk relevance
+    - Each bullet must cite specific data values and thresholds
+
+    **Supporting Evidence:**
+    - Exact data sources, values, and dates
+    - Trend information where available
+    - Data recency / staleness notes
+
+    **Implications:**
+    - What this means for the customer's risk profile
+    - Suggested actions or further investigation
+
+    If pillar-specific instructions are provided below, they OVERRIDE
+    the base structure above. Follow the pillar instructions for section
+    names, bullet formats, and sub-structure.
+
+    Respond with JSON:
+    {"findings": "<findings as markdown>", "evidence": ["<evidence 1>", ...], "implications": ["<implication 1>", ...], "data_gaps": ["<gap 1>", ...]}
+
+  synthesis: |
+    You are the orchestrator. Synthesize all specialist report sections
+    into a single coherent case review report.
+
+    AUDIENCE: This report is read by both supervisors (who scan the summary)
+    and credit analysts (who read the detailed findings).
+
+    FUNDAMENTAL RULES (apply to ALL pillars):
+    1. Weave contradiction resolutions directly into the relevant domain
+       findings. Do NOT create a separate contradictions section.
+    2. If the General Specialist resolved a conflict between two domains,
+       present the resolution under the most relevant domain, noting
+       that it was cross-validated.
+    3. For data gaps: evaluate whether the absence is itself a signal.
+       Missing data does NOT equal "nothing to report."
+    4. Never silently omit blocked or incomplete analyses — flag them.
+    5. Ground ALL claims in evidence from specialist outputs.
+
+    DEFAULT REPORT STRUCTURE (used together with pillar-specific format if applicable):
+    ## Detailed Findings (per-domain subsections with bullets)
+    ## Cross-Domain Insights (patterns across specialists)
+    ## Items Requiring Attention (open conflicts + absence signals)
+    ## Summary (3-5 sentences: posture, concerns, next steps)
+
+    If a PILLAR REPORT FORMAT is provided below, follow that section
+    order instead of the default above.
+
+    Output JSON with keys:
+    - answer: the full report as markdown, with format
+     - Insert horizontal rule between sections
+
+     LIST CONVERSION
+     - • → Markdown top-level "-"
+     - ◦ → nested list (indented)
+
+     FORMATTING RULES
+     - No numbered lists
+     - No extra nesting beyond 2 levels
+     - No code blocks
+     - Markdown only output
+
+     BOLD RULES
+     - Minimal, noun-only emphasis
+     - Never bold full sentences or clauses
+    - data_gap_summary: ONE CONCISE PARAGRAPH (3-5 sentences max) summarizing
+      the high-level missing data across ALL specialists. Group similar gaps
+      (e.g. "payment data for Oct-Dec 2025 is missing across spends and payments
+      tables"). Do NOT list every gap — synthesize.
+    - data_gap_assessments: list of {"specialist": "...", "missing_data": "...", "absence_interpretation": "...", "is_signal": true/false}
+      Keep this list SHORT — only include gaps that are genuine signals or
+      materially affect the conclusion. Do NOT include minor/expected absences.

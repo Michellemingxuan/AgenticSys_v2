@@ -172,11 +172,12 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
     </div>
     <div class="strategy-body">
       <div class="strategy-label">Design principle</div>
-      <div class="strategy-title">The case ID is stateful on the gateway — never a tool arg, never hand-carried by the LLM</div>
+      <div class="strategy-title">The case ID lives on the gateway — implicit in every query; when it surfaces to the LLM, the format keeps it firewall-safe</div>
       <div class="strategy-pills">
         <span class="pill">set once per session</span>
         <span class="pill">not in tool parameters</span>
-        <span class="pill">stripped from query results</span>
+        <span class="pill">stripped from data rows</span>
+        <span class="pill">surfaces only in tool response header</span>
         <span class="pill">format <span style="color:var(--green)">CASE-{seq:05d}</span> — 5 digits, below firewall threshold</span>
       </div>
     </div>
@@ -194,7 +195,7 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 flowchart LR
     SP["Specialist<br/><i>3-step chain · Data step</i>"]:::agent
     TOOL["Tool call<br/><b>query_table(table, filter, columns)</b><br/><i>no case_id arg</i>"]:::tool
-    GW["SimulatedDataGateway<br/><b>_current_case = 'CASE-00001'</b><br/><i>stateful · set once</i>"]:::gw
+    GW["SimulatedDataGateway<br/><b>_current_case = {case_id}</b><br/><i>stateful · set once</i>"]:::gw
     STORE[("case_data{br}{case_id → tables → rows}")]:::store
     RES["Rows for active case<br/><i>case_id stripped — implicit from context</i>"]:::res
 
@@ -230,7 +231,7 @@ flowchart LR
         </div>
       </div>
       <div class="card-text">The CLI picks the case, then <span class="mono">gateway.set_case(case_id)</span> stores it on the module-singleton gateway. Every subsequent read is implicitly scoped.</div>
-      <div class="card-code">gateway.set_case("CASE-00001")
+      <div class="card-code">gateway.set_case("&lt;case_id&gt;")
 <span class="c-comment"># logger.log("case_selected", ...)</span>
 init_tools(gateway, catalog)</div>
     </div>
@@ -272,7 +273,7 @@ init_tools(gateway, catalog)</div>
   <div class="section">
     <span class="section-label">Why the case ID doesn't trigger the firewall</span>
     <span class="section-line"></span>
-    <span class="section-note">Digit-count thresholds · where CASE-00001 sits</span>
+    <span class="section-note">Digit-count thresholds · where &lt;case_id&gt; sits</span>
   </div>
 
   <div class="firewall">
@@ -298,7 +299,7 @@ init_tools(gateway, catalog)</div>
           <span class="fw-tick-digits">15</span>
         </div>
         <!-- example markers -->
-        <div class="fw-marker" style="left: 30%; background: var(--green)" title="CASE-00001 (5 digits)">●</div>
+        <div class="fw-marker" style="left: 30%; background: var(--green)" title="&lt;case_id&gt; (5 digits)">●</div>
         <div class="fw-marker" style="left: 60%; background: var(--amber)" title="6-digit ID">●</div>
         <div class="fw-marker" style="left: 100%; background: var(--red)" title="Long numeric ID">●</div>
       </div>
@@ -314,10 +315,10 @@ init_tools(gateway, catalog)</div>
       <div class="ex good">
         <div class="ex-head">
           <span class="ex-tag">Safe</span>
-          <span class="ex-title">CASE-00001</span>
+          <span class="ex-title">CASE-{seq:05d}</span>
         </div>
         <div class="ex-body">5-digit zero-padded sequence (<span class="mono">{seq:05d}</span>). Below both thresholds — passes through every sanitizer intact. This is why the format was chosen.</div>
-        <div class="ex-sample">Tool response header: <span class="mono-green">Tables for case CASE-00001:</span></div>
+        <div class="ex-sample">Tool response header: <span class="mono-green">Tables for case &lt;case_id&gt;:</span></div>
       </div>
       <div class="ex bad">
         <div class="ex-head">
@@ -361,7 +362,18 @@ flowchart LR
 
   <div style="background: var(--gray-light); border: 1px solid var(--gray-border); border-radius: 3px; padding: 12px 16px; font-size: 12px; color: var(--slate); line-height: 1.55;">
     <strong style="color: var(--navy)">Summary.</strong>
-    The data agent keeps the case ID <em>out of band</em>: stateful on the gateway, absent from tool parameters, stripped from rows, and formatted (<span class="mono">CASE-00001</span>) to stay under the firewall's digit-masking thresholds. Long digit runs in any other field (payment amount, card number, account reference) are masked by the SafeChain adapter on every call — so even if data <em>does</em> carry sensitive-looking digits, the LLM never sees the raw value.
+    The data agent keeps the case ID mostly out of band: stateful on the gateway, absent from tool parameters, stripped from data rows. It surfaces only in the <span class="mono">list_available_tables()</span> response header, and the <span class="mono">CASE-{seq:05d}</span> format keeps that surface firewall-safe (5 digits, below both thresholds). Long digit runs in any other field (payment amount, card number, account reference) are masked by SafeChain on every call — so even if data <em>does</em> carry sensitive-looking digits, the LLM never sees the raw value.
+  </div>
+
+  <!-- CROSS-REF -->
+  <div style="margin-top: 22px; padding: 14px 18px; background: var(--white); border: 1px solid var(--gray-border); border-left: 3px solid var(--red); border-radius: 3px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+    <div style="width: 32px; height: 32px; background: var(--red-bg); border-radius: 3px; display: flex; align-items: center; justify-content: center; color: var(--red); flex-shrink: 0;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+    </div>
+    <div style="flex: 1; min-width: 240px; font-size: 12px; color: var(--slate); line-height: 1.5;">
+      <span style="font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em; color: var(--red); display: block; margin-bottom: 2px;">See also · companion page</span>
+      <a href="firewall_overview.html" style="color: var(--blue); text-decoration: none; border-bottom: 1px dashed var(--blue); font-weight: 700; font-family: 'SF Mono', 'Monaco', 'Consolas', monospace; font-size: 11.5px;">firewall_overview.html →</a> covers the full firewall behaviour: retry logic, the two sanitizer layers, and how a blocked call propagates back to the reviewer.
+    </div>
   </div>
 
 </div>

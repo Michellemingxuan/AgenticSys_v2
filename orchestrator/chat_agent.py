@@ -2,9 +2,30 @@
 
 from __future__ import annotations
 
+import re
+
 from gateway.firewall_stack import FirewallStack
 from logger.event_logger import EventLogger
 from models.types import FinalOutput, SpecialistOutput
+
+
+def _as_bullets(text: str) -> list[str]:
+    """Split a findings string into clean bullet lines.
+
+    Handles three common shapes the LLM may return:
+      - already-bulleted markdown ("- foo\\n- bar")
+      - • / ◦ bullets ("• foo\\n• bar")
+      - prose (one or more sentences; returned as a single bullet)
+    """
+    if not text:
+        return []
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    bullet_prefix = re.compile(r"^[-•◦*]\s+")
+    bullets = [bullet_prefix.sub("", ln) for ln in lines if bullet_prefix.match(ln)]
+    if bullets:
+        return bullets
+    # No bullet markers — treat as a single findings blob.
+    return [" ".join(lines)]
 
 
 CHAT_SYSTEM_PROMPT = (
@@ -49,18 +70,30 @@ class ChatAgent:
             if final_output.specialists_consulted and not selected:
                 parts.append(f"- Consulted: {', '.join(final_output.specialists_consulted)}")
 
+        # ── Sub-questions (team plan) ─────────────────────────────
+        if final_output.sub_questions:
+            parts.append("\n## Sub-questions assigned to specialists")
+            for sub in final_output.sub_questions:
+                parts.append(f"- **{sub.specialist}**: {sub.sub_question}")
+
         # ── Per-specialist findings ───────────────────────────────
         if specialist_outputs:
             parts.append("\n## Per-specialist findings")
             for domain, output in specialist_outputs.items():
                 parts.append(f"\n**{domain}**")
-                parts.append(f"- Findings: {output.findings}")
+                # Findings — render as bullets (findings field may be prose or
+                # pre-bulleted; split on newlines that start with "-" or "•").
+                parts.append("- **Findings**:")
+                for item in _as_bullets(output.findings):
+                    parts.append(f"  - {item}")
                 if output.evidence:
-                    parts.append(f"- Evidence: {'; '.join(output.evidence)}")
-                if output.implications:
-                    parts.append(f"- Implications: {'; '.join(output.implications)}")
+                    parts.append("- **Evidence**:")
+                    for ev in output.evidence:
+                        parts.append(f"  - {ev}")
                 if output.data_gaps:
-                    parts.append(f"- Data gaps: {'; '.join(output.data_gaps)}")
+                    parts.append("- **Data gaps**:")
+                    for gap in output.data_gaps:
+                        parts.append(f"  - {gap}")
 
         # ── Cross-domain insights ─────────────────────────────────
         if final_output.cross_domain_insights:

@@ -1,14 +1,16 @@
-"""Load prompt templates from config/prompts/{common,report,chat}.yaml.
+"""Load prompt templates from config/prompts/prompts.yaml.
 
-Prompt assembly for specialists:
-    common.yaml/common_format_instructions
-    + {report|chat}.yaml/specialist
-    + pillar.yaml/{domain}.report_instructions
+Single-file source of truth. Top-level keys: ``common``, ``chat``, ``report``.
 
-Prompt assembly for synthesis:
-    {report|chat}.yaml/synthesis
-    + pillar.yaml/report_format
-    + pillar.yaml/synthesis_instructions
+Prompt assembly for specialists (``get_specialist_prompt``):
+    common.format_instructions
+    + {chat|report}.specialist        ($question, $findings, $domain substituted)
+    + pillar.{domain}.report_instructions
+
+Prompt assembly for synthesis (``get_synthesis_prompt``):
+    {chat|report}.synthesis
+    + pillar.report_format
+    + pillar.synthesis_report (instructions + per-section prompts + formatter)
 """
 
 from __future__ import annotations
@@ -17,22 +19,27 @@ from pathlib import Path
 
 import yaml
 
-_cache: dict[str, dict] = {}
+_PROMPTS_FILE = "prompts.yaml"
+_cache: dict | None = None
 
 
-def _load_file(name: str, config_dir: str = "config") -> dict:
-    if name in _cache:
-        return _cache[name]
+def _load_prompts(config_dir: str = "config") -> dict:
+    """Load prompts.yaml once and cache. Falls back to package-relative path."""
+    global _cache
+    if _cache is not None:
+        return _cache
 
-    path = Path(config_dir) / "prompts" / f"{name}.yaml"
+    path = Path(config_dir) / "prompts" / _PROMPTS_FILE
     if not path.exists():
-        path = Path(__file__).parent / "prompts" / f"{name}.yaml"
+        path = Path(__file__).parent / "prompts" / _PROMPTS_FILE
+
     if path.exists():
         with open(path) as f:
-            _cache[name] = yaml.safe_load(f) or {}
+            _cache = yaml.safe_load(f) or {}
     else:
-        _cache[name] = {}
-    return _cache[name]
+        _cache = {}
+
+    return _cache
 
 
 def get_specialist_prompt(
@@ -42,23 +49,25 @@ def get_specialist_prompt(
     domain: str = "",
     pillar_report_instructions: str = "",
 ) -> str:
-    """Assemble the specialist Step 3 prompt.
+    """Assemble the specialist Step-3 prompt.
 
-    = common_format_instructions + mode specialist + pillar report_instructions
+    common.format_instructions + {mode}.specialist + pillar.report_instructions
     """
-    common_data = _load_file("common")
-    common = common_data.get("common_format_instructions", common_data.get("common_specialist", ""))
+    data = _load_prompts()
+    common = data.get("common", {}).get("format_instructions", "")
 
-    mode_templates = _load_file(mode)  # "report" or "chat"
-    mode_template = mode_templates.get("specialist", "Answer: $question\nFindings: $findings")
-
-    mode_prompt = (mode_template
-                   .replace("$question", question)
-                   .replace("$findings", findings)
-                   .replace("$domain", domain))
+    mode_template = (
+        data.get(mode, {}).get("specialist")
+        or "Answer: $question\nFindings: $findings"
+    )
+    mode_prompt = (
+        mode_template
+        .replace("$question", question)
+        .replace("$findings", findings)
+        .replace("$domain", domain)
+    )
 
     parts = [common, mode_prompt]
-
     if pillar_report_instructions:
         parts.append(f"PILLAR-SPECIFIC INSTRUCTIONS:\n{pillar_report_instructions}")
 
@@ -72,26 +81,22 @@ def get_synthesis_prompt(
 ) -> str:
     """Assemble the orchestrator synthesis prompt.
 
-    = {report|chat}.yaml/synthesis
-    + pillar report_format
-    + pillar synthesis_report (instructions + per-section prompts + formatter)
+    {mode}.synthesis + pillar.report_format + pillar.synthesis_report
     """
-    mode_templates = _load_file(mode)
-    base = mode_templates.get("synthesis", "Synthesize specialist outputs.")
+    data = _load_prompts()
+    base = data.get(mode, {}).get("synthesis") or "Synthesize specialist outputs."
 
-    parts = [base]
+    parts: list[str] = [base]
 
     if pillar_report_format:
         parts.append(f"PILLAR REPORT FORMAT:\n{pillar_report_format}")
 
-    # Handle synthesis_report as dict (structured) or string (flat)
+    # synthesis_report may be a flat string or a structured dict.
     if isinstance(pillar_synthesis_report, dict):
-        # Top-level instructions
         instructions = pillar_synthesis_report.get("instructions", "")
         if instructions:
             parts.append(f"PILLAR SYNTHESIS INSTRUCTIONS:\n{instructions}")
 
-        # Per-section prompts (early_risk_prediction_section, etc.)
         for key, value in pillar_synthesis_report.items():
             if key in ("instructions", "formatter_report"):
                 continue
@@ -102,7 +107,6 @@ def get_synthesis_prompt(
             elif isinstance(value, str) and value.strip():
                 parts.append(f"SECTION INSTRUCTIONS [{key}]:\n{value}")
 
-        # Formatter (applied last)
         formatter = pillar_synthesis_report.get("formatter_report", "")
         if formatter:
             parts.append(f"FINAL FORMATTING INSTRUCTIONS:\n{formatter}")
@@ -114,5 +118,6 @@ def get_synthesis_prompt(
 
 
 def reload() -> None:
-    """Force reload from disk (useful after editing templates)."""
-    _cache.clear()
+    """Force reload from disk (useful after editing prompts.yaml)."""
+    global _cache
+    _cache = None

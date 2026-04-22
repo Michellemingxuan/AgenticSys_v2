@@ -16,7 +16,9 @@ from models.types import (
     Resolution,
     ReviewReport,
     SpecialistOutput,
+    TeamAssignment,
 )
+from skills.domain.loader import load_domain_skill
 
 
 SYNTHESIZE_PROMPT = (
@@ -32,8 +34,31 @@ SYNTHESIZE_PROMPT = (
 )
 
 
+PLAN_TEAM_PROMPT = (
+    "You are the orchestrator. Given a reviewer's question and a description "
+    "of each available specialist (including their data tables and columns), "
+    "produce a team plan: pick the specialists whose data can answer the "
+    "question, AND rewrite the question into a focused sub-question for each.\n\n"
+    "Guidelines:\n"
+    "- Select specialists whose DATA contains fields relevant to the question.\n"
+    "- Prefer warm specialists (already active in session) when relevant.\n"
+    "- Be targeted, not exhaustive — but don't miss specialists with relevant data.\n"
+    "- For broad questions (e.g. 'full report'), select all specialists.\n"
+    "- For each selected specialist, write a sub-question that focuses ONLY on the\n"
+    "  aspect that specialist's data can address. Do not ask a specialist about\n"
+    "  data they don't have.\n"
+    "- If the question is atomic or can only be answered by one specialist, the\n"
+    "  sub-question may equal the root question verbatim.\n"
+    "- Sub-questions should be short (one sentence where possible) and grounded\n"
+    "  in the specialist's data vocabulary.\n\n"
+    "Return a JSON object: "
+    "{\"plan\": [{\"specialist\": \"<domain>\", \"sub_question\": \"<...>\"}, ...]}\n"
+    "Always return at least one plan entry."
+)
+
+
 class Orchestrator:
-    """Coordinates synthesis of specialist outputs into a final answer."""
+    """Coordinates team planning, synthesis, and final answer assembly."""
 
     def __init__(
         self,
@@ -42,12 +67,138 @@ class Orchestrator:
         registry: SessionRegistry,
         pillar: str,
         pillar_config: dict | None = None,
+        catalog=None,
     ):
         self.firewall = firewall
         self.logger = logger
         self.registry = registry
         self.pillar = pillar
         self.pillar_config = pillar_config or {}
+        self.catalog = catalog
+
+    # ──────────────────────────────────────────────────────────────
+    # Team planning — selects specialists AND decomposes the question
+    # into per-specialist sub-questions in a single LLM call.
+    # ──────────────────────────────────────────────────────────────
+
+    def plan_team(
+        self,
+        question: str,
+        available_specialists: list[str],
+        active_specialists: list[dict] | None = None,
+        mode: str = "chat",
+    ) -> list[TeamAssignment]:
+        active_specialists = active_specialists or []
+        self.logger.log(
+            "plan_team_start",
+            {"question": question, "pillar": self.pillar, "mode": mode,
+             "available": available_specialists},
+        )
+
+        # Report mode → consult all specialists, each gets the root question
+        # verbatim; a full report doesn't benefit from splitting.
+        if mode == "report":
+            plan = [TeamAssignment(specialist=s, sub_question=question)
+                    for s in available_specialists]
+            self.logger.log("plan_team_done",
+                            {"plan": [p.model_dump() for p in plan],
+                             "reason": "report mode — all specialists, root question"})
+            return plan
+
+        spec_descriptions = self._build_specialist_descriptions(available_specialists)
+
+        active_info = ""
+        if active_specialists:
+            active_info = "\nCurrently active (warm, have prior context):\n"
+            for a in active_specialists:
+                active_info += f"  - {a['domain']} ({a['questions_answered']} questions answered)\n"
+
+        user_message = (
+            f"Question: {question}\n"
+            f"Pillar: {self.pillar}\n\n"
+            f"Available specialists and their data:\n{spec_descriptions}\n"
+            f"{active_info}\n"
+            "Produce the team plan."
+        )
+
+        result = self.firewall.call(
+            system_prompt=PLAN_TEAM_PROMPT,
+            user_message=user_message,
+        )
+
+        if result.status == "blocked" or result.data is None:
+            self.logger.log("plan_team_fallback", {"reason": "blocked"})
+            return [TeamAssignment(specialist=s, sub_question=question)
+                    for s in available_specialists]
+
+        plan = self._parse_plan(result.data, available_specialists, question)
+        self.logger.log("plan_team_done",
+                        {"plan": [p.model_dump() for p in plan]})
+        return plan
+
+    def _build_specialist_descriptions(self, available: list[str]) -> str:
+        lines: list[str] = []
+        for domain in available:
+            skill = load_domain_skill(domain)
+            if skill is None:
+                lines.append(f"- {domain}: (no skill loaded)")
+                continue
+
+            desc = f"- {domain}:"
+            desc += f"\n    Focus: {skill.system_prompt[:150]}"
+            desc += f"\n    Tables: {', '.join(skill.data_hints)}"
+
+            if self.catalog:
+                for table in skill.data_hints:
+                    schema = self.catalog.get_schema(table)
+                    if schema:
+                        col_names = list(schema.keys())
+                        if len(col_names) > 15:
+                            desc += f"\n    Columns ({table}): {', '.join(col_names[:15])}... (+{len(col_names)-15} more)"
+                        else:
+                            desc += f"\n    Columns ({table}): {', '.join(col_names)}"
+
+            desc += f"\n    Risk signals: {', '.join(skill.risk_signals[:3])}"
+            lines.append(desc)
+
+        return "\n".join(lines)
+
+    def _parse_plan(
+        self,
+        data: dict,
+        available: list[str],
+        root_question: str,
+    ) -> list[TeamAssignment]:
+        raw = data.get("plan", data.get("response", []))
+
+        if isinstance(raw, str):
+            try:
+                parsed_outer = json.loads(raw)
+                raw = parsed_outer.get("plan", [])
+            except (json.JSONDecodeError, AttributeError):
+                return [TeamAssignment(specialist=s, sub_question=root_question)
+                        for s in available]
+
+        if not isinstance(raw, list):
+            return [TeamAssignment(specialist=s, sub_question=root_question)
+                    for s in available]
+
+        plan: list[TeamAssignment] = []
+        seen: set[str] = set()
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            specialist = entry.get("specialist") or entry.get("domain")
+            sub_q = entry.get("sub_question") or entry.get("subquestion") or root_question
+            if specialist in available and specialist not in seen:
+                plan.append(TeamAssignment(specialist=specialist, sub_question=sub_q))
+                seen.add(specialist)
+
+        if not plan:
+            return [TeamAssignment(specialist=s, sub_question=root_question)
+                    for s in available]
+
+        return plan
 
     def synthesize(
         self,
@@ -55,6 +206,7 @@ class Orchestrator:
         review_report: ReviewReport,
         question: str,
         mode: str,
+        team_plan: list[TeamAssignment] | None = None,
     ) -> FinalOutput:
         self.logger.log(
             "orchestrator_synthesize",
@@ -184,4 +336,5 @@ class Orchestrator:
             data_gaps=data_gaps,
             blocked_steps=blocked_steps,
             specialists_consulted=list(specialist_outputs.keys()),
+            sub_questions=team_plan or [],
         )
