@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
 from agents.session_registry import SessionRegistry
-from gateway.firewall_stack import FirewallStack
 from logger.event_logger import EventLogger
 from models.types import (
     Conflict,
@@ -26,9 +25,8 @@ def logger(tmp_path):
 
 
 @pytest.fixture
-def firewall(logger):
-    adapter = MagicMock()
-    return FirewallStack(adapter, logger)
+def mock_llm():
+    return AsyncMock()
 
 
 def _make_output(domain: str, findings: str, data_gaps=None) -> SpecialistOutput:
@@ -46,11 +44,11 @@ def _make_output(domain: str, findings: str, data_gaps=None) -> SpecialistOutput
 # ---- plan_team tests (team selection + sub-question decomposition) ----
 
 
-def test_plan_team_parses_plan(firewall, logger):
+async def test_plan_team_parses_plan(mock_llm, logger):
     # plan_team now makes two sequential LLM calls:
     #   1. SELECT_TEAM → {"specialists": [...]}
     #   2. SPLIT_SUBQUESTIONS → {"plan": [...]}
-    firewall.call = MagicMock(
+    mock_llm.ainvoke = AsyncMock(
         side_effect=[
             LLMResult(status="success", data={"specialists": ["bureau", "modeling"]}),
             LLMResult(
@@ -66,8 +64,8 @@ def test_plan_team_parses_plan(firewall, logger):
     )
 
     registry = SessionRegistry()
-    orch = Orchestrator(firewall, logger, registry, "credit_risk")
-    plan = orch.plan_team(
+    orch = Orchestrator(mock_llm, logger, registry, "credit_risk")
+    plan = await orch.plan_team(
         question="What is the credit risk?",
         available_specialists=["bureau", "modeling", "spend_payments", "wcc"],
         active_specialists=[],
@@ -79,21 +77,21 @@ def test_plan_team_parses_plan(firewall, logger):
     assert "FICO" in plan[0].sub_question
     assert plan[1].specialist == "modeling"
     # Two LLM calls: one per step.
-    assert firewall.call.call_count == 2
+    assert mock_llm.ainvoke.call_count == 2
 
 
-def test_plan_team_single_specialist_skips_split_call(firewall, logger):
+async def test_plan_team_single_specialist_skips_split_call(mock_llm, logger):
     """When team-selection returns exactly one specialist, the sub-question
     decomposition step is skipped — sub-question equals the root verbatim,
     saving one LLM call."""
-    firewall.call = MagicMock(
+    mock_llm.ainvoke = AsyncMock(
         return_value=LLMResult(status="success", data={"specialists": ["bureau"]}),
     )
 
     registry = SessionRegistry()
-    orch = Orchestrator(firewall, logger, registry, "credit_risk")
+    orch = Orchestrator(mock_llm, logger, registry, "credit_risk")
     root = "What is the current bureau score?"
-    plan = orch.plan_team(
+    plan = await orch.plan_team(
         question=root,
         available_specialists=["bureau", "modeling"],
         active_specialists=[],
@@ -103,37 +101,37 @@ def test_plan_team_single_specialist_skips_split_call(firewall, logger):
     assert plan[0].specialist == "bureau"
     assert plan[0].sub_question == root
     # Only the selection call fired — decomposition short-circuited.
-    assert firewall.call.call_count == 1
+    assert mock_llm.ainvoke.call_count == 1
 
 
-def test_plan_team_report_mode_returns_all_with_root_question(firewall, logger):
+async def test_plan_team_report_mode_returns_all_with_root_question(mock_llm, logger):
     # Report mode must not call the LLM — it picks every specialist with root question.
-    firewall.call = MagicMock()
+    mock_llm.ainvoke = AsyncMock()
     registry = SessionRegistry()
-    orch = Orchestrator(firewall, logger, registry, "credit_risk")
+    orch = Orchestrator(mock_llm, logger, registry, "credit_risk")
     available = ["bureau", "modeling"]
 
-    plan = orch.plan_team(
+    plan = await orch.plan_team(
         question="Full report please",
         available_specialists=available,
         active_specialists=[],
         mode="report",
     )
 
-    firewall.call.assert_not_called()
+    mock_llm.ainvoke.assert_not_called()
     assert [p.specialist for p in plan] == available
     assert all(p.sub_question == "Full report please" for p in plan)
 
 
-def test_plan_team_fallback_on_block(firewall, logger):
-    firewall.call = MagicMock(
+async def test_plan_team_fallback_on_block(mock_llm, logger):
+    mock_llm.ainvoke = AsyncMock(
         return_value=LLMResult(status="blocked", error="denied")
     )
     registry = SessionRegistry()
-    orch = Orchestrator(firewall, logger, registry, "credit_risk")
+    orch = Orchestrator(mock_llm, logger, registry, "credit_risk")
     available = ["bureau", "modeling"]
 
-    plan = orch.plan_team(
+    plan = await orch.plan_team(
         question="anything",
         available_specialists=available,
         active_specialists=[],
@@ -147,8 +145,8 @@ def test_plan_team_fallback_on_block(firewall, logger):
 # ---- Orchestrator synthesize tests ----
 
 
-def test_synthesize_merges_outputs(firewall, logger):
-    firewall.call = MagicMock(
+async def test_synthesize_merges_outputs(mock_llm, logger):
+    mock_llm.ainvoke = AsyncMock(
         return_value=LLMResult(
             status="success",
             data={
@@ -159,20 +157,20 @@ def test_synthesize_merges_outputs(firewall, logger):
     )
 
     registry = SessionRegistry()
-    orch = Orchestrator(firewall, logger, registry, "credit_risk")
+    orch = Orchestrator(mock_llm, logger, registry, "credit_risk")
 
     outputs = {"bureau": _make_output("bureau", "Score is 680")}
     report = ReviewReport()
 
-    final = orch.synthesize(outputs, report, "What is the credit risk?", "chat")
+    final = await orch.synthesize(outputs, report, "What is the credit risk?", "chat")
 
     assert isinstance(final, FinalOutput)
     assert final.answer == "The credit risk is moderate."
     assert "bureau" in final.specialists_consulted
 
 
-def test_synthesize_includes_open_conflicts(firewall, logger):
-    firewall.call = MagicMock(
+async def test_synthesize_includes_open_conflicts(mock_llm, logger):
+    mock_llm.ainvoke = AsyncMock(
         return_value=LLMResult(
             status="success",
             data={
@@ -183,7 +181,7 @@ def test_synthesize_includes_open_conflicts(firewall, logger):
     )
 
     registry = SessionRegistry()
-    orch = Orchestrator(firewall, logger, registry, "credit_risk")
+    orch = Orchestrator(mock_llm, logger, registry, "credit_risk")
 
     outputs = {
         "bureau": _make_output("bureau", "Score is 580"),
@@ -198,15 +196,15 @@ def test_synthesize_includes_open_conflicts(firewall, logger):
     )
     report = ReviewReport(open_conflicts=[conflict])
 
-    final = orch.synthesize(outputs, report, "What is the credit risk?", "chat")
+    final = await orch.synthesize(outputs, report, "What is the credit risk?", "chat")
 
     assert isinstance(final, FinalOutput)
     assert len(final.open_conflicts) == 1
     assert final.open_conflicts[0].contradiction == "Low score but low DTI"
 
 
-def test_synthesize_handles_data_gaps(firewall, logger):
-    firewall.call = MagicMock(
+async def test_synthesize_handles_data_gaps(mock_llm, logger):
+    mock_llm.ainvoke = AsyncMock(
         return_value=LLMResult(
             status="success",
             data={
@@ -224,14 +222,14 @@ def test_synthesize_handles_data_gaps(firewall, logger):
     )
 
     registry = SessionRegistry()
-    orch = Orchestrator(firewall, logger, registry, "credit_risk")
+    orch = Orchestrator(mock_llm, logger, registry, "credit_risk")
 
     outputs = {
         "bureau": _make_output("bureau", "Score is 700", data_gaps=["payment_history_2024"])
     }
     report = ReviewReport()
 
-    final = orch.synthesize(outputs, report, "What is the credit risk?", "chat")
+    final = await orch.synthesize(outputs, report, "What is the credit risk?", "chat")
 
     assert isinstance(final, FinalOutput)
     assert len(final.data_gaps) >= 1

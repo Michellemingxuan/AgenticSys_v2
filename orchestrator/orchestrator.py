@@ -6,7 +6,7 @@ import json
 
 from agents.session_registry import SessionRegistry
 from config.report_loader import get_synthesis_prompt
-from gateway.firewall_stack import FirewallStack
+from gateway.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger
 from models.types import (
     BlockedStep,
@@ -88,14 +88,14 @@ class Orchestrator:
 
     def __init__(
         self,
-        firewall: FirewallStack,
+        llm: FirewalledModel,
         logger: EventLogger,
         registry: SessionRegistry,
         pillar: str,
         pillar_config: dict | None = None,
         catalog=None,
     ):
-        self.firewall = firewall
+        self.llm = llm
         self.logger = logger
         self.registry = registry
         self.pillar = pillar
@@ -112,7 +112,7 @@ class Orchestrator:
     # cases short-circuit to avoid unnecessary LLM calls.
     # ──────────────────────────────────────────────────────────────
 
-    def plan_team(
+    async def plan_team(
         self,
         question: str,
         available_specialists: list[str],
@@ -137,7 +137,7 @@ class Orchestrator:
             return plan
 
         # Step 1: team selection.
-        selected = self._select_team(question, available_specialists, active_specialists)
+        selected = await self._select_team(question, available_specialists, active_specialists)
 
         # Single-specialist shortcut: no decomposition needed.
         if len(selected) <= 1:
@@ -149,12 +149,12 @@ class Orchestrator:
             return plan
 
         # Step 2: sub-question decomposition for the selected team.
-        plan = self._split_sub_questions(question, selected)
+        plan = await self._split_sub_questions(question, selected)
         self.logger.log("plan_team_done",
                         {"plan": [p.model_dump() for p in plan]})
         return plan
 
-    def _select_team(
+    async def _select_team(
         self,
         question: str,
         available_specialists: list[str],
@@ -196,7 +196,7 @@ class Orchestrator:
             "Pick the specialists whose data directly contributes to the root."
         )
 
-        result = self.firewall.call(
+        result = await self.llm.ainvoke(
             system_prompt=SELECT_TEAM_PROMPT,
             user_message=user_message,
         )
@@ -210,7 +210,7 @@ class Orchestrator:
         self.logger.log("select_team_done", {"selected": selected})
         return selected
 
-    def _split_sub_questions(
+    async def _split_sub_questions(
         self,
         question: str,
         selected_specialists: list[str],
@@ -225,7 +225,7 @@ class Orchestrator:
             "Produce one sub-question per specialist, each in service of the root."
         )
 
-        result = self.firewall.call(
+        result = await self.llm.ainvoke(
             system_prompt=SPLIT_SUBQUESTIONS_PROMPT,
             user_message=user_message,
         )
@@ -331,7 +331,7 @@ class Orchestrator:
 
         return plan
 
-    def synthesize(
+    async def synthesize(
         self,
         specialist_outputs: dict[str, SpecialistOutput],
         review_report: ReviewReport,
@@ -396,7 +396,7 @@ class Orchestrator:
             pillar_report_format=self.pillar_config.get("report_format", ""),
             pillar_synthesis_report=self.pillar_config.get("synthesis_report", ""),
         )
-        result = self.firewall.call(
+        result = await self.llm.ainvoke(
             system_prompt=synthesis_prompt,
             user_message=user_message,
         )
