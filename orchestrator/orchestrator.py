@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from pathlib import Path
 
+from agents.general_specialist import GeneralSpecialist
+from agents.report_agent import ReportAgent
 from agents.session_registry import SessionRegistry
 from config.report_loader import get_synthesis_prompt
 from gateway.firewall_stack import FirewalledModel
@@ -14,13 +17,16 @@ from models.types import (
     BlockedStep,
     Conflict,
     DataGap,
+    FinalAnswer,
     FinalOutput,
+    ReportDraft,
     Resolution,
     ReviewReport,
     SpecialistOutput,
     TeamAssignment,
+    TeamDraft,
 )
-from skills.domain.loader import load_domain_skill
+from skills.domain.loader import list_domain_skills, load_domain_skill
 from skills.loader import load_skill as _load_skill
 
 
@@ -48,6 +54,7 @@ _TEAM_CONSTRUCTION_BODY = _load_skill(_WORKFLOW_DIR / "team_construction.md").bo
 SYNTHESIZE_PROMPT = _load_skill(_WORKFLOW_DIR / "synthesis.md").body
 SELECT_TEAM_PROMPT = _extract_section(_TEAM_CONSTRUCTION_BODY, "# Step 1")
 SPLIT_SUBQUESTIONS_PROMPT = _extract_section(_TEAM_CONSTRUCTION_BODY, "# Step 2")
+BALANCING_PROMPT = _load_skill(_WORKFLOW_DIR / "balancing.md").body
 
 
 class Orchestrator:
@@ -435,4 +442,193 @@ class Orchestrator:
             blocked_steps=blocked_steps,
             specialists_consulted=list(specialist_outputs.keys()),
             sub_questions=team_plan or [],
+        )
+
+    # ──────────────────────────────────────────────────────────────
+    # Phase 4 — parallel Reports + Team pipeline with Balancing merge
+    # ──────────────────────────────────────────────────────────────
+
+    async def run(
+        self,
+        question: str,
+        case_folder: Path,
+        report_agent: ReportAgent,
+    ) -> FinalAnswer:
+        """End-to-end per-question entry: dispatch Reports + Team in parallel,
+        merge via the Balancing skill, return a FinalAnswer.
+
+        The report_agent is injected so tests can stub it; production callers
+        build one via `ReportAgent(llm, logger)` and hand it in once per session.
+        """
+        self.logger.log(
+            "orchestrator_run_start",
+            {"question": question, "case_folder": str(case_folder)},
+        )
+
+        report_draft, team_draft = await asyncio.gather(
+            report_agent.run(question, case_folder),
+            self._run_team_workflow(question),
+        )
+
+        self.logger.log(
+            "orchestrator_run_branches_done",
+            {
+                "report_coverage": report_draft.coverage,
+                "team_specialists": team_draft.specialists_consulted,
+            },
+        )
+
+        final = await self.balance(question, report_draft, team_draft)
+        self.logger.log(
+            "orchestrator_run_done",
+            {"flag_count": len(final.flags), "answer_len": len(final.answer)},
+        )
+        return final
+
+    async def _run_team_workflow(self, question: str) -> TeamDraft:
+        """Team-side branch: plan → dispatch specialists in parallel → compare → synthesize.
+
+        Mode is fixed to "chat" — the legacy "report" mode is deprecated
+        (the `--mode report` CLI flag is dropped in this phase; the Report
+        Agent consumes pre-staged reports rather than regenerating them).
+        """
+        mode = "chat"
+        available = list_domain_skills()
+        active = self.registry.list_active()
+
+        plan = await self.plan_team(
+            question=question,
+            available_specialists=available,
+            active_specialists=active,
+            mode=mode,
+        )
+
+        # Fan out specialists concurrently. Registry is in-memory so `get_or_create`
+        # is safe to call sequentially before the gather.
+        async def _dispatch(assignment: TeamAssignment) -> tuple[str, SpecialistOutput] | None:
+            skill = load_domain_skill(assignment.specialist)
+            if skill is None:
+                return None
+            agent = self.registry.get_or_create(
+                domain=assignment.specialist,
+                pillar=self.pillar,
+                domain_skill=skill,
+                pillar_yaml=self.pillar_config,
+                llm=self.llm,
+                logger=self.logger,
+            )
+            output = await agent.run(
+                assignment.sub_question, mode=mode, root_question=question
+            )
+            return assignment.specialist, output
+
+        results = await asyncio.gather(*(_dispatch(a) for a in plan))
+        specialist_outputs: dict[str, SpecialistOutput] = {
+            name: output for pair in results if pair is not None for name, output in [pair]
+        }
+
+        general = GeneralSpecialist(self.llm, self.logger)
+        review_report = await general.compare(specialist_outputs, question)
+
+        final_output = await self.synthesize(
+            specialist_outputs, review_report, question, mode, team_plan=plan
+        )
+
+        return TeamDraft(
+            answer=final_output.answer,
+            data_gap_summary=final_output.data_gap_summary,
+            resolved_contradictions=final_output.resolved_contradictions,
+            open_conflicts=final_output.open_conflicts,
+            cross_domain_insights=final_output.cross_domain_insights,
+            data_requests_made=final_output.data_requests_made,
+            data_gaps=final_output.data_gaps,
+            blocked_steps=final_output.blocked_steps,
+            specialists_consulted=final_output.specialists_consulted,
+            sub_questions=final_output.sub_questions,
+        )
+
+    async def balance(
+        self,
+        question: str,
+        report_draft: ReportDraft,
+        team_draft: TeamDraft,
+    ) -> FinalAnswer:
+        """Invoke the Balancing skill to merge the two drafts.
+
+        The skill body holds the coverage-branch policy — Python never branches
+        on coverage. If the LLM call is blocked, we degrade to a deterministic
+        fallback: on coverage=="none" return the team draft verbatim with a
+        one-line note; otherwise combine both answers with a flag.
+        """
+        user_message = (
+            f"Reviewer question: {question}\n\n"
+            f"=== Report draft (coverage = {report_draft.coverage}) ===\n"
+            f"Answer: {report_draft.answer}\n"
+            f"Evidence excerpts: {report_draft.evidence_excerpts}\n"
+            f"Files consulted: {report_draft.files_consulted}\n\n"
+            f"=== Team draft ===\n"
+            f"Answer: {team_draft.answer}\n"
+            f"Specialists consulted: {team_draft.specialists_consulted}\n"
+            f"Open conflicts: "
+            f"{[(c.pair, c.contradiction) for c in team_draft.open_conflicts]}\n"
+            f"Cross-domain insights: {team_draft.cross_domain_insights}\n\n"
+            "Merge per the Balancing skill's policy. Return JSON with answer + flags."
+        )
+
+        result = await self.llm.ainvoke(
+            system_prompt=BALANCING_PROMPT,
+            user_message=user_message,
+        )
+
+        if result.status == "blocked" or result.data is None:
+            return self._balance_fallback(report_draft, team_draft)
+
+        data = result.data
+        answer = str(data.get("answer", "")).strip()
+        flags = data.get("flags", []) or []
+        if not isinstance(flags, list):
+            flags = []
+
+        if not answer:
+            return self._balance_fallback(report_draft, team_draft)
+
+        return FinalAnswer(
+            answer=answer,
+            flags=[str(f) for f in flags],
+            report_draft=report_draft,
+            team_draft=team_draft,
+        )
+
+    @staticmethod
+    def _balance_fallback(
+        report_draft: ReportDraft, team_draft: TeamDraft
+    ) -> FinalAnswer:
+        """Deterministic fallback when the Balancing LLM call is blocked or empty.
+
+        Mirrors the policy in balancing.md so behavior stays predictable:
+          - coverage=="none"  → team draft verbatim, prefixed with the no-reports note
+          - coverage=="full"  → report answer, appended with team answer as supplement
+          - coverage=="partial" → same shape as "full"; reviewer still gets both
+        """
+        if report_draft.coverage == "none":
+            prefix = (
+                "No prior curated reports were found for this case — answer is "
+                "from live specialist analysis only.\n\n"
+            )
+            return FinalAnswer(
+                answer=prefix + team_draft.answer,
+                flags=["balancing fallback: LLM blocked on merge"],
+                report_draft=report_draft,
+                team_draft=team_draft,
+            )
+
+        merged = (
+            f"[From curated reports]\n{report_draft.answer}\n\n"
+            f"[From team specialists]\n{team_draft.answer}"
+        )
+        return FinalAnswer(
+            answer=merged,
+            flags=["balancing fallback: LLM blocked on merge"],
+            report_draft=report_draft,
+            team_draft=team_draft,
         )
