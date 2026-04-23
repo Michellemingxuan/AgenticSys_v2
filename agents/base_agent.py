@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from config.report_loader import get_specialist_prompt
-from gateway.firewall_stack import FirewallStack
+from gateway.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger
 from models.types import DomainSkill, LLMResult, SpecialistOutput
 from tools.data_tools import list_available_tables, get_table_schema, query_table
@@ -88,12 +88,12 @@ class BaseSpecialistAgent:
         self,
         domain_skill: DomainSkill,
         pillar_yaml: dict,
-        firewall: FirewallStack,
+        llm: FirewalledModel,
         logger: EventLogger,
     ):
         self.skill = domain_skill
         self.pillar = pillar_yaml
-        self.firewall = firewall
+        self.llm = llm
         self.logger = logger
         self.rolling_summary: str = ""
         self._questions_answered: list[str] = []
@@ -145,7 +145,7 @@ class BaseSpecialistAgent:
         if len(self.rolling_summary) > _MAX_ROLLING_SUMMARY:
             self.rolling_summary = self.rolling_summary[-_MAX_ROLLING_SUMMARY:]
 
-    def run(
+    async def run(
         self,
         question: str,
         mode: str = "chat",
@@ -178,7 +178,7 @@ class BaseSpecialistAgent:
             "data_request",
             {"domain": self.skill.name, "question": question, "root_question": root_question},
         )
-        step1 = self.firewall.call(
+        step1 = await self.llm.ainvoke(
             system_prompt=system_prompt,
             user_message=f"{question_header}\n\nWhat data do you need to answer your sub-question?",
             tools=tools,
@@ -189,7 +189,7 @@ class BaseSpecialistAgent:
 
         # Step 2: Synthesise
         data_context = str(step1.data) if step1.data else "No data retrieved"
-        step2 = self.firewall.call(
+        step2 = await self.llm.ainvoke(
             system_prompt=system_prompt,
             user_message=(
                 f"{question_header}\n\n"
@@ -218,7 +218,7 @@ class BaseSpecialistAgent:
                 + step3_msg
             )
 
-        step3 = self.firewall.call(
+        step3 = await self.llm.ainvoke(
             system_prompt=system_prompt,
             user_message=step3_msg,
         )
