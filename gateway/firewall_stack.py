@@ -69,4 +69,20 @@ class FirewalledModel:
         tools: list[Callable] | None = None,
         output_type: Any = None,
     ) -> LLMResult:
-        raise NotImplementedError("ainvoke not yet implemented")
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_message)]
+
+        response = await self.model.ainvoke(messages)
+
+        content = response.content if hasattr(response, "content") else str(response)
+        data = {"response": content}
+
+        record = StepRecord(
+            prompt=system_prompt,
+            message=user_message,
+            result=data,
+            attempt=0,
+        )
+        self.firewall.step_history.append(record)
+        return LLMResult(status="success", data=data)

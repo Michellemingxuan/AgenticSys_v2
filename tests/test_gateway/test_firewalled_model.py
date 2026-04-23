@@ -34,3 +34,19 @@ def test_firewalled_model_construction(firewall, fake_model):
     assert isinstance(fwm, FirewalledModel)
     assert fwm.firewall is firewall
     assert fwm.model is fake_model
+
+
+from langchain_core.messages import AIMessage
+
+
+@pytest.mark.asyncio
+async def test_ainvoke_basic_text_response(firewall, fake_model):
+    fake_model.ainvoke.return_value = AIMessage(content="42 is the answer")
+
+    fwm = firewall.wrap(fake_model)
+    result = await fwm.ainvoke(system_prompt="be helpful", user_message="what is 42?")
+
+    assert result.status == "success"
+    assert result.data == {"response": "42 is the answer"}
+    assert len(firewall.step_history) == 1
+    assert fake_model.ainvoke.call_count == 1
