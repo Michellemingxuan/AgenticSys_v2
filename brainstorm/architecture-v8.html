@@ -449,7 +449,8 @@ const TimelineController = {
       const x2 = rb.left + rb.width/2 - stageRect.left;
       const y2 = rb.top  + rb.height/2 - stageRect.top;
       const cx = (x1 + x2) / 2;
-      const cy = Math.min(y1, y2) - 24;
+      const pairIdx = i / 2;
+      const cy = Math.min(y1, y2) - 24 - pairIdx * 22;
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`);
       path.setAttribute('class', 'token-path active');
@@ -470,6 +471,7 @@ document.getElementById('pb-scrubber').addEventListener('click', (e) => {
   TimelineController.goto(Math.round(pct * TimelineController.total));
 });
 
+window.addEventListener('resize', () => TimelineController.render());
 TimelineController.render();
 </script>
 
