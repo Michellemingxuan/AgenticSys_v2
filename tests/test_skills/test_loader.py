@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from skills.loader import Skill, SkillLoadError, load_skill
+from skills.loader import Skill, SkillLoadError, load_skill, load_skills_for
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -43,3 +43,21 @@ def test_load_skill_missing_required_fields_raises():
 def test_load_skill_malformed_yaml_raises():
     with pytest.raises(SkillLoadError, match="Malformed YAML"):
         load_skill(FIXTURES / "invalid_yaml.md")
+
+
+def test_load_skills_for_filters_by_owner(monkeypatch):
+    monkeypatch.setattr("skills.loader._SKILLS_ROOT", FIXTURES)
+
+    orch_skills = load_skills_for("orchestrator")
+    names = {s.name for s in orch_skills}
+    assert "Sample Workflow" in names
+    assert "Shared Workflow" in names
+    assert "Sample Helper" not in names  # owned by chat_agent
+
+
+def test_load_skills_for_shared_skill_returned_for_both_owners(monkeypatch):
+    monkeypatch.setattr("skills.loader._SKILLS_ROOT", FIXTURES)
+
+    dm_skills = load_skills_for("data_manager")
+    names = {s.name for s in dm_skills}
+    assert "Shared Workflow" in names
