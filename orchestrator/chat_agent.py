@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from gateway.firewall_stack import FirewallStack
+from gateway.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger
 from models.types import FinalOutput, SpecialistOutput
 
@@ -42,8 +42,8 @@ CHAT_SYSTEM_PROMPT = (
 class ChatAgent:
     """Formats analysis output and handles follow-up conversation."""
 
-    def __init__(self, firewall: FirewallStack, logger: EventLogger):
-        self.firewall = firewall
+    def __init__(self, llm: FirewalledModel, logger: EventLogger):
+        self.llm = llm
         self.logger = logger
 
     def format_for_reviewer(
@@ -151,7 +151,7 @@ class ChatAgent:
 
         return "\n".join(parts)
 
-    def converse(self, user_message: str, context: str = "") -> str:
+    async def converse(self, user_message: str, context: str = "") -> str:
         full_context = context
         user_msg = user_message
 
@@ -160,7 +160,7 @@ class ChatAgent:
         else:
             system = CHAT_SYSTEM_PROMPT
 
-        result = self.firewall.call(
+        result = await self.llm.ainvoke(
             system_prompt=system,
             user_message=user_msg,
         )

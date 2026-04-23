@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
-from gateway.firewall_stack import FirewallStack
 from logger.event_logger import EventLogger
 from models.types import FinalOutput, LLMResult
 from orchestrator.chat_agent import ChatAgent
@@ -18,18 +17,17 @@ def logger(tmp_path):
 
 
 @pytest.fixture
-def firewall(logger):
-    adapter = MagicMock()
-    return FirewallStack(adapter, logger)
+def mock_llm():
+    return AsyncMock()
 
 
-def test_format_for_reviewer(firewall, logger):
+def test_format_for_reviewer(mock_llm, logger):
     final = FinalOutput(
         answer="The credit risk is moderate based on bureau and spend data.",
         specialists_consulted=["bureau", "spend_payments"],
     )
 
-    agent = ChatAgent(firewall, logger)
+    agent = ChatAgent(mock_llm, logger)
     formatted = agent.format_for_reviewer(final)
 
     assert "credit risk is moderate" in formatted
@@ -38,16 +36,16 @@ def test_format_for_reviewer(firewall, logger):
     assert "Specialists consulted" in formatted
 
 
-def test_converse_returns_response(firewall, logger):
-    firewall.call = MagicMock(
+async def test_converse_returns_response(mock_llm, logger):
+    mock_llm.ainvoke = AsyncMock(
         return_value=LLMResult(
             status="success",
             data={"response": "The bureau score indicates moderate risk."},
         )
     )
 
-    agent = ChatAgent(firewall, logger)
-    response = agent.converse("What does the bureau score mean?", context="Score is 680")
+    agent = ChatAgent(mock_llm, logger)
+    response = await agent.converse("What does the bureau score mean?", context="Score is 680")
 
     assert isinstance(response, str)
     assert len(response) > 0
