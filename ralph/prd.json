@@ -133,8 +133,8 @@
         "pytest tests/ passes"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Landed in phase-0a-langchain-async \u2014 commits 5a4960d, d708220 (send+semaphore + orchestrator wiring). Dedicated US-011 semaphore test: test_semaphore_bounds_concurrent_ainvoke."
     },
     {
       "id": "US-010",
@@ -149,8 +149,8 @@
         "pytest tests/ passes"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Landed in phase-0a-langchain-async \u2014 commits 5a4960d, d708220 (send+semaphore + orchestrator wiring). Dedicated US-011 semaphore test: test_semaphore_bounds_concurrent_ainvoke."
     },
     {
       "id": "US-011",
@@ -164,8 +164,8 @@
         "pytest tests/ passes"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Landed in phase-0a-langchain-async \u2014 commits 5a4960d, d708220 (send+semaphore + orchestrator wiring). Dedicated US-011 semaphore test: test_semaphore_bounds_concurrent_ainvoke."
     },
     {
       "id": "US-012",
