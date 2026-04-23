@@ -26,6 +26,7 @@ from tools.data_tools import init_tools
 
 
 _REPORTS_DIR = Path(__file__).parent / "reports"
+_DATA_TABLES_DIR = Path(__file__).parent / "data_tables"
 
 
 async def run_question(
@@ -70,10 +71,21 @@ async def amain():
     firewall = FirewallStack(logger=logger)
     llm = build_llm(args.model, firewall)
 
-    gen = DataGenerator(seed=args.seed, cases=50)
-    gen.load_profiles()
-    tables_raw = gen.generate_all()
-    gateway = SimulatedDataGateway.from_generated(tables_raw)
+    # Data source: prefer data_tables/<case>/*.csv if any cases are staged
+    # there; otherwise fall back to the generator. This lets real-data POC
+    # runs drop CSV exports into `data_tables/` without touching code.
+    csv_gateway = SimulatedDataGateway.from_case_folders(str(_DATA_TABLES_DIR))
+    if csv_gateway.list_case_ids():
+        gateway = csv_gateway
+        logger.log("data_source", {"source": "csv", "dir": str(_DATA_TABLES_DIR),
+                                   "cases": csv_gateway.list_case_ids()})
+    else:
+        gen = DataGenerator(seed=args.seed, cases=50)
+        gen.load_profiles()
+        tables_raw = gen.generate_all()
+        gateway = SimulatedDataGateway.from_generated(tables_raw)
+        logger.log("data_source", {"source": "generator", "seed": args.seed})
+
     catalog = DataCatalog()
     init_tools(gateway, catalog, logger=logger)
 

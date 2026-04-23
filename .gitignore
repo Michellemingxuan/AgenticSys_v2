@@ -4,6 +4,10 @@ __pycache__/
 .env
 logs/
 data/simulated/
+# data_tables/ holds per-case CSVs (real or synthetic export). Keep the
+# directory + README tracked, but never commit the CSV contents — they
+# can carry sensitive PII in real deployments.
+data_tables/*/
 .superpowers/
 venv/
 .venv/
