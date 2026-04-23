@@ -55,6 +55,7 @@ SYNTHESIZE_PROMPT = _load_skill(_WORKFLOW_DIR / "synthesis.md").body
 SELECT_TEAM_PROMPT = _extract_section(_TEAM_CONSTRUCTION_BODY, "# Step 1")
 SPLIT_SUBQUESTIONS_PROMPT = _extract_section(_TEAM_CONSTRUCTION_BODY, "# Step 2")
 BALANCING_PROMPT = _load_skill(_WORKFLOW_DIR / "balancing.md").body
+DATA_CATALOG_PROMPT = _load_skill(_WORKFLOW_DIR / "data_catalog.md").body
 
 
 class Orchestrator:
@@ -171,7 +172,7 @@ class Orchestrator:
         )
 
         result = await self.llm.ainvoke(
-            system_prompt=SELECT_TEAM_PROMPT,
+            system_prompt=SELECT_TEAM_PROMPT + "\n\n" + DATA_CATALOG_PROMPT,
             user_message=user_message,
         )
 
@@ -371,7 +372,7 @@ class Orchestrator:
             pillar_synthesis_report=self.pillar_config.get("synthesis_report", ""),
         )
         result = await self.llm.ainvoke(
-            system_prompt=synthesis_prompt,
+            system_prompt=synthesis_prompt + "\n\n" + DATA_CATALOG_PROMPT,
             user_message=user_message,
         )
 
