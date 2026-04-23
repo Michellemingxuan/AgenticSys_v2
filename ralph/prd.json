@@ -1,0 +1,276 @@
+{
+  "project": "AgenticSys_v1",
+  "branchName": "ralph/skills-refactor-p5-p9",
+  "description": "Orchestrator + Skills refactor, phases 5-9: Guardrail Agent (input-side content gate), Data Manager Agent (data-side governance) + shared data_catalog skill, firewall middleware on every inter-agent transit, floating helper skills (web_browser, acropedia) wired via LangChain tool-calling, and cleanup sweep. All work lands on top of phases 0a-4 already completed on the same branch; spec is docs/specs/2026-04-23-orchestrator-skills-refactor-design.md.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add GuardrailVerdict type to models/types.py",
+      "description": "As the Guardrail Agent, I need a typed return value so callers can branch on pass/reject deterministically.",
+      "acceptanceCriteria": [
+        "models/types.py defines `class GuardrailVerdict(BaseModel)` with fields: `passed: bool`, `reason: str = ''`, `redacted_question: str`",
+        "Type imports cleanly (no circular imports) from agents/ modules",
+        "pytest tests/ passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Landed in phase-0a-langchain-async as commits 4136299, 7c0c47d, 50ace54, ea48cde, 585d241."
+    },
+    {
+      "id": "US-002",
+      "title": "Create skills/workflow/relevance_check.md",
+      "description": "As the Guardrail Agent, I need markdown instructions for judging whether a reviewer question is in-scope for case review.",
+      "acceptanceCriteria": [
+        "File skills/workflow/relevance_check.md exists with valid YAML frontmatter (name, description, type=workflow, owner=[guardrail_agent], mode=inline)",
+        "Body explains: in-scope = credit-risk / case-review questions; out-of-scope examples include 'what to eat for lunch' and personal-chat topics",
+        "Body specifies JSON output shape: {passed: bool, reason: str}",
+        "skills.loader.load_skill() parses the file without raising SkillLoadError",
+        "pytest tests/ passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Landed in phase-0a-langchain-async as commits 4136299, 7c0c47d, 50ace54, ea48cde, 585d241."
+    },
+    {
+      "id": "US-003",
+      "title": "Create skills/workflow/redact.md",
+      "description": "As the Guardrail Agent and future Data Manager Agent, I need shared markdown instructions for redacting identifiers from inbound text.",
+      "acceptanceCriteria": [
+        "File skills/workflow/redact.md exists with YAML frontmatter (type=workflow, owner=[guardrail_agent, data_manager], mode=inline) \u2014 owner list must include both agents",
+        "Body describes identifier patterns to mask (raw account numbers, 6+-digit runs, CASE-XXXXX IDs, role-injection tokens [SYSTEM]/[USER])",
+        "Body specifies JSON output shape: {redacted: str, masked_spans: list[str]}",
+        "skills.loader.load_skill() parses the file",
+        "pytest tests/ passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Landed in phase-0a-langchain-async as commits 4136299, 7c0c47d, 50ace54, ea48cde, 585d241."
+    },
+    {
+      "id": "US-004",
+      "title": "Build agents/guardrail_agent.py with screen() method",
+      "description": "As main.py, I need a GuardrailAgent whose screen(question) method redacts identifiers and decides relevance before the Orchestrator runs.",
+      "acceptanceCriteria": [
+        "agents/guardrail_agent.py defines `class GuardrailAgent` with `__init__(self, llm: FirewalledModel, logger: EventLogger)` and `async def screen(self, question: str) -> GuardrailVerdict`",
+        "screen() invokes redact.md first (inline prompt) to produce a redacted question, then invokes relevance_check.md to decide pass/reject",
+        "Off-topic questions (e.g., 'what should I eat for lunch?') return GuardrailVerdict(passed=False, reason=...)",
+        "tests/test_agents/test_guardrail_agent.py covers: in-scope pass, off-topic reject, redaction of 6+-digit run, redaction of CASE-XXXXX token",
+        "pytest tests/ passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Landed in phase-0a-langchain-async as commits 4136299, 7c0c47d, 50ace54, ea48cde, 585d241."
+    },
+    {
+      "id": "US-005",
+      "title": "Wire Guardrail into main.py ahead of Orchestrator.run()",
+      "description": "As a reviewer, my questions should be screened by the Guardrail Agent before any orchestration work begins \u2014 rejected questions return a friendly message and skip Orchestrator.run().",
+      "acceptanceCriteria": [
+        "main.py constructs a GuardrailAgent alongside ChatAgent",
+        "Every path that previously called run_question() now calls GuardrailAgent.screen() first",
+        "On GuardrailVerdict.passed == False, main prints reason and skips Orchestrator.run()",
+        "On pass, Orchestrator.run() receives the redacted question (not the raw)",
+        "Interactive REPL loop handles reject without exiting \u2014 reviewer can try another question",
+        "pytest tests/ passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Landed in phase-0a-langchain-async as commits 4136299, 7c0c47d, 50ace54, ea48cde, 585d241."
+    },
+    {
+      "id": "US-006",
+      "title": "Create skills/workflow/data_catalog.md",
+      "description": "As the Orchestrator and the Data Manager Agent, I need markdown instructions for querying the catalog tool and interpreting its results.",
+      "acceptanceCriteria": [
+        "File skills/workflow/data_catalog.md exists with YAML frontmatter (type=workflow, owner=[orchestrator, data_manager], mode=inline) \u2014 owner list must include both",
+        "Body describes the catalog tool surface: list_available_tables, get_table_schema, column descriptions",
+        "Body explains how orchestrator uses catalog for team_construction (column coverage) and synthesis (grounding evidence in real table/column names)",
+        "skills.loader.load_skill() parses the file",
+        "pytest tests/ passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Build agents/data_manager_agent.py with query() and describe_catalog()",
+      "description": "As Base Specialists and the Orchestrator, I need a Data Manager that fronts the gateway \u2014 applies redact policy on returned data and owns the data_catalog skill.",
+      "acceptanceCriteria": [
+        "agents/data_manager_agent.py defines `class DataManagerAgent` with `__init__(self, gateway, catalog, llm, logger)` and `async def query(self, table: str, filters: dict) -> QueryResult`, `async def describe_catalog(self) -> str`",
+        "query() wraps gateway.query_table and applies redact.md policy on output text fields before returning",
+        "describe_catalog() returns the catalog prompt-context using the data_catalog.md skill as system prompt guidance",
+        "Tests in tests/test_agents/test_data_manager_agent.py cover: query() happy path, query() redacts digit runs, describe_catalog() returns catalog text",
+        "pytest tests/ passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Orchestrator loads data_catalog.md for team_construction + synthesis",
+      "description": "As the Orchestrator, my team selection and synthesis prompts should include the data_catalog skill body \u2014 currently the catalog is injected ad-hoc via `catalog.to_prompt_context()`; move the instruction text into the markdown skill.",
+      "acceptanceCriteria": [
+        "Orchestrator module loads data_catalog.md body at import (mirroring how team_construction.md is loaded)",
+        "The body is appended to the system prompt in _select_team and synthesize",
+        "Existing orchestrator tests still pass (behavior is additive \u2014 more instruction text, same output shape)",
+        "pytest tests/ passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Add FirewallStack.send() for inter-agent transit",
+      "description": "As the firewall, I need to intercept inter-agent messages (not just LLM calls) so redaction and logging apply on every cross-agent edge.",
+      "acceptanceCriteria": [
+        "gateway/firewall_stack.py adds `async def send(self, message, from_agent: str, to_agent: str) -> <same type as message>` that logs the transit and returns the (possibly-redacted) message",
+        "send() applies the redact.md policy when the message contains string fields with identifier patterns",
+        "send() validates message shape via Pydantic when the message is a BaseModel instance",
+        "tests/test_gateway/test_firewall_stack.py adds coverage for send() on: plain dict, Pydantic model, message containing a 6+-digit run",
+        "pytest tests/ passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Wrap Orchestrator.run's cross-agent calls with firewall.send",
+      "description": "As the firewall bus, every agent-to-agent handoff inside Orchestrator.run should route through send() \u2014 not just LLM calls.",
+      "acceptanceCriteria": [
+        "Inside Orchestrator.run, the ReportDraft returned from report_agent.run() is routed through firewall.send(...)",
+        "TeamDraft returned from _run_team_workflow is routed through firewall.send(...)",
+        "FinalAnswer handed back from balance() is routed through firewall.send(...)",
+        "Event log (logger) shows one transit event per cross-agent edge",
+        "Existing tests pass with no behavior change on clean inputs",
+        "pytest tests/ passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Add configurable asyncio.Semaphore to FirewalledModel for LLM rate limiting",
+      "description": "As the orchestrator fanning out parallel branches + parallel specialists, I need a shared semaphore so we don't hammer the LLM API on fan-out.",
+      "acceptanceCriteria": [
+        "FirewallStack.__init__ accepts `concurrency_cap: int = 8` and creates an `asyncio.Semaphore(concurrency_cap)`",
+        "FirewalledModel.ainvoke acquires the semaphore before each LLM call and releases in a try/finally",
+        "build_llm() exposes concurrency_cap via kwarg (like api_max_retries)",
+        "Test: constructing FirewallStack with concurrency_cap=2 and launching 4 parallel ainvoke calls completes correctly (no deadlock, all 4 return)",
+        "pytest tests/ passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Create skills/helper/web_browser.md and skills/helper/acropedia.md",
+      "description": "As Chat Agent, Guardrail Agent, and Base Specialists, I need tool-callable helper skill files to reference.",
+      "acceptanceCriteria": [
+        "skills/helper/web_browser.md exists with frontmatter type=helper, mode=tool, tool_signature='web_browser(url: str) -> str', owner=[chat_agent, guardrail_agent, base_specialist]",
+        "skills/helper/acropedia.md exists with frontmatter type=helper, mode=tool, tool_signature='acropedia_lookup(term: str) -> dict', owner=[chat_agent, guardrail_agent, base_specialist]",
+        "acropedia.md body describes the lookup contract (input: abbreviation/term; output: {full_name, explanation}) and notes that the underlying adapter may be a stub initially",
+        "web_browser.md body can be a brief placeholder",
+        "skills.loader.load_skills_for('chat_agent') returns both helpers",
+        "pytest tests/ passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Build tools/acropedia.py adapter stub",
+      "description": "As the acropedia_lookup tool, I need a Python implementation that's pluggable to a future internal platform but returns safe stub data today.",
+      "acceptanceCriteria": [
+        "tools/acropedia.py defines `def acropedia_lookup(term: str) -> dict` returning {'full_name': str, 'explanation': str}",
+        "Stub returns a well-known canned response for 'DTI' (debt-to-income) and 'FICO' so tests can assert specific values",
+        "Unknown terms return {'full_name': term, 'explanation': 'Definition not available in Acropedia stub'}",
+        "tests/test_tools/test_acropedia.py covers: known term (DTI), unknown term fallback",
+        "pytest tests/ passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Wire helpers as LangChain @tool callables on agents' LLM",
+      "description": "As Chat Agent, Guardrail Agent, and Base Specialists, I should be able to call acropedia_lookup and web_browser when the LLM decides I need them.",
+      "acceptanceCriteria": [
+        "New helper in gateway/llm_factory.py (or agents/helpers.py) returns LangChain @tool-decorated versions of acropedia_lookup and a placeholder web_browser callable",
+        "ChatAgent constructor optionally accepts a list of bound tools and binds them via model.bind_tools(...) on its FirewalledModel",
+        "Test: ChatAgent with acropedia_lookup bound can handle a mocked LLM that emits a tool_call for acropedia_lookup, and the result is fed back into the conversation",
+        "Tool binding is additive \u2014 ChatAgent without tools still works as today",
+        "pytest tests/ passes"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Remove dead mode == 'report' branches from orchestrator + plan_team",
+      "description": "The --mode CLI flag was dropped in Phase 4 but plan_team still has a `mode == 'report'` branch. Remove it.",
+      "acceptanceCriteria": [
+        "orchestrator.plan_team no longer accepts a `mode` parameter OR the `mode == 'report'` branch is removed (keeping the kwarg for compat is fine if it's purely pass-through to specialists)",
+        "orchestrator._run_team_workflow continues to hard-code mode='chat' internally",
+        "test_plan_team_report_mode_returns_all_with_root_question test is either deleted or rewritten to cover the non-report path",
+        "grep shows no remaining `mode == 'report'` or `'report'` references in orchestrator/orchestrator.py",
+        "pytest tests/ passes"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Delete or consolidate chat_agent.format_for_reviewer",
+      "description": "main.py now uses a local _format_final_answer for FinalAnswer rendering. The old ChatAgent.format_for_reviewer (which formatted FinalOutput) may be unused.",
+      "acceptanceCriteria": [
+        "grep shows no production call to ChatAgent.format_for_reviewer outside of its own test file",
+        "Either: delete format_for_reviewer + its tests, OR extend it to accept FinalAnswer and migrate main._format_final_answer into ChatAgent (pick one, land it consistently)",
+        "All existing tests for ChatAgent still pass (or are updated to reflect the chosen API)",
+        "pytest tests/ passes"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Drop the legacy FinalOutput in favor of TeamDraft",
+      "description": "FinalOutput and TeamDraft are duplicates. Orchestrator.synthesize still emits FinalOutput and _run_team_workflow adapts it to TeamDraft. Collapse into TeamDraft.",
+      "acceptanceCriteria": [
+        "Orchestrator.synthesize returns TeamDraft directly (not FinalOutput)",
+        "_run_team_workflow no longer needs the field-by-field adapter",
+        "FinalOutput class is deleted from models/types.py, OR aliased `FinalOutput = TeamDraft` with a deprecation comment if external callers exist",
+        "All existing tests updated to reference TeamDraft",
+        "pytest tests/ passes"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Refresh brainstorm/2026-04-23-architecture-current.md snapshot",
+      "description": "The current-architecture mermaid snapshot was written before phases 0a-4 landed. Update it to reflect the new parallel Reports+Team flow with Guardrail on the input side and Data Manager on the data side.",
+      "acceptanceCriteria": [
+        "brainstorm/2026-04-23-architecture-current.md mermaid diagram shows: Reviewer \u2192 Guardrail \u2192 ChatAgent \u2192 Orchestrator.run \u2192 asyncio.gather(ReportAgent, TeamWorkflow) \u2192 Balance \u2192 FinalAnswer",
+        "Diagram includes Data Manager Agent between specialists and the gateway",
+        "Diagram shows FirewallStack wrapping both LLM calls and inter-agent transits",
+        "Notes section updates to reflect async + LangChain + skills-as-markdown state (not the sync + Python-modules state the original snapshot described)",
+        "pytest tests/ passes (this story only touches docs, but run anyway as sanity check)"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
