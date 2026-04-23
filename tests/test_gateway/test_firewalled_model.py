@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from gateway.firewall_stack import FirewallStack, FirewalledModel
+from gateway.firewall_stack import FirewallRejection, FirewallStack, FirewalledModel, FIREWALL_GUIDANCE
 from logger.event_logger import EventLogger
 
 
@@ -50,3 +50,37 @@ async def test_ainvoke_basic_text_response(firewall, fake_model):
     assert result.data == {"response": "42 is the answer"}
     assert len(firewall.step_history) == 1
     assert fake_model.ainvoke.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_ainvoke_retries_then_succeeds(firewall, fake_model):
+    fake_model.ainvoke.side_effect = [
+        FirewallRejection("PII", "contains PII"),
+        AIMessage(content="safe answer"),
+    ]
+
+    fwm = firewall.wrap(fake_model)
+    result = await fwm.ainvoke(system_prompt="be safe", user_message="hello 1234567")
+
+    assert result.status == "success"
+    assert result.data == {"response": "safe answer"}
+    assert fake_model.ainvoke.call_count == 2
+
+    # On retry, the system prompt should carry FIREWALL_GUIDANCE and the user
+    # message should have its 6+-digit run masked.
+    second_call_messages = fake_model.ainvoke.call_args_list[1][0][0]
+    assert any("***MASKED***" in m.content for m in second_call_messages)
+    assert any(FIREWALL_GUIDANCE in m.content for m in second_call_messages)
+
+
+@pytest.mark.asyncio
+async def test_ainvoke_returns_blocked_after_max_retries(firewall, fake_model):
+    fake_model.ainvoke.side_effect = FirewallRejection("PII", "always blocked")
+
+    fwm = firewall.wrap(fake_model)
+    result = await fwm.ainvoke(system_prompt="x", user_message="y")
+
+    assert result.status == "blocked"
+    assert "always blocked" in result.error
+    # default max_retries=2 → 1 initial + 2 retries = 3 attempts
+    assert fake_model.ainvoke.call_count == 3

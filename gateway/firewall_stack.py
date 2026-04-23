@@ -71,18 +71,52 @@ class FirewalledModel:
     ) -> LLMResult:
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_message)]
+        from gateway import case_scrubber
 
-        response = await self.model.ainvoke(messages)
+        attempt = 0
+        current_system = system_prompt
+        # Pre-step: case-ID scrubbing always happens, regardless of retry status.
+        current_message = case_scrubber.scrub(user_message, case_id=None)
 
-        content = response.content if hasattr(response, "content") else str(response)
-        data = {"response": content}
+        last_error: str | None = None
 
-        record = StepRecord(
-            prompt=system_prompt,
-            message=user_message,
-            result=data,
-            attempt=0,
-        )
-        self.firewall.step_history.append(record)
-        return LLMResult(status="success", data=data)
+        while attempt <= self.firewall.max_retries:
+            messages = [
+                SystemMessage(content=current_system),
+                HumanMessage(content=current_message),
+            ]
+            try:
+                response = await self.model.ainvoke(messages)
+            except FirewallRejection as e:
+                self.firewall.logger.log(
+                    "firewall_rejection",
+                    {"code": e.code, "message": e.message, "attempt": attempt},
+                )
+                last_error = str(e)
+                attempt += 1
+                if attempt > self.firewall.max_retries:
+                    self.firewall.logger.log(
+                        "firewall_blocked",
+                        {"code": e.code, "message": e.message, "attempts": attempt},
+                    )
+                    return LLMResult(status="blocked", error=last_error)
+                # Re-prepare for the next attempt.
+                current_system = system_prompt + "\n\n" + FIREWALL_GUIDANCE
+                current_message = self.firewall._sanitize_message(
+                    case_scrubber.scrub(user_message, case_id=None)
+                )
+                continue
+
+            content = response.content if hasattr(response, "content") else str(response)
+            data = {"response": content}
+            record = StepRecord(
+                prompt=current_system,
+                message=current_message,
+                result=data,
+                attempt=attempt,
+            )
+            self.firewall.step_history.append(record)
+            return LLMResult(status="success", data=data)
+
+        # Unreachable in normal flow; safety fallback.
+        return LLMResult(status="blocked", error=last_error or "max retries exhausted")  # pragma: no cover
