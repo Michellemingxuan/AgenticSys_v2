@@ -431,6 +431,7 @@ const TimelineController = {
   speed: 1,
   total: STEPS.length,
   timer: null,
+  _lastZoom: null,
 
   goto(n) {
     this.step = Math.max(0, Math.min(this.total, n));
@@ -531,7 +532,12 @@ const TimelineController = {
       liveEl.querySelector('.lsc-purpose').textContent = sk.purpose;
     }
 
-    if (s && s.zoom === 'team-construction') ZoomTC.open();
+    if (s && s.zoom === 'team-construction' && this._lastZoom !== this.step) {
+      this._lastZoom = this.step;
+      ZoomTC.open();
+    } else if (!s || s.zoom !== 'team-construction') {
+      if (this._lastZoom !== null && this._lastZoom !== undefined) this._lastZoom = null;
+    }
   },
 
   _clearTokenPaths() {
@@ -669,7 +675,14 @@ document.getElementById('tc-next').addEventListener('click', () => ZoomTC.next()
 document.getElementById('tc-prev').addEventListener('click', () => ZoomTC.prev());
 document.getElementById('tc-close').addEventListener('click', () => ZoomTC.close());
 document.querySelector('#zoom-team-construction .zo-close').addEventListener('click', () => ZoomTC.close());
-document.getElementById('zoom-backdrop').addEventListener('click', () => { ZoomTC.close(); });
+
+// Zoom registry — additional zoom overlays push themselves here so the shared
+// backdrop closes all of them on click. Each registered object must expose .close().
+window.ZoomRegistry = window.ZoomRegistry || [];
+window.ZoomRegistry.push(ZoomTC);
+document.getElementById('zoom-backdrop').addEventListener('click', () => {
+  window.ZoomRegistry.forEach(z => z.close());
+});
 </script>
 
 </body>
