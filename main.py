@@ -6,8 +6,9 @@ import argparse
 import asyncio
 import sys
 import uuid
+from pathlib import Path
 
-from agents.general_specialist import GeneralSpecialist
+from agents.report_agent import ReportAgent
 from agents.session_registry import SessionRegistry
 from config.pillar_loader import PillarLoader
 from data.catalog import DataCatalog
@@ -16,61 +17,59 @@ from data.generator import DataGenerator
 from gateway.firewall_stack import FirewallStack
 from gateway.llm_factory import build_llm
 from logger.event_logger import EventLogger
-from models.types import FinalOutput
+from models.types import FinalAnswer
 from orchestrator.chat_agent import ChatAgent
 from orchestrator.orchestrator import Orchestrator
-from skills.domain.loader import list_domain_skills, load_domain_skill
 from tools.data_tools import init_tools
+
+
+_RESULTS_DIR = Path(__file__).parent / "results"
 
 
 async def run_question(
     question: str,
-    mode: str,
     pillar: str,
     llm,
     logger: EventLogger,
     registry: SessionRegistry,
     pillar_yaml: dict,
+    case_id: str,
     catalog=None,
-) -> FinalOutput:
-    available = list_domain_skills()
+) -> FinalAnswer:
+    """Entry point for a single reviewer question.
 
+    Dispatches the Report Agent (reads curated `results/<case-id>/*.md`) and
+    the team workflow in parallel, then merges via the Balancing skill.
+    """
     orchestrator = Orchestrator(
         llm, logger, registry, pillar,
         pillar_config=pillar_yaml, catalog=catalog,
     )
+    report_agent = ReportAgent(llm, logger)
+    case_folder = _RESULTS_DIR / case_id
 
-    active = registry.list_active()
-    plan = await orchestrator.plan_team(
-        question=question,
-        available_specialists=available,
-        active_specialists=active,
-        mode=mode,
+    return await orchestrator.run(question, case_folder, report_agent)
+
+
+def _format_final_answer(final) -> str:
+    """Minimal reviewer formatter for FinalAnswer (Phase 4).
+
+    Future phases extend ChatAgent with a richer renderer; this is the
+    simplest possible glue so the CLI stays runnable right after the
+    parallel-pipeline cut-over.
+    """
+    parts = ["## Answer\n", final.answer]
+    if final.flags:
+        parts.append("\n## Flags")
+        for flag in final.flags:
+            parts.append(f"- {flag}")
+    parts.append(
+        f"\n## Provenance\n"
+        f"- Report coverage: {final.report_draft.coverage}\n"
+        f"- Files consulted: {final.report_draft.files_consulted or '(none)'}\n"
+        f"- Specialists consulted: {final.team_draft.specialists_consulted or '(none)'}"
     )
-
-    specialist_outputs = {}
-    for assignment in plan:
-        skill = load_domain_skill(assignment.specialist)
-        if skill is None:
-            continue
-        agent = registry.get_or_create(
-            domain=assignment.specialist,
-            pillar=pillar,
-            domain_skill=skill,
-            pillar_yaml=pillar_yaml,
-            llm=llm,
-            logger=logger,
-        )
-        output = await agent.run(assignment.sub_question, mode=mode, root_question=question)
-        specialist_outputs[assignment.specialist] = output
-
-    general = GeneralSpecialist(llm, logger)
-    review_report = await general.compare(specialist_outputs, question)
-
-    final = await orchestrator.synthesize(
-        specialist_outputs, review_report, question, mode, team_plan=plan,
-    )
-    return final
+    return "\n".join(parts)
 
 
 async def amain():
@@ -78,7 +77,6 @@ async def amain():
     parser.add_argument("--pillar", choices=["credit_risk", "escalation", "cbo"],
                         default="credit_risk")
     parser.add_argument("--question", type=str, default=None)
-    parser.add_argument("--mode", choices=["chat", "report"], default="chat")
     parser.add_argument("--model", type=str, default="gpt-4.1")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--case-id", type=str, default=None)
@@ -86,7 +84,7 @@ async def amain():
 
     session_id = str(uuid.uuid4())[:8]
     logger = EventLogger(session_id=session_id)
-    logger.log("session_start", {"pillar": args.pillar, "mode": args.mode, "model": args.model})
+    logger.log("session_start", {"pillar": args.pillar, "model": args.model})
 
     firewall = FirewallStack(logger=logger)
     llm = build_llm(args.model, firewall)
@@ -127,13 +125,13 @@ async def amain():
 
     if args.question:
         final = await run_question(
-            args.question, args.mode, args.pillar,
-            llm, logger, registry, pillar_yaml, catalog=catalog,
+            args.question, args.pillar,
+            llm, logger, registry, pillar_yaml, case_id, catalog=catalog,
         )
-        print(chat_agent.format_for_reviewer(final))
+        print(_format_final_answer(final))
     else:
         print("Agentic Credit Risk System")
-        print(f"Pillar: {args.pillar} | Mode: {args.mode} | Model: {args.model}")
+        print(f"Pillar: {args.pillar} | Model: {args.model}")
         print("Type 'quit' to exit.\n")
 
         loop = asyncio.get_running_loop()
@@ -158,10 +156,10 @@ async def amain():
                 continue
 
             final = await run_question(
-                question, args.mode, args.pillar,
-                llm, logger, registry, pillar_yaml, catalog=catalog,
+                question, args.pillar,
+                llm, logger, registry, pillar_yaml, case_id, catalog=catalog,
             )
-            formatted = chat_agent.format_for_reviewer(final)
+            formatted = _format_final_answer(final)
             last_context = formatted
             print(formatted)
             print()
