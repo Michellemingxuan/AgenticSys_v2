@@ -118,6 +118,34 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 .dr-section code { display: block; font-family: 'Courier New', monospace; font-size: 11px; background: var(--gray-light); padding: 8px 10px; border-left: 2px solid var(--blue); border-radius: 2px; white-space: pre-wrap; }
 .dr-replay { margin-top: 16px; background: var(--blue); color: white; border: none; padding: 8px 14px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; cursor: pointer; border-radius: 2px; }
 .dr-replay:disabled { background: var(--gray-border); color: var(--gray-text); cursor: not-allowed; }
+
+.zoom-backdrop { position: fixed; inset: 0; background: rgba(0, 23, 90, 0.55); opacity: 0; pointer-events: none; transition: opacity 0.3s ease; z-index: 45; }
+.zoom-backdrop.open { opacity: 1; pointer-events: auto; }
+.zoom-overlay { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.96); opacity: 0; pointer-events: none; background: white; border-radius: 4px; padding: 28px 32px; width: min(1100px, 92vw); max-height: 88vh; overflow-y: auto; box-shadow: 0 30px 80px rgba(0,0,0,0.3); transition: opacity 0.3s ease, transform 0.3s ease; z-index: 46; }
+.zoom-overlay.open { transform: translate(-50%, -50%) scale(1); opacity: 1; pointer-events: auto; }
+.zo-title { font-family: Georgia, serif; font-size: 22px; font-weight: 700; color: var(--navy); margin-bottom: 4px; }
+.zo-sub { font-size: 11px; color: var(--gray-text); margin-bottom: 18px; }
+.zo-close { position: absolute; top: 18px; right: 20px; background: transparent; border: none; font-size: 20px; cursor: pointer; color: var(--gray-text); }
+.zo-controls { display: flex; gap: 8px; margin-top: 18px; justify-content: flex-end; }
+.zo-controls button { background: var(--navy); color: white; border: none; padding: 6px 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer; border-radius: 2px; }
+.zo-controls button.ghost { background: transparent; color: var(--gray-text); border: 1px solid var(--gray-border); }
+
+.tc-roster { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.tc-roster .chip { padding: 4px 10px; font-size: 10px; font-weight: 700; background: var(--gray-light); border: 1px solid var(--gray-border); border-radius: 2px; color: var(--slate); opacity: 0.55; transition: opacity 0.25s ease, background 0.25s ease, border-color 0.25s ease; }
+.tc-roster .chip.selected { opacity: 1; background: var(--green-bg); border-color: var(--green-border); color: var(--green); }
+.tc-shells { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 12px; }
+.tc-shell { border: 2px dashed var(--gray-border); border-radius: 4px; padding: 14px; min-height: 120px; display: flex; flex-direction: column; gap: 6px; transition: border-color 0.3s ease, background 0.3s ease; }
+.tc-shell.filled { border-style: solid; border-color: var(--green); background: var(--green-bg); }
+.tc-shell-label { font-size: 10px; color: var(--gray-text); font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; }
+.tc-injected { font-size: 13px; font-weight: 700; color: var(--green); margin-top: 4px; opacity: 0; transform: translateY(-4px); transition: opacity 0.25s ease, transform 0.25s ease; }
+.tc-shell.filled .tc-injected { opacity: 1; transform: translateY(0); }
+.tc-yaml { margin-top: 6px; font-size: 10px; color: var(--amber); background: var(--amber-bg); border: 1px solid var(--amber-border); padding: 4px 6px; border-radius: 2px; opacity: 0; transition: opacity 0.3s ease 0.1s; }
+.tc-shell.filled .tc-yaml { opacity: 1; }
+.tc-inner-steps { list-style: none; counter-reset: ts; margin: 12px 0 0; }
+.tc-inner-steps li { counter-increment: ts; font-size: 12px; color: var(--slate); line-height: 1.55; padding: 6px 0 6px 28px; position: relative; }
+.tc-inner-steps li::before { content: counter(ts); position: absolute; left: 0; top: 6px; width: 20px; height: 20px; border-radius: 50%; background: var(--gray-border); color: var(--navy); font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; transition: background 0.25s ease, color 0.25s ease; }
+.tc-inner-steps li.active::before { background: var(--blue); color: white; }
+.tc-inner-steps li.done::before { background: var(--green); color: white; }
 </style>
 </head>
 <body>
@@ -284,6 +312,60 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
   </div>
 </div>
 
+<div class="zoom-backdrop" id="zoom-backdrop"></div>
+
+<section class="zoom-overlay" id="zoom-team-construction" aria-hidden="true">
+  <button class="zo-close" aria-label="Close zoom">✕</button>
+  <div class="zo-title">Zoom A — Team Construction</div>
+  <div class="zo-sub">Orchestrator recruits specialists by injecting a domain skill + pillar YAML into the Base Specialist shell.</div>
+
+  <div class="dr-section"><h4>Available roster (credit_risk.yaml)</h4>
+    <div class="tc-roster" id="tc-roster">
+      <span class="chip" data-role="bureau">bureau</span>
+      <span class="chip" data-role="crossbu">crossbu</span>
+      <span class="chip" data-role="modeling">modeling</span>
+      <span class="chip" data-role="spend_pay">spend_pay</span>
+      <span class="chip" data-role="wcc">wcc</span>
+      <span class="chip" data-role="cust_rel">cust_rel</span>
+      <span class="chip" data-role="cap_afford">cap_afford</span>
+    </div>
+  </div>
+
+  <div class="dr-section"><h4>Recruited specialists</h4>
+    <div class="tc-shells">
+      <div class="tc-shell" data-shell="bureau">
+        <div class="tc-shell-label">Base Specialist Shell 1</div>
+        <div class="tc-injected">+ bureau domain skill</div>
+        <div class="tc-yaml">focus: "Delinquency Risk" · overlay: "Flag 90D+ Marks"</div>
+      </div>
+      <div class="tc-shell" data-shell="crossbu">
+        <div class="tc-shell-label">Base Specialist Shell 2</div>
+        <div class="tc-injected">+ crossbu domain skill</div>
+        <div class="tc-yaml">focus: "Cross-BU Exposure" · overlay: "Multi-product overlap"</div>
+      </div>
+      <div class="tc-shell" data-shell="cap_afford">
+        <div class="tc-shell-label">Base Specialist Shell 3</div>
+        <div class="tc-injected">+ cap_afford domain skill</div>
+        <div class="tc-yaml">focus: "Capacity Headroom" · overlay: "Limit vs DTI"</div>
+      </div>
+    </div>
+  </div>
+
+  <ol class="tc-inner-steps" id="tc-inner-steps">
+    <li data-i="1">Load pillar roster — 7 domain skills available from credit_risk.yaml, each with focus + prompt_overlay.</li>
+    <li data-i="2">LLM reasoning maps gaps → candidate domain skills. "cross-bureau" → bureau, crossbu · "capacity risk" → cap_afford.</li>
+    <li data-i="3">Recruit: instantiate Base Specialist ×3. Each shell receives its domain skill + YAML overlay (focus, prompt_overlay).</li>
+    <li data-i="4">Bind case folder handle to each specialist.</li>
+    <li data-i="5">Dispatch in parallel.</li>
+  </ol>
+
+  <div class="zo-controls">
+    <button class="ghost" id="tc-prev">◀ Inner step</button>
+    <button id="tc-next">Inner step ▶</button>
+    <button class="ghost" id="tc-close">Close &amp; resume</button>
+  </div>
+</section>
+
 <div class="drawer-backdrop" id="drawer-backdrop"></div>
 <aside class="skill-drawer" id="skill-drawer" aria-hidden="true">
   <button class="drawer-close" id="drawer-close" aria-label="Close">✕</button>
@@ -448,6 +530,8 @@ const TimelineController = {
       liveEl.querySelector('.lsc-owner').textContent = sk.owner;
       liveEl.querySelector('.lsc-purpose').textContent = sk.purpose;
     }
+
+    if (s && s.zoom === 'team-construction') ZoomTC.open();
   },
 
   _clearTokenPaths() {
@@ -545,6 +629,47 @@ document.querySelectorAll('[data-skill]').forEach(el => {
 });
 document.getElementById('drawer-close').addEventListener('click', closeDrawer);
 document.getElementById('drawer-backdrop').addEventListener('click', closeDrawer);
+
+const ZoomTC = {
+  i: 0,
+  total: 5,
+  open() {
+    this.i = 0;
+    this._apply();
+    document.getElementById('zoom-backdrop').classList.add('open');
+    const el = document.getElementById('zoom-team-construction');
+    el.classList.add('open');
+    el.setAttribute('aria-hidden','false');
+    TimelineController.pause();
+  },
+  close() {
+    document.getElementById('zoom-backdrop').classList.remove('open');
+    const el = document.getElementById('zoom-team-construction');
+    el.classList.remove('open');
+    el.setAttribute('aria-hidden','true');
+  },
+  next() { if (this.i < this.total) this.i++; this._apply(); },
+  prev() { if (this.i > 0) this.i--; this._apply(); },
+  _apply() {
+    document.querySelectorAll('#tc-inner-steps li').forEach(li => {
+      const n = parseInt(li.dataset.i, 10);
+      li.classList.toggle('active', n === this.i);
+      li.classList.toggle('done', n < this.i);
+    });
+    const highlight = this.i >= 2;
+    document.querySelectorAll('#tc-roster .chip').forEach(c => {
+      const sel = ['bureau','crossbu','cap_afford'].includes(c.dataset.role);
+      c.classList.toggle('selected', highlight && sel);
+    });
+    document.querySelectorAll('.tc-shell').forEach(s => s.classList.toggle('filled', this.i >= 3));
+  }
+};
+
+document.getElementById('tc-next').addEventListener('click', () => ZoomTC.next());
+document.getElementById('tc-prev').addEventListener('click', () => ZoomTC.prev());
+document.getElementById('tc-close').addEventListener('click', () => ZoomTC.close());
+document.querySelector('#zoom-team-construction .zo-close').addEventListener('click', () => ZoomTC.close());
+document.getElementById('zoom-backdrop').addEventListener('click', () => { ZoomTC.close(); });
 </script>
 
 </body>
