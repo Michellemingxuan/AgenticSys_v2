@@ -146,6 +146,23 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 .tc-inner-steps li::before { content: counter(ts); position: absolute; left: 0; top: 6px; width: 20px; height: 20px; border-radius: 50%; background: var(--gray-border); color: var(--navy); font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; transition: background 0.25s ease, color 0.25s ease; }
 .tc-inner-steps li.active::before { background: var(--blue); color: white; }
 .tc-inner-steps li.done::before { background: var(--green); color: white; }
+
+.case-folder { transition: background 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease; }
+.case-folder.expand { background: #FFF4C6; border-color: #F59E0B; box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.25); }
+.cf-tables { transition: color 0.4s ease; }
+
+/* Peer review overlay */
+.pr-matrix { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 10px 0; }
+.pr-cell { border: 1px solid var(--gray-border); padding: 10px 12px; font-size: 11px; line-height: 1.4; border-radius: 2px; background: var(--gray-light); opacity: 0.45; transition: opacity 0.3s ease, background 0.3s ease, border-color 0.3s ease; }
+.pr-cell.visited { opacity: 1; background: white; }
+.pr-cell.contradict { background: var(--amber-bg); border-color: var(--amber-border); }
+.pr-cell .pr-pair { font-weight: 700; color: var(--navy); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; }
+.pr-loop { margin-top: 12px; border: 1px dashed var(--purple-border); border-radius: 2px; padding: 12px 14px; background: var(--purple-bg); display: none; }
+.pr-loop.open { display: block; }
+.pr-loop h5 { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--purple); margin-bottom: 8px; }
+.pr-loop-step { font-size: 12px; color: var(--slate); padding: 4px 0; display: flex; gap: 8px; opacity: 0.45; transition: opacity 0.3s ease; }
+.pr-loop-step.on { opacity: 1; }
+.pr-loop-step .icon { font-size: 14px; }
 </style>
 </head>
 <body>
@@ -366,6 +383,35 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
   </div>
 </section>
 
+<section class="zoom-overlay" id="zoom-peer-review" aria-hidden="true">
+  <button class="zo-close" aria-label="Close zoom">✕</button>
+  <div class="zo-title">Zoom B — Peer Review</div>
+  <div class="zo-sub">General Specialist: pairwise Comparison → Conflict Solver loop → review report back to Orchestrator.</div>
+
+  <div class="dr-section"><h4>Pairwise Comparison Matrix</h4>
+    <div class="pr-matrix" id="pr-matrix">
+      <div class="pr-cell" data-pair="1"><div class="pr-pair">Bureau ↔ CrossBU</div>"Low bureau risk" vs "high internal concentration" — implications diverge.</div>
+      <div class="pr-cell" data-pair="2"><div class="pr-pair">Bureau ↔ Cap&amp;Afford</div>Both suggest moderate; consistent.</div>
+      <div class="pr-cell" data-pair="3"><div class="pr-pair">CrossBU ↔ Cap&amp;Afford</div>Concentration + DTI 0.41 → combined exposure warrants flag.</div>
+    </div>
+  </div>
+
+  <div class="pr-loop" id="pr-loop">
+    <h5>Conflict Solver — Bureau ↔ CrossBU</h5>
+    <div class="pr-loop-step" data-i="1"><span class="icon">🔍</span><div><strong>Identify:</strong> Bureau implies low risk, but CrossBU shows 62% concentration in one product.</div></div>
+    <div class="pr-loop-step" data-i="2"><span class="icon">❓</span><div><strong>Raise Q:</strong> Does the external clean bureau history offset internal Amex concentration?</div></div>
+    <div class="pr-loop-step" data-i="3"><span class="icon">💡</span><div><strong>Self-answer:</strong> Bureau score excludes internal Amex exposure. Internal concentration is therefore a distinct risk not captured by FICO.</div></div>
+    <div class="pr-loop-step" data-i="4"><span class="icon">📡</span><div><strong>Data Query (optional):</strong> pulls xbu_summary to confirm concentration across last 3 months.</div></div>
+    <div class="pr-loop-step" data-i="5"><span class="icon">✓</span><div><strong>Resolve:</strong> Combined evidence flags elevated concentrated-exposure risk despite clean external bureau.</div></div>
+  </div>
+
+  <div class="zo-controls">
+    <button class="ghost" id="pr-prev">◀ Inner step</button>
+    <button id="pr-next">Inner step ▶</button>
+    <button class="ghost" id="pr-close">Close &amp; resume</button>
+  </div>
+</section>
+
 <div class="drawer-backdrop" id="drawer-backdrop"></div>
 <aside class="skill-drawer" id="skill-drawer" aria-hidden="true">
   <button class="drawer-close" id="drawer-close" aria-label="Close">✕</button>
@@ -487,6 +533,8 @@ const TimelineController = {
     document.querySelectorAll('.toolbox-item.glow').forEach(el => el.classList.remove('glow'));
     this._clearTokenPaths();
     SpecInnerChain.stop();
+    document.getElementById('case-folder').classList.remove('expand');
+    document.getElementById('cf-tables').textContent = 'bureau · cross_bu · income_dti · txn_monthly · reports/';
 
     if (this.step === 0) {
       narratorEl.textContent = "Press ▶ to begin the walkthrough.";
@@ -533,11 +581,18 @@ const TimelineController = {
       liveEl.querySelector('.lsc-purpose').textContent = sk.purpose;
     }
 
-    if (s && s.zoom === 'team-construction' && this._lastZoom !== this.step) {
+    if (s && s.zoom && this._lastZoom !== this.step) {
       this._lastZoom = this.step;
-      ZoomTC.open();
-    } else if (!s || s.zoom !== 'team-construction') {
-      if (this._lastZoom !== null && this._lastZoom !== undefined) this._lastZoom = null;
+      if (s.zoom === 'team-construction') ZoomTC.open();
+      else if (s.zoom === 'peer-review') ZoomPR.open();
+    } else if (!s || !s.zoom) {
+      this._lastZoom = null;
+    }
+
+    if (s && s.caseFolderExpand) {
+      const cf = document.getElementById('case-folder');
+      cf.classList.add('expand');
+      document.getElementById('cf-tables').textContent = 'bureau · cross_bu · income_dti · txn_monthly · xbu_summary (new) · reports/';
     }
 
     if (this.step === 6) SpecInnerChain.run();
@@ -639,6 +694,10 @@ document.querySelectorAll('[data-skill]').forEach(el => {
 document.getElementById('drawer-close').addEventListener('click', closeDrawer);
 document.getElementById('drawer-backdrop').addEventListener('click', closeDrawer);
 
+// Zoom registry — additional zoom overlays push themselves here so the shared
+// backdrop closes all of them on click. Each registered object must expose .close().
+window.ZoomRegistry = window.ZoomRegistry || [];
+
 const ZoomTC = {
   i: 0,
   total: 5,
@@ -679,6 +738,48 @@ document.getElementById('tc-prev').addEventListener('click', () => ZoomTC.prev()
 document.getElementById('tc-close').addEventListener('click', () => ZoomTC.close());
 document.querySelector('#zoom-team-construction .zo-close').addEventListener('click', () => ZoomTC.close());
 
+const ZoomPR = {
+  i: 0,
+  total: 8, // 3 matrix cells + 5 loop steps
+  open() {
+    this.i = 0;
+    this._apply();
+    document.getElementById('zoom-backdrop').classList.add('open');
+    const el = document.getElementById('zoom-peer-review');
+    el.classList.add('open');
+    el.setAttribute('aria-hidden','false');
+    TimelineController.pause();
+  },
+  close() {
+    document.getElementById('zoom-backdrop').classList.remove('open');
+    const el = document.getElementById('zoom-peer-review');
+    el.classList.remove('open');
+    el.setAttribute('aria-hidden','true');
+  },
+  next() { if (this.i < this.total) this.i++; this._apply(); },
+  prev() { if (this.i > 0) this.i--; this._apply(); },
+  _apply() {
+    document.querySelectorAll('#pr-matrix .pr-cell').forEach(c => {
+      const p = parseInt(c.dataset.pair, 10);
+      c.classList.toggle('visited', this.i >= p);
+      c.classList.toggle('contradict', p === 1 && this.i >= p);
+    });
+    const loop = document.getElementById('pr-loop');
+    loop.classList.toggle('open', this.i >= 3);
+    document.querySelectorAll('#pr-loop .pr-loop-step').forEach(s => {
+      const n = parseInt(s.dataset.i, 10);
+      s.classList.toggle('on', this.i >= 3 + n);
+    });
+  }
+};
+
+window.ZoomRegistry.push(ZoomPR);
+
+document.getElementById('pr-next').addEventListener('click', () => ZoomPR.next());
+document.getElementById('pr-prev').addEventListener('click', () => ZoomPR.prev());
+document.getElementById('pr-close').addEventListener('click', () => ZoomPR.close());
+document.querySelector('#zoom-peer-review .zo-close').addEventListener('click', () => ZoomPR.close());
+
 const SpecInnerChain = {
   sequence: ['data-query','data-analysis','data-viz','synthesize','report-answer'],
   timers: [],
@@ -702,9 +803,6 @@ const SpecInnerChain = {
   }
 };
 
-// Zoom registry — additional zoom overlays push themselves here so the shared
-// backdrop closes all of them on click. Each registered object must expose .close().
-window.ZoomRegistry = window.ZoomRegistry || [];
 window.ZoomRegistry.push(ZoomTC);
 document.getElementById('zoom-backdrop').addEventListener('click', () => {
   window.ZoomRegistry.forEach(z => z.close());
