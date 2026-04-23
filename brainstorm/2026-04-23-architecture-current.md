@@ -1,69 +1,71 @@
-# Current Architecture (snapshot 2026-04-23)
+# Current Architecture (refreshed 2026-04-24, post-phase-0a..9)
 
-Snapshot of the system before the skills/parallel-paths refactor. Captures the per-question pipeline and the agent/tool boundaries as they exist today.
+Snapshot of the system after the skills-refactor branch (`phase-0a-langchain-async`) lands. Supersedes the earlier pre-refactor snapshot. Captures the per-question pipeline and the agent/tool/skill boundaries as they exist today.
 
 ```mermaid
 flowchart TD
-    User([Reviewer question]) --> Main["main.py<br/>run_question(question, mode, pillar)"]
+    User([Reviewer question]) --> GA["Guardrail Agent<br/>redact + relevance_check"]
+    GA -->|reject| Rej([Rejected — reason returned])
+    GA -->|pass, redacted| Chat["Chat Agent<br/>(can call helper tools:<br/>acropedia, web_browser)"]
+    Chat --> OrchRun["Orchestrator.run(redacted_question, case_folder)"]
 
-    Main --> Avail["list_domain_skills()<br/>= 7 domain modules"]
-    Main --> Orch["Orchestrator.plan_team(question, mode)"]
+    OrchRun -->|asyncio.gather| ReportPath[Report Agent]
+    OrchRun -->|asyncio.gather| TeamPath["_run_team_workflow()"]
 
-    Orch -->|mode == report| All["All specialists,<br/>sub_q = root question verbatim"]
-    Orch -->|mode == chat| Sel["_select_team()<br/>LLM call · sees full data catalog<br/>+ specialist roster + warmth"]
-    Sel -->|N == 1| Single["Single specialist,<br/>sub_q = root"]
-    Sel -->|N &gt; 1| Split["_split_sub_questions()<br/>LLM call · per-specialist sub-questions"]
-    All --> Plan["TeamAssignment list"]
-    Single --> Plan
-    Split --> Plan
-
-    Plan --> Loop["For each assignment (sequential):<br/>load_domain_skill +<br/>SessionRegistry.get_or_create"]
-    Loop --> Spec["BaseSpecialist.run(sub_q, root_q, mode)"]
-    Spec --> ToolUse["data_tools:<br/>list_available_tables<br/>get_table_schema<br/>query_table"]
-    ToolUse --> GW["SimulatedDataGateway<br/>(per-case in-memory tables)"]
-    Spec --> SpecOut["SpecialistOutput<br/>findings · evidence ·<br/>implications · data_gaps"]
-
-    SpecOut --> Compare["GeneralSpecialist.compare()<br/>LLM call · pairwise comparison<br/>over selected specialists"]
-    Compare --> Review["ReviewReport<br/>resolved · open_conflicts ·<br/>cross_domain_insights ·<br/>data_requests_made"]
-
-    SpecOut --> Synth["Orchestrator.synthesize()<br/>LLM call · merges specialists +<br/>review into final answer"]
-    Review --> Synth
-    Synth --> Final["FinalOutput<br/>answer · data_gaps · blocked_steps ·<br/>specialists_consulted · sub_questions"]
-
-    Final --> Format["ChatAgent.format_for_reviewer()"]
-    Format --> Out([Markdown answer to reviewer])
-
-    subgraph FW["Firewall stack (every LLM call routes through here)"]
-        FWStack["FirewallStack.call(system_prompt, user_message)"]
-        Adapter["OpenAIAdapter / SafeChainAdapter"]
-        FWStack --> Adapter
+    subgraph ReportPathBox["Reports path"]
+        ReportPath --> RN["workflow/report_needle.md<br/>— list files, decide coverage"]
+        RN --> RA["workflow/report_analysis.md<br/>— extract evidence"]
+        RA --> RD["ReportDraft<br/>(coverage: full|partial|none)"]
     end
 
-    Sel -.-> FWStack
-    Split -.-> FWStack
-    Spec -.-> FWStack
-    Compare -.-> FWStack
-    Synth -.-> FWStack
+    subgraph TeamPathBox["Team path"]
+        TeamPath --> PlanTeam["plan_team<br/>team_construction.md + data_catalog.md"]
+        PlanTeam --> FanOut["asyncio.gather(specialists)"]
+        FanOut --> Specs["Base Specialists ×N<br/>domain/*.md + data_query.md + data_analysis.md"]
+        Specs --> DM["Data Manager<br/>(wraps query_table, applies redact)"]
+        DM --> Gateway[(SimulatedDataGateway)]
+        Specs --> Cmp["General Specialist<br/>comparison.md + conflict_solver.md"]
+        Cmp --> Synth["synthesize<br/>synthesis.md + data_catalog.md"]
+        Synth --> TD[TeamDraft]
+    end
 
-    classDef llm fill:#e0f2fe,stroke:#0369a1
-    classDef tool fill:#dcfce7,stroke:#15803d
-    classDef data fill:#fef3c7,stroke:#92400e
-    classDef out fill:#f3e8ff,stroke:#6b21a8
-    class Sel,Split,Spec,Compare,Synth llm
-    class ToolUse tool
-    class GW data
-    class Final,Out out
+    RD -.-> Send1["firewall.send(ReportDraft)"]
+    TD -.-> Send2["firewall.send(TeamDraft)"]
+    Send1 --> Bal["balance<br/>workflow/balancing.md<br/>(coverage-branch policy in markdown)"]
+    Send2 --> Bal
+    Bal --> Send3["firewall.send(FinalAnswer)"]
+    Send3 --> Out([Reviewer: FinalAnswer with flags + provenance])
+
+    subgraph Firewall["FirewallStack — two chokepoints"]
+        FW1["wrap(model).ainvoke(...)<br/>retry on FirewallRejection<br/>+ asyncio.Semaphore<br/>+ case-id/digit-run redact"]
+        FW2["send(message, from, to)<br/>inter-agent bus<br/>+ shape-validate Pydantic"]
+    end
+
+    Chat -.LLM.-> FW1
+    OrchRun -.LLM.-> FW1
+    Specs -.LLM.-> FW1
+    GA -.LLM.-> FW1
+    Cmp -.LLM.-> FW1
 ```
 
-## Notes
+## What's present
 
-- **Synchronous throughout.** `firewall.call`, all agents, the per-assignment loop, and the per-pair comparison loop are blocking. No `asyncio`, no threads.
-- **One mode flag drives planning.** `mode == "report"` short-circuits team selection (everyone gets the root question). `mode == "chat"` runs the two-step LLM planning (select → split).
-- **Domain skills are Python.** `skills/domain/*.py` modules expose a `get_skill()` factory returning a `DomainSkill` dataclass (`system_prompt`, `data_hints`, `risk_signals`, `decision_focus`, `prompt_overlay`).
-- **Tools live in `tools/data_tools.py`.** Specialists call `query_table` directly through normal Python — there is no LLM-driven tool-call protocol yet.
-- **Session warmth is a tiebreaker.** `SessionRegistry` tracks which specialists have been instantiated; `_select_team` is told about warmth but instructed not to let it override data relevance.
-- **No prior-report consultation.** Today nothing reads `results/<case-id>/`. The team workflow is the only answer source.
+- **Async throughout.** Every agent method that touches the LLM is `async`. LangChain `ChatOpenAI` is the wrapped model. `FirewalledModel.ainvoke` preserves the legacy `(system_prompt, user_message, tools, output_type) -> LLMResult` surface.
+- **Two parallel branches per question.** Reports path (curated `results/<case-id>/*.md`) and Team path (specialist dispatch → peer review → synthesis) run via `asyncio.gather`. The Balancing skill merges the drafts — policy lives in `skills/workflow/balancing.md`, not in Python.
+- **Input-side Guardrail.** Reviewer questions route through `GuardrailAgent.screen()` first — redact identifiers + reject off-topic before any orchestration work starts.
+- **Data-side Data Manager.** Wraps the gateway with redaction + fronts the catalog skill. Orchestrator and Data Manager both inline the `data_catalog.md` body to ground team selection and synthesis in real table/column names.
+- **Firewall as bus.** `firewall.send(message, from_agent, to_agent)` applies redact patterns + shape-validates every inter-agent transit. Shared `asyncio.Semaphore` caps concurrent LLM calls on fan-out.
+- **Helpers as tools.** `helper/acropedia.md` + `helper/web_browser.md` bound to the Chat Agent's LLM via `bind_tools`. Acropedia has a stub adapter with canned entries; web browser is a placeholder until the fetch layer lands.
+- **Skills as markdown.** All prompts (7 domain + 13 workflow + 2 helper = 22 total) live in `skills/{workflow,domain,helper}/*.md` with YAML frontmatter for structured fields. `skills/loader.py` parses + filters by owner.
+
+## What's still transitional
+
+- **No LangGraph.** The parallel branches use raw `asyncio.gather`. A future phase (Phase 0c in the spec) builds a proper `StateGraph` wrapping the same topology.
+- **Web browser helper is a placeholder.** Returns a "not yet available" message until the fetch layer is wired in.
+- **Acropedia is a stub.** Canned entries for DTI, FICO, WCC, CBR, PD. Swap in the real internal-platform client later.
+- **`FinalOutput` kept as `TeamDraft` alias.** Some external callers may still import `FinalOutput`; remove the alias once none remain.
+- **Data Manager is not yet in the specialist hot path.** Base Specialists currently call `query_table` directly via `bind_tools`. Wiring specialists through `DataManagerAgent.query` so ALL data access applies the redact policy is a follow-up — the class and its skill are in place.
 
 ## What this diagram is for
 
-Reference snapshot for the next-version design (`2026-04-23-orchestrator-skills-refactor-design.md`, forthcoming). Compare side-by-side to see what the parallel Reports-path + Balancing-skill change adds and what stays the same.
+Reference snapshot at the end of the skills-refactor branch. The original pre-refactor snapshot (sequential, Python-module-based) is preserved in the git history at commit `084983b` if side-by-side comparison is needed.
