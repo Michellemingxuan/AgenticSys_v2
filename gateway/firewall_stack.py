@@ -37,9 +37,11 @@ class FirewallStack:
         self.step_history: list[StepRecord] = []
 
     def wrap(self, model: BaseChatModel) -> "FirewalledModel":
+        """Wrap a LangChain model with firewall retry logic."""
         return FirewalledModel(model=model, firewall=self)
 
     def rollback_to(self, step_index: int) -> None:
+        """Truncate step_history to the given index."""
         self.step_history = self.step_history[:step_index]
 
     @staticmethod
@@ -67,4 +69,4 @@ class FirewalledModel:
         tools: list[Callable] | None = None,
         output_type: Any = None,
     ) -> LLMResult:
-        raise NotImplementedError("Implemented in Task 3")
+        raise NotImplementedError("ainvoke not yet implemented")
