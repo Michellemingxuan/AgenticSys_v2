@@ -471,6 +471,17 @@ class Orchestrator:
             self._run_team_workflow(question),
         )
 
+        # Each parallel branch hands its draft back to the orchestrator.
+        # Route both through the firewall bus for redact + logging + shape
+        # round-trip, before the balancing step combines them.
+        firewall = self.llm.firewall
+        report_draft = await firewall.send(
+            report_draft, from_agent="report_agent", to_agent="orchestrator"
+        )
+        team_draft = await firewall.send(
+            team_draft, from_agent="team_workflow", to_agent="orchestrator"
+        )
+
         self.logger.log(
             "orchestrator_run_branches_done",
             {
@@ -480,6 +491,9 @@ class Orchestrator:
         )
 
         final = await self.balance(question, report_draft, team_draft)
+        final = await firewall.send(
+            final, from_agent="orchestrator", to_agent="chat_agent"
+        )
         self.logger.log(
             "orchestrator_run_done",
             {"flag_count": len(final.flags), "answer_len": len(final.answer)},

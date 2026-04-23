@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agents.session_registry import SessionRegistry
+from gateway.firewall_stack import FirewallStack
 from logger.event_logger import EventLogger
 from models.types import (
     Conflict,
@@ -28,8 +29,13 @@ def logger(tmp_path):
 
 
 @pytest.fixture
-def mock_llm():
-    return AsyncMock()
+def mock_llm(logger):
+    """AsyncMock LLM with a real FirewallStack attached — so firewall.send()
+    inter-agent transits in Orchestrator.run round-trip through the actual
+    redact-and-validate path instead of collapsing into another AsyncMock."""
+    llm = AsyncMock()
+    llm.firewall = FirewallStack(logger=logger)
+    return llm
 
 
 def _make_output(domain: str, findings: str, data_gaps=None) -> SpecialistOutput:
