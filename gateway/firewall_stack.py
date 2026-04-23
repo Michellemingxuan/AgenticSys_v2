@@ -1,10 +1,12 @@
-"""Firewall retry stack — wraps every LLM call with content-safety retries."""
+"""Firewall stack — wraps every LLM call (LangChain models) with content-safety retries."""
 
 from __future__ import annotations
 
 import re
+from typing import Any, Callable
 
-from gateway.llm_adapter import BaseLLMAdapter
+from langchain_core.language_models import BaseChatModel
+
 from logger.event_logger import EventLogger
 from models.types import LLMResult, StepRecord
 
@@ -27,70 +29,42 @@ class FirewallRejection(Exception):
 
 
 class FirewallStack:
-    """Wraps every LLM call with firewall retry logic."""
+    """Owns firewall config and step history. Use `wrap(model)` to build a FirewalledModel."""
 
-    def __init__(
-        self,
-        adapter: BaseLLMAdapter,
-        logger: EventLogger,
-        max_retries: int = 2,
-    ):
-        self.adapter = adapter
+    def __init__(self, logger: EventLogger, max_retries: int = 2):
         self.logger = logger
         self.max_retries = max_retries
         self.step_history: list[StepRecord] = []
 
-    def call(
-        self,
-        system_prompt: str,
-        user_message: str,
-        tools: list | None = None,
-        output_type=None,
-    ) -> LLMResult:
-        attempt = 0
-        current_system = system_prompt
-        current_message = user_message
-
-        while attempt <= self.max_retries:
-            try:
-                result = self.adapter.run(
-                    system_prompt=current_system,
-                    user_message=current_message,
-                    tools=tools,
-                    output_type=output_type,
-                )
-                record = StepRecord(
-                    prompt=current_system,
-                    message=current_message,
-                    result=result,
-                    attempt=attempt,
-                )
-                self.step_history.append(record)
-                return LLMResult(status="success", data=result)
-            except FirewallRejection as e:
-                self.logger.log(
-                    "firewall_rejection",
-                    {"code": e.code, "message": e.message, "attempt": attempt},
-                )
-                attempt += 1
-                if attempt > self.max_retries:
-                    self.logger.log(
-                        "firewall_blocked",
-                        {"code": e.code, "message": e.message, "attempts": attempt},
-                    )
-                    return LLMResult(status="blocked", error=str(e))
-                # Add guidance and sanitize for retry
-                current_system = system_prompt + "\n\n" + FIREWALL_GUIDANCE
-                current_message = self._sanitize_message(user_message)
-
-        # Should not reach here, but safety fallback
-        return LLMResult(status="blocked", error="max retries exhausted")  # pragma: no cover
+    def wrap(self, model: BaseChatModel) -> "FirewalledModel":
+        return FirewalledModel(model=model, firewall=self)
 
     def rollback_to(self, step_index: int) -> None:
-        """Truncate step_history to the given index."""
         self.step_history = self.step_history[:step_index]
 
     @staticmethod
     def _sanitize_message(message: str) -> str:
         """Mask long digit sequences (6+ digits) with ***MASKED***."""
         return re.sub(r"\d{6,}", "***MASKED***", message)
+
+
+class FirewalledModel:
+    """LangChain chat model wrapped with retry-on-FirewallRejection + tool-call loop.
+
+    Preserves the legacy `(system_prompt, user_message, tools, output_type) -> LLMResult`
+    surface so call sites can migrate from `firewall.call(...)` to `await llm.ainvoke(...)`
+    with minimal change.
+    """
+
+    def __init__(self, model: BaseChatModel, firewall: FirewallStack):
+        self.model = model
+        self.firewall = firewall
+
+    async def ainvoke(
+        self,
+        system_prompt: str,
+        user_message: str,
+        tools: list[Callable] | None = None,
+        output_type: Any = None,
+    ) -> LLMResult:
+        raise NotImplementedError("Implemented in Task 3")
