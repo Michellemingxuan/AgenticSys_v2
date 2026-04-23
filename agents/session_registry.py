@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from agents.base_agent import BaseSpecialistAgent
-from gateway.firewall_stack import FirewallStack
+from gateway.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger
 from models.types import DomainSkill
 
@@ -20,7 +20,7 @@ class SessionRegistry:
         pillar: str,
         domain_skill: DomainSkill,
         pillar_yaml: dict,
-        firewall: FirewallStack,
+        llm: FirewalledModel,
         logger: EventLogger,
     ) -> BaseSpecialistAgent:
         key = (domain, pillar)
@@ -28,7 +28,7 @@ class SessionRegistry:
             logger.log("specialist_reused", {"domain": domain, "pillar": pillar})
             return self._active[key]
 
-        agent = BaseSpecialistAgent(domain_skill, pillar_yaml, firewall, logger)
+        agent = BaseSpecialistAgent(domain_skill, pillar_yaml, llm, logger)
         self._active[key] = agent
         logger.log("specialist_invoked", {"domain": domain, "pillar": pillar})
         return agent
