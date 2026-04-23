@@ -133,6 +133,7 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 .tc-roster { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 .tc-roster .chip { padding: 4px 10px; font-size: 10px; font-weight: 700; background: var(--gray-light); border: 1px solid var(--gray-border); border-radius: 2px; color: var(--slate); opacity: 0.55; transition: opacity 0.25s ease, background 0.25s ease, border-color 0.25s ease; }
 .tc-roster .chip.selected { opacity: 1; background: var(--green-bg); border-color: var(--green-border); color: var(--green); }
+.tc-roster .chip { cursor: pointer; }
 .tc-shells { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 12px; }
 .tc-shell { border: 2px dashed var(--gray-border); border-radius: 4px; padding: 14px; min-height: 120px; display: flex; flex-direction: column; gap: 6px; transition: border-color 0.3s ease, background 0.3s ease; }
 .tc-shell.filled { border-style: solid; border-color: var(--green); background: var(--green-bg); }
@@ -226,6 +227,7 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
               <div class="skill-belt">
                 <span class="skill-node" data-skill="converse">Converse</span>
                 <span class="skill-node" data-skill="stream">Stream</span>
+                <span class="skill-node" data-skill="dispatch">Dispatch</span>
               </div>
             </div>
             <div class="agent-card" data-agent="orchestrator">
@@ -235,6 +237,7 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
                 <span class="skill-node" data-skill="report-analysis">Report Analysis</span>
                 <span class="skill-node" data-skill="team-construction">Team Construction</span>
                 <span class="skill-node" data-skill="synthesis">Synthesis</span>
+                <span class="skill-node" data-skill="deliver">Deliver</span>
               </div>
             </div>
           </div>
@@ -357,13 +360,13 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 
   <div class="dr-section"><h4>Available roster (credit_risk.yaml)</h4>
     <div class="tc-roster" id="tc-roster">
-      <span class="chip" data-role="bureau">bureau</span>
-      <span class="chip" data-role="crossbu">crossbu</span>
-      <span class="chip" data-role="modeling">modeling</span>
-      <span class="chip" data-role="spend_pay">spend_pay</span>
-      <span class="chip" data-role="wcc">wcc</span>
-      <span class="chip" data-role="cust_rel">cust_rel</span>
-      <span class="chip" data-role="cap_afford">cap_afford</span>
+      <span class="chip" data-role="bureau"     data-skill="domain-bureau">bureau</span>
+      <span class="chip" data-role="crossbu"    data-skill="domain-crossbu">crossbu</span>
+      <span class="chip" data-role="modeling"   data-skill="domain-modeling">modeling</span>
+      <span class="chip" data-role="spend_pay"  data-skill="domain-spendpay">spend_pay</span>
+      <span class="chip" data-role="wcc"        data-skill="domain-wcc">wcc</span>
+      <span class="chip" data-role="cust_rel"   data-skill="domain-custrel">cust_rel</span>
+      <span class="chip" data-role="cap_afford" data-skill="domain-capafford">cap_afford</span>
     </div>
   </div>
 
@@ -447,7 +450,7 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 // NOTE: actor value 'spec-all' is a pseudo-id meaning "fan out to all spec-* agent cards"; not a real data-agent.
 const STEPS = [
   { n: 1,  narrator: "Chat Agent receives the reviewer's question. The 📖 Abbreviation helper expands 'cross-bureau' and 'DTI'.", actor: 'chat',         skill: 'converse',         helper: 'abbreviation' },
-  { n: 2,  narrator: "Chat Agent routes the question to the Orchestrator.",                                                      actor: 'chat',         skill: 'stream',           tokenPath: 'chat->orchestrator' },
+  { n: 2,  narrator: "Chat Agent routes the question to the Orchestrator.",                                                      actor: 'chat',         skill: 'dispatch',         tokenPath: 'chat->orchestrator' },
   { n: 3,  narrator: "Orchestrator fires Report Needle on existing case reports. Result: partial hit.",                          actor: 'orchestrator', skill: 'report-needle' },
   { n: 4,  narrator: "Orchestrator fires Report Analysis to extract the already-covered portion.",                               actor: 'orchestrator', skill: 'report-analysis' },
   { n: 5,  narrator: "Orchestrator invokes Team Construction. Zoom in for recruitment and domain-skill injection.",              actor: 'orchestrator', skill: 'team-construction', zoom: 'team-construction' },
@@ -456,13 +459,15 @@ const STEPS = [
   { n: 8,  narrator: "Specialists return findings and chart specs to the Orchestrator.",                                         actor: 'spec-all',     skill: 'report-answer',     tokenPath: 'specs->orchestrator' },
   { n: 9,  narrator: "General Specialist runs Comparison + Conflict Solver. Zoom in for pairwise matrix and resolution loop.",   actor: 'general',      skill: 'comparison',        zoom: 'peer-review' },
   { n: 10, narrator: "Orchestrator runs Synthesis — merges findings, peer-review notes, and report evidence.",                   actor: 'orchestrator', skill: 'synthesis' },
-  { n: 11, narrator: "Answer travels back to the Chat Agent.",                                                                   actor: 'orchestrator', skill: 'stream',           tokenPath: 'orchestrator->chat' },
+  { n: 11, narrator: "Answer travels back to the Chat Agent.",                                                                   actor: 'orchestrator', skill: 'deliver',          tokenPath: 'orchestrator->chat' },
   { n: 12, narrator: "Chat Agent renders the final answer with inline charts produced by specialists' Data Viz outputs.",        actor: 'chat',         skill: 'converse',         helper: null }
 ];
 
 const SKILLS = {
   'converse':         { name: 'Converse',         owner: 'Chat Agent',       purpose: 'Handles reviewer turns in natural language. Interprets intent and collects clarifications.', tools: '—', example: 'User: "Is there combined cross-bureau and capacity risk?" → parsed + routed.' },
   'stream':           { name: 'Stream',           owner: 'Chat Agent',       purpose: 'Streams partial tokens back to the reviewer as the answer is built.',                           tools: '—', example: 'Streams "Based on bureau tradelines …" incrementally.' },
+  'dispatch':         { name: 'Dispatch',         owner: 'Chat Agent',       purpose: 'Hands off a reviewer question to the Orchestrator with session + pillar context attached.',             tools: 'orchestrator.invoke()', example: 'Routes the combined-risk question into the credit_risk pillar flow.' },
+  'deliver':          { name: 'Deliver',          owner: 'Orchestrator',     purpose: 'Sends the synthesized answer (findings + review + chart specs) back to the Chat Agent for streaming.', tools: 'chat.return()', example: 'Delivers "Yes — combined risk present. Bureau clean but internal concentration elevated." + chart spec.' },
   'report-needle':    { name: 'Report Needle',    owner: 'Orchestrator',     purpose: 'Locates the answer inside existing case reports — a precise lookup across report sections.',   tools: 'report_index.search()', example: 'Finds the bureau-headline paragraph; flags capacity section as missing.' },
   'report-analysis':  { name: 'Report Analysis',  owner: 'Orchestrator',     purpose: 'Deeper scan when Report Needle hits partially — extracts covered scope and surfaces gaps.',      tools: 'report_index.section()', example: 'Confirms "capacity" and "cross-BU concentration" are uncovered.' },
   'team-construction':{ name: 'Team Construction',owner: 'Orchestrator',     purpose: 'LLM-driven recruitment: maps report gaps to domain skills and instantiates Base Specialists with pillar YAML overlays.', tools: 'base_agent.spawn()', example: 'Recruits bureau + crossbu + cap_afford for credit_risk.yaml.' },
@@ -470,6 +475,10 @@ const SKILLS = {
   'domain-bureau':    { name: 'Bureau (Domain)',  owner: 'Base Specialist',  purpose: 'Tradeline health, derog marks, score interpretation with pillar-specific focus (credit_risk: "Flag 90D+").', tools: '(injected prompt + thresholds)', example: 'Reads bureau table → flags 2 tradelines 60 DPD, otherwise clean.' },
   'domain-crossbu':   { name: 'CrossBU (Domain)', owner: 'Base Specialist',  purpose: 'Cross-BU exposure, contagion patterns, concentration signals.',                                   tools: '(injected prompt + thresholds)', example: '3 active cards, 62% exposure concentrated in one product.' },
   'domain-capafford': { name: 'Cap&Afford (Domain)', owner: 'Base Specialist', purpose: 'DTI, limit headroom, income capacity vs outstanding balances.',                                 tools: '(injected prompt + thresholds)', example: 'DTI 0.41; limit headroom 18%.' },
+  'domain-modeling':  { name: 'Modeling (Domain)',         owner: 'Base Specialist',  purpose: 'Score trajectories, model signals, thresholds — reads internal risk model outputs and explains drivers.',   tools: '(injected prompt + thresholds)', example: 'Not recruited for this case — stays warm in roster for follow-up questions.' },
+  'domain-spendpay':  { name: 'Spend & Payments (Domain)', owner: 'Base Specialist',  purpose: 'Payment trends, delinquency patterns, spend spikes — detects behavioral deterioration on rolling windows.', tools: '(injected prompt + thresholds)', example: 'Not recruited for this case — would be pulled if the question involved payment timing.' },
+  'domain-wcc':       { name: 'WCC (Domain)',              owner: 'Base Specialist',  purpose: 'Watch-list flags, control signals, trigger classification — event-level flags with severity.',           tools: '(injected prompt + thresholds)', example: 'Not recruited for this case — no WCC trigger fired on CASE-00001.' },
+  'domain-custrel':   { name: 'Customer Rel. (Domain)',    owner: 'Base Specialist',  purpose: 'Tenure, product usage, relationship depth — softer context for interpreting numeric signals.',              tools: '(injected prompt + thresholds)', example: 'Not recruited for this case — would contextualize tenure or product breadth.' },
   'data-query':       { name: 'Data Query',       owner: 'Base Specialist',  purpose: 'Queries tables already staged under the case folder (local, default path).',                     tools: 'case_folder.query_table()', example: "query_table('bureau', columns='fico_score,dpd_status')" },
   'data-analysis':    { name: 'Data Analysis',    owner: 'Base Specialist',  purpose: 'Statistical summary + anomaly detection on returned rows.',                                      tools: '—', example: 'Detects 2σ spike in 90 DPD events over last 6 months.' },
   'data-viz':         { name: 'Data Visualization',owner: 'Base Specialist', purpose: 'Produces chart specs (bar/line/heatmap) to be rendered in the final answer.',                    tools: '—', example: 'Emits line-chart spec for DPD counts by month.' },
