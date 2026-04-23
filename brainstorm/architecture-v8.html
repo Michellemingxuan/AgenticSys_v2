@@ -27,6 +27,31 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 .hero-sub { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.5); font-weight: 600; margin-top: 4px; }
 
 .page { max-width: 1600px; margin: 0 auto; padding: 24px 80px 52px; }
+
+/* STAGE */
+.stage { position: relative; display: flex; flex-direction: column; gap: 18px; padding: 16px 0; }
+.layer { display: flex; gap: 16px; align-items: stretch; }
+.layer-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em; color: var(--gray-text); width: 72px; flex-shrink: 0; padding-top: 14px; }
+.layer-body { flex: 1; display: flex; gap: 12px; align-items: stretch; flex-wrap: wrap; }
+
+/* AGENT CARD */
+.agent-card { background: white; border: 1px solid var(--gray-border); border-left: 3px solid var(--blue); border-radius: 2px; padding: 10px 12px; min-width: 220px; transition: transform 0.25s ease, box-shadow 0.25s ease; }
+.agent-card.green-left { border-left-color: var(--green); }
+.agent-card.purple-left { border-left-color: var(--purple); }
+.agent-card.red-left { border-left-color: var(--red); }
+.agent-name { font-size: 13px; font-weight: 700; color: var(--navy); margin-bottom: 6px; }
+.skill-belt { display: flex; gap: 4px; flex-wrap: wrap; }
+.skill-node { display: inline-flex; align-items: center; gap: 4px; font-size: 9px; font-weight: 700; padding: 3px 7px; border-radius: 2px; background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); cursor: pointer; transition: transform 0.2s ease, box-shadow 0.2s ease; white-space: nowrap; }
+.skill-node.purple { background: var(--purple-bg); color: var(--purple); border-color: var(--purple-border); }
+.skill-node.amber { background: var(--amber-bg); color: var(--amber); border-color: var(--amber-border); }
+.skill-node.red { background: var(--red-bg); color: var(--red); border-color: var(--red-border); }
+.skill-node:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,0.12); }
+
+/* CASE FOLDER */
+.case-folder { background: var(--amber-bg); border: 1px dashed var(--amber-border); border-radius: 4px; padding: 10px 14px; display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+.cf-icon { font-size: 18px; }
+.cf-text { font-size: 11px; color: var(--amber); font-weight: 700; }
+.cf-tables { font-size: 9px; color: var(--slate); margin-left: auto; }
 </style>
 </head>
 <body>
@@ -43,7 +68,108 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 </div>
 
 <div class="page">
-  <!-- playback, stage, toolbox, narrator, overlays, drawer added in later tasks -->
+  <div class="stage" id="stage">
+
+    <div class="layer" data-layer="1">
+      <div class="layer-label">Layer 1</div>
+      <div class="layer-body">
+        <div class="agent-card" data-agent="chat">
+          <div class="agent-name">Chat Agent</div>
+          <div class="skill-belt">
+            <span class="skill-node" data-skill="converse">Converse</span>
+            <span class="skill-node" data-skill="stream">Stream</span>
+          </div>
+        </div>
+        <div class="agent-card" data-agent="orchestrator">
+          <div class="agent-name">Orchestrator</div>
+          <div class="skill-belt">
+            <span class="skill-node" data-skill="report-needle">Report Needle</span>
+            <span class="skill-node" data-skill="report-analysis">Report Analysis</span>
+            <span class="skill-node" data-skill="team-construction">Team Construction</span>
+            <span class="skill-node" data-skill="synthesis">Synthesis</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer" data-layer="2">
+      <div class="layer-label">Layer 2</div>
+      <div class="layer-body">
+        <div class="agent-card green-left" data-agent="spec-bureau">
+          <div class="agent-name">Base Specialist · Bureau</div>
+          <div class="skill-belt">
+            <span class="skill-node" data-skill="domain-bureau">Bureau (Domain)</span>
+            <span class="skill-node" data-skill="data-query">Data Query</span>
+            <span class="skill-node" data-skill="data-analysis">Data Analysis</span>
+            <span class="skill-node" data-skill="data-viz">Data Visualization</span>
+            <span class="skill-node" data-skill="synthesize">Synthesize</span>
+            <span class="skill-node" data-skill="report-answer">Report / Answer</span>
+          </div>
+        </div>
+        <div class="agent-card green-left" data-agent="spec-crossbu">
+          <div class="agent-name">Base Specialist · CrossBU</div>
+          <div class="skill-belt">
+            <span class="skill-node" data-skill="domain-crossbu">CrossBU (Domain)</span>
+            <span class="skill-node" data-skill="data-query">Data Query</span>
+            <span class="skill-node" data-skill="data-analysis">Data Analysis</span>
+            <span class="skill-node" data-skill="data-viz">Data Visualization</span>
+            <span class="skill-node" data-skill="synthesize">Synthesize</span>
+            <span class="skill-node" data-skill="report-answer">Report / Answer</span>
+          </div>
+        </div>
+        <div class="agent-card green-left" data-agent="spec-capafford">
+          <div class="agent-name">Base Specialist · Cap&amp;Afford</div>
+          <div class="skill-belt">
+            <span class="skill-node" data-skill="domain-capafford">Cap&amp;Afford (Domain)</span>
+            <span class="skill-node" data-skill="data-query">Data Query</span>
+            <span class="skill-node" data-skill="data-analysis">Data Analysis</span>
+            <span class="skill-node" data-skill="data-viz">Data Visualization</span>
+            <span class="skill-node" data-skill="synthesize">Synthesize</span>
+            <span class="skill-node" data-skill="report-answer">Report / Answer</span>
+          </div>
+        </div>
+        <div class="agent-card purple-left" data-agent="general">
+          <div class="agent-name">General Specialist</div>
+          <div class="skill-belt">
+            <span class="skill-node purple" data-skill="comparison">Comparison</span>
+            <span class="skill-node purple" data-skill="conflict-solver">Conflict Solver</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="case-folder" id="case-folder">
+      <span class="cf-icon">📁</span>
+      <span class="cf-text">Case Folder — CASE-00001</span>
+      <span class="cf-tables" id="cf-tables">bureau · cross_bu · income_dti · txn_monthly · reports/</span>
+    </div>
+
+    <div class="layer" data-layer="3">
+      <div class="layer-label">Layer 3</div>
+      <div class="layer-body">
+        <div class="agent-card red-left" data-agent="repository">
+          <div class="agent-name">Repository Agent</div>
+          <div class="skill-belt">
+            <span class="skill-node red" data-skill="pillar-access">Pillar Access</span>
+            <span class="skill-node red" data-skill="gating">Gating</span>
+            <span class="skill-node red" data-skill="redact">Redact</span>
+            <span class="skill-node red" data-skill="catalog-gov">Catalog Governance</span>
+          </div>
+        </div>
+        <div class="agent-card green-left" data-agent="data-agent">
+          <div class="agent-name">Data Agent · Lumi Gateway</div>
+          <div class="skill-belt">
+            <span class="skill-node" data-skill="data-pull">Data Pull</span>
+            <span class="skill-node" data-skill="text-to-sql">Text-to-SQL</span>
+            <span class="skill-node" data-skill="execute">Execute</span>
+            <span class="skill-node" data-skill="retrieve">Retrieve</span>
+            <span class="skill-node" data-skill="analyze">Analyze</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
 </div>
 
 <script>
