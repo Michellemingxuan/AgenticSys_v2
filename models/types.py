@@ -102,17 +102,11 @@ class TeamAssignment(BaseModel):
     sub_question: str
 
 
-class FinalOutput(BaseModel):
-    answer: str
-    data_gap_summary: str = ""   # one concise summary of missing data across specialists
-    resolved_contradictions: list[Resolution] = Field(default_factory=list)
-    open_conflicts: list[Conflict] = Field(default_factory=list)
-    cross_domain_insights: list[str] = Field(default_factory=list)
-    data_requests_made: list[dict] = Field(default_factory=list)
-    data_gaps: list[DataGap] = Field(default_factory=list)
-    blocked_steps: list[BlockedStep] = Field(default_factory=list)
-    specialists_consulted: list[str] = Field(default_factory=list)
-    sub_questions: list[TeamAssignment] = Field(default_factory=list)
+# `FinalOutput` is kept as a backwards-compat alias — callers have been
+# migrated to `TeamDraft` (defined below), which is the canonical shape
+# for the team-workflow branch. Remove this alias once all external
+# consumers are updated.
+FinalOutput = None  # placeholder; rebound after TeamDraft is defined.
 
 
 class LLMResult(BaseModel):
@@ -189,6 +183,10 @@ class FinalAnswer(BaseModel):
     flags: list[str] = Field(default_factory=list)
     report_draft: ReportDraft
     team_draft: TeamDraft
+
+
+# Backwards-compat alias — see the placeholder earlier in this file.
+FinalOutput = TeamDraft
 
 
 class GuardrailVerdict(BaseModel):

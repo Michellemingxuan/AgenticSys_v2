@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from logger.event_logger import EventLogger
-from models.types import FinalOutput, LLMResult
+from models.types import FinalAnswer, LLMResult, ReportDraft, TeamDraft
 from orchestrator.chat_agent import ChatAgent
 
 
@@ -21,19 +21,39 @@ def mock_llm():
     return AsyncMock()
 
 
-def test_format_for_reviewer(mock_llm, logger):
-    final = FinalOutput(
+def test_format_final_answer(mock_llm, logger):
+    final = FinalAnswer(
         answer="The credit risk is moderate based on bureau and spend data.",
-        specialists_consulted=["bureau", "spend_payments"],
+        flags=["team confirms report"],
+        report_draft=ReportDraft(coverage="full", files_consulted=["bureau.md"]),
+        team_draft=TeamDraft(
+            answer="team answer",
+            specialists_consulted=["bureau", "spend_payments"],
+        ),
     )
 
-    agent = ChatAgent(mock_llm, logger)
-    formatted = agent.format_for_reviewer(final)
+    formatted = ChatAgent.format_final_answer(final)
 
     assert "credit risk is moderate" in formatted
     assert "bureau" in formatted
     assert "spend_payments" in formatted
-    assert "Specialists consulted" in formatted
+    assert "Report coverage: full" in formatted
+    assert "team confirms report" in formatted
+
+
+def test_format_final_answer_no_flags(mock_llm, logger):
+    """When there are no flags, the Flags section is omitted."""
+    final = FinalAnswer(
+        answer="clean answer",
+        flags=[],
+        report_draft=ReportDraft(coverage="none"),
+        team_draft=TeamDraft(answer="t", specialists_consulted=["bureau"]),
+    )
+
+    formatted = ChatAgent.format_final_answer(final)
+
+    assert "\n## Flags" not in formatted
+    assert "Report coverage: none" in formatted
 
 
 async def test_converse_returns_response(mock_llm, logger):

@@ -53,27 +53,6 @@ async def run_question(
     return await orchestrator.run(question, case_folder, report_agent)
 
 
-def _format_final_answer(final) -> str:
-    """Minimal reviewer formatter for FinalAnswer (Phase 4).
-
-    Future phases extend ChatAgent with a richer renderer; this is the
-    simplest possible glue so the CLI stays runnable right after the
-    parallel-pipeline cut-over.
-    """
-    parts = ["## Answer\n", final.answer]
-    if final.flags:
-        parts.append("\n## Flags")
-        for flag in final.flags:
-            parts.append(f"- {flag}")
-    parts.append(
-        f"\n## Provenance\n"
-        f"- Report coverage: {final.report_draft.coverage}\n"
-        f"- Files consulted: {final.report_draft.files_consulted or '(none)'}\n"
-        f"- Specialists consulted: {final.team_draft.specialists_consulted or '(none)'}"
-    )
-    return "\n".join(parts)
-
-
 async def amain():
     parser = argparse.ArgumentParser(description="Agentic Credit Risk Analysis System")
     parser.add_argument("--pillar", choices=["credit_risk", "escalation", "cbo"],
@@ -138,7 +117,7 @@ async def amain():
             verdict.redacted_question, args.pillar,
             llm, logger, registry, pillar_yaml, case_id, catalog=catalog,
         )
-        return _format_final_answer(final)
+        return chat_agent.format_final_answer(final)
 
     if args.question:
         print(await _screen_and_run(args.question))

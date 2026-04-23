@@ -12,8 +12,7 @@ from data.catalog import DataCatalog
 from data.gateway import SimulatedDataGateway
 from data.generator import DataGenerator
 from logger.event_logger import EventLogger
-from models.types import FinalOutput, LLMResult, ReviewReport, SpecialistOutput
-from orchestrator.chat_agent import ChatAgent
+from models.types import LLMResult, ReviewReport, SpecialistOutput, TeamDraft
 from orchestrator.orchestrator import Orchestrator
 from skills.domain.loader import list_domain_skills, load_domain_skill
 from tools.data_tools import init_tools
@@ -176,14 +175,12 @@ async def test_full_pipeline_smoke(mock_llm, logger, tmp_path):
         specialist_outputs, review_report, question, "chat", team_plan=plan,
     )
 
-    assert isinstance(final, FinalOutput)
+    # synthesize() now returns TeamDraft directly (FinalOutput was the
+    # pre-Phase-9 name; the alias is still importable but the canonical
+    # type is TeamDraft).
+    assert isinstance(final, TeamDraft)
     assert len(final.answer) > 0
     assert len(final.specialists_consulted) >= 1
-
-    chat_agent = ChatAgent(mock_llm, logger)
-    formatted = chat_agent.format_for_reviewer(final)
-    assert len(formatted) > 0
-    assert "Specialists consulted" in formatted
 
 
 def test_specialist_reuse_across_questions(mock_llm, logger):
