@@ -225,8 +225,8 @@
         "pytest tests/ passes"
       ],
       "priority": 15,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Landed in phase-0a-langchain-async \u2014 cleanup commits 89b4aba, b688399, 9069624."
     },
     {
       "id": "US-016",
@@ -239,8 +239,8 @@
         "pytest tests/ passes"
       ],
       "priority": 16,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Landed in phase-0a-langchain-async \u2014 cleanup commits 89b4aba, b688399, 9069624."
     },
     {
       "id": "US-017",
@@ -254,8 +254,8 @@
         "pytest tests/ passes"
       ],
       "priority": 17,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Landed in phase-0a-langchain-async \u2014 cleanup commits 89b4aba, b688399, 9069624."
     },
     {
       "id": "US-018",
@@ -269,8 +269,8 @@
         "pytest tests/ passes (this story only touches docs, but run anyway as sanity check)"
       ],
       "priority": 18,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Landed in phase-0a-langchain-async \u2014 cleanup commits 89b4aba, b688399, 9069624."
     }
   ]
 }
