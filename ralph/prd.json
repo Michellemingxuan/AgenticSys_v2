@@ -180,8 +180,8 @@
         "pytest tests/ passes"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Landed in phase-0a-langchain-async \u2014 commits 9401937, 5c398bb, 27a444f."
     },
     {
       "id": "US-013",
@@ -195,8 +195,8 @@
         "pytest tests/ passes"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Landed in phase-0a-langchain-async \u2014 commits 9401937, 5c398bb, 27a444f."
     },
     {
       "id": "US-014",
@@ -210,8 +210,8 @@
         "pytest tests/ passes"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Landed in phase-0a-langchain-async \u2014 commits 9401937, 5c398bb, 27a444f."
     },
     {
       "id": "US-015",
