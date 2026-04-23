@@ -68,6 +68,7 @@ class FirewalledModel:
         user_message: str,
         tools: list[Callable] | None = None,
         output_type: Any = None,
+        max_tool_turns: int = 12,
     ) -> LLMResult:
         from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -78,6 +79,9 @@ class FirewalledModel:
         # Pre-step: case-ID scrubbing always happens, regardless of retry status.
         current_message = case_scrubber.scrub(user_message, case_id=None)
 
+        bound_model = self.model.bind_tools(tools) if tools else self.model
+        tool_map = {fn.__name__: fn for fn in (tools or [])}
+
         last_error: str | None = None
 
         while attempt <= self.firewall.max_retries:
@@ -86,7 +90,7 @@ class FirewalledModel:
                 HumanMessage(content=current_message),
             ]
             try:
-                response = await self.model.ainvoke(messages)
+                response = await self._tool_loop(bound_model, messages, tool_map, max_tool_turns)
             except FirewallRejection as e:
                 self.firewall.logger.log(
                     "firewall_rejection",
@@ -120,3 +124,37 @@ class FirewalledModel:
 
         # Unreachable in normal flow; safety fallback.
         return LLMResult(status="blocked", error=last_error or "max retries exhausted")  # pragma: no cover
+
+    async def _tool_loop(
+        self,
+        bound_model,
+        messages: list,
+        tool_map: dict[str, Callable],
+        max_tool_turns: int,
+    ):
+        """Drive bound_model until it returns a final non-tool AIMessage."""
+        from langchain_core.messages import ToolMessage
+
+        response = None
+        for _ in range(max_tool_turns):
+            response = await bound_model.ainvoke(messages)
+            tool_calls = getattr(response, "tool_calls", None)
+            if not tool_calls:
+                return response
+
+            messages.append(response)
+            for tc in tool_calls:
+                name = tc.get("name") if isinstance(tc, dict) else tc.name
+                args = tc.get("args") if isinstance(tc, dict) else tc.args
+                tc_id = tc.get("id") if isinstance(tc, dict) else tc.id
+                fn = tool_map.get(name)
+                if fn is None:
+                    result = f"error: unknown tool {name}"
+                else:
+                    try:
+                        result = str(fn(**(args or {})))
+                    except Exception as exc:
+                        result = f"error: {exc}"
+                messages.append(ToolMessage(content=result, tool_call_id=tc_id))
+
+        return response  # last response after exhausting turns

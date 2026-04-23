@@ -84,3 +84,42 @@ async def test_ainvoke_returns_blocked_after_max_retries(firewall, fake_model):
     assert "always blocked" in result.error
     # default max_retries=2 → 1 initial + 2 retries = 3 attempts
     assert fake_model.ainvoke.call_count == 3
+
+
+async def test_ainvoke_executes_tool_call(firewall, fake_model):
+    """When the LLM emits tool_calls, FirewalledModel runs them and feeds results back."""
+    from langchain_core.messages import AIMessage
+
+    def add(a: int, b: int) -> int:
+        """Add two numbers."""
+        return a + b
+
+    # Round 1: model asks to call `add(2, 3)`.
+    tool_call_msg = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "add", "args": {"a": 2, "b": 3}, "id": "tc-1", "type": "tool_call"}
+        ],
+    )
+    # Round 2: model emits final text after seeing the tool result.
+    final_msg = AIMessage(content="The answer is 5")
+
+    fake_model.ainvoke.side_effect = [tool_call_msg, final_msg]
+
+    fwm = firewall.wrap(fake_model)
+    result = await fwm.ainvoke(
+        system_prompt="use tools",
+        user_message="add 2 and 3",
+        tools=[add],
+    )
+
+    assert result.status == "success"
+    assert result.data == {"response": "The answer is 5"}
+    fake_model.bind_tools.assert_called_once_with([add])
+    assert fake_model.ainvoke.call_count == 2
+
+    # Second invocation should include a ToolMessage carrying the tool result "5".
+    second_msgs = fake_model.ainvoke.call_args_list[1][0][0]
+    tool_msgs = [m for m in second_msgs if m.__class__.__name__ == "ToolMessage"]
+    assert len(tool_msgs) == 1
+    assert "5" in tool_msgs[0].content
