@@ -163,6 +163,25 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 .pr-loop-step { font-size: 12px; color: var(--slate); padding: 4px 0; display: flex; gap: 8px; opacity: 0.45; transition: opacity 0.3s ease; }
 .pr-loop-step.on { opacity: 1; }
 .pr-loop-step .icon { font-size: 14px; }
+
+/* === Task 10: Hover-highlight === */
+.stage.dim-others .agent-card:not(.hover-active) { opacity: 0.42; filter: grayscale(0.2); }
+.stage.dim-others .agent-card.hover-active { outline: 2px solid var(--blue); outline-offset: 3px; }
+.stage.dim-skills .skill-node:not(.hover-active) { opacity: 0.28; }
+.stage.dim-skills .skill-node.hover-active { outline: 2px solid var(--blue); outline-offset: 1px; }
+.agent-card, .skill-node { transition: opacity 0.2s ease, outline 0.2s ease, transform 0.25s ease, box-shadow 0.25s ease; }
+
+/* === Task 10: Polish CSS === */
+.page { padding-bottom: 80px; }
+.stage { min-height: 420px; }
+.narrator { min-height: 86px; }
+.zoom-overlay { font-size: 14px; }
+.skill-drawer { font-size: 14px; }
+.agent-card, .skill-node, .toolbox-item, .pb-btn, .zo-controls button, .drawer-close, .zo-close, .dr-replay { user-select: none; }
+@media (max-width: 1280px) {
+  .page-layout { grid-template-columns: 1fr; }
+  .toolbox { position: static; }
+}
 </style>
 </head>
 <body>
@@ -809,6 +828,50 @@ document.querySelector('#zoom-peer-review .zo-close').addEventListener('click', 
 
 document.getElementById('zoom-backdrop').addEventListener('click', () => {
   window.ZoomRegistry.forEach(z => z.close());
+});
+
+/* === Task 10: Hover logic + keyboard shortcuts === */
+const stageEl = document.getElementById('stage');
+document.querySelectorAll('.agent-card').forEach(card => {
+  card.addEventListener('mouseenter', () => {
+    stageEl.classList.add('dim-others');
+    card.classList.add('hover-active');
+    card.querySelectorAll('.skill-node').forEach(n => n.classList.add('hover-active'));
+  });
+  card.addEventListener('mouseleave', () => {
+    stageEl.classList.remove('dim-others');
+    card.classList.remove('hover-active');
+    card.querySelectorAll('.skill-node').forEach(n => n.classList.remove('hover-active'));
+  });
+});
+
+document.querySelectorAll('.skill-node').forEach(node => {
+  node.addEventListener('mouseenter', (e) => {
+    e.stopPropagation();
+    stageEl.classList.add('dim-skills');
+    node.classList.add('hover-active');
+    const card = node.closest('.agent-card');
+    if (card) card.classList.add('hover-active');
+  });
+  node.addEventListener('mouseleave', (e) => {
+    e.stopPropagation();
+    stageEl.classList.remove('dim-skills');
+    node.classList.remove('hover-active');
+    const card = node.closest('.agent-card');
+    if (card) card.classList.remove('hover-active');
+  });
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.code === 'Space') { e.preventDefault(); TimelineController.toggle(); }
+  else if (e.code === 'ArrowRight') { TimelineController.pause(); TimelineController.next(); }
+  else if (e.code === 'ArrowLeft')  { TimelineController.pause(); TimelineController.back(); }
+  else if (e.code === 'Escape') {
+    if (document.getElementById('skill-drawer').classList.contains('open')) closeDrawer();
+    else if (document.getElementById('zoom-team-construction').classList.contains('open')) ZoomTC.close();
+    else if (document.getElementById('zoom-peer-review').classList.contains('open')) ZoomPR.close();
+  }
 });
 </script>
 
