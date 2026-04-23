@@ -51,7 +51,7 @@ flowchart TD
 ## What's present
 
 - **Async throughout.** Every agent method that touches the LLM is `async`. LangChain `ChatOpenAI` is the wrapped model. `FirewalledModel.ainvoke` preserves the legacy `(system_prompt, user_message, tools, output_type) -> LLMResult` surface.
-- **Two parallel branches per question.** Reports path (curated `results/<case-id>/*.md`) and Team path (specialist dispatch → peer review → synthesis) run via `asyncio.gather`. The Balancing skill merges the drafts — policy lives in `skills/workflow/balancing.md`, not in Python.
+- **Two parallel branches per question.** Reports path (curated `reports/<case-id>/*.md`) and Team path (specialist dispatch → peer review → synthesis) run via `asyncio.gather`. The Balancing skill merges the drafts — policy lives in `skills/workflow/balancing.md`, not in Python.
 - **Input-side Guardrail.** Reviewer questions route through `GuardrailAgent.screen()` first — redact identifiers + reject off-topic before any orchestration work starts.
 - **Data-side Data Manager.** Wraps the gateway with redaction + fronts the catalog skill. Orchestrator and Data Manager both inline the `data_catalog.md` body to ground team selection and synthesis in real table/column names.
 - **Firewall as bus.** `firewall.send(message, from_agent, to_agent)` applies redact patterns + shape-validates every inter-agent transit. Shared `asyncio.Semaphore` caps concurrent LLM calls on fan-out.

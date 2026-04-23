@@ -1,4 +1,4 @@
-"""Report Agent — scans `results/<case-id>/*.md` for curated reports and
+"""Report Agent — scans `reports/<case-id>/*.md` for curated reports and
 extracts an evidence-grounded answer to a reviewer's question.
 
 The agent runs a two-step chain over its markdown skills:

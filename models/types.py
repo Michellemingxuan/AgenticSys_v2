@@ -135,7 +135,7 @@ class StepRecord(BaseModel):
 
 
 class ReportDraft(BaseModel):
-    """Result of the Report Agent's Needle + Analysis chain over `results/<case-id>/`.
+    """Result of the Report Agent's Needle + Analysis chain over `reports/<case-id>/`.
 
     `coverage` is the Needle's verdict on how well the curated reports answer
     the reviewer's question:

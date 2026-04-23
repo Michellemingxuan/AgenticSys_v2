@@ -25,7 +25,7 @@ from orchestrator.orchestrator import Orchestrator
 from tools.data_tools import init_tools
 
 
-_RESULTS_DIR = Path(__file__).parent / "results"
+_REPORTS_DIR = Path(__file__).parent / "reports"
 
 
 async def run_question(
@@ -40,7 +40,7 @@ async def run_question(
 ) -> FinalAnswer:
     """Entry point for a single reviewer question.
 
-    Dispatches the Report Agent (reads curated `results/<case-id>/*.md`) and
+    Dispatches the Report Agent (reads curated `reports/<case-id>/*.md`) and
     the team workflow in parallel, then merges via the Balancing skill.
     """
     orchestrator = Orchestrator(
@@ -48,7 +48,7 @@ async def run_question(
         pillar_config=pillar_yaml, catalog=catalog,
     )
     report_agent = ReportAgent(llm, logger)
-    case_folder = _RESULTS_DIR / case_id
+    case_folder = _REPORTS_DIR / case_id
 
     return await orchestrator.run(question, case_folder, report_agent)
 
