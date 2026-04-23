@@ -18,7 +18,6 @@ from models.types import (
     Conflict,
     DataGap,
     FinalAnswer,
-    FinalOutput,
     ReportDraft,
     Resolution,
     ReviewReport,
@@ -92,24 +91,13 @@ class Orchestrator:
         question: str,
         available_specialists: list[str],
         active_specialists: list[dict] | None = None,
-        mode: str = "chat",
     ) -> list[TeamAssignment]:
         active_specialists = active_specialists or []
         self.logger.log(
             "plan_team_start",
-            {"question": question, "pillar": self.pillar, "mode": mode,
+            {"question": question, "pillar": self.pillar,
              "available": available_specialists},
         )
-
-        # Report mode → consult all specialists, each gets the root question
-        # verbatim; a full report doesn't benefit from splitting.
-        if mode == "report":
-            plan = [TeamAssignment(specialist=s, sub_question=question)
-                    for s in available_specialists]
-            self.logger.log("plan_team_done",
-                            {"plan": [p.model_dump() for p in plan],
-                             "reason": "report mode — all specialists, root question"})
-            return plan
 
         # Step 1: team selection.
         selected = await self._select_team(question, available_specialists, active_specialists)
@@ -313,7 +301,7 @@ class Orchestrator:
         question: str,
         mode: str,
         team_plan: list[TeamAssignment] | None = None,
-    ) -> FinalOutput:
+    ) -> TeamDraft:
         self.logger.log(
             "orchestrator_synthesize",
             {
@@ -377,7 +365,7 @@ class Orchestrator:
         )
 
         if result.status == "blocked" or result.data is None:
-            return FinalOutput(
+            return TeamDraft(
                 answer="Synthesis was blocked by content firewall. Please rephrase.",
                 specialists_consulted=list(specialist_outputs.keys()),
                 open_conflicts=review_report.open_conflicts,
@@ -432,7 +420,7 @@ class Orchestrator:
                     )
                 )
 
-        return FinalOutput(
+        return TeamDraft(
             answer=answer,
             data_gap_summary=data_gap_summary,
             resolved_contradictions=review_report.resolved,
@@ -515,7 +503,6 @@ class Orchestrator:
             question=question,
             available_specialists=available,
             active_specialists=active,
-            mode=mode,
         )
 
         # Fan out specialists concurrently. Registry is in-memory so `get_or_create`
@@ -545,21 +532,9 @@ class Orchestrator:
         general = GeneralSpecialist(self.llm, self.logger)
         review_report = await general.compare(specialist_outputs, question)
 
-        final_output = await self.synthesize(
+        # synthesize() returns a TeamDraft directly now — no adapter needed.
+        return await self.synthesize(
             specialist_outputs, review_report, question, mode, team_plan=plan
-        )
-
-        return TeamDraft(
-            answer=final_output.answer,
-            data_gap_summary=final_output.data_gap_summary,
-            resolved_contradictions=final_output.resolved_contradictions,
-            open_conflicts=final_output.open_conflicts,
-            cross_domain_insights=final_output.cross_domain_insights,
-            data_requests_made=final_output.data_requests_made,
-            data_gaps=final_output.data_gaps,
-            blocked_steps=final_output.blocked_steps,
-            specialists_consulted=final_output.specialists_consulted,
-            sub_questions=final_output.sub_questions,
         )
 
     async def balance(

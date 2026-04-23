@@ -113,25 +113,6 @@ async def test_plan_team_single_specialist_skips_split_call(mock_llm, logger):
     assert mock_llm.ainvoke.call_count == 1
 
 
-async def test_plan_team_report_mode_returns_all_with_root_question(mock_llm, logger):
-    # Report mode must not call the LLM — it picks every specialist with root question.
-    mock_llm.ainvoke = AsyncMock()
-    registry = SessionRegistry()
-    orch = Orchestrator(mock_llm, logger, registry, "credit_risk")
-    available = ["bureau", "modeling"]
-
-    plan = await orch.plan_team(
-        question="Full report please",
-        available_specialists=available,
-        active_specialists=[],
-        mode="report",
-    )
-
-    mock_llm.ainvoke.assert_not_called()
-    assert [p.specialist for p in plan] == available
-    assert all(p.sub_question == "Full report please" for p in plan)
-
-
 async def test_plan_team_fallback_on_block(mock_llm, logger):
     mock_llm.ainvoke = AsyncMock(
         return_value=LLMResult(status="blocked", error="denied")
