@@ -123,3 +123,44 @@ async def test_ainvoke_executes_tool_call(firewall, fake_model):
     tool_msgs = [m for m in second_msgs if m.__class__.__name__ == "ToolMessage"]
     assert len(tool_msgs) == 1
     assert "5" in tool_msgs[0].content
+
+
+async def test_ainvoke_parses_output_type(firewall, fake_model):
+    from pydantic import BaseModel
+    from langchain_core.messages import AIMessage
+
+    class Answer(BaseModel):
+        value: int
+        label: str
+
+    fake_model.ainvoke.return_value = AIMessage(content='{"value": 42, "label": "ok"}')
+
+    fwm = firewall.wrap(fake_model)
+    result = await fwm.ainvoke(
+        system_prompt="return JSON",
+        user_message="give me an answer",
+        output_type=Answer,
+    )
+
+    assert result.status == "success"
+    assert result.data == {"value": 42, "label": "ok"}
+
+
+async def test_ainvoke_output_type_invalid_json_falls_back_to_raw(firewall, fake_model):
+    from pydantic import BaseModel
+    from langchain_core.messages import AIMessage
+
+    class Answer(BaseModel):
+        value: int
+
+    fake_model.ainvoke.return_value = AIMessage(content="not json at all")
+
+    fwm = firewall.wrap(fake_model)
+    result = await fwm.ainvoke(
+        system_prompt="return JSON",
+        user_message="give me an answer",
+        output_type=Answer,
+    )
+
+    assert result.status == "success"
+    assert result.data == {"raw": "not json at all"}

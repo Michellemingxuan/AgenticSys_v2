@@ -112,7 +112,17 @@ class FirewalledModel:
                 continue
 
             content = response.content if hasattr(response, "content") else str(response)
-            data = {"response": content}
+
+            if output_type is not None:
+                import json as _json
+                try:
+                    parsed = _json.loads(content)
+                    data = output_type(**parsed).model_dump()
+                except Exception:
+                    data = {"raw": content}
+            else:
+                data = {"response": content}
+
             record = StepRecord(
                 prompt=current_system,
                 message=current_message,
