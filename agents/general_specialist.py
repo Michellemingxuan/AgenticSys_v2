@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import json
+from pathlib import Path
 
 from gateway.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger
@@ -14,18 +15,13 @@ from models.types import (
     ReviewReport,
     SpecialistOutput,
 )
+from skills.loader import load_skill as _load_skill
 
 
-COMPARE_SYSTEM_PROMPT = (
-    "You are a General Specialist — a cross-domain reviewer who identifies "
-    "contradictions, tensions, and complementary insights across specialist outputs. "
-    "For each pair of specialists, determine whether their findings contradict, "
-    "and if so, attempt to resolve the contradiction using available evidence. "
-    "Respond in JSON with keys: resolved (list of objects with pair, contradiction, "
-    "question_raised, answer, supporting_evidence, conclusion) and open_conflicts "
-    "(list of objects with pair, contradiction, question_raised, reason_unresolved, "
-    "evidence_from_both). Also include cross_domain_insights (list of strings)."
-)
+_WORKFLOW_DIR = Path(__file__).parent.parent / "skills" / "workflow"
+
+
+COMPARE_SYSTEM_PROMPT = _load_skill(_WORKFLOW_DIR / "comparison.md").body
 
 
 class GeneralSpecialist:

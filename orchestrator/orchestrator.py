@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 
 from agents.session_registry import SessionRegistry
 from config.report_loader import get_synthesis_prompt
@@ -19,68 +21,33 @@ from models.types import (
     TeamAssignment,
 )
 from skills.domain.loader import load_domain_skill
+from skills.loader import load_skill as _load_skill
 
 
-SYNTHESIZE_PROMPT = (
-    "You are the orchestrator synthesizer. Merge the following specialist "
-    "outputs into a unified answer. Use resolved contradictions over raw "
-    "findings when available. Evaluate absence of data as a potential signal "
-    "(absence-as-signal). Never silently omit blocked or incomplete analyses — "
-    "flag them explicitly.\n\n"
-    "Output JSON with keys:\n"
-    "- answer: the merged answer string\n"
-    "- data_gap_assessments: list of objects with keys "
-    "(specialist, missing_data, absence_interpretation, is_signal)\n"
-)
+_WORKFLOW_DIR = Path(__file__).parent.parent / "skills" / "workflow"
 
 
-SELECT_TEAM_PROMPT = (
-    "You are the orchestrator's TEAM SELECTION step. Given a reviewer's "
-    "root question and a description of each available specialist (data "
-    "tables and columns), pick the specialists whose data can directly "
-    "contribute to answering the root.\n\n"
-    "RULES:\n"
-    "- Select a specialist only if its DATA contains fields that the root "
-    "question depends on. Prefer 1-3 specialists over a broad sweep.\n"
-    "- Do NOT pick a specialist for 'additional context' or 'completeness'. "
-    "Every pick must carry its weight in the final answer.\n"
-    "- Prefer warm specialists (already active in session) when they are "
-    "relevant — but do not pick a warm specialist whose data is unrelated.\n"
-    "- For broad questions (e.g. 'full report'), select all specialists.\n"
-    "- Return at least one specialist.\n\n"
-    "Return a JSON object: {\"specialists\": [\"<domain1>\", \"<domain2>\"]}"
-)
+def _extract_section(body: str, heading_prefix: str) -> str:
+    """Extract a markdown section starting with the given heading prefix.
+
+    Returns everything from the matched heading until the next top-level
+    heading (or end of body). Used to split `team_construction.md`'s two
+    step-blocks so each LLM call sees only its own instructions.
+    """
+    pattern = rf"(?ms)^({re.escape(heading_prefix)}[^\n]*\n\n.*?)(?=\n^# |\Z)"
+    m = re.search(pattern, body)
+    if m is None:
+        return body
+    section = m.group(1)
+    # Drop the leading heading line + blank line that follows it.
+    return re.sub(r"^#[^\n]*\n\n", "", section, count=1).rstrip()
 
 
-SPLIT_SUBQUESTIONS_PROMPT = (
-    "You are the orchestrator's SUB-QUESTION DECOMPOSITION step. The team "
-    "has already been selected. For each selected specialist, rewrite the "
-    "root question into a focused sub-question.\n\n"
-    "GOVERNING PRINCIPLE — sub-questions must be IN SERVICE of the root:\n"
-    "- Every sub-question MUST be a piece of evidence whose answer directly "
-    "contributes to answering the root question. If an answer to a sub-question "
-    "would NOT change or support the answer to the root, it does not belong in "
-    "the plan. Do not emit it.\n"
-    "- Do NOT add sub-questions that merely expand scope, explore adjacent "
-    "topics, or satisfy curiosity. No 'while we're at it' questions.\n"
-    "- Before emitting each sub-question, silently ask yourself: \"If the "
-    "specialist answers this, does it help the reviewer answer the root?\" "
-    "If 'maybe' or 'only indirectly', skip or rewrite until tight.\n\n"
-    "PHRASING RULES:\n"
-    "- One sentence per sub-question.\n"
-    "- Grounded in the specialist's data vocabulary (use column/table names "
-    "from its data description where relevant).\n"
-    "- Focused ONLY on the aspect that specialist's data can address — do not "
-    "ask a specialist about data it doesn't have.\n"
-    "- Orthogonal across specialists — two specialists must not be asked the "
-    "same thing. Each sub-question gives the synthesizer a distinct piece.\n"
-    "- Phrased so the answer slots directly into the root-question synthesis.\n"
-    "- If only one specialist was selected, its sub-question may equal the "
-    "root question verbatim.\n\n"
-    "Return a JSON object: "
-    "{\"plan\": [{\"specialist\": \"<domain>\", \"sub_question\": \"<...>\"}, ...]}\n"
-    "Produce exactly one entry per selected specialist, in the same order."
-)
+_TEAM_CONSTRUCTION_BODY = _load_skill(_WORKFLOW_DIR / "team_construction.md").body
+
+SYNTHESIZE_PROMPT = _load_skill(_WORKFLOW_DIR / "synthesis.md").body
+SELECT_TEAM_PROMPT = _extract_section(_TEAM_CONSTRUCTION_BODY, "# Step 1")
+SPLIT_SUBQUESTIONS_PROMPT = _extract_section(_TEAM_CONSTRUCTION_BODY, "# Step 2")
 
 
 class Orchestrator:
