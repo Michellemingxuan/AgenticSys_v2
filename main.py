@@ -8,6 +8,7 @@ import sys
 import uuid
 from pathlib import Path
 
+from agents.guardrail_agent import GuardrailAgent
 from agents.report_agent import ReportAgent
 from agents.session_registry import SessionRegistry
 from config.pillar_loader import PillarLoader
@@ -122,13 +123,23 @@ async def amain():
 
     registry = SessionRegistry()
     chat_agent = ChatAgent(llm, logger)
+    guardrail = GuardrailAgent(llm, logger)
 
-    if args.question:
+    async def _screen_and_run(question: str) -> str:
+        """Screen via Guardrail; if rejected, return the reason.
+        Otherwise route the redacted question through run_question and format.
+        """
+        verdict = await guardrail.screen(question)
+        if not verdict.passed:
+            return f"[rejected] {verdict.reason}"
         final = await run_question(
-            args.question, args.pillar,
+            verdict.redacted_question, args.pillar,
             llm, logger, registry, pillar_yaml, case_id, catalog=catalog,
         )
-        print(_format_final_answer(final))
+        return _format_final_answer(final)
+
+    if args.question:
+        print(await _screen_and_run(args.question))
     else:
         print("Agentic Credit Risk System")
         print(f"Pillar: {args.pillar} | Model: {args.model}")
@@ -155,12 +166,9 @@ async def amain():
                 print(response)
                 continue
 
-            final = await run_question(
-                question, args.pillar,
-                llm, logger, registry, pillar_yaml, case_id, catalog=catalog,
-            )
-            formatted = _format_final_answer(final)
-            last_context = formatted
+            formatted = await _screen_and_run(question)
+            if not formatted.startswith("[rejected]"):
+                last_context = formatted
             print(formatted)
             print()
 
