@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Literal
 from pydantic import BaseModel, Field
 
 
@@ -125,3 +126,66 @@ class StepRecord(BaseModel):
     message: str
     result: dict | None = None
     attempt: int = 0
+
+
+# ── New types for the Reports path (Phase 3) ─────────────────────────
+#
+# TeamDraft = what the team-workflow branch produces (today's FinalOutput shape
+# will migrate onto this name in Phase 4; for now TeamDraft is a fresh alias
+# that agents emit when the parallel orchestrator lands).
+#
+# ReportDraft = what the Report Agent produces after scanning curated
+# case-folder reports.
+#
+# FinalAnswer = what the Balancing skill returns — merges both drafts.
+
+
+class ReportDraft(BaseModel):
+    """Result of the Report Agent's Needle + Analysis chain over `results/<case-id>/`.
+
+    `coverage` is the Needle's verdict on how well the curated reports answer
+    the reviewer's question:
+      - "full":    reports fully answer the question
+      - "partial": reports cover some aspects, team workflow fills gaps
+      - "none":    no relevant reports (empty folder or nothing matched)
+    """
+
+    coverage: Literal["full", "partial", "none"]
+    answer: str = ""
+    evidence_excerpts: list[str] = Field(default_factory=list)
+    files_consulted: list[str] = Field(default_factory=list)
+
+
+class TeamDraft(BaseModel):
+    """The team-workflow branch's intermediate answer — same shape as today's
+    `FinalOutput`, renamed for clarity in the parallel pipeline.
+
+    Phase 4 wires the orchestrator to emit `TeamDraft` instead of `FinalOutput`
+    for the team branch; `FinalOutput` stays as today's chat/report return type
+    until that cut-over lands.
+    """
+
+    answer: str
+    data_gap_summary: str = ""
+    resolved_contradictions: list[Resolution] = Field(default_factory=list)
+    open_conflicts: list[Conflict] = Field(default_factory=list)
+    cross_domain_insights: list[str] = Field(default_factory=list)
+    data_requests_made: list[dict] = Field(default_factory=list)
+    data_gaps: list[DataGap] = Field(default_factory=list)
+    blocked_steps: list[BlockedStep] = Field(default_factory=list)
+    specialists_consulted: list[str] = Field(default_factory=list)
+    sub_questions: list[TeamAssignment] = Field(default_factory=list)
+
+
+class FinalAnswer(BaseModel):
+    """Top-level reviewer-facing answer — the Balancing skill's output.
+
+    Carries both drafts so the reviewer / downstream formatters can see
+    provenance: which claim came from the curated report, which from the team
+    workflow, and which discrepancies the Balancing skill flagged.
+    """
+
+    answer: str
+    flags: list[str] = Field(default_factory=list)
+    report_draft: ReportDraft
+    team_draft: TeamDraft
