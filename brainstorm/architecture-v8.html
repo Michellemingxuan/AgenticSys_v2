@@ -251,6 +251,7 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 </div>
 
 <script>
+// NOTE: actor value 'spec-all' is a pseudo-id meaning "fan out to all spec-* agent cards"; not a real data-agent.
 const STEPS = [
   { n: 1,  narrator: "Chat Agent receives the reviewer's question. The 📖 Abbreviation helper expands 'cross-bureau' and 'DTI'.", actor: 'chat',         skill: 'converse',         helper: 'abbreviation' },
   { n: 2,  narrator: "Chat Agent routes the question to the Orchestrator.",                                                      actor: 'chat',         skill: 'stream',           tokenPath: 'chat->orchestrator' },
@@ -313,6 +314,7 @@ const TimelineController = {
   reset() { this.pause(); this.goto(0); },
 
   play() {
+    if (this.playing) return;
     if (this.step >= this.total) this.goto(0);
     this.playing = true;
     document.getElementById('pb-play').textContent = '⏸';
