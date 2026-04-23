@@ -510,13 +510,21 @@ function openDrawer(skillId) {
   document.getElementById('dr-tools').textContent = sk.tools || '—';
   document.getElementById('dr-example').textContent = sk.example || '—';
 
-  const stepIdx = STEPS.findIndex(s => s.skill === skillId);
+  const cur = TimelineController.step;
+  const occurrences = [];
+  STEPS.forEach((s, i) => { if (s.skill === skillId) occurrences.push(i); });
+  const nextIdx = occurrences.find(i => i + 1 >= cur);
+  const stepIdx = nextIdx !== undefined ? nextIdx : (occurrences[0] !== undefined ? occurrences[0] : -1);
   const replay = document.getElementById('dr-replay');
   if (stepIdx >= 0) {
     replay.disabled = false;
+    replay.textContent = occurrences.length > 1
+      ? `Jump to step ${stepIdx + 1} (fires ${occurrences.length}×)`
+      : `Jump to step ${stepIdx + 1}`;
     replay.onclick = () => { TimelineController.pause(); TimelineController.goto(stepIdx + 1); closeDrawer(); };
   } else {
     replay.disabled = true;
+    replay.textContent = 'Not in walkthrough';
     replay.onclick = null;
   }
 
