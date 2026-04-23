@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -12,7 +11,6 @@ from agents.session_registry import SessionRegistry
 from data.catalog import DataCatalog
 from data.gateway import SimulatedDataGateway
 from data.generator import DataGenerator
-from gateway.firewall_stack import FirewallStack
 from logger.event_logger import EventLogger
 from models.types import FinalOutput, LLMResult, ReviewReport, SpecialistOutput
 from orchestrator.chat_agent import ChatAgent
@@ -21,7 +19,7 @@ from skills.domain.loader import list_domain_skills, load_domain_skill
 from tools.data_tools import init_tools
 
 
-def _mock_firewall_call(system_prompt: str, user_message: str, **kwargs) -> LLMResult:
+def _mock_llm_ainvoke(system_prompt: str, user_message: str, **kwargs) -> LLMResult:
     """Route mock responses based on prompt content."""
     combined = (system_prompt + " " + user_message).lower()
 
@@ -119,22 +117,19 @@ def logger(tmp_path):
 
 
 @pytest.fixture
-def mock_firewall(logger):
-    adapter = MagicMock()
-    fw = FirewallStack(adapter, logger)
-    fw.call = MagicMock(side_effect=_mock_firewall_call)
-    return fw
+def mock_llm():
+    llm = AsyncMock()
+    llm.ainvoke = AsyncMock(side_effect=_mock_llm_ainvoke)
+    return llm
 
 
-def test_full_pipeline_smoke(mock_firewall, logger, tmp_path):
+async def test_full_pipeline_smoke(mock_llm, logger, tmp_path):
     """Full pipeline: team construction -> specialist dispatch -> compare -> synthesize -> format."""
-    # Data setup — per-case gateway
     gen = DataGenerator(seed=42)
     gen.load_profiles()
     tables_raw = gen.generate_all()
 
     gateway = SimulatedDataGateway.from_generated(tables_raw)
-    # Set a case for the test
     case_ids = gateway.list_case_ids()
     assert len(case_ids) > 0
     gateway.set_case(case_ids[0])
@@ -146,17 +141,15 @@ def test_full_pipeline_smoke(mock_firewall, logger, tmp_path):
     pillar = "credit_risk"
     question = "What is the overall credit risk for this applicant?"
 
-    # Step 1: Team planning (specialist selection + sub-question decomposition)
-    orchestrator = Orchestrator(mock_firewall, logger, registry, pillar)
+    orchestrator = Orchestrator(mock_llm, logger, registry, pillar)
     available = list_domain_skills()
-    plan = orchestrator.plan_team(
+    plan = await orchestrator.plan_team(
         question=question,
         available_specialists=available,
         active_specialists=[],
     )
     assert len(plan) >= 1
 
-    # Step 2: Specialist dispatch
     specialist_outputs = {}
     for assignment in plan:
         skill = load_domain_skill(assignment.specialist)
@@ -167,21 +160,19 @@ def test_full_pipeline_smoke(mock_firewall, logger, tmp_path):
             pillar=pillar,
             domain_skill=skill,
             pillar_yaml={},
-            firewall=mock_firewall,
+            llm=mock_llm,
             logger=logger,
         )
-        output = agent.run(assignment.sub_question, mode="chat", root_question=question)
+        output = await agent.run(assignment.sub_question, mode="chat", root_question=question)
         specialist_outputs[assignment.specialist] = output
 
     assert len(specialist_outputs) >= 1
 
-    # Step 3: Compare
-    general = GeneralSpecialist(mock_firewall, logger)
-    review_report = general.compare(specialist_outputs, question)
+    general = GeneralSpecialist(mock_llm, logger)
+    review_report = await general.compare(specialist_outputs, question)
     assert isinstance(review_report, ReviewReport)
 
-    # Step 4: Synthesize — reuse the orchestrator instance from Step 1.
-    final = orchestrator.synthesize(
+    final = await orchestrator.synthesize(
         specialist_outputs, review_report, question, "chat", team_plan=plan,
     )
 
@@ -189,40 +180,36 @@ def test_full_pipeline_smoke(mock_firewall, logger, tmp_path):
     assert len(final.answer) > 0
     assert len(final.specialists_consulted) >= 1
 
-    # Step 5: Format
-    chat_agent = ChatAgent(mock_firewall, logger)
+    chat_agent = ChatAgent(mock_llm, logger)
     formatted = chat_agent.format_for_reviewer(final)
     assert len(formatted) > 0
     assert "Specialists consulted" in formatted
 
 
-def test_specialist_reuse_across_questions(mock_firewall, logger):
+def test_specialist_reuse_across_questions(mock_llm, logger):
     """Verify that registry reuses specialist instances across questions."""
     registry = SessionRegistry()
     skill = load_domain_skill("bureau")
     assert skill is not None
 
-    # Create specialist via registry
     agent1 = registry.get_or_create(
         domain="bureau",
         pillar="credit_risk",
         domain_skill=skill,
         pillar_yaml={},
-        firewall=mock_firewall,
+        llm=mock_llm,
         logger=logger,
     )
 
-    # Simulate a rolling summary update
     agent1._update_rolling_summary("Q1", "Score is 720")
     assert agent1.rolling_summary != ""
 
-    # Get again via registry — should be the same instance
     agent2 = registry.get_or_create(
         domain="bureau",
         pillar="credit_risk",
         domain_skill=skill,
         pillar_yaml={},
-        firewall=mock_firewall,
+        llm=mock_llm,
         logger=logger,
     )
 

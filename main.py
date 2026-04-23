@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import sys
 import uuid
 
@@ -13,59 +14,40 @@ from data.catalog import DataCatalog
 from data.gateway import SimulatedDataGateway
 from data.generator import DataGenerator
 from gateway.firewall_stack import FirewallStack
+from gateway.llm_factory import build_llm
 from logger.event_logger import EventLogger
-from models.types import FinalOutput, ReviewReport
+from models.types import FinalOutput
 from orchestrator.chat_agent import ChatAgent
 from orchestrator.orchestrator import Orchestrator
 from skills.domain.loader import list_domain_skills, load_domain_skill
 from tools.data_tools import init_tools
 
 
-def build_adapter(args):
-    """Build the appropriate LLM adapter based on CLI args."""
-    if args.use_env_pipeline:
-        try:
-            from gateway.safechain_adapter import SafeChainAdapter
-            return SafeChainAdapter(llm=None, model_name=args.model)
-        except Exception:
-            raise NotImplementedError(
-                "SafeChain adapter requires the safechain package. "
-                "Use --model without --use-env-pipeline for OpenAI."
-            )
-    else:
-        from gateway.openai_adapter import OpenAIAdapter
-        return OpenAIAdapter(model=args.model)
-
-
-def run_question(
+async def run_question(
     question: str,
     mode: str,
     pillar: str,
-    firewall: FirewallStack,
+    llm,
     logger: EventLogger,
     registry: SessionRegistry,
     pillar_yaml: dict,
     catalog=None,
 ) -> FinalOutput:
-    """Run the full pipeline for a single question."""
     available = list_domain_skills()
 
-    # Orchestrator owns team planning (selection + sub-question split) and synthesis.
     orchestrator = Orchestrator(
-        firewall, logger, registry, pillar,
+        llm, logger, registry, pillar,
         pillar_config=pillar_yaml, catalog=catalog,
     )
 
-    # Team planning — one LLM call returns specialist selection + per-specialist sub-questions.
     active = registry.list_active()
-    plan = orchestrator.plan_team(
+    plan = await orchestrator.plan_team(
         question=question,
         available_specialists=available,
         active_specialists=active,
         mode=mode,
     )
 
-    # Specialist dispatch — each specialist sees its sub-question + the root question.
     specialist_outputs = {}
     for assignment in plan:
         skill = load_domain_skill(assignment.specialist)
@@ -76,92 +58,46 @@ def run_question(
             pillar=pillar,
             domain_skill=skill,
             pillar_yaml=pillar_yaml,
-            firewall=firewall,
+            llm=llm,
             logger=logger,
         )
-        output = agent.run(assignment.sub_question, mode=mode, root_question=question)
+        output = await agent.run(assignment.sub_question, mode=mode, root_question=question)
         specialist_outputs[assignment.specialist] = output
 
-    # Cross-domain comparison
-    general = GeneralSpecialist(firewall, logger)
-    review_report = general.compare(specialist_outputs, question)
+    general = GeneralSpecialist(llm, logger)
+    review_report = await general.compare(specialist_outputs, question)
 
-    # Synthesis
-    final = orchestrator.synthesize(
+    final = await orchestrator.synthesize(
         specialist_outputs, review_report, question, mode, team_plan=plan,
     )
-
     return final
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Agentic Credit Risk Analysis System"
-    )
-    parser.add_argument(
-        "--pillar",
-        choices=["credit_risk", "escalation", "cbo"],
-        default="credit_risk",
-        help="Analysis pillar (default: credit_risk)",
-    )
-    parser.add_argument(
-        "--question",
-        type=str,
-        default=None,
-        help="Single question (non-interactive mode)",
-    )
-    parser.add_argument(
-        "--mode",
-        choices=["chat", "report"],
-        default="chat",
-        help="Output mode (default: chat)",
-    )
-    parser.add_argument(
-        "--model",
-        type=str,
-        default="gpt-4.1",
-        help="LLM model name (default: gpt-4.1)",
-    )
-    parser.add_argument(
-        "--use-env-pipeline",
-        action="store_true",
-        help="Use SafeChain adapter for deployment environment",
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=42,
-        help="Random seed for data generation (default: 42)",
-    )
-    parser.add_argument(
-        "--case-id",
-        type=str,
-        default=None,
-        help="Case ID to review (e.g. CASE-00001). If omitted, lists available cases.",
-    )
-
+async def amain():
+    parser = argparse.ArgumentParser(description="Agentic Credit Risk Analysis System")
+    parser.add_argument("--pillar", choices=["credit_risk", "escalation", "cbo"],
+                        default="credit_risk")
+    parser.add_argument("--question", type=str, default=None)
+    parser.add_argument("--mode", choices=["chat", "report"], default="chat")
+    parser.add_argument("--model", type=str, default="gpt-4.1")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--case-id", type=str, default=None)
     args = parser.parse_args()
 
-    # Session setup
     session_id = str(uuid.uuid4())[:8]
     logger = EventLogger(session_id=session_id)
     logger.log("session_start", {"pillar": args.pillar, "mode": args.mode, "model": args.model})
 
-    # Build adapter and firewall
-    adapter = build_adapter(args)
-    firewall = FirewallStack(adapter, logger)
+    firewall = FirewallStack(logger=logger)
+    llm = build_llm(args.model, firewall)
 
-    # Data generation — organized per case
     gen = DataGenerator(seed=args.seed, cases=50)
     gen.load_profiles()
     tables_raw = gen.generate_all()
-
-    # Build per-case gateway from generated data
     gateway = SimulatedDataGateway.from_generated(tables_raw)
     catalog = DataCatalog()
     init_tools(gateway, catalog, logger=logger)
 
-    # Case selection
     available_cases = gateway.list_case_ids()
     if not available_cases:
         print("No cases available. Check data generation.")
@@ -183,35 +119,28 @@ def main():
     gateway.set_case(case_id)
     logger.log("case_selected", {"case_id": case_id, "tables": gateway.list_tables()})
 
-    # Pillar config
     pillar_loader = PillarLoader()
     pillar_yaml = pillar_loader.load(args.pillar) or {}
 
-    # Session registry
     registry = SessionRegistry()
-
-    # Chat agent for formatting
-    chat_agent = ChatAgent(firewall, logger)
+    chat_agent = ChatAgent(llm, logger)
 
     if args.question:
-        # Single question mode
-        final = run_question(
+        final = await run_question(
             args.question, args.mode, args.pillar,
-            firewall, logger, registry, pillar_yaml,
-            catalog=catalog,
+            llm, logger, registry, pillar_yaml, catalog=catalog,
         )
-        formatted = chat_agent.format_for_reviewer(final)
-        print(formatted)
+        print(chat_agent.format_for_reviewer(final))
     else:
-        # Interactive mode
         print("Agentic Credit Risk System")
         print(f"Pillar: {args.pillar} | Mode: {args.mode} | Model: {args.model}")
         print("Type 'quit' to exit.\n")
 
+        loop = asyncio.get_running_loop()
         last_context = ""
         while True:
             try:
-                question = input(">> ").strip()
+                question = (await loop.run_in_executor(None, input, ">> ")).strip()
             except (EOFError, KeyboardInterrupt):
                 print("\nGoodbye.")
                 break
@@ -223,16 +152,14 @@ def main():
                 break
 
             if question.startswith("/chat "):
-                # Follow-up conversation
                 follow_up = question[6:].strip()
-                response = chat_agent.converse(follow_up, context=last_context)
+                response = await chat_agent.converse(follow_up, context=last_context)
                 print(response)
                 continue
 
-            final = run_question(
+            final = await run_question(
                 question, args.mode, args.pillar,
-                firewall, logger, registry, pillar_yaml,
-                catalog=catalog,
+                llm, logger, registry, pillar_yaml, catalog=catalog,
             )
             formatted = chat_agent.format_for_reviewer(final)
             last_context = formatted
@@ -240,6 +167,10 @@ def main():
             print()
 
     logger.log("session_end", {})
+
+
+def main():
+    asyncio.run(amain())
 
 
 if __name__ == "__main__":
