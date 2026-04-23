@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
 from agents.general_specialist import GeneralSpecialist, COMPARE_SYSTEM_PROMPT
-from gateway.firewall_stack import FirewallStack
 from logger.event_logger import EventLogger
 from models.types import LLMResult, ReviewReport, SpecialistOutput
 
@@ -18,9 +17,9 @@ def logger(tmp_path):
 
 
 @pytest.fixture
-def firewall(logger):
-    adapter = MagicMock()
-    return FirewallStack(adapter, logger)
+def mock_llm():
+    """A FirewalledModel stand-in with a mockable async ainvoke."""
+    return AsyncMock()
 
 
 def _make_output(domain: str, findings: str) -> SpecialistOutput:
@@ -34,27 +33,27 @@ def _make_output(domain: str, findings: str) -> SpecialistOutput:
     )
 
 
-def test_general_specialist_creation(firewall, logger):
-    gs = GeneralSpecialist(firewall, logger)
-    assert gs.firewall is firewall
+def test_general_specialist_creation(mock_llm, logger):
+    gs = GeneralSpecialist(mock_llm, logger)
+    assert gs.llm is mock_llm
     assert gs.logger is logger
 
 
-def test_generate_pairs(firewall, logger):
-    gs = GeneralSpecialist(firewall, logger)
+def test_generate_pairs(mock_llm, logger):
+    gs = GeneralSpecialist(mock_llm, logger)
     pairs = gs._generate_pairs(["bureau", "capacity"])
     assert len(pairs) == 1
     assert pairs[0] == ("bureau", "capacity")
 
 
-def test_generate_pairs_three(firewall, logger):
-    gs = GeneralSpecialist(firewall, logger)
+def test_generate_pairs_three(mock_llm, logger):
+    gs = GeneralSpecialist(mock_llm, logger)
     pairs = gs._generate_pairs(["bureau", "capacity", "spend"])
     assert len(pairs) == 3
 
 
-def test_compare_returns_review_report(firewall, logger):
-    firewall.call = MagicMock(
+async def test_compare_returns_review_report(mock_llm, logger):
+    mock_llm.ainvoke = AsyncMock(
         return_value=LLMResult(
             status="success",
             data={
@@ -74,12 +73,12 @@ def test_compare_returns_review_report(firewall, logger):
         )
     )
 
-    gs = GeneralSpecialist(firewall, logger)
+    gs = GeneralSpecialist(mock_llm, logger)
     outputs = {
         "bureau": _make_output("bureau", "Score is 580"),
         "capacity": _make_output("capacity", "DTI is 45%"),
     }
-    report = gs.compare(outputs, "What is the credit risk?")
+    report = await gs.compare(outputs, "What is the credit risk?")
 
     assert isinstance(report, ReviewReport)
     assert len(report.resolved) == 1
@@ -89,10 +88,10 @@ def test_compare_returns_review_report(firewall, logger):
     assert "Both domains flag high leverage" in report.cross_domain_insights
 
 
-def test_compare_single_specialist(firewall, logger):
-    gs = GeneralSpecialist(firewall, logger)
+async def test_compare_single_specialist(mock_llm, logger):
+    gs = GeneralSpecialist(mock_llm, logger)
     outputs = {"bureau": _make_output("bureau", "Score is 580")}
-    report = gs.compare(outputs, "test")
+    report = await gs.compare(outputs, "test")
     assert isinstance(report, ReviewReport)
     assert len(report.resolved) == 0
     assert len(report.open_conflicts) == 0

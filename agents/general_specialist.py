@@ -5,7 +5,7 @@ from __future__ import annotations
 import itertools
 import json
 
-from gateway.firewall_stack import FirewallStack
+from gateway.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger
 from models.types import (
     Conflict,
@@ -31,11 +31,11 @@ COMPARE_SYSTEM_PROMPT = (
 class GeneralSpecialist:
     """Cross-domain reviewer that compares specialist outputs."""
 
-    def __init__(self, firewall: FirewallStack, logger: EventLogger):
-        self.firewall = firewall
+    def __init__(self, llm: FirewalledModel, logger: EventLogger):
+        self.llm = llm
         self.logger = logger
 
-    def compare(
+    async def compare(
         self,
         specialist_outputs: dict[str, SpecialistOutput],
         question: str,
@@ -59,7 +59,7 @@ class GeneralSpecialist:
             "Identify contradictions, attempt resolution, and note cross-domain insights."
         )
 
-        result = self.firewall.call(
+        result = await self.llm.ainvoke(
             system_prompt=COMPARE_SYSTEM_PROMPT,
             user_message=user_message,
         )
