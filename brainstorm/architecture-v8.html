@@ -392,7 +392,7 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
     <div class="pr-matrix" id="pr-matrix">
       <div class="pr-cell" data-pair="1"><div class="pr-pair">Bureau ↔ CrossBU</div>"Low bureau risk" vs "high internal concentration" — implications diverge.</div>
       <div class="pr-cell" data-pair="2"><div class="pr-pair">Bureau ↔ Cap&amp;Afford</div>Both suggest moderate; consistent.</div>
-      <div class="pr-cell" data-pair="3"><div class="pr-pair">CrossBU ↔ Cap&amp;Afford</div>Concentration + DTI 0.41 → combined exposure warrants flag.</div>
+      <div class="pr-cell" data-pair="3"><div class="pr-pair">CrossBU ↔ Cap&amp;Afford</div>Both point the same direction — concentration + DTI 0.41 → combined exposure warrants flag.</div>
     </div>
   </div>
 
@@ -646,6 +646,29 @@ document.getElementById('pb-scrubber').addEventListener('click', (e) => {
   TimelineController.goto(Math.round(pct * TimelineController.total));
 });
 
+const SpecInnerChain = {
+  sequence: ['data-query','data-analysis','data-viz','synthesize','report-answer'],
+  timers: [],
+  run() {
+    this.stop();
+    const cards = document.querySelectorAll('[data-agent^="spec-"]');
+    this.sequence.forEach((sk, idx) => {
+      const t = setTimeout(() => {
+        cards.forEach(c => {
+          c.querySelectorAll('.skill-node').forEach(n => n.classList.remove('active'));
+          const node = c.querySelector(`[data-skill="${sk}"]`);
+          if (node) node.classList.add('active');
+        });
+      }, idx * 500);
+      this.timers.push(t);
+    });
+  },
+  stop() {
+    this.timers.forEach(t => clearTimeout(t));
+    this.timers = [];
+  }
+};
+
 window.addEventListener('resize', () => TimelineController.render());
 TimelineController.render();
 
@@ -702,6 +725,7 @@ const ZoomTC = {
   i: 0,
   total: 5,
   open() {
+    window.ZoomRegistry.forEach(z => { if (z !== this) z.close(); });
     this.i = 0;
     this._apply();
     document.getElementById('zoom-backdrop').classList.add('open');
@@ -733,6 +757,8 @@ const ZoomTC = {
   }
 };
 
+window.ZoomRegistry.push(ZoomTC);
+
 document.getElementById('tc-next').addEventListener('click', () => ZoomTC.next());
 document.getElementById('tc-prev').addEventListener('click', () => ZoomTC.prev());
 document.getElementById('tc-close').addEventListener('click', () => ZoomTC.close());
@@ -742,6 +768,7 @@ const ZoomPR = {
   i: 0,
   total: 8, // 3 matrix cells + 5 loop steps
   open() {
+    window.ZoomRegistry.forEach(z => { if (z !== this) z.close(); });
     this.i = 0;
     this._apply();
     document.getElementById('zoom-backdrop').classList.add('open');
@@ -780,30 +807,6 @@ document.getElementById('pr-prev').addEventListener('click', () => ZoomPR.prev()
 document.getElementById('pr-close').addEventListener('click', () => ZoomPR.close());
 document.querySelector('#zoom-peer-review .zo-close').addEventListener('click', () => ZoomPR.close());
 
-const SpecInnerChain = {
-  sequence: ['data-query','data-analysis','data-viz','synthesize','report-answer'],
-  timers: [],
-  run() {
-    this.stop();
-    const cards = document.querySelectorAll('[data-agent^="spec-"]');
-    this.sequence.forEach((sk, idx) => {
-      const t = setTimeout(() => {
-        cards.forEach(c => {
-          c.querySelectorAll('.skill-node').forEach(n => n.classList.remove('active'));
-          const node = c.querySelector(`[data-skill="${sk}"]`);
-          if (node) node.classList.add('active');
-        });
-      }, idx * 500);
-      this.timers.push(t);
-    });
-  },
-  stop() {
-    this.timers.forEach(t => clearTimeout(t));
-    this.timers = [];
-  }
-};
-
-window.ZoomRegistry.push(ZoomTC);
 document.getElementById('zoom-backdrop').addEventListener('click', () => {
   window.ZoomRegistry.forEach(z => z.close());
 });
