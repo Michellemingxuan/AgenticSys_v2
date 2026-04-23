@@ -41,8 +41,9 @@ class ChatAgent:
         """Render a FinalAnswer as reviewer-facing markdown.
 
         Sections: Answer, Flags (if any), Provenance (report coverage + files
-        consulted + specialists consulted). Staticmethod because formatting
-        doesn't depend on the agent's LLM or logger.
+        consulted + specialists consulted), Timeline (per-stage duration).
+        Staticmethod because formatting doesn't depend on the agent's LLM
+        or logger.
         """
         parts: list[str] = ["## Answer\n", final.answer]
         if final.flags:
@@ -55,6 +56,12 @@ class ChatAgent:
             f"- Files consulted: {final.report_draft.files_consulted or '(none)'}\n"
             f"- Specialists consulted: {final.team_draft.specialists_consulted or '(none)'}"
         )
+        if final.timeline:
+            parts.append("\n## Timeline")
+            for entry in final.timeline:
+                parts.append(
+                    f"- **{entry['stage']}**: {entry['duration_ms']} ms"
+                )
         return "\n".join(parts)
 
     async def converse(self, user_message: str, context: str = "") -> str:

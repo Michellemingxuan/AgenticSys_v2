@@ -328,6 +328,46 @@ async def test_balance_falls_back_when_answer_empty(mock_llm, logger):
     assert any("fallback" in f for f in final.flags)
 
 
+async def test_run_populates_timeline_with_three_stages(mock_llm, logger, tmp_path):
+    """Orchestrator.run attaches a per-stage timeline with ISO timestamps +
+    duration_ms for report_agent, team_workflow, and balance."""
+    def _router(system_prompt: str, user_message: str, **kwargs):
+        sp = system_prompt.lower()
+        if "report needle" in sp or "locate relevant" in sp:
+            return LLMResult(status="success", data={"relevant_files": [], "coverage": "none", "hints": []})
+        if "team selection" in sp or "pick the specialists" in sp:
+            return LLMResult(status="success", data={"specialists": ["bureau"]})
+        if "cross-domain reviewer" in sp:
+            return LLMResult(status="success", data={"resolved": [], "open_conflicts": [], "cross_domain_insights": []})
+        if "orchestrator synthesizer" in sp or "data_gap_assessments" in sp:
+            return LLMResult(status="success", data={"answer": "team answer", "data_gap_assessments": []})
+        if "balancing" in sp:
+            return LLMResult(status="success", data={"answer": "merged", "flags": []})
+        return LLMResult(status="success", data={"findings": "f", "evidence": [], "implications": [], "data_gaps": []})
+
+    mock_llm.ainvoke = AsyncMock(side_effect=_router)
+
+    from agents.report_agent import ReportAgent
+    case_folder = tmp_path / "CASE-T"
+    case_folder.mkdir()
+    registry = SessionRegistry()
+    orch = Orchestrator(mock_llm, logger, registry, "credit_risk")
+    report_agent = ReportAgent(mock_llm, logger)
+
+    final = await orch.run("What is the bureau status?", case_folder, report_agent)
+
+    stages = [t["stage"] for t in final.timeline]
+    assert stages == ["report_agent", "team_workflow", "balance"] or stages == ["team_workflow", "report_agent", "balance"]
+    # Each entry has the required keys.
+    for entry in final.timeline:
+        assert set(entry.keys()) == {"stage", "started_at", "ended_at", "duration_ms"}
+        assert isinstance(entry["duration_ms"], float)
+        assert entry["duration_ms"] >= 0
+        # ISO microseconds (6 digits) must survive the firewall.send redact.
+        assert "***MASKED***" not in entry["started_at"]
+        assert "***MASKED***" not in entry["ended_at"]
+
+
 async def test_run_dispatches_report_and_team_and_balances(mock_llm, logger, tmp_path):
     """End-to-end: orchestrator.run() dispatches both branches in parallel
     and merges via the Balancing skill."""

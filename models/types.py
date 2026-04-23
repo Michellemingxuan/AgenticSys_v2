@@ -177,12 +177,20 @@ class FinalAnswer(BaseModel):
     Carries both drafts so the reviewer / downstream formatters can see
     provenance: which claim came from the curated report, which from the team
     workflow, and which discrepancies the Balancing skill flagged.
+
+    `timeline` holds per-stage wall-clock timestamps — recorded by
+    `Orchestrator.run` as a cheap forward-looking hook. Each entry is a dict
+    with keys `{stage, started_at (ISO8601), ended_at (ISO8601),
+    duration_ms (float)}`. Stages are `report_agent`, `team_workflow`, and
+    `balance`. The first two run in parallel via `asyncio.gather`, so their
+    time ranges overlap; `balance` starts after both branches complete.
     """
 
     answer: str
     flags: list[str] = Field(default_factory=list)
     report_draft: ReportDraft
     team_draft: TeamDraft
+    timeline: list[dict] = Field(default_factory=list)
 
 
 # Backwards-compat alias — see the placeholder earlier in this file.

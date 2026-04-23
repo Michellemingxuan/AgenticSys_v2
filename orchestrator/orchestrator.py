@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from agents.general_specialist import GeneralSpecialist
@@ -454,9 +456,28 @@ class Orchestrator:
             {"question": question, "case_folder": str(case_folder)},
         )
 
+        # Per-stage wall-clock timeline — cheap forward-looking hook for the
+        # chat UI to show progress / duration without a full LangGraph rewrite.
+        # Each entry records ISO8601 timestamps + a perf-counter-derived
+        # duration in ms. The two parallel branches overlap in time.
+        timeline: list[dict] = []
+
+        async def _timed(stage: str, coro):
+            started = datetime.now(timezone.utc)
+            t0 = time.perf_counter()
+            try:
+                return await coro
+            finally:
+                timeline.append({
+                    "stage": stage,
+                    "started_at": started.isoformat(),
+                    "ended_at": datetime.now(timezone.utc).isoformat(),
+                    "duration_ms": round((time.perf_counter() - t0) * 1000, 2),
+                })
+
         report_draft, team_draft = await asyncio.gather(
-            report_agent.run(question, case_folder),
-            self._run_team_workflow(question),
+            _timed("report_agent", report_agent.run(question, case_folder)),
+            _timed("team_workflow", self._run_team_workflow(question)),
         )
 
         # Each parallel branch hands its draft back to the orchestrator.
@@ -478,13 +499,24 @@ class Orchestrator:
             },
         )
 
-        final = await self.balance(question, report_draft, team_draft)
+        final = await _timed("balance", self.balance(question, report_draft, team_draft))
         final = await firewall.send(
             final, from_agent="orchestrator", to_agent="chat_agent"
         )
+
+        # Attach timeline AFTER firewall.send — ISO timestamps carry 6-digit
+        # microseconds that the redact regex (`\d{6,}`) would otherwise mask
+        # (e.g. "2026-04-24T10:00:03.***MASKED***+00:00"). Timestamps aren't
+        # sensitive identifiers, so set them on the final returned object.
+        final.timeline = timeline
+
         self.logger.log(
             "orchestrator_run_done",
-            {"flag_count": len(final.flags), "answer_len": len(final.answer)},
+            {
+                "flag_count": len(final.flags),
+                "answer_len": len(final.answer),
+                "timeline_stages": [t["stage"] for t in timeline],
+            },
         )
         return final
 
