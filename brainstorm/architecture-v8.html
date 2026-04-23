@@ -85,6 +85,24 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 .lsc-name { font-size: 13px; font-weight: 700; color: var(--navy); margin-bottom: 2px; }
 .lsc-owner { font-size: 10px; color: var(--gray-text); margin-bottom: 6px; }
 .lsc-purpose { font-size: 11px; color: var(--slate); line-height: 1.5; }
+
+.agent-card.active { transform: scale(1.04); box-shadow: 0 0 0 3px rgba(0, 111, 207, 0.25), 0 8px 20px rgba(0,0,0,0.08); }
+.agent-card.active.purple-left { box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.35), 0 8px 20px rgba(0,0,0,0.08); }
+.agent-card.active.red-left    { box-shadow: 0 0 0 3px rgba(252, 165, 165, 0.45), 0 8px 20px rgba(0,0,0,0.08); }
+.agent-card.active.green-left  { box-shadow: 0 0 0 3px rgba(134, 239, 172, 0.6), 0 8px 20px rgba(0,0,0,0.08); }
+
+.skill-node.active { animation: skillPulse 1.2s ease infinite; box-shadow: 0 0 0 2px rgba(0, 111, 207, 0.35); }
+@keyframes skillPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+#token-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.token-path { fill: none; stroke: var(--blue); stroke-width: 2; stroke-dasharray: 6 6; stroke-dashoffset: 0; opacity: 0; }
+.token-path.active { opacity: 1; animation: dashMarch 1s linear infinite; }
+@keyframes dashMarch {
+  to { stroke-dashoffset: -24; }
+}
 </style>
 </head>
 <body>
@@ -119,6 +137,7 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
   <div class="pb-question">Q: Is there combined cross-bureau and capacity risk on this case?</div>
 </div>
       <div class="stage" id="stage">
+        <svg id="token-svg" aria-hidden="true"></svg>
 
         <div class="layer" data-layer="1">
           <div class="layer-label">Layer 1</div>
@@ -352,6 +371,12 @@ const TimelineController = {
     const narratorEl = document.getElementById('narrator-text');
     const liveEl = document.getElementById('live-skill');
 
+    // Clear previous state
+    document.querySelectorAll('.agent-card.active').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.skill-node.active').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.toolbox-item.glow').forEach(el => el.classList.remove('glow'));
+    this._clearTokenPaths();
+
     if (this.step === 0) {
       narratorEl.textContent = "Press ▶ to begin the walkthrough.";
       liveEl.querySelector('.lsc-name').textContent = '—';
@@ -361,11 +386,74 @@ const TimelineController = {
     }
     const s = STEPS[this.step - 1];
     narratorEl.textContent = s.narrator;
+
+    // Agent pulse — support 'spec-all' for the 3 parallel specialists
+    if (s.actor === 'spec-all') {
+      ['spec-bureau','spec-crossbu','spec-capafford'].forEach(a => {
+        const el = document.querySelector(`[data-agent="${a}"]`);
+        if (el) el.classList.add('active');
+      });
+    } else {
+      const agentEl = document.querySelector(`[data-agent="${s.actor}"]`);
+      if (agentEl) agentEl.classList.add('active');
+    }
+
+    // Skill pulse — pulse the skill node on the active agent's card
+    const activeAgentEls = document.querySelectorAll('.agent-card.active');
+    activeAgentEls.forEach(cardEl => {
+      const skillEl = cardEl.querySelector(`[data-skill="${s.skill}"]`);
+      if (skillEl) skillEl.classList.add('active');
+    });
+
+    // Helper glow
+    if (s.helper) {
+      const helperEl = document.querySelector(`[data-helper="${s.helper}"]`);
+      if (helperEl) helperEl.classList.add('glow');
+    }
+
+    // Token travel
+    if (s.tokenPath) this._drawTokenPath(s.tokenPath);
+
+    // Live skill card
     const sk = SKILLS[s.skill];
     if (sk) {
       liveEl.querySelector('.lsc-name').textContent = sk.name;
       liveEl.querySelector('.lsc-owner').textContent = sk.owner;
       liveEl.querySelector('.lsc-purpose').textContent = sk.purpose;
+    }
+  },
+
+  _clearTokenPaths() {
+    const svg = document.getElementById('token-svg');
+    svg.innerHTML = '';
+  },
+
+  _drawTokenPath(pathKey) {
+    const svg = document.getElementById('token-svg');
+    const stageRect = document.getElementById('stage').getBoundingClientRect();
+    const endpointsByKey = {
+      'chat->orchestrator':   ['chat', 'orchestrator'],
+      'orchestrator->chat':   ['orchestrator', 'chat'],
+      'specs->orchestrator':  ['spec-bureau', 'orchestrator', 'spec-crossbu', 'orchestrator', 'spec-capafford', 'orchestrator']
+    };
+    const pairs = endpointsByKey[pathKey];
+    if (!pairs) return;
+    for (let i = 0; i < pairs.length; i += 2) {
+      const a = document.querySelector(`[data-agent="${pairs[i]}"]`);
+      const b = document.querySelector(`[data-agent="${pairs[i+1]}"]`);
+      if (!a || !b) continue;
+      const ra = a.getBoundingClientRect();
+      const rb = b.getBoundingClientRect();
+      const x1 = ra.left + ra.width/2 - stageRect.left;
+      const y1 = ra.top  + ra.height/2 - stageRect.top;
+      const x2 = rb.left + rb.width/2 - stageRect.left;
+      const y2 = rb.top  + rb.height/2 - stageRect.top;
+      const cx = (x1 + x2) / 2;
+      const cy = Math.min(y1, y2) - 24;
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`);
+      path.setAttribute('class', 'token-path active');
+      svg.appendChild(path);
     }
   }
 };
