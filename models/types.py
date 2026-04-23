@@ -189,3 +189,17 @@ class FinalAnswer(BaseModel):
     flags: list[str] = Field(default_factory=list)
     report_draft: ReportDraft
     team_draft: TeamDraft
+
+
+class GuardrailVerdict(BaseModel):
+    """Output of the Guardrail Agent's screen() — whether a reviewer's
+    question is in-scope for case review, and what the redacted version
+    of the question looks like after the redact skill ran.
+
+    `passed=False` short-circuits the Orchestrator; `reason` is the
+    reviewer-facing message explaining why.
+    """
+
+    passed: bool
+    reason: str = ""
+    redacted_question: str
