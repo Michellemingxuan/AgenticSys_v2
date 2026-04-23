@@ -63,6 +63,28 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 .toolbox-name { font-size: 11px; font-weight: 700; color: var(--navy); }
 .toolbox-sub { font-size: 9px; color: var(--gray-text); margin-top: 2px; }
 .toolbox-note { font-size: 9px; color: var(--gray-text); margin-top: 10px; font-style: italic; line-height: 1.4; }
+
+.playback-bar { display: flex; align-items: center; gap: 12px; background: var(--navy); color: white; padding: 10px 16px; border-radius: 2px; margin-bottom: 16px; }
+.pb-btn { background: transparent; color: white; border: 1px solid rgba(255,255,255,0.25); border-radius: 2px; padding: 5px 10px; font-size: 13px; cursor: pointer; font-family: inherit; }
+.pb-btn:hover { background: rgba(255,255,255,0.08); }
+.pb-btn.primary { background: var(--blue); border-color: var(--blue); font-weight: 700; }
+.pb-speed { display: flex; gap: 4px; }
+.pb-speed button { padding: 4px 8px; font-size: 10px; }
+.pb-speed button.active { background: var(--blue); border-color: var(--blue); }
+.pb-scrubber { flex: 1; height: 6px; background: rgba(255,255,255,0.15); border-radius: 3px; position: relative; cursor: pointer; }
+.pb-progress { position: absolute; top: 0; left: 0; bottom: 0; background: var(--blue); border-radius: 3px; transition: width 0.25s ease; width: 0%; }
+.pb-step-indicator { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; white-space: nowrap; }
+.pb-question { font-size: 11px; color: rgba(255,255,255,0.75); font-style: italic; max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.narrator { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 18px; background: var(--gray-light); border: 1px solid var(--gray-border); border-radius: 2px; padding: 14px 18px; }
+.narrator-left .n-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--gray-text); margin-bottom: 4px; }
+.narrator-left .n-text { font-size: 13px; color: var(--navy); font-weight: 500; line-height: 1.5; }
+.narrator-right { border-left: 1px solid var(--gray-border); padding-left: 18px; }
+.narrator-right .n-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--gray-text); margin-bottom: 6px; }
+.live-skill-card { background: white; border: 1px solid var(--gray-border); border-left: 3px solid var(--blue); padding: 10px 12px; border-radius: 2px; }
+.lsc-name { font-size: 13px; font-weight: 700; color: var(--navy); margin-bottom: 2px; }
+.lsc-owner { font-size: 10px; color: var(--gray-text); margin-bottom: 6px; }
+.lsc-purpose { font-size: 11px; color: var(--slate); line-height: 1.5; }
 </style>
 </head>
 <body>
@@ -81,6 +103,21 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 <div class="page">
   <div class="page-layout">
     <div class="page-main">
+      <div class="playback-bar">
+  <button class="pb-btn" id="pb-prev" title="Step back">⏮</button>
+  <button class="pb-btn primary" id="pb-play" title="Play / Pause">▶</button>
+  <button class="pb-btn" id="pb-next" title="Step forward">⏭</button>
+  <button class="pb-btn" id="pb-reset" title="Reset">↺</button>
+  <div class="pb-speed">
+    <button class="pb-btn" data-speed="0.5">0.5×</button>
+    <button class="pb-btn active" data-speed="1">1×</button>
+    <button class="pb-btn" data-speed="2">2×</button>
+    <button class="pb-btn" data-speed="4">4×</button>
+  </div>
+  <div class="pb-scrubber" id="pb-scrubber"><div class="pb-progress" id="pb-progress"></div></div>
+  <div class="pb-step-indicator" id="pb-step">Step 0 / 12</div>
+  <div class="pb-question">Q: Is there combined cross-bureau and capacity risk on this case?</div>
+</div>
       <div class="stage" id="stage">
 
         <div class="layer" data-layer="1">
@@ -183,6 +220,20 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
         </div>
 
       </div>
+      <div class="narrator">
+  <div class="narrator-left">
+    <div class="n-label">Current Step</div>
+    <div class="n-text" id="narrator-text">Press ▶ to begin the walkthrough.</div>
+  </div>
+  <div class="narrator-right">
+    <div class="n-label">Live Skill</div>
+    <div class="live-skill-card" id="live-skill">
+      <div class="lsc-name">—</div>
+      <div class="lsc-owner">No skill active</div>
+      <div class="lsc-purpose">Advance the timeline to see skills fire in order.</div>
+    </div>
+  </div>
+</div>
     </div>
     <aside class="toolbox" id="toolbox">
       <div class="toolbox-title">Helper Toolbox</div>
@@ -200,7 +251,136 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 </div>
 
 <script>
-// controllers added in later tasks
+const STEPS = [
+  { n: 1,  narrator: "Chat Agent receives the reviewer's question. The 📖 Abbreviation helper expands 'cross-bureau' and 'DTI'.", actor: 'chat',         skill: 'converse',         helper: 'abbreviation' },
+  { n: 2,  narrator: "Chat Agent routes the question to the Orchestrator.",                                                      actor: 'chat',         skill: 'stream',           tokenPath: 'chat->orchestrator' },
+  { n: 3,  narrator: "Orchestrator fires Report Needle on existing case reports. Result: partial hit.",                          actor: 'orchestrator', skill: 'report-needle' },
+  { n: 4,  narrator: "Orchestrator fires Report Analysis to extract the already-covered portion.",                               actor: 'orchestrator', skill: 'report-analysis' },
+  { n: 5,  narrator: "Orchestrator invokes Team Construction. Zoom in for recruitment and domain-skill injection.",              actor: 'orchestrator', skill: 'team-construction', zoom: 'team-construction' },
+  { n: 6,  narrator: "Three Base Specialists execute in parallel on the case folder: Bureau, CrossBU, Cap&Afford.",              actor: 'spec-all',     skill: 'data-query' },
+  { n: 7,  narrator: "CrossBU needs data not in the case folder. Data Agent (Lumi Gateway) fires; new rows land in the folder.", actor: 'data-agent',   skill: 'data-pull',         caseFolderExpand: true },
+  { n: 8,  narrator: "Specialists return findings and chart specs to the Orchestrator.",                                         actor: 'spec-all',     skill: 'report-answer',     tokenPath: 'specs->orchestrator' },
+  { n: 9,  narrator: "General Specialist runs Comparison + Conflict Solver. Zoom in for pairwise matrix and resolution loop.",   actor: 'general',      skill: 'comparison',        zoom: 'peer-review' },
+  { n: 10, narrator: "Orchestrator runs Synthesis — merges findings, peer-review notes, and report evidence.",                   actor: 'orchestrator', skill: 'synthesis' },
+  { n: 11, narrator: "Answer travels back to the Chat Agent.",                                                                   actor: 'orchestrator', skill: 'stream',           tokenPath: 'orchestrator->chat' },
+  { n: 12, narrator: "Chat Agent renders the final answer with inline charts produced by specialists' Data Viz outputs.",        actor: 'chat',         skill: 'converse',         helper: null }
+];
+
+const SKILLS = {
+  'converse':         { name: 'Converse',         owner: 'Chat Agent',       purpose: 'Handles reviewer turns in natural language. Interprets intent and collects clarifications.', tools: '—', example: 'User: "Is there combined cross-bureau and capacity risk?" → parsed + routed.' },
+  'stream':           { name: 'Stream',           owner: 'Chat Agent',       purpose: 'Streams partial tokens back to the reviewer as the answer is built.',                           tools: '—', example: 'Streams "Based on bureau tradelines …" incrementally.' },
+  'report-needle':    { name: 'Report Needle',    owner: 'Orchestrator',     purpose: 'Locates the answer inside existing case reports — a precise lookup across report sections.',   tools: 'report_index.search()', example: 'Finds the bureau-headline paragraph; flags capacity section as missing.' },
+  'report-analysis':  { name: 'Report Analysis',  owner: 'Orchestrator',     purpose: 'Deeper scan when Report Needle hits partially — extracts covered scope and surfaces gaps.',      tools: 'report_index.section()', example: 'Confirms "capacity" and "cross-BU concentration" are uncovered.' },
+  'team-construction':{ name: 'Team Construction',owner: 'Orchestrator',     purpose: 'LLM-driven recruitment: maps report gaps to domain skills and instantiates Base Specialists with pillar YAML overlays.', tools: 'base_agent.spawn()', example: 'Recruits bureau + crossbu + cap_afford for credit_risk.yaml.' },
+  'synthesis':        { name: 'Synthesis',        owner: 'Orchestrator',     purpose: 'Merges specialist findings + peer-review notes + report evidence into one grounded answer.',    tools: '—', example: 'Reconciles "low FICO-side risk" with "elevated internal concentration".' },
+  'domain-bureau':    { name: 'Bureau (Domain)',  owner: 'Base Specialist',  purpose: 'Tradeline health, derog marks, score interpretation with pillar-specific focus (credit_risk: "Flag 90D+").', tools: '(injected prompt + thresholds)', example: 'Reads bureau table → flags 2 tradelines 60 DPD, otherwise clean.' },
+  'domain-crossbu':   { name: 'CrossBU (Domain)', owner: 'Base Specialist',  purpose: 'Cross-BU exposure, contagion patterns, concentration signals.',                                   tools: '(injected prompt + thresholds)', example: '3 active cards, 62% exposure concentrated in one product.' },
+  'domain-capafford': { name: 'Cap&Afford (Domain)', owner: 'Base Specialist', purpose: 'DTI, limit headroom, income capacity vs outstanding balances.',                                 tools: '(injected prompt + thresholds)', example: 'DTI 0.41; limit headroom 18%.' },
+  'data-query':       { name: 'Data Query',       owner: 'Base Specialist',  purpose: 'Queries tables already staged under the case folder (local, default path).',                     tools: 'case_folder.query_table()', example: "query_table('bureau', columns='fico_score,dpd_status')" },
+  'data-analysis':    { name: 'Data Analysis',    owner: 'Base Specialist',  purpose: 'Statistical summary + anomaly detection on returned rows.',                                      tools: '—', example: 'Detects 2σ spike in 90 DPD events over last 6 months.' },
+  'data-viz':         { name: 'Data Visualization',owner: 'Base Specialist', purpose: 'Produces chart specs (bar/line/heatmap) to be rendered in the final answer.',                    tools: '—', example: 'Emits line-chart spec for DPD counts by month.' },
+  'synthesize':       { name: 'Synthesize',       owner: 'Base Specialist',  purpose: 'Turns raw rows + analysis into structured findings shaped by the injected domain skill.',        tools: '—', example: 'Findings: "Delinquency risk moderate, driven by 2 aged tradelines".' },
+  'report-answer':    { name: 'Report / Answer',  owner: 'Base Specialist',  purpose: 'Emits a standardized section narrative (report mode) or a direct reply (chat mode).',            tools: '—', example: 'Chat-mode reply: "Bureau side is contained; see 2 aged lines."' },
+  'comparison':       { name: 'Comparison',       owner: 'General Specialist', purpose: "Pairwise compare across specialist outputs; extracts each specialist's implications.",        tools: '—', example: 'Bureau↔CrossBU: "low bureau risk" vs "high internal concentration".' },
+  'conflict-solver':  { name: 'Conflict Solver',  owner: 'General Specialist', purpose: 'Identify → raise Q → self-answer → (optional Data Query) → resolve or escalate.',              tools: 'case_folder.query_table()', example: 'Resolves by noting bureau scope excludes internal Amex exposure.' },
+  'pillar-access':    { name: 'Pillar Access',    owner: 'Repository Agent', purpose: 'Enforces silenced tables/schemas per pillar YAML before forwarding to data agents.',             tools: '—', example: 'credit_risk.yaml does not silence bureau → pass-through.' },
+  'gating':           { name: 'Gating',           owner: 'Repository Agent', purpose: 'Validates requests against user role permissions.',                                               tools: '—', example: 'Reviewer role: allowed.' },
+  'redact':           { name: 'Redact',           owner: 'Repository Agent', purpose: 'Strips PII and sensitive fields before data leaves the gateway.',                                 tools: '—', example: 'Drops SSN, email, street address columns.' },
+  'catalog-gov':      { name: 'Catalog Governance', owner: 'Repository Agent', purpose: 'Register, update, retire tables/schemas in the Shared Data Catalog.',                           tools: '—', example: 'Admin-only; not fired in this case.' },
+  'data-pull':        { name: 'Data Pull',        owner: 'Data Agent',       purpose: 'Pulls from Lumi — fires only when the case folder + reports cannot answer.',                    tools: 'lumi.pull()', example: "pull('xbu_summary WHERE case_id=CASE-00001')" },
+  'text-to-sql':      { name: 'Text-to-SQL',      owner: 'Data Agent',       purpose: 'Resolves semantic variables to Lumi tables/columns via schema descriptions.',                   tools: '—', example: '"latest cross-BU exposure" → xbu_summary.exposure' },
+  'execute':          { name: 'Execute',          owner: 'Data Agent',       purpose: 'Runs generated SQL in a sandbox; retries recoverable failures.',                                tools: '—', example: 'Runs parametrised query under 2s budget.' },
+  'retrieve':         { name: 'Retrieve',         owner: 'Data Agent',       purpose: 'Returns structured rows through the Repository Agent.',                                         tools: '—', example: 'Returns 12 rows to requesting specialist.' },
+  'analyze':          { name: 'Analyze',          owner: 'Data Agent',       purpose: 'Optional statistical summary on fetched rows before returning.',                                tools: '—', example: 'Flags 2 outlier rows for CrossBU.' },
+  'web-browser':      { name: 'Web Browser',      owner: 'Shared Helper',    purpose: 'Fetches external context — news, public filings, bureau definitions.',                          tools: 'http.get()', example: 'Not fired in this scripted case.' },
+  'abbreviation':     { name: 'Abbreviation',     owner: 'Shared Helper',    purpose: 'Expands internal abbreviations with full names + domain-specific meaning.',                     tools: '—', example: '"cross-BU" → "Cross-Business-Unit exposure".' }
+};
+
+const TimelineController = {
+  step: 0,
+  playing: false,
+  speed: 1,
+  total: STEPS.length,
+  timer: null,
+
+  goto(n) {
+    this.step = Math.max(0, Math.min(this.total, n));
+    this.render();
+  },
+
+  next() { if (this.step < this.total) this.goto(this.step + 1); else this.pause(); },
+  back() { this.goto(this.step - 1); },
+  reset() { this.pause(); this.goto(0); },
+
+  play() {
+    if (this.step >= this.total) this.goto(0);
+    this.playing = true;
+    document.getElementById('pb-play').textContent = '⏸';
+    this._tick();
+  },
+
+  pause() {
+    this.playing = false;
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    document.getElementById('pb-play').textContent = '▶';
+  },
+
+  toggle() { this.playing ? this.pause() : this.play(); },
+
+  setSpeed(s) {
+    this.speed = s;
+    document.querySelectorAll('.pb-speed button').forEach(b => b.classList.toggle('active', parseFloat(b.dataset.speed) === s));
+  },
+
+  _tick() {
+    if (!this.playing) return;
+    const dwell = 2500 / this.speed;
+    this.timer = setTimeout(() => {
+      if (this.step >= this.total) { this.pause(); return; }
+      this.next();
+      if (this.playing) this._tick();
+    }, dwell);
+  },
+
+  render() {
+    const pct = (this.step / this.total) * 100;
+    document.getElementById('pb-progress').style.width = pct + '%';
+    document.getElementById('pb-step').textContent = `Step ${this.step} / ${this.total}`;
+
+    const narratorEl = document.getElementById('narrator-text');
+    const liveEl = document.getElementById('live-skill');
+
+    if (this.step === 0) {
+      narratorEl.textContent = "Press ▶ to begin the walkthrough.";
+      liveEl.querySelector('.lsc-name').textContent = '—';
+      liveEl.querySelector('.lsc-owner').textContent = 'No skill active';
+      liveEl.querySelector('.lsc-purpose').textContent = 'Advance the timeline to see skills fire in order.';
+      return;
+    }
+    const s = STEPS[this.step - 1];
+    narratorEl.textContent = s.narrator;
+    const sk = SKILLS[s.skill];
+    if (sk) {
+      liveEl.querySelector('.lsc-name').textContent = sk.name;
+      liveEl.querySelector('.lsc-owner').textContent = sk.owner;
+      liveEl.querySelector('.lsc-purpose').textContent = sk.purpose;
+    }
+  }
+};
+
+document.getElementById('pb-play').addEventListener('click', () => TimelineController.toggle());
+document.getElementById('pb-next').addEventListener('click', () => { TimelineController.pause(); TimelineController.next(); });
+document.getElementById('pb-prev').addEventListener('click', () => { TimelineController.pause(); TimelineController.back(); });
+document.getElementById('pb-reset').addEventListener('click', () => TimelineController.reset());
+document.querySelectorAll('.pb-speed button').forEach(b => b.addEventListener('click', () => TimelineController.setSpeed(parseFloat(b.dataset.speed))));
+document.getElementById('pb-scrubber').addEventListener('click', (e) => {
+  const rect = e.currentTarget.getBoundingClientRect();
+  const pct = (e.clientX - rect.left) / rect.width;
+  TimelineController.pause();
+  TimelineController.goto(Math.round(pct * TimelineController.total));
+});
+
+TimelineController.render();
 </script>
 
 </body>
