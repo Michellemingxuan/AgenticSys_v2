@@ -99,3 +99,36 @@ def load_skills_for(agent_name: str) -> list[Skill]:
         if agent_name in skill.owner:
             skills.append(skill)
     return skills
+
+
+def render_inline_prompt(skills: list[Skill]) -> str:
+    """Concatenate inline-mode skill bodies into one prompt string.
+
+    Tool-mode skills are skipped — they're exposed to the LLM via tool-calling,
+    not injected into the system prompt.
+    """
+    parts: list[str] = []
+    for skill in skills:
+        if skill.mode != "inline":
+            continue
+        parts.append(f"=== {skill.name} ===\n{skill.body}")
+    return "\n\n".join(parts)
+
+
+def helper_tool_specs(skills: list[Skill]) -> list[dict[str, Any]]:
+    """Return tool-call specs for tool-mode skills.
+
+    Shape: list of dicts suitable for later adaptation to LangChain `@tool`
+    decorators. Inline-mode skills are skipped.
+    """
+    specs: list[dict[str, Any]] = []
+    for skill in skills:
+        if skill.mode != "tool":
+            continue
+        specs.append({
+            "name": skill.name,
+            "description": skill.description,
+            "signature": skill.meta.get("tool_signature", ""),
+            "body": skill.body,
+        })
+    return specs
