@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any, Callable
 
 from langchain_core.language_models import BaseChatModel
+from pydantic import BaseModel
 
 from logger.event_logger import EventLogger
 from models.types import LLMResult, StepRecord
+
+
+_CASE_ID_RE = re.compile(r"CASE-\d+")
+_DIGIT_RUN_RE = re.compile(r"\d{6,}")
 
 
 FIREWALL_GUIDANCE = (
@@ -29,12 +35,32 @@ class FirewallRejection(Exception):
 
 
 class FirewallStack:
-    """Owns firewall config and step history. Use `wrap(model)` to build a FirewalledModel."""
+    """Owns firewall config, step history, and the inter-agent transit bus.
 
-    def __init__(self, logger: EventLogger, max_retries: int = 2):
+    Two chokepoints:
+      - `wrap(model).ainvoke(...)` — every LLM call (retry on FirewallRejection,
+        tool-loop, output_type parsing) passes through here.
+      - `send(message, from, to)`  — every inter-agent transit runs through
+        here so redact patterns apply on every cross-agent edge, not just at
+        the LLM boundary.
+
+    `concurrency_cap` bounds simultaneous LLM requests across all wrapped
+    models. Parallel fan-out (Phase 4 asyncio.gather on Reports + Team, and
+    parallel specialist dispatch) can otherwise trip OpenAI rate limits on
+    large pillars. Default 8 is a safe starting point.
+    """
+
+    def __init__(
+        self,
+        logger: EventLogger,
+        max_retries: int = 2,
+        concurrency_cap: int = 8,
+    ):
         self.logger = logger
         self.max_retries = max_retries
+        self.concurrency_cap = concurrency_cap
         self.step_history: list[StepRecord] = []
+        self._semaphore = asyncio.Semaphore(concurrency_cap)
 
     def wrap(self, model: BaseChatModel) -> "FirewalledModel":
         """Wrap a LangChain model with firewall retry logic."""
@@ -44,10 +70,46 @@ class FirewallStack:
         """Truncate step_history to the given index."""
         self.step_history = self.step_history[:step_index]
 
+    async def send(self, message: Any, from_agent: str, to_agent: str) -> Any:
+        """Inter-agent transit chokepoint. Logs, redacts, and shape-validates.
+
+        Returns the (possibly-redacted) message so callers can thread it into
+        the next agent. Pydantic models round-trip through `model_dump` +
+        `model_validate` so redaction applies to string fields without losing
+        type information. Plain dicts, lists, and strings are walked in
+        place. Other types pass through untouched.
+        """
+        self.logger.log(
+            "firewall_send",
+            {
+                "from": from_agent,
+                "to": to_agent,
+                "type": type(message).__name__,
+            },
+        )
+        return self._redact_payload(message)
+
+    @classmethod
+    def _redact_payload(cls, payload: Any) -> Any:
+        if isinstance(payload, str):
+            return cls._sanitize_message(payload)
+        if isinstance(payload, BaseModel):
+            dumped = payload.model_dump()
+            redacted = cls._redact_payload(dumped)
+            return type(payload).model_validate(redacted)
+        if isinstance(payload, dict):
+            return {k: cls._redact_payload(v) for k, v in payload.items()}
+        if isinstance(payload, list):
+            return [cls._redact_payload(v) for v in payload]
+        if isinstance(payload, tuple):
+            return tuple(cls._redact_payload(v) for v in payload)
+        return payload
+
     @staticmethod
     def _sanitize_message(message: str) -> str:
-        """Mask long digit sequences (6+ digits) with ***MASKED***."""
-        return re.sub(r"\d{6,}", "***MASKED***", message)
+        """Mask identifiers: long digit runs (6+ digits) and CASE-\\d+ tokens."""
+        masked = _CASE_ID_RE.sub("[CASE-ID]", message)
+        return _DIGIT_RUN_RE.sub("***MASKED***", masked)
 
 
 class FirewalledModel:
@@ -147,7 +209,12 @@ class FirewalledModel:
 
         response = None
         for _ in range(max_tool_turns):
-            response = await bound_model.ainvoke(messages)
+            # Shared semaphore caps concurrent LLM requests across all
+            # FirewalledModel instances under this FirewallStack — protects
+            # against rate limits on parallel fan-out (Reports + Team,
+            # parallel specialists).
+            async with self.firewall._semaphore:
+                response = await bound_model.ainvoke(messages)
             tool_calls = getattr(response, "tool_calls", None)
             if not tool_calls:
                 return response
