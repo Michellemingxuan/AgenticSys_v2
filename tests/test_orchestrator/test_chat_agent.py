@@ -50,3 +50,34 @@ async def test_converse_returns_response(mock_llm, logger):
     assert isinstance(response, str)
     assert len(response) > 0
     assert "bureau score" in response.lower()
+
+
+async def test_converse_forwards_tools_to_llm(mock_llm, logger):
+    """When ChatAgent is constructed with helper tools, every converse()
+    LLM call should receive them via the tools= kwarg on ainvoke."""
+    mock_llm.ainvoke = AsyncMock(
+        return_value=LLMResult(status="success", data={"response": "ok"})
+    )
+
+    def fake_helper(term: str) -> str:
+        """Fake helper doc."""
+        return term
+
+    agent = ChatAgent(mock_llm, logger, tools=[fake_helper])
+    await agent.converse("What is DTI?")
+
+    call_kwargs = mock_llm.ainvoke.await_args.kwargs
+    assert call_kwargs.get("tools") == [fake_helper]
+
+
+async def test_converse_no_tools_passes_none(mock_llm, logger):
+    """Default ChatAgent (no tools) forwards tools=None — preserves legacy behavior."""
+    mock_llm.ainvoke = AsyncMock(
+        return_value=LLMResult(status="success", data={"response": "ok"})
+    )
+
+    agent = ChatAgent(mock_llm, logger)
+    await agent.converse("Hi")
+
+    call_kwargs = mock_llm.ainvoke.await_args.kwargs
+    assert call_kwargs.get("tools") is None

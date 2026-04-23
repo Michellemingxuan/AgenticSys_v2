@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 
 from agents.guardrail_agent import GuardrailAgent
+from agents.helper_tools import build_helper_tools
 from agents.report_agent import ReportAgent
 from agents.session_registry import SessionRegistry
 from config.pillar_loader import PillarLoader
@@ -122,7 +123,8 @@ async def amain():
     pillar_yaml = pillar_loader.load(args.pillar) or {}
 
     registry = SessionRegistry()
-    chat_agent = ChatAgent(llm, logger)
+    helper_tools = build_helper_tools()
+    chat_agent = ChatAgent(llm, logger, tools=helper_tools)
     guardrail = GuardrailAgent(llm, logger)
 
     async def _screen_and_run(question: str) -> str:

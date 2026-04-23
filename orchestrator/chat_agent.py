@@ -42,9 +42,17 @@ CHAT_SYSTEM_PROMPT = (
 class ChatAgent:
     """Formats analysis output and handles follow-up conversation."""
 
-    def __init__(self, llm: FirewalledModel, logger: EventLogger):
+    def __init__(
+        self,
+        llm: FirewalledModel,
+        logger: EventLogger,
+        tools: list | None = None,
+    ):
         self.llm = llm
         self.logger = logger
+        # Optional list of callables (helper skills in tool mode) to bind on
+        # every converse() call. None keeps the legacy no-tools behavior.
+        self.tools = tools
 
     def format_for_reviewer(
         self,
@@ -163,6 +171,7 @@ class ChatAgent:
         result = await self.llm.ainvoke(
             system_prompt=system,
             user_message=user_msg,
+            tools=self.tools,
         )
 
         if result.status == "blocked":
