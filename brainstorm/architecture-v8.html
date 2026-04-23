@@ -103,6 +103,21 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 @keyframes dashMarch {
   to { stroke-dashoffset: -24; }
 }
+
+.drawer-backdrop { position: fixed; inset: 0; background: rgba(0, 23, 90, 0.35); opacity: 0; pointer-events: none; transition: opacity 0.25s ease; z-index: 40; }
+.drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+.skill-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 420px; background: white; box-shadow: -6px 0 24px rgba(0,0,0,0.15); transform: translateX(100%); transition: transform 0.3s ease; z-index: 50; padding: 22px 24px; overflow-y: auto; }
+.skill-drawer.open { transform: translateX(0); }
+.drawer-close { position: absolute; top: 14px; right: 16px; background: transparent; border: none; font-size: 18px; cursor: pointer; color: var(--gray-text); }
+.dr-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em; color: var(--gray-text); margin-bottom: 4px; }
+.dr-name { font-size: 22px; font-weight: 700; color: var(--navy); margin-bottom: 2px; }
+.dr-owner { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 2px; background: var(--gray-light); color: var(--slate); border: 1px solid var(--gray-border); margin-bottom: 16px; }
+.dr-section { margin-bottom: 14px; }
+.dr-section h4 { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--gray-text); margin-bottom: 5px; }
+.dr-section p, .dr-section code { font-size: 12px; color: var(--slate); line-height: 1.55; }
+.dr-section code { display: block; font-family: 'Courier New', monospace; font-size: 11px; background: var(--gray-light); padding: 8px 10px; border-left: 2px solid var(--blue); border-radius: 2px; white-space: pre-wrap; }
+.dr-replay { margin-top: 16px; background: var(--blue); color: white; border: none; padding: 8px 14px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; cursor: pointer; border-radius: 2px; }
+.dr-replay:disabled { background: var(--gray-border); color: var(--gray-text); cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -268,6 +283,18 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
     </aside>
   </div>
 </div>
+
+<div class="drawer-backdrop" id="drawer-backdrop"></div>
+<aside class="skill-drawer" id="skill-drawer" aria-hidden="true">
+  <button class="drawer-close" id="drawer-close" aria-label="Close">✕</button>
+  <div class="dr-label">Skill</div>
+  <div class="dr-name" id="dr-name">—</div>
+  <div class="dr-owner" id="dr-owner">—</div>
+  <div class="dr-section"><h4>Purpose</h4><p id="dr-purpose">—</p></div>
+  <div class="dr-section"><h4>Tools called</h4><p id="dr-tools">—</p></div>
+  <div class="dr-section"><h4>Example (this case)</h4><code id="dr-example">—</code></div>
+  <button class="dr-replay" id="dr-replay">Replay this step</button>
+</aside>
 
 <script>
 // NOTE: actor value 'spec-all' is a pseudo-id meaning "fan out to all spec-* agent cards"; not a real data-agent.
@@ -473,6 +500,43 @@ document.getElementById('pb-scrubber').addEventListener('click', (e) => {
 
 window.addEventListener('resize', () => TimelineController.render());
 TimelineController.render();
+
+function openDrawer(skillId) {
+  const sk = SKILLS[skillId];
+  if (!sk) return;
+  document.getElementById('dr-name').textContent = sk.name;
+  document.getElementById('dr-owner').textContent = sk.owner;
+  document.getElementById('dr-purpose').textContent = sk.purpose;
+  document.getElementById('dr-tools').textContent = sk.tools || '—';
+  document.getElementById('dr-example').textContent = sk.example || '—';
+
+  const stepIdx = STEPS.findIndex(s => s.skill === skillId);
+  const replay = document.getElementById('dr-replay');
+  if (stepIdx >= 0) {
+    replay.disabled = false;
+    replay.onclick = () => { TimelineController.pause(); TimelineController.goto(stepIdx + 1); closeDrawer(); };
+  } else {
+    replay.disabled = true;
+    replay.onclick = null;
+  }
+
+  document.getElementById('drawer-backdrop').classList.add('open');
+  const d = document.getElementById('skill-drawer');
+  d.classList.add('open');
+  d.setAttribute('aria-hidden', 'false');
+  TimelineController.pause();
+}
+function closeDrawer() {
+  document.getElementById('drawer-backdrop').classList.remove('open');
+  const d = document.getElementById('skill-drawer');
+  d.classList.remove('open');
+  d.setAttribute('aria-hidden', 'true');
+}
+document.querySelectorAll('[data-skill]').forEach(el => {
+  el.addEventListener('click', (e) => { e.stopPropagation(); openDrawer(el.dataset.skill); });
+});
+document.getElementById('drawer-close').addEventListener('click', closeDrawer);
+document.getElementById('drawer-backdrop').addEventListener('click', closeDrawer);
 </script>
 
 </body>
