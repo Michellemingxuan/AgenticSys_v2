@@ -25,4 +25,17 @@ def test_build_llm_returns_firewalled_model(logger):
 
     assert isinstance(llm, FirewalledModel)
     assert llm.firewall is firewall
-    mock_chat.assert_called_once_with(model="gpt-4.1")
+    # Default api_max_retries=2 is passed through explicitly.
+    mock_chat.assert_called_once_with(model="gpt-4.1", max_retries=2)
+
+
+def test_build_llm_passes_custom_api_max_retries(logger):
+    """api_max_retries tunes LangChain's built-in retry layer (5xx / 429 / timeouts)."""
+    firewall = FirewallStack(logger=logger)
+
+    with patch("gateway.llm_factory.ChatOpenAI") as mock_chat:
+        mock_chat.return_value = object()
+        llm = build_llm("gpt-4.1", firewall, api_max_retries=5)
+
+    assert isinstance(llm, FirewalledModel)
+    mock_chat.assert_called_once_with(model="gpt-4.1", max_retries=5)
