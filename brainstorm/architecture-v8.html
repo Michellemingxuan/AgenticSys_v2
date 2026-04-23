@@ -486,6 +486,7 @@ const TimelineController = {
     document.querySelectorAll('.skill-node.active').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.toolbox-item.glow').forEach(el => el.classList.remove('glow'));
     this._clearTokenPaths();
+    SpecInnerChain.stop();
 
     if (this.step === 0) {
       narratorEl.textContent = "Press ▶ to begin the walkthrough.";
@@ -538,6 +539,8 @@ const TimelineController = {
     } else if (!s || s.zoom !== 'team-construction') {
       if (this._lastZoom !== null && this._lastZoom !== undefined) this._lastZoom = null;
     }
+
+    if (this.step === 6) SpecInnerChain.run();
   },
 
   _clearTokenPaths() {
@@ -675,6 +678,29 @@ document.getElementById('tc-next').addEventListener('click', () => ZoomTC.next()
 document.getElementById('tc-prev').addEventListener('click', () => ZoomTC.prev());
 document.getElementById('tc-close').addEventListener('click', () => ZoomTC.close());
 document.querySelector('#zoom-team-construction .zo-close').addEventListener('click', () => ZoomTC.close());
+
+const SpecInnerChain = {
+  sequence: ['data-query','data-analysis','data-viz','synthesize','report-answer'],
+  timers: [],
+  run() {
+    this.stop();
+    const cards = document.querySelectorAll('[data-agent^="spec-"]');
+    this.sequence.forEach((sk, idx) => {
+      const t = setTimeout(() => {
+        cards.forEach(c => {
+          c.querySelectorAll('.skill-node').forEach(n => n.classList.remove('active'));
+          const node = c.querySelector(`[data-skill="${sk}"]`);
+          if (node) node.classList.add('active');
+        });
+      }, idx * 500);
+      this.timers.push(t);
+    });
+  },
+  stop() {
+    this.timers.forEach(t => clearTimeout(t));
+    this.timers = [];
+  }
+};
 
 // Zoom registry — additional zoom overlays push themselves here so the shared
 // backdrop closes all of them on click. Each registered object must expose .close().
