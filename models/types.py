@@ -171,6 +171,20 @@ class TeamDraft(BaseModel):
     sub_questions: list[TeamAssignment] = Field(default_factory=list)
 
 
+class DataPullRequest(BaseModel):
+    """Advisory signal emitted by the Balance step when specialist `data_gaps`
+    and report `coverage` together suggest the answer is materially incomplete.
+
+    No live pull backend exists today — this documents what a future Data Agent
+    would target. Rendered to the reviewer by `ChatAgent.format_final_answer`.
+    """
+
+    needed: bool
+    reason: str
+    would_pull: list[str] = Field(default_factory=list)
+    severity: Literal["low", "medium", "high"]
+
+
 class FinalAnswer(BaseModel):
     """Top-level reviewer-facing answer — the Balancing skill's output.
 
@@ -184,6 +198,10 @@ class FinalAnswer(BaseModel):
     duration_ms (float)}`. Stages are `report_agent`, `team_workflow`, and
     `balance`. The first two run in parallel via `asyncio.gather`, so their
     time ranges overlap; `balance` starts after both branches complete.
+
+    `data_pull_request` is set when the balancing step judges the combined
+    drafts insufficient to answer with confidence. Advisory only — no live
+    pull backend is wired today.
     """
 
     answer: str
@@ -191,6 +209,7 @@ class FinalAnswer(BaseModel):
     report_draft: ReportDraft
     team_draft: TeamDraft
     timeline: list[dict] = Field(default_factory=list)
+    data_pull_request: DataPullRequest | None = None
 
 
 # Backwards-compat alias — see the placeholder earlier in this file.
