@@ -1,0 +1,40 @@
+"""Tests for data.adapter — the sync-time schema reconciler."""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from data import adapter
+
+
+REPO_ROOT = Path(__file__).parent.parent
+SCOPE_GUARDED_PATHS = [
+    "data/gateway.py",
+    "data/catalog.py",
+    "agents",
+    "tools",
+]
+
+
+def test_adapter_module_importable():
+    """Smoke test: module imports and constants are defined."""
+    assert adapter.FUZZY_THRESHOLD == 0.85
+    assert adapter.TOP_K == 3
+    assert adapter.DTYPE_COMPAT_THRESHOLD == 0.5
+
+
+def test_pandas_scope():
+    """pandas must ONLY be imported inside data/adapter.py — never by gateway,
+    catalog, agents, or tools. Enforced via grep over the guarded paths.
+    """
+    for rel in SCOPE_GUARDED_PATHS:
+        target = REPO_ROOT / rel
+        cmd = ["grep", "-rn", "--include=*.py", "import pandas", str(target)]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        # grep exit 1 = no matches (good); exit 0 = matches found (fail).
+        assert result.returncode == 1, (
+            f"pandas import leaked into {rel}:\n{result.stdout}"
+        )
