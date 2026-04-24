@@ -271,6 +271,33 @@ def match_column(
 
 # ── Parse-hint inference (strptime pattern for date-as-string columns) ────
 
+# Common-sense name → draft description patterns. First substring match wins.
+_DRAFT_PATTERNS: list[tuple[str, str]] = [
+    ("id", "unique identifier"),
+    ("date", "date value — verify format and semantics"),
+    ("amount", "monetary amount"),
+    ("balance", "balance value"),
+    ("count", "count of occurrences"),
+    ("rate", "rate or ratio"),
+    ("score", "score value"),
+    ("name", "name string"),
+    ("code", "code value — verify encoding"),
+]
+
+
+def _draft_description(col_name: str) -> str:
+    """Propose a provisional description for an obviously-named new column.
+
+    Returns empty string when no pattern matches — forcing the human to
+    describe the column from scratch.
+    """
+    norm = _normalize_name(col_name)
+    for keyword, draft in _DRAFT_PATTERNS:
+        if keyword in norm:
+            return f"{draft} (agent-drafted, unverified)"
+    return ""
+
+
 def _infer_parse_hint(samples: list) -> str | None:
     """Detect a strptime format pattern for date-as-string columns.
 
@@ -296,3 +323,50 @@ def _infer_parse_hint(samples: list) -> str | None:
                 best = (rate, fmt)
 
     return best[1] if best else None
+
+
+# ── Case reconciliation (orchestrates matcher over all tables/cols) ────────
+
+def reconcile_case(gateway, canonical: dict, case_id: str) -> Diff:
+    """Reconcile all tables+columns in a case against the canonical catalog.
+
+    Pure function — does NOT write to YAML. Caller (apply_diff) handles I/O.
+    """
+    diff = Diff(case_id=case_id)
+    gateway.set_case(case_id)
+
+    canonical_tables = set(canonical.keys())
+
+    for table in gateway.list_tables():
+        rows = gateway.query(table) or []
+        if table not in canonical_tables:
+            diff.new_tables.append(table)
+
+        if not rows:
+            continue
+
+        for col in rows[0].keys():
+            samples = [r.get(col) for r in rows[:200]]
+
+            result = match_column(
+                real_table=table,
+                real_col=col,
+                real_samples=samples,
+                canonical=canonical,
+            )
+
+            # Parse hint: only attempt for columns with stringy samples.
+            if result.real_dtype == "string":
+                hint = _infer_parse_hint(samples)
+                if hint:
+                    result.parse_hint = hint
+
+            if result.bucket == "auto":
+                diff.auto_aliased.append(result)
+            elif result.bucket == "ambiguous":
+                diff.ambiguous.append(result)
+            else:
+                result.drafted_description = _draft_description(col)
+                diff.new.append(result)
+
+    return diff

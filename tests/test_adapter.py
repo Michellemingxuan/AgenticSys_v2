@@ -210,3 +210,77 @@ def test_infer_parse_hint(samples, expected):
 def test_infer_parse_hint_rejects_numeric():
     # Pure numeric samples should NOT be flagged as dates.
     assert adapter._infer_parse_hint(["123", "456", "789"]) is None
+
+
+# ── Task 6: reconcile_case ─────────────────────────────────────────────────
+
+def test_reconcile_case_produces_three_buckets():
+    """End-to-end reconciliation of one case against a tiny catalog."""
+    from data.gateway import SimulatedDataGateway
+
+    case_data = {
+        "case_A": {
+            "transactions": [
+                {"trans_amt": "12.50", "transaction_dt": "2025-01-01", "totally_new_field": "x"},
+                {"trans_amt": "30.00", "transaction_dt": "2025-02-15", "totally_new_field": "y"},
+            ],
+        },
+    }
+    gateway = SimulatedDataGateway(case_data=case_data)
+    gateway.set_case("case_A")
+
+    canonical = _canonical_fixture()
+
+    diff = adapter.reconcile_case(gateway, canonical, "case_A")
+
+    assert diff.case_id == "case_A"
+    # trans_amt is a known alias of amount → auto
+    assert any(e.real_col == "trans_amt" and e.chosen and e.chosen.canonical_col == "amount"
+               for e in diff.auto_aliased)
+    # transaction_dt fuzzy-matches transaction_date → ambiguous
+    assert any(e.real_col == "transaction_dt" for e in diff.ambiguous)
+    # totally_new_field has no match → new
+    assert any(e.real_col == "totally_new_field" for e in diff.new)
+
+
+def test_reconcile_case_flags_unknown_tables():
+    """A table not in canonical lands in new_tables; its columns go to new."""
+    from data.gateway import SimulatedDataGateway
+
+    case_data = {
+        "case_A": {
+            "brand_new_table": [{"foo": "1"}, {"foo": "2"}],
+        },
+    }
+    gateway = SimulatedDataGateway(case_data=case_data)
+    gateway.set_case("case_A")
+    canonical = _canonical_fixture()
+
+    diff = adapter.reconcile_case(gateway, canonical, "case_A")
+
+    assert "brand_new_table" in diff.new_tables
+    assert any(c.real_table == "brand_new_table" for c in diff.new)
+
+
+def test_reconcile_case_drafts_description_for_common_patterns():
+    """Columns with obvious-naming patterns get an agent-drafted description."""
+    from data.gateway import SimulatedDataGateway
+
+    case_data = {
+        "case_A": {
+            "new_tbl": [
+                {"customer_id": "1", "txn_amount": "10.0", "bogusthing": "x"},
+                {"customer_id": "2", "txn_amount": "20.0", "bogusthing": "y"},
+            ],
+        },
+    }
+    gateway = SimulatedDataGateway(case_data=case_data)
+    gateway.set_case("case_A")
+    canonical = _canonical_fixture()
+
+    diff = adapter.reconcile_case(gateway, canonical, "case_A")
+
+    by_name = {e.real_col: e for e in diff.new}
+    assert by_name["customer_id"].drafted_description  # non-empty
+    assert by_name["txn_amount"].drafted_description   # non-empty
+    assert by_name["bogusthing"].drafted_description == ""  # no pattern match
