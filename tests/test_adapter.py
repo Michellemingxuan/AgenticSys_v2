@@ -521,6 +521,22 @@ columns:
     assert "[canonical: amount]" in out
 
 
+def test_data_catalog_sync_skill_loads():
+    """The new sync skill file is parseable by the existing loader."""
+    from skills.loader import load_skill
+
+    skill_path = REPO_ROOT / "skills" / "workflow" / "data_catalog_sync.md"
+    skill = load_skill(skill_path)
+    assert skill.name
+    assert "sync" in skill.name.lower() or "catalog" in skill.name.lower()
+    body_lower = skill.body.lower()
+    assert "auto" in body_lower
+    assert "ambiguous" in body_lower
+    assert "new" in body_lower
+    assert "sync_catalog" in body_lower
+    assert "verify_description" in body_lower
+
+
 def test_to_prompt_context_omits_canonical_when_same(tmp_path):
     """When real_name == canonical_name, no [canonical: X] annotation."""
     from data.catalog import DataCatalog
