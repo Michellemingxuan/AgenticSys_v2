@@ -63,3 +63,27 @@ def test_normalize_name_idempotent():
         once = adapter._normalize_name(raw)
         twice = adapter._normalize_name(once)
         assert once == twice
+
+
+# ── Task 3: _dtype_compatible ──────────────────────────────────────────────
+
+@pytest.mark.parametrize("samples,canonical_dtype,expected", [
+    # Integer-like strings → compatible with int
+    (["1", "2", "3"], "int", True),
+    (["1", "two", "three"], "int", False),  # 1/3 parse rate < 0.5
+    # Float-like → compatible with float
+    (["1.5", "2.0", "3.14"], "float", True),
+    (["abc", "def"], "float", False),
+    # Date-like strings → compatible with date
+    (["2025-01-01", "2025-02-15", "2025-12-31"], "date", True),
+    (["Nov'2025", "Dec'2025", "Jan'2026"], "date", True),
+    (["not a date", "also not"], "date", False),
+    # String canonical accepts anything
+    (["anything", "goes"], "str", True),
+    (["123", "456"], "string", True),
+    # Empty samples → treated as compatible (no evidence against)
+    ([], "int", True),
+    ([None, None], "int", True),
+])
+def test_dtype_compatible(samples, canonical_dtype, expected):
+    assert adapter._dtype_compatible(samples, canonical_dtype) is expected
