@@ -267,3 +267,32 @@ def match_column(
         real_dtype=real_dtype_hint,
         bucket="new",
     )
+
+
+# ── Parse-hint inference (strptime pattern for date-as-string columns) ────
+
+def _infer_parse_hint(samples: list) -> str | None:
+    """Detect a strptime format pattern for date-as-string columns.
+
+    Returns the format with the highest parse-success rate (>= threshold)
+    from _DATE_FORMATS, or None if no format reaches the threshold.
+    """
+    non_null = [s for s in samples if s is not None and s != ""]
+    if not non_null:
+        return None
+
+    series = pd.Series([str(s) for s in non_null])
+    best: tuple[float, str] | None = None
+
+    for fmt in _DATE_FORMATS:
+        try:
+            rate = float(
+                pd.to_datetime(series, errors="coerce", format=fmt).notna().mean()
+            )
+        except (ValueError, TypeError):
+            continue
+        if rate >= DTYPE_COMPAT_THRESHOLD:
+            if best is None or rate > best[0]:
+                best = (rate, fmt)
+
+    return best[1] if best else None

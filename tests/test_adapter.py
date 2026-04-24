@@ -190,3 +190,23 @@ def test_ambiguous_candidates_sorted_by_ratio_desc():
     if len(result.candidates) >= 2:
         ratios = [c.ratio for c in result.candidates]
         assert ratios == sorted(ratios, reverse=True)
+
+
+# ── Task 5: _infer_parse_hint ──────────────────────────────────────────────
+
+@pytest.mark.parametrize("samples,expected", [
+    (["2025-01-01", "2025-02-15", "2025-12-31"], "%Y-%m-%d"),
+    (["Nov'2025", "Dec'2025", "Jan'2026"], "%b'%Y"),
+    (["2025-01", "2025-02", "2025-12"], "%Y-%m"),
+    # Unambiguous d/m/Y — only %d/%m/%Y parses month>12.
+    (["15/01/2025", "31/12/2025", "04/03/2026"], "%d/%m/%Y"),
+    (["not a date", "also nope"], None),
+    ([], None),
+])
+def test_infer_parse_hint(samples, expected):
+    assert adapter._infer_parse_hint(samples) == expected
+
+
+def test_infer_parse_hint_rejects_numeric():
+    # Pure numeric samples should NOT be flagged as dates.
+    assert adapter._infer_parse_hint(["123", "456", "789"]) is None
