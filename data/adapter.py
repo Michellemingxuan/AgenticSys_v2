@@ -7,6 +7,7 @@ stay pure-Python. See tests/test_adapter.py::test_pandas_scope for enforcement.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -47,3 +48,20 @@ class Diff:
     ambiguous: list[ColumnDiff] = field(default_factory=list)
     new: list[ColumnDiff] = field(default_factory=list)
     new_tables: list[str] = field(default_factory=list)
+
+
+# ── Name normalization ─────────────────────────────────────────────────────
+
+_NON_ALNUM = re.compile(r"[^a-z0-9]")
+_TRAILING_DIGITS = re.compile(r"\d+$")
+
+
+def _normalize_name(name: str) -> str:
+    """Normalize a column or table name for fuzzy comparison.
+
+    Lowercase → strip non-alphanumerics → trim trailing digits.
+    Idempotent: normalize(normalize(x)) == normalize(x).
+    """
+    lower = name.lower()
+    alnum = _NON_ALNUM.sub("", lower)
+    return _TRAILING_DIGITS.sub("", alnum)

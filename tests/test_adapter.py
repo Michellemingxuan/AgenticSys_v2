@@ -38,3 +38,28 @@ def test_pandas_scope():
         assert result.returncode == 1, (
             f"pandas import leaked into {rel}:\n{result.stdout}"
         )
+
+
+# ── Task 2: _normalize_name ────────────────────────────────────────────────
+
+@pytest.mark.parametrize("raw,expected", [
+    ("fico_score", "ficoscore"),
+    ("FICO_Score", "ficoscore"),
+    ("trans-amt", "transamt"),
+    ("Trans.Amt", "transamt"),
+    ("amount_v2", "amountv"),       # non-alnums stripped, trailing digits trimmed
+    ("col_123", "col"),             # trailing digits stripped (cleanly numeric tail)
+    ("", ""),
+    ("a", "a"),
+    ("already_normalized_no_change", "alreadynormalizednochange"),
+])
+def test_normalize_name(raw, expected):
+    assert adapter._normalize_name(raw) == expected
+
+
+def test_normalize_name_idempotent():
+    """Applying normalize twice yields the same result as applying once."""
+    for raw in ["fico_score", "TRANS-AMT", "amount_v2", ""]:
+        once = adapter._normalize_name(raw)
+        twice = adapter._normalize_name(once)
+        assert once == twice
