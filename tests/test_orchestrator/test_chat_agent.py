@@ -7,7 +7,13 @@ from unittest.mock import AsyncMock
 import pytest
 
 from logger.event_logger import EventLogger
-from models.types import FinalAnswer, LLMResult, ReportDraft, TeamDraft
+from models.types import (
+    DataPullRequest,
+    FinalAnswer,
+    LLMResult,
+    ReportDraft,
+    TeamDraft,
+)
 from orchestrator.chat_agent import ChatAgent
 
 
@@ -54,6 +60,50 @@ def test_format_final_answer_no_flags(mock_llm, logger):
 
     assert "\n## Flags" not in formatted
     assert "Report coverage: none" in formatted
+
+
+def _final_with_dpr(dpr):
+    return FinalAnswer(
+        answer="test answer",
+        flags=[],
+        report_draft=ReportDraft(coverage="partial"),
+        team_draft=TeamDraft(answer="team answer", specialists_consulted=["bureau"]),
+        data_pull_request=dpr,
+    )
+
+
+def test_format_without_pull_request_omits_section():
+    formatted = ChatAgent.format_final_answer(_final_with_dpr(None))
+    assert "Data pull recommendation" not in formatted
+
+
+def test_format_with_pull_request_renders_section():
+    dpr = DataPullRequest(
+        needed=True,
+        reason="Need bureau refresh",
+        would_pull=["bureau.fico_latest", "spend_payments.returned_reasons"],
+        severity="high",
+    )
+    formatted = ChatAgent.format_final_answer(_final_with_dpr(dpr))
+    assert "Data pull recommendation (severity: high)" in formatted
+    assert "Need bureau refresh" in formatted
+    assert "bureau.fico_latest" in formatted
+    assert "spend_payments.returned_reasons" in formatted
+    assert "No live pull today" in formatted
+
+
+def test_format_with_needed_false_omits_section():
+    dpr = DataPullRequest(needed=False, reason="ok", would_pull=[], severity="low")
+    formatted = ChatAgent.format_final_answer(_final_with_dpr(dpr))
+    assert "Data pull recommendation" not in formatted
+
+
+def test_format_with_empty_would_pull_shows_placeholder():
+    dpr = DataPullRequest(
+        needed=True, reason="generic concern", would_pull=[], severity="low",
+    )
+    formatted = ChatAgent.format_final_answer(_final_with_dpr(dpr))
+    assert "Would pull: (nothing specific flagged)" in formatted
 
 
 async def test_converse_returns_response(mock_llm, logger):

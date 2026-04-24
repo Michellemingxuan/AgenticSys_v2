@@ -40,8 +40,8 @@ class ChatAgent:
     def format_final_answer(final: FinalAnswer) -> str:
         """Render a FinalAnswer as reviewer-facing markdown.
 
-        Sections: Answer, Flags (if any), Provenance (report coverage + files
-        consulted + specialists consulted), Timeline (per-stage duration).
+        Sections: Answer, Flags (if any), Provenance, Data pull recommendation
+        (if any), Timeline (per-stage duration).
         Staticmethod because formatting doesn't depend on the agent's LLM
         or logger.
         """
@@ -56,6 +56,18 @@ class ChatAgent:
             f"- Files consulted: {final.report_draft.files_consulted or '(none)'}\n"
             f"- Specialists consulted: {final.team_draft.specialists_consulted or '(none)'}"
         )
+
+        dpr = final.data_pull_request
+        if dpr is not None and dpr.needed:
+            would_pull_str = ", ".join(dpr.would_pull) if dpr.would_pull else "(nothing specific flagged)"
+            parts.append(
+                f"\n## Data pull recommendation (severity: {dpr.severity})\n"
+                f"Reason: {dpr.reason}\n\n"
+                f"Would pull: {would_pull_str}\n\n"
+                f"> No live pull today — the Data Agent is not deployed yet. "
+                f"This is a signal of what a future pull would target."
+            )
+
         if final.timeline:
             parts.append("\n## Timeline")
             for entry in final.timeline:
