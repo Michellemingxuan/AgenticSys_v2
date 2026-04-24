@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from gateway.firewall_stack import FirewalledModel
+from llm.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger
 from models.types import ReportDraft
 from skills.loader import load_skill as _load_skill

@@ -1,6 +1,6 @@
-"""Unit tests for gateway.case_scrubber."""
+"""Unit tests for llm.case_scrubber."""
 
-from gateway.case_scrubber import scrub
+from llm.case_scrubber import scrub
 
 
 def test_scrub_replaces_active_case_id():

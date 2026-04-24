@@ -6,7 +6,7 @@ import itertools
 import json
 from pathlib import Path
 
-from gateway.firewall_stack import FirewalledModel
+from llm.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger
 from models.types import (
     Conflict,

@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from gateway.firewall_stack import FirewallStack
+from llm.firewall_stack import FirewallStack
 from logger.event_logger import EventLogger
 from models.types import StepRecord
 

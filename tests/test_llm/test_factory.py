@@ -1,4 +1,4 @@
-"""Tests for gateway.llm_factory.build_llm."""
+"""Tests for llm.factory.build_llm."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
-from gateway.firewall_stack import FirewallStack, FirewalledModel
-from gateway.llm_factory import build_llm
+from llm.firewall_stack import FirewallStack, FirewalledModel
+from llm.factory import build_llm
 from logger.event_logger import EventLogger
 
 
@@ -19,7 +19,7 @@ def logger(tmp_path):
 def test_build_llm_returns_firewalled_model(logger):
     firewall = FirewallStack(logger=logger)
 
-    with patch("gateway.llm_factory.ChatOpenAI") as mock_chat:
+    with patch("llm.factory.ChatOpenAI") as mock_chat:
         mock_chat.return_value = object()  # opaque LangChain model stand-in
         llm = build_llm("gpt-4.1", firewall)
 
@@ -33,7 +33,7 @@ def test_build_llm_passes_custom_api_max_retries(logger):
     """api_max_retries tunes LangChain's built-in retry layer (5xx / 429 / timeouts)."""
     firewall = FirewallStack(logger=logger)
 
-    with patch("gateway.llm_factory.ChatOpenAI") as mock_chat:
+    with patch("llm.factory.ChatOpenAI") as mock_chat:
         mock_chat.return_value = object()
         llm = build_llm("gpt-4.1", firewall, api_max_retries=5)
 

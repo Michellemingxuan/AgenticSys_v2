@@ -13,7 +13,7 @@ from agents.general_specialist import GeneralSpecialist
 from agents.report_agent import ReportAgent
 from agents.session_registry import SessionRegistry
 from config.report_loader import get_synthesis_prompt
-from gateway.firewall_stack import FirewalledModel
+from llm.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger
 from models.types import (
     BlockedStep,

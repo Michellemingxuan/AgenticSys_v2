@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from gateway.firewall_stack import FirewallRejection, FirewallStack, FirewalledModel, FIREWALL_GUIDANCE
+from llm.firewall_stack import FirewallRejection, FirewallStack, FirewalledModel, FIREWALL_GUIDANCE
 from logger.event_logger import EventLogger
 
 

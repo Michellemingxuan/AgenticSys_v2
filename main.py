@@ -16,8 +16,8 @@ from config.pillar_loader import PillarLoader
 from datalayer.catalog import DataCatalog
 from datalayer.gateway import SimulatedDataGateway
 from datalayer.generator import DataGenerator
-from gateway.firewall_stack import FirewallStack
-from gateway.llm_factory import build_llm
+from llm.firewall_stack import FirewallStack
+from llm.factory import build_llm
 from logger.event_logger import EventLogger
 from models.types import FinalAnswer
 from orchestrator.chat_agent import ChatAgent

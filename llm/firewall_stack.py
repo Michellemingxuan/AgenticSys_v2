@@ -134,7 +134,7 @@ class FirewalledModel:
     ) -> LLMResult:
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        from gateway import case_scrubber
+        from llm import case_scrubber
 
         attempt = 0
         current_system = system_prompt

@@ -25,7 +25,7 @@ from pathlib import Path
 from datalayer import adapter
 from datalayer.catalog import DataCatalog
 from datalayer.gateway import SimulatedDataGateway
-from gateway.firewall_stack import FirewalledModel
+from llm.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger
 from skills.loader import load_skill as _load_skill
 from tools.data_tools import query_table

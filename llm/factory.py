@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from langchain_openai import ChatOpenAI
 
-from gateway.firewall_stack import FirewallStack, FirewalledModel
+from llm.firewall_stack import FirewallStack, FirewalledModel
 
 
 def build_llm(

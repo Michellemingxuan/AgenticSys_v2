@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agents.session_registry import SessionRegistry
-from gateway.firewall_stack import FirewallStack
+from llm.firewall_stack import FirewallStack
 from logger.event_logger import EventLogger
 from models.types import (
     Conflict,

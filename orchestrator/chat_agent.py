@@ -8,7 +8,7 @@ Two public methods:
 
 from __future__ import annotations
 
-from gateway.firewall_stack import FirewalledModel
+from llm.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger
 from models.types import FinalAnswer
 

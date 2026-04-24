@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from config.report_loader import get_specialist_prompt
-from gateway.firewall_stack import FirewalledModel
+from llm.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger
 from models.types import DomainSkill, LLMResult, SpecialistOutput
 from skills.loader import load_skill as _load_skill
