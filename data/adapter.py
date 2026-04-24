@@ -136,3 +136,134 @@ def _dtype_compatible(samples: list, canonical_dtype: str) -> bool:
 
     # Unknown canonical dtype — don't reject.
     return True
+
+
+# ── Four-stage matcher ─────────────────────────────────────────────────────
+
+from difflib import SequenceMatcher
+
+
+def _infer_real_dtype(samples: list) -> str:
+    """Infer a loose dtype label for the real column from sample values."""
+    non_null = [s for s in samples if s is not None and s != ""]
+    if not non_null:
+        return "unknown"
+    series = pd.Series([str(s) for s in non_null])
+    numeric = pd.to_numeric(series, errors="coerce")
+    if numeric.notna().mean() >= 0.95:
+        return "int" if (numeric.dropna() % 1 == 0).all() else "float"
+    parsed_date = pd.to_datetime(series, errors="coerce", format="mixed")
+    if parsed_date.notna().mean() >= 0.95:
+        return "date"
+    # Try explicit date formats too — catches exotic patterns like "Nov'2025".
+    for fmt in _DATE_FORMATS:
+        try:
+            rate = float(
+                pd.to_datetime(series, errors="coerce", format=fmt).notna().mean()
+            )
+        except (ValueError, TypeError):
+            continue
+        if rate >= 0.95:
+            return "date"
+    return "string"
+
+
+def match_column(
+    real_table: str,
+    real_col: str,
+    real_samples: list,
+    canonical: dict[str, dict[str, dict]],
+) -> ColumnDiff:
+    """Match a real CSV column against the canonical catalog.
+
+    Returns a ColumnDiff with bucket in {"auto", "ambiguous", "new"}.
+    """
+    real_norm = _normalize_name(real_col)
+    real_dtype_hint = _infer_real_dtype(real_samples)
+
+    # Stage 1 — Exact match against canonical name or any alias.
+    for canonical_table, cols in canonical.items():
+        for canonical_col, spec in cols.items():
+            aliases = spec.get("aliases", []) or []
+            if real_col == canonical_col or real_col in aliases:
+                chosen = Candidate(
+                    canonical_table=canonical_table,
+                    canonical_col=canonical_col,
+                    ratio=1.0,
+                    canonical_dtype=spec["dtype"],
+                    dtype_compatible=True,
+                )
+                return ColumnDiff(
+                    real_table=real_table,
+                    real_col=real_col,
+                    real_dtype=real_dtype_hint,
+                    bucket="auto",
+                    chosen=chosen,
+                )
+
+    # Stage 2 — Normalized match against canonical name or any alias.
+    for canonical_table, cols in canonical.items():
+        for canonical_col, spec in cols.items():
+            aliases = spec.get("aliases", []) or []
+            candidates_norm = {_normalize_name(canonical_col)} | {
+                _normalize_name(a) for a in aliases
+            }
+            if real_norm in candidates_norm:
+                dtype_ok = _dtype_compatible(real_samples, spec["dtype"])
+                cand = Candidate(
+                    canonical_table=canonical_table,
+                    canonical_col=canonical_col,
+                    ratio=1.0,
+                    canonical_dtype=spec["dtype"],
+                    dtype_compatible=dtype_ok,
+                )
+                if dtype_ok:
+                    return ColumnDiff(
+                        real_table=real_table,
+                        real_col=real_col,
+                        real_dtype=real_dtype_hint,
+                        bucket="auto",
+                        chosen=cand,
+                    )
+                return ColumnDiff(
+                    real_table=real_table,
+                    real_col=real_col,
+                    real_dtype=real_dtype_hint,
+                    bucket="ambiguous",
+                    candidates=[cand],
+                )
+
+    # Stage 3 — Fuzzy match against canonical names.
+    all_candidates: list[Candidate] = []
+    for canonical_table, cols in canonical.items():
+        for canonical_col, spec in cols.items():
+            canonical_norm = _normalize_name(canonical_col)
+            ratio = SequenceMatcher(None, real_norm, canonical_norm).ratio()
+            if ratio >= FUZZY_THRESHOLD:
+                all_candidates.append(Candidate(
+                    canonical_table=canonical_table,
+                    canonical_col=canonical_col,
+                    ratio=ratio,
+                    canonical_dtype=spec["dtype"],
+                    dtype_compatible=_dtype_compatible(real_samples, spec["dtype"]),
+                ))
+
+    all_candidates.sort(key=lambda c: (-c.ratio, c.canonical_col))
+    top = all_candidates[:TOP_K]
+
+    if top:
+        return ColumnDiff(
+            real_table=real_table,
+            real_col=real_col,
+            real_dtype=real_dtype_hint,
+            bucket="ambiguous",
+            candidates=top,
+        )
+
+    # Stage 4 — Genuinely new.
+    return ColumnDiff(
+        real_table=real_table,
+        real_col=real_col,
+        real_dtype=real_dtype_hint,
+        bucket="new",
+    )

@@ -87,3 +87,106 @@ def test_normalize_name_idempotent():
 ])
 def test_dtype_compatible(samples, canonical_dtype, expected):
     assert adapter._dtype_compatible(samples, canonical_dtype) is expected
+
+
+# ── Task 4: match_column ───────────────────────────────────────────────────
+
+def _canonical_fixture() -> dict[str, dict[str, dict]]:
+    """Minimal canonical catalog fixture for match_column tests."""
+    return {
+        "transactions": {
+            "amount": {
+                "dtype": "float",
+                "aliases": ["trans_amt"],
+            },
+            "transaction_date": {
+                "dtype": "date",
+                "aliases": [],
+            },
+            "mcc": {
+                "dtype": "str",
+                "aliases": [],
+            },
+        },
+        "bureau": {
+            "fico_score": {
+                "dtype": "int",
+                "aliases": ["fico"],
+            },
+        },
+    }
+
+
+def test_match_exact_canonical_name_is_auto():
+    catalog = _canonical_fixture()
+    result = adapter.match_column(
+        real_table="bureau",
+        real_col="fico_score",
+        real_samples=["700", "720", "680"],
+        canonical=catalog,
+    )
+    assert result.bucket == "auto"
+    assert result.chosen is not None
+    assert result.chosen.canonical_col == "fico_score"
+
+
+def test_match_known_alias_is_auto():
+    catalog = _canonical_fixture()
+    result = adapter.match_column(
+        real_table="bureau",
+        real_col="fico",
+        real_samples=["700", "720"],
+        canonical=catalog,
+    )
+    assert result.bucket == "auto"
+    assert result.chosen.canonical_col == "fico_score"
+
+
+def test_match_normalized_is_auto_when_dtype_compatible():
+    catalog = _canonical_fixture()
+    result = adapter.match_column(
+        real_table="transactions",
+        real_col="MCC",  # normalizes to mcc
+        real_samples=["5411", "5812"],
+        canonical=catalog,
+    )
+    assert result.bucket == "auto"
+    assert result.chosen.canonical_col == "mcc"
+
+
+def test_match_fuzzy_is_ambiguous():
+    catalog = _canonical_fixture()
+    result = adapter.match_column(
+        real_table="transactions",
+        real_col="transaction_dt",
+        real_samples=["2025-01-01", "2025-02-01"],
+        canonical=catalog,
+    )
+    assert result.bucket == "ambiguous"
+    assert any(c.canonical_col == "transaction_date" for c in result.candidates)
+    assert len(result.candidates) <= adapter.TOP_K
+
+
+def test_match_no_candidates_is_new():
+    catalog = _canonical_fixture()
+    result = adapter.match_column(
+        real_table="misc",
+        real_col="totally_unrelated_field",
+        real_samples=["a", "b"],
+        canonical=catalog,
+    )
+    assert result.bucket == "new"
+    assert result.candidates == []
+
+
+def test_ambiguous_candidates_sorted_by_ratio_desc():
+    catalog = _canonical_fixture()
+    result = adapter.match_column(
+        real_table="transactions",
+        real_col="trans_date",
+        real_samples=["2025-01-01"],
+        canonical=catalog,
+    )
+    if len(result.candidates) >= 2:
+        ratios = [c.ratio for c in result.candidates]
+        assert ratios == sorted(ratios, reverse=True)
