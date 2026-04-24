@@ -1,0 +1,7 @@
+{
+  "question": "Summarise this customer's recent spend and payment behaviour.",
+  "pillar": "credit_risk",
+  "case_id": "CASE-00001",
+  "specialist": "spend_payments",
+  "notes": "Polishes the spend_payments specialist's tool-calling loop. Switch `specialist` to any other domain under skills/domain/ to polish that domain instead."
+}

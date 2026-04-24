@@ -1,0 +1,26 @@
+{
+  "question": "Is this customer's credit risk acceptable?",
+  "specialist_outputs": {
+    "bureau": {
+      "domain": "bureau",
+      "question": "What do the bureau scores tell us about credit risk?",
+      "mode": "chat",
+      "findings": "Bureau scores are stable and above internal thresholds (FICO 720, SBFE 680). No recent deterioration.",
+      "evidence": ["FICO 720 (latest)", "SBFE 680 (latest)"],
+      "implications": ["External credit profile is solid"],
+      "data_gaps": [],
+      "raw_data": {}
+    },
+    "spend_payments": {
+      "domain": "spend_payments",
+      "question": "How have spend and payment patterns trended recently?",
+      "mode": "chat",
+      "findings": "Payment behaviour shows two returned payments in the last 60 days; spend velocity flat.",
+      "evidence": ["2 returned payments 2025-10 to 2025-12", "monthly spend ~$8k/mo flat"],
+      "implications": ["Early warning signal on payment reliability"],
+      "data_gaps": [],
+      "raw_data": {}
+    }
+  },
+  "notes": "Two hand-authored specialist outputs that disagree in tone (bureau calm vs spend_payments concerned). Exercises the Compare skill's contradiction path. Regenerate via the REGENERATE=True cell to replace with a live specialist run."
+}

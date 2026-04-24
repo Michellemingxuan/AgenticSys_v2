@@ -1,0 +1,5 @@
+{
+  "question": "What are the main credit risk findings for this customer?",
+  "case_id": "CASE-00001",
+  "notes": "With reports/CASE-00001/ empty, coverage will be 'none'. To exercise coverage=full, drop curated markdown into reports/CASE-00001/ before re-running."
+}

@@ -1,0 +1,8 @@
+{
+  "question": "Is this customer's credit risk acceptable?",
+  "pillar": "credit_risk",
+  "available_specialists": null,
+  "active_specialists": [],
+  "case_id": "CASE-00001",
+  "notes": "Baseline multi-specialist selection case. available_specialists=null -> all domains from skills/domain/."
+}
