@@ -123,28 +123,114 @@ class DataCatalog:
             else:
                 base[key] = value
 
-    def to_prompt_context(self) -> str:
-        """Format the full catalog as text for injection into LLM prompts.
+    def to_prompt_context(
+        self,
+        case_schema: dict[str, list[str]] | None = None,
+    ) -> str:
+        """Format the catalog as text for injection into LLM prompts.
 
-        This is what specialists see when they need to understand what data
-        is available and what each column means.
+        Parameters
+        ----------
+        case_schema : dict[str, list[str]] | None
+            Optional per-case filter: ``{table_name: [real_column_names]}``.
+            When provided, output includes only tables that are physically
+            present in this case, and renders columns using their real
+            names (annotated with ``[canonical: X]`` when they differ).
+            When None, renders the full catalog using canonical names
+            (backwards-compatible with pre-sync behavior).
         """
         lines: list[str] = ["=== DATA CATALOG ===", ""]
-        for table in self.list_tables():
-            desc = self.get_description(table)
+
+        if case_schema is not None:
+            scope_tables = [t for t in self.list_tables() if t in case_schema]
+            # Pre-scan for banner — emit if any column in scope is pending.
+            scope_has_pending = False
+            for table in scope_tables:
+                profile = self._profiles[table]
+                for real_col in case_schema[table]:
+                    spec = self._find_column_spec(profile, real_col)
+                    if spec and spec.get("description_pending"):
+                        scope_has_pending = True
+                        break
+                if scope_has_pending:
+                    break
+            if scope_has_pending:
+                lines.append(
+                    "⚠ Some columns in this case have unverified descriptions — "
+                    "treat them cautiously."
+                )
+                lines.append("")
+        else:
+            scope_tables = self.list_tables()
+
+        for table in scope_tables:
+            profile = self._profiles[table]
+            desc = profile.get("description", "")
             lines.append(f"TABLE: {table}")
             lines.append(f"  {desc}")
-            details = self.get_column_details(table)
-            if details:
-                for col, info in details.items():
-                    col_desc = info.get("description", "")
-                    col_type = info["type"]
-                    extras = []
-                    if "values" in info:
-                        extras.append(f"values: {', '.join(info['values'])}")
-                    elif "min" in info and "max" in info:
-                        extras.append(f"range: {info['min']}–{info['max']}")
-                    extra_str = f" ({', '.join(extras)})" if extras else ""
-                    lines.append(f"  - {col} [{col_type}]{extra_str}: {col_desc}")
+
+            if case_schema is not None:
+                for real_col in case_schema[table]:
+                    spec = self._find_column_spec(profile, real_col)
+                    if spec is None:
+                        lines.append(f"  - {real_col} [unknown]: (not in catalog)")
+                        continue
+                    canonical = self._canonical_of(profile, real_col)
+                    lines.append(self._format_column_line(
+                        real_col=real_col,
+                        canonical_col=canonical,
+                        spec=spec,
+                    ))
+            else:
+                for col, spec in profile.get("columns", {}).items():
+                    lines.append(self._format_column_line(
+                        real_col=col,
+                        canonical_col=col,
+                        spec=spec,
+                    ))
             lines.append("")
+
         return "\n".join(lines)
+
+    @staticmethod
+    def _find_column_spec(profile: dict, real_col: str) -> dict | None:
+        """Find the column spec for a real name, checking canonical and aliases."""
+        columns = profile.get("columns", {}) or {}
+        if real_col in columns:
+            return columns[real_col]
+        for spec in columns.values():
+            if real_col in (spec.get("aliases") or []):
+                return spec
+        return None
+
+    @staticmethod
+    def _canonical_of(profile: dict, real_col: str) -> str:
+        """Return the canonical column name matching a real column name."""
+        columns = profile.get("columns", {}) or {}
+        if real_col in columns:
+            return real_col
+        for canonical, spec in columns.items():
+            if real_col in (spec.get("aliases") or []):
+                return canonical
+        return real_col
+
+    @staticmethod
+    def _format_column_line(real_col: str, canonical_col: str, spec: dict) -> str:
+        dtype = spec.get("dtype", "unknown")
+        desc = spec.get("description", "")
+        pending = spec.get("description_pending", False)
+        parse_hint = spec.get("parse_hint")
+
+        canonical_annot = (
+            f" [canonical: {canonical_col}]"
+            if real_col != canonical_col
+            else ""
+        )
+        parse_annot = f" [parse: {parse_hint}]" if parse_hint else ""
+        pending_annot = " [UNVERIFIED]" if pending else ""
+        desc_str = f'"{desc}"' if desc else "(no description)"
+
+        return (
+            f"  - {real_col} ({dtype}){canonical_annot}: "
+            f"{desc_str}{parse_annot}{pending_annot}"
+        )

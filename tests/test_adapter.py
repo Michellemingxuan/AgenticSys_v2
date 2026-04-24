@@ -416,3 +416,127 @@ columns:
     # New column was written with description_pending=true
     assert "new_col" in trans_cols
     assert trans_cols["new_col"]["description_pending"] is True
+
+
+# ── Task 8: case-filtered to_prompt_context ────────────────────────────────
+
+def test_to_prompt_context_full_is_unchanged_by_default(tmp_path):
+    """Default no-arg call preserves existing behavior (backwards compat)."""
+    from data.catalog import DataCatalog
+
+    profile_dir = tmp_path / "profiles"
+    profile_dir.mkdir()
+    (profile_dir / "bureau.yaml").write_text("""\
+table: bureau
+description: "Bureau data"
+columns:
+  fico_score:
+    dtype: int
+    description: "FICO score"
+""")
+
+    cat = DataCatalog(profile_dir=str(profile_dir))
+    out = cat.to_prompt_context()
+    assert "TABLE: bureau" in out
+    assert "fico_score" in out
+    assert "[UNVERIFIED]" not in out
+
+
+def test_to_prompt_context_case_filtered(tmp_path):
+    """case_schema filters tables to those physically present in the case."""
+    from data.catalog import DataCatalog
+
+    profile_dir = tmp_path / "profiles"
+    profile_dir.mkdir()
+    (profile_dir / "bureau.yaml").write_text("""\
+table: bureau
+description: "Bureau data"
+columns:
+  fico_score:
+    dtype: int
+    description: "FICO score"
+""")
+    (profile_dir / "payments.yaml").write_text("""\
+table: payments
+description: "Payment data"
+columns:
+  amount:
+    dtype: float
+    description: "Payment amount"
+""")
+
+    cat = DataCatalog(profile_dir=str(profile_dir))
+    out = cat.to_prompt_context(case_schema={"bureau": ["fico_score"]})
+    assert "bureau" in out
+    assert "payments" not in out
+
+
+def test_to_prompt_context_unverified_marker_and_banner(tmp_path):
+    """Pending columns show [UNVERIFIED] + case emits warning banner."""
+    from data.catalog import DataCatalog
+
+    profile_dir = tmp_path / "profiles"
+    profile_dir.mkdir()
+    (profile_dir / "bureau.yaml").write_text("""\
+table: bureau
+description: "Bureau data"
+columns:
+  fico_score:
+    dtype: int
+    description: "FICO score"
+    description_pending: false
+  new_col:
+    dtype: string
+    description: "draft"
+    description_pending: true
+""")
+
+    cat = DataCatalog(profile_dir=str(profile_dir))
+    out = cat.to_prompt_context(case_schema={"bureau": ["fico_score", "new_col"]})
+    assert "[UNVERIFIED]" in out
+    assert "unverified descriptions" in out.lower()
+    fico_line = next(line for line in out.splitlines() if "fico_score" in line)
+    assert "[UNVERIFIED]" not in fico_line
+
+
+def test_to_prompt_context_canonical_annotation_when_real_differs(tmp_path):
+    """When real column name differs from canonical, [canonical: X] is added."""
+    from data.catalog import DataCatalog
+
+    profile_dir = tmp_path / "profiles"
+    profile_dir.mkdir()
+    (profile_dir / "transactions.yaml").write_text("""\
+table: transactions
+description: "Transactions"
+columns:
+  amount:
+    dtype: float
+    description: "Transaction amount"
+    aliases: [trans_amt]
+""")
+
+    cat = DataCatalog(profile_dir=str(profile_dir))
+    out = cat.to_prompt_context(case_schema={"transactions": ["trans_amt"]})
+    assert "trans_amt" in out
+    assert "[canonical: amount]" in out
+
+
+def test_to_prompt_context_omits_canonical_when_same(tmp_path):
+    """When real_name == canonical_name, no [canonical: X] annotation."""
+    from data.catalog import DataCatalog
+
+    profile_dir = tmp_path / "profiles"
+    profile_dir.mkdir()
+    (profile_dir / "bureau.yaml").write_text("""\
+table: bureau
+description: "Bureau data"
+columns:
+  fico_score:
+    dtype: int
+    description: "FICO score"
+""")
+
+    cat = DataCatalog(profile_dir=str(profile_dir))
+    out = cat.to_prompt_context(case_schema={"bureau": ["fico_score"]})
+    assert "fico_score" in out
+    assert "[canonical: fico_score]" not in out
