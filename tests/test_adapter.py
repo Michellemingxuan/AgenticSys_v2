@@ -284,3 +284,135 @@ def test_reconcile_case_drafts_description_for_common_patterns():
     assert by_name["customer_id"].drafted_description  # non-empty
     assert by_name["txn_amount"].drafted_description   # non-empty
     assert by_name["bogusthing"].drafted_description == ""  # no pattern match
+
+
+# ── Task 7: write_profile_patch + apply_diff ───────────────────────────────
+
+def test_write_profile_patch_appends_alias(tmp_path):
+    """Round-trip: write_profile_patch appends an alias, reload confirms it."""
+    from data.catalog import DataCatalog
+
+    profile_dir = tmp_path / "profiles"
+    profile_dir.mkdir()
+    (profile_dir / "bureau.yaml").write_text("""\
+table: bureau
+description: "Bureau data"
+columns:
+  fico_score:
+    dtype: int
+    description: "FICO score"
+    aliases: []
+""")
+
+    cat = DataCatalog(profile_dir=str(profile_dir))
+    cat.write_profile_patch("bureau", {
+        "columns": {"fico_score": {"aliases": ["fico"]}},
+    })
+
+    cat2 = DataCatalog(profile_dir=str(profile_dir))
+    assert "fico" in cat2._profiles["bureau"]["columns"]["fico_score"]["aliases"]
+
+
+def test_write_profile_patch_adds_new_column(tmp_path):
+    from data.catalog import DataCatalog
+
+    profile_dir = tmp_path / "profiles"
+    profile_dir.mkdir()
+    (profile_dir / "bureau.yaml").write_text("""\
+table: bureau
+description: "Bureau data"
+columns:
+  fico_score:
+    dtype: int
+    description: "FICO score"
+    aliases: []
+""")
+
+    cat = DataCatalog(profile_dir=str(profile_dir))
+    cat.write_profile_patch("bureau", {
+        "columns": {
+            "new_field": {
+                "dtype": "string",
+                "description": "",
+                "description_pending": True,
+                "aliases": ["new_field"],
+            },
+        },
+    })
+
+    cat2 = DataCatalog(profile_dir=str(profile_dir))
+    new = cat2._profiles["bureau"]["columns"]["new_field"]
+    assert new["description_pending"] is True
+    assert new["aliases"] == ["new_field"]
+
+
+def test_write_profile_patch_creates_new_table_file(tmp_path):
+    """If the table doesn't exist yet, write_profile_patch creates its file."""
+    from data.catalog import DataCatalog
+
+    profile_dir = tmp_path / "profiles"
+    profile_dir.mkdir()
+    cat = DataCatalog(profile_dir=str(profile_dir))
+
+    cat.write_profile_patch("brand_new_table", {
+        "columns": {
+            "col_one": {
+                "dtype": "int",
+                "description": "",
+                "description_pending": True,
+                "aliases": ["col_one"],
+            },
+        },
+    })
+
+    assert (profile_dir / "brand_new_table.yaml").exists()
+    cat2 = DataCatalog(profile_dir=str(profile_dir))
+    assert "brand_new_table" in cat2._profiles
+    assert "col_one" in cat2._profiles["brand_new_table"]["columns"]
+
+
+def test_apply_diff_writes_auto_and_new_not_ambiguous(tmp_path):
+    """apply_diff persists auto + new; leaves ambiguous alone."""
+    from data.catalog import DataCatalog
+    from data.gateway import SimulatedDataGateway
+
+    profile_dir = tmp_path / "profiles"
+    profile_dir.mkdir()
+    (profile_dir / "transactions.yaml").write_text("""\
+table: transactions
+description: "Transaction data"
+columns:
+  amount:
+    dtype: float
+    description: "Transaction amount"
+    aliases: [trans_amt]
+  transaction_date:
+    dtype: date
+    description: "Transaction date"
+    aliases: []
+""")
+
+    cat = DataCatalog(profile_dir=str(profile_dir))
+    case_data = {
+        "case_A": {
+            "transactions": [
+                {"trans_amt": "12.50", "transaction_dt": "2025-01-01", "new_col": "x"},
+                {"trans_amt": "30.00", "transaction_dt": "2025-02-15", "new_col": "y"},
+            ],
+        },
+    }
+    gateway = SimulatedDataGateway(case_data=case_data)
+    canonical = {t: p["columns"] for t, p in cat._profiles.items()}
+    diff = adapter.reconcile_case(gateway, canonical, "case_A")
+
+    adapter.apply_diff(diff, cat)
+
+    cat2 = DataCatalog(profile_dir=str(profile_dir))
+    trans_cols = cat2._profiles["transactions"]["columns"]
+    # Auto: trans_amt was already an alias; no-op (or dedup)
+    assert "trans_amt" in trans_cols["amount"]["aliases"]
+    # Ambiguous (transaction_dt) was NOT written to transaction_date.aliases
+    assert "transaction_dt" not in (trans_cols.get("transaction_date", {}).get("aliases", []) or [])
+    # New column was written with description_pending=true
+    assert "new_col" in trans_cols
+    assert trans_cols["new_col"]["description_pending"] is True

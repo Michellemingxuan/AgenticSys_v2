@@ -370,3 +370,44 @@ def reconcile_case(gateway, canonical: dict, case_id: str) -> Diff:
                 diff.new.append(result)
 
     return diff
+
+
+def apply_diff(diff: Diff, catalog) -> None:
+    """Persist auto_aliased + new entries to the catalog's YAML profiles.
+
+    Does NOT persist ambiguous entries — those are returned to the caller
+    for human review.
+    """
+    patches: dict[str, dict] = {}
+
+    def _patch_for(table: str) -> dict:
+        if table not in patches:
+            patches[table] = {"columns": {}}
+        return patches[table]
+
+    for entry in diff.auto_aliased:
+        if entry.chosen is None:
+            continue
+        # Skip if the real name IS the canonical name — nothing to add.
+        if entry.real_col == entry.chosen.canonical_col:
+            continue
+        t = _patch_for(entry.chosen.canonical_table)
+        col_patch = t["columns"].setdefault(entry.chosen.canonical_col, {})
+        col_patch.setdefault("aliases", [])
+        if entry.real_col not in col_patch["aliases"]:
+            col_patch["aliases"].append(entry.real_col)
+
+    for entry in diff.new:
+        t = _patch_for(entry.real_table)
+        col_patch: dict = {
+            "dtype": entry.real_dtype,
+            "description": entry.drafted_description,
+            "description_pending": True,
+            "aliases": [entry.real_col],
+        }
+        if entry.parse_hint:
+            col_patch["parse_hint"] = entry.parse_hint
+        t["columns"][entry.real_col] = col_patch
+
+    for table, patch in patches.items():
+        catalog.write_profile_patch(table, patch)

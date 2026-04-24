@@ -77,6 +77,52 @@ class DataCatalog:
             details[col_name] = col_info
         return details
 
+    def write_profile_patch(self, table: str, patch: dict) -> None:
+        """Merge a patch dict into the table's YAML profile and persist.
+
+        Creates the profile file if the table doesn't exist yet. Appends
+        to list-valued fields (e.g., aliases) instead of overwriting. Dicts
+        merge recursively; scalars in the patch overwrite the existing value.
+
+        After writing, the in-memory ``_profiles`` dict is refreshed from
+        disk so the catalog stays consistent.
+
+        Note: ``yaml.safe_dump`` does NOT preserve comments — any comments
+        in pre-existing profile YAMLs will be dropped on first patch. See
+        docs/plans/2026-04-24-data-catalog-sync.md § Known Issues.
+        """
+        profile_path = self._profile_dir / f"{table}.yaml"
+
+        if profile_path.exists():
+            with open(profile_path) as f:
+                profile = yaml.safe_load(f) or {}
+        else:
+            profile = {"table": table, "description": "", "columns": {}}
+
+        self._merge_patch(profile, patch)
+
+        with open(profile_path, "w") as f:
+            yaml.safe_dump(profile, f, default_flow_style=False, sort_keys=False)
+
+        self._profiles[table] = profile
+
+    @staticmethod
+    def _merge_patch(base: dict, patch: dict) -> None:
+        """Recursive merge. Lists are union-appended (dedup preserving order)."""
+        for key, value in patch.items():
+            if key not in base or base[key] is None:
+                base[key] = value
+                continue
+            existing = base[key]
+            if isinstance(existing, dict) and isinstance(value, dict):
+                DataCatalog._merge_patch(existing, value)
+            elif isinstance(existing, list) and isinstance(value, list):
+                for item in value:
+                    if item not in existing:
+                        existing.append(item)
+            else:
+                base[key] = value
+
     def to_prompt_context(self) -> str:
         """Format the full catalog as text for injection into LLM prompts.
 
