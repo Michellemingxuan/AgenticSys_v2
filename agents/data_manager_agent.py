@@ -22,6 +22,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from data import adapter
 from data.catalog import DataCatalog
 from data.gateway import SimulatedDataGateway
 from gateway.firewall_stack import FirewalledModel
@@ -91,12 +92,74 @@ class DataManagerAgent:
         return self._redact(raw)
 
     def describe_catalog(self) -> str:
-        """Return the catalog prompt-context, preceded by the data_catalog
-        skill body so downstream prompts carry the 'how to reason about
-        tables' guidance alongside the actual table/column listing.
+        """Return the catalog prompt-context (case-filtered when a case is
+        active), preceded by the data_catalog skill body.
         """
-        context = self.catalog.to_prompt_context() if self.catalog else ""
+        if self.catalog is None:
+            return self._catalog_prompt
+
+        case_schema = self._build_case_schema()
+        context = self.catalog.to_prompt_context(case_schema=case_schema)
         return f"{self._catalog_prompt}\n\n{context}".rstrip()
+
+    def _build_case_schema(self) -> dict[str, list[str]] | None:
+        """Return {table: [real_col_names]} for the current case, or None if
+        no case is active (falls back to full-catalog rendering).
+        """
+        if self.gateway.get_case_id() is None:
+            return None
+        schema: dict[str, list[str]] = {}
+        for table in self.gateway.list_tables():
+            rows = self.gateway.query(table) or []
+            schema[table] = list(rows[0].keys()) if rows else []
+        return schema
+
+    def sync_catalog(self, case_id: str) -> adapter.Diff:
+        """Reconcile a real case folder against the canonical catalog.
+
+        Auto-aliased matches and new columns are persisted to the YAML
+        profiles. Ambiguous matches are returned but NOT persisted —
+        callers (typically the data_catalog_sync skill) resolve them with
+        human input.
+        """
+        self.logger.log("data_manager_sync_start", {"case_id": case_id})
+        canonical = {
+            table: self.catalog._profiles[table]["columns"]
+            for table in self.catalog.list_tables()
+        }
+        diff = adapter.reconcile_case(self.gateway, canonical, case_id)
+        adapter.apply_diff(diff, self.catalog)
+        self.logger.log(
+            "data_manager_sync_done",
+            {
+                "case_id": case_id,
+                "auto": len(diff.auto_aliased),
+                "ambiguous": len(diff.ambiguous),
+                "new": len(diff.new),
+                "new_tables": len(diff.new_tables),
+            },
+        )
+        return diff
+
+    def verify_description(
+        self,
+        table: str,
+        column: str,
+        new_text: str | None = None,
+    ) -> None:
+        """Mark a column's description as human-verified.
+
+        If ``new_text`` is provided, the description is overwritten first.
+        ``description_pending`` is flipped to ``False`` in both cases.
+        """
+        patch: dict = {"columns": {column: {"description_pending": False}}}
+        if new_text is not None:
+            patch["columns"][column]["description"] = new_text
+        self.catalog.write_profile_patch(table, patch)
+        self.logger.log(
+            "data_manager_verify_desc",
+            {"table": table, "column": column, "edited": new_text is not None},
+        )
 
     @staticmethod
     def _redact(text: str) -> str:
