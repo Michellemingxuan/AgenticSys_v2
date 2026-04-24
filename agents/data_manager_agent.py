@@ -1,6 +1,6 @@
 """Data Manager Agent — data-side governance.
 
-Fronts the `SimulatedDataGateway` + `DataCatalog` for everything downstream
+Fronts the `LocalDataGateway` + `DataCatalog` for everything downstream
 of the specialists. Two responsibilities:
 
   1. `query(...)`           — wrap `tools.data_tools.query_table` and apply
@@ -24,7 +24,7 @@ from pathlib import Path
 
 from datalayer import adapter
 from datalayer.catalog import DataCatalog
-from datalayer.gateway import SimulatedDataGateway
+from datalayer.gateway import LocalDataGateway
 from llm.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger
 from skills.loader import load_skill as _load_skill
@@ -48,7 +48,7 @@ class DataManagerAgent:
 
     def __init__(
         self,
-        gateway: SimulatedDataGateway,
+        gateway: LocalDataGateway,
         catalog: DataCatalog,
         llm: FirewalledModel,
         logger: EventLogger,

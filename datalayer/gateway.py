@@ -59,10 +59,14 @@ class DataGateway(ABC):
         ...
 
 
-class SimulatedDataGateway(DataGateway):
+class LocalDataGateway(DataGateway):
     """In-memory gateway backed by per-case table data.
 
     Data structure: {case_id: {table_name: [row_dicts]}}
+
+    Loads from either the DataGenerator (synthetic cases) via
+    :meth:`from_generated`, or from a folder of per-case CSV exports
+    (real or synthetic-frozen) via :meth:`from_case_folders`.
     """
 
     def __init__(self, case_data: dict[str, dict[str, list[dict]]] | None = None):
@@ -109,7 +113,7 @@ class SimulatedDataGateway(DataGateway):
         return sorted(case_tables.keys())
 
     @classmethod
-    def from_generated(cls, tables_raw: dict[str, dict[str, list]]) -> "SimulatedDataGateway":
+    def from_generated(cls, tables_raw: dict[str, dict[str, list]]) -> "LocalDataGateway":
         """Build per-case data from generator's column-oriented output.
 
         The generator produces {table_name: {col_name: [values]}}.
@@ -138,7 +142,7 @@ class SimulatedDataGateway(DataGateway):
         return cls(case_data=case_data)
 
     @classmethod
-    def from_case_folders(cls, data_dir: str) -> "SimulatedDataGateway":
+    def from_case_folders(cls, data_dir: str) -> "LocalDataGateway":
         """Load per-case data from folder structure: data_dir/{case_id}/{table}.csv."""
         case_data: dict[str, dict[str, list[dict]]] = {}
         data_path = Path(data_dir)
@@ -159,3 +163,10 @@ class SimulatedDataGateway(DataGateway):
                     case_data[case_id][table_name] = list(reader)
 
         return cls(case_data=case_data)
+
+
+# Backwards-compat alias — `SimulatedDataGateway` is the old name of the class
+# that handles both simulated and real local CSV flavors. Kept for one cycle so
+# external imports don't break; remove in a follow-up after internal call sites
+# migrate (done here) and external consumers update.
+SimulatedDataGateway = LocalDataGateway

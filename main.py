@@ -14,7 +14,7 @@ from agents.report_agent import ReportAgent
 from agents.session_registry import SessionRegistry
 from config.pillar_loader import PillarLoader
 from datalayer.catalog import DataCatalog
-from datalayer.gateway import SimulatedDataGateway
+from datalayer.gateway import LocalDataGateway
 from datalayer.generator import DataGenerator
 from llm.firewall_stack import FirewallStack
 from llm.factory import build_llm
@@ -74,7 +74,7 @@ async def amain():
     # Data source: prefer data_tables/<case>/*.csv if any cases are staged
     # there; otherwise fall back to the generator. This lets real-data POC
     # runs drop CSV exports into `data_tables/` without touching code.
-    csv_gateway = SimulatedDataGateway.from_case_folders(str(_DATA_TABLES_DIR))
+    csv_gateway = LocalDataGateway.from_case_folders(str(_DATA_TABLES_DIR))
     if csv_gateway.list_case_ids():
         gateway = csv_gateway
         logger.log("data_source", {"source": "csv", "dir": str(_DATA_TABLES_DIR),
@@ -83,7 +83,7 @@ async def amain():
         gen = DataGenerator(seed=args.seed, cases=50)
         gen.load_profiles()
         tables_raw = gen.generate_all()
-        gateway = SimulatedDataGateway.from_generated(tables_raw)
+        gateway = LocalDataGateway.from_generated(tables_raw)
         logger.log("data_source", {"source": "generator", "seed": args.seed})
 
     catalog = DataCatalog()

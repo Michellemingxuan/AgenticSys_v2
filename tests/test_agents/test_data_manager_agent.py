@@ -8,7 +8,7 @@ import pytest
 
 from agents.data_manager_agent import DataManagerAgent
 from datalayer.catalog import DataCatalog
-from datalayer.gateway import SimulatedDataGateway
+from datalayer.gateway import LocalDataGateway
 from datalayer.generator import DataGenerator
 from logger.event_logger import EventLogger
 from tools.data_tools import init_tools
@@ -34,7 +34,7 @@ def live_gateway_catalog():
     gen = DataGenerator(seed=42)
     gen.load_profiles()
     tables_raw = gen.generate_all()
-    gateway = SimulatedDataGateway.from_generated(tables_raw)
+    gateway = LocalDataGateway.from_generated(tables_raw)
     case_ids = gateway.list_case_ids()
     gateway.set_case(case_ids[0])
     catalog = DataCatalog()

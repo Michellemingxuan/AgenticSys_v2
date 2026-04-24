@@ -3,7 +3,7 @@
 import pytest
 
 from datalayer.catalog import DataCatalog
-from datalayer.gateway import SimulatedDataGateway
+from datalayer.gateway import LocalDataGateway
 from tools import data_tools
 
 
@@ -22,7 +22,7 @@ def _setup_tools():
             ],
         },
     }
-    gateway = SimulatedDataGateway(case_data=case_data)
+    gateway = LocalDataGateway(case_data=case_data)
     gateway.set_case("CASE-00001")
     catalog = DataCatalog(profile_dir="config/data_profiles")
     data_tools.init_tools(gateway, catalog)
@@ -47,7 +47,7 @@ def test_list_tables_no_case_set():
         "CASE-00001": {"bureau_full": [{"score": 720}]},
         "CASE-00002": {"bureau_full": [{"score": 580}]},
     }
-    gateway = SimulatedDataGateway(case_data=case_data)
+    gateway = LocalDataGateway(case_data=case_data)
     # Intentionally do NOT call gateway.set_case(...)
     catalog = DataCatalog(profile_dir="config/data_profiles")
     data_tools.init_tools(gateway, catalog)

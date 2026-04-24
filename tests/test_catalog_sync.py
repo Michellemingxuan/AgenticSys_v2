@@ -39,7 +39,7 @@ columns:
     )
 
     from datalayer.catalog import DataCatalog
-    from datalayer.gateway import SimulatedDataGateway
+    from datalayer.gateway import LocalDataGateway
     from agents.data_manager_agent import DataManagerAgent
 
     class _NullLogger:
@@ -50,7 +50,7 @@ columns:
         pass
 
     catalog = DataCatalog(profile_dir=str(profile_dir))
-    gateway = SimulatedDataGateway.from_case_folders(str(case_root))
+    gateway = LocalDataGateway.from_case_folders(str(case_root))
 
     agent = DataManagerAgent(
         gateway=gateway,

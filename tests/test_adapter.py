@@ -216,7 +216,7 @@ def test_infer_parse_hint_rejects_numeric():
 
 def test_reconcile_case_produces_three_buckets():
     """End-to-end reconciliation of one case against a tiny catalog."""
-    from datalayer.gateway import SimulatedDataGateway
+    from datalayer.gateway import LocalDataGateway
 
     case_data = {
         "case_A": {
@@ -226,7 +226,7 @@ def test_reconcile_case_produces_three_buckets():
             ],
         },
     }
-    gateway = SimulatedDataGateway(case_data=case_data)
+    gateway = LocalDataGateway(case_data=case_data)
     gateway.set_case("case_A")
 
     canonical = _canonical_fixture()
@@ -245,14 +245,14 @@ def test_reconcile_case_produces_three_buckets():
 
 def test_reconcile_case_flags_unknown_tables():
     """A table not in canonical lands in new_tables; its columns go to new."""
-    from datalayer.gateway import SimulatedDataGateway
+    from datalayer.gateway import LocalDataGateway
 
     case_data = {
         "case_A": {
             "brand_new_table": [{"foo": "1"}, {"foo": "2"}],
         },
     }
-    gateway = SimulatedDataGateway(case_data=case_data)
+    gateway = LocalDataGateway(case_data=case_data)
     gateway.set_case("case_A")
     canonical = _canonical_fixture()
 
@@ -264,7 +264,7 @@ def test_reconcile_case_flags_unknown_tables():
 
 def test_reconcile_case_drafts_description_for_common_patterns():
     """Columns with obvious-naming patterns get an agent-drafted description."""
-    from datalayer.gateway import SimulatedDataGateway
+    from datalayer.gateway import LocalDataGateway
 
     case_data = {
         "case_A": {
@@ -274,7 +274,7 @@ def test_reconcile_case_drafts_description_for_common_patterns():
             ],
         },
     }
-    gateway = SimulatedDataGateway(case_data=case_data)
+    gateway = LocalDataGateway(case_data=case_data)
     gateway.set_case("case_A")
     canonical = _canonical_fixture()
 
@@ -374,7 +374,7 @@ def test_write_profile_patch_creates_new_table_file(tmp_path):
 def test_apply_diff_writes_auto_and_new_not_ambiguous(tmp_path):
     """apply_diff persists auto + new; leaves ambiguous alone."""
     from datalayer.catalog import DataCatalog
-    from datalayer.gateway import SimulatedDataGateway
+    from datalayer.gateway import LocalDataGateway
 
     profile_dir = tmp_path / "profiles"
     profile_dir.mkdir()
@@ -401,7 +401,7 @@ columns:
             ],
         },
     }
-    gateway = SimulatedDataGateway(case_data=case_data)
+    gateway = LocalDataGateway(case_data=case_data)
     canonical = {t: p["columns"] for t, p in cat._profiles.items()}
     diff = adapter.reconcile_case(gateway, canonical, "case_A")
 

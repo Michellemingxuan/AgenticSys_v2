@@ -9,7 +9,7 @@ import pytest
 from agents.general_specialist import GeneralSpecialist
 from agents.session_registry import SessionRegistry
 from datalayer.catalog import DataCatalog
-from datalayer.gateway import SimulatedDataGateway
+from datalayer.gateway import LocalDataGateway
 from datalayer.generator import DataGenerator
 from logger.event_logger import EventLogger
 from models.types import LLMResult, ReviewReport, SpecialistOutput, TeamDraft
@@ -128,7 +128,7 @@ async def test_full_pipeline_smoke(mock_llm, logger, tmp_path):
     gen.load_profiles()
     tables_raw = gen.generate_all()
 
-    gateway = SimulatedDataGateway.from_generated(tables_raw)
+    gateway = LocalDataGateway.from_generated(tables_raw)
     case_ids = gateway.list_case_ids()
     assert len(case_ids) > 0
     gateway.set_case(case_ids[0])

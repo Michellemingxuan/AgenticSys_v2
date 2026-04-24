@@ -1,9 +1,9 @@
-"""Tests for DataCatalog and SimulatedDataGateway (case-scoped)."""
+"""Tests for DataCatalog and LocalDataGateway (case-scoped)."""
 
 import pytest
 
 from datalayer.catalog import DataCatalog
-from datalayer.gateway import SimulatedDataGateway
+from datalayer.gateway import LocalDataGateway
 
 
 # ── Catalog fixtures ──────────────────────────────────────────────
@@ -37,7 +37,7 @@ def gateway():
             ],
         },
     }
-    gw = SimulatedDataGateway(case_data=case_data)
+    gw = LocalDataGateway(case_data=case_data)
     return gw
 
 
@@ -139,7 +139,7 @@ def test_gateway_from_generated():
             "amount": [500, 200, 0],
         },
     }
-    gw = SimulatedDataGateway.from_generated(tables_raw)
+    gw = LocalDataGateway.from_generated(tables_raw)
     cases = gw.list_case_ids()
     assert "CASE-00001" in cases
     assert "CASE-00002" in cases
@@ -157,9 +157,9 @@ def test_gateway_from_generated():
 
 def test_gateway_error_uses_neutral_path_token():
     """Error strings surfaced to callers must use <case> token, not the raw case ID."""
-    from datalayer.gateway import SimulatedDataGateway
+    from datalayer.gateway import LocalDataGateway
 
-    gw = SimulatedDataGateway(case_data={"77165907010": {"payments": [{"amt": 100}]}})
+    gw = LocalDataGateway(case_data={"77165907010": {"payments": [{"amt": 100}]}})
     gw.set_case("77165907010")
 
     assert gw._display_path("payments") == "<case>/payments.csv"
