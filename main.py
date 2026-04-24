@@ -29,6 +29,42 @@ _REPORTS_DIR = Path(__file__).parent / "reports"
 _DATA_TABLES_DIR = Path(__file__).parent / "data_tables"
 
 
+def _resolve_data_source(flag: str, tables_dir: Path) -> tuple[str, Path | None]:
+    """Pick where case data comes from.
+
+    Args:
+        flag: one of "auto", "real", "simulated", "generator".
+        tables_dir: root of the data_tables/ folder.
+
+    Returns:
+        (source_name, csv_dir) where csv_dir is None for the generator path.
+        Raises SystemExit if the user explicitly asked for real/simulated
+        and that folder is empty.
+    """
+    real_dir = tables_dir / "real"
+    sim_dir = tables_dir / "simulated"
+
+    def _has_cases(p: Path) -> bool:
+        return p.is_dir() and any(c.is_dir() for c in p.iterdir())
+
+    if flag == "generator":
+        return "generator", None
+    if flag == "real":
+        if not _has_cases(real_dir):
+            raise SystemExit(f"--data-source real requested but {real_dir} is empty")
+        return "real", real_dir
+    if flag == "simulated":
+        if not _has_cases(sim_dir):
+            raise SystemExit(f"--data-source simulated requested but {sim_dir} is empty")
+        return "simulated", sim_dir
+    # auto
+    if _has_cases(real_dir):
+        return "real", real_dir
+    if _has_cases(sim_dir):
+        return "simulated", sim_dir
+    return "generator", None
+
+
 async def run_question(
     question: str,
     pillar: str,
@@ -62,6 +98,12 @@ async def amain():
     parser.add_argument("--model", type=str, default="gpt-4.1")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--case-id", type=str, default=None)
+    parser.add_argument(
+        "--data-source",
+        choices=["auto", "real", "simulated", "generator"],
+        default="auto",
+        help="Where to load case data from. 'auto' resolves to real → simulated → generator.",
+    )
     args = parser.parse_args()
 
     session_id = str(uuid.uuid4())[:8]
@@ -71,20 +113,18 @@ async def amain():
     firewall = FirewallStack(logger=logger)
     llm = build_llm(args.model, firewall)
 
-    # Data source: prefer data_tables/<case>/*.csv if any cases are staged
-    # there; otherwise fall back to the generator. This lets real-data POC
-    # runs drop CSV exports into `data_tables/` without touching code.
-    csv_gateway = LocalDataGateway.from_case_folders(str(_DATA_TABLES_DIR))
-    if csv_gateway.list_case_ids():
-        gateway = csv_gateway
-        logger.log("data_source", {"source": "csv", "dir": str(_DATA_TABLES_DIR),
-                                   "cases": csv_gateway.list_case_ids()})
-    else:
+    source, csv_dir = _resolve_data_source(args.data_source, _DATA_TABLES_DIR)
+    if source == "generator":
         gen = DataGenerator(seed=args.seed, cases=50)
         gen.load_profiles()
         tables_raw = gen.generate_all()
         gateway = LocalDataGateway.from_generated(tables_raw)
-        logger.log("data_source", {"source": "generator", "seed": args.seed})
+        logger.log("data_source", {"source": "generator", "path": None,
+                                   "case_count": len(gateway.list_case_ids())})
+    else:
+        gateway = LocalDataGateway.from_case_folders(str(csv_dir))
+        logger.log("data_source", {"source": source, "path": str(csv_dir),
+                                   "case_count": len(gateway.list_case_ids())})
 
     catalog = DataCatalog()
     init_tools(gateway, catalog, logger=logger)
