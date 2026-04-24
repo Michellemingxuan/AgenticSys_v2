@@ -19,6 +19,7 @@ from models.types import (
     BlockedStep,
     Conflict,
     DataGap,
+    DataPullRequest,
     FinalAnswer,
     ReportDraft,
     Resolution,
@@ -614,12 +615,43 @@ class Orchestrator:
         if not answer:
             return self._balance_fallback(report_draft, team_draft)
 
+        dpr = self._parse_data_pull_request(data.get("data_pull_request"))
+        flags_str = [str(f) for f in flags]
+        if dpr is not None and dpr.needed:
+            flags_str = ["data insufficient — pull recommended"] + flags_str
+            self.logger.log("data_pull_requested", {
+                "would_pull": dpr.would_pull,
+                "severity": dpr.severity,
+                "reason": dpr.reason,
+            })
+
         return FinalAnswer(
             answer=answer,
-            flags=[str(f) for f in flags],
+            flags=flags_str,
             report_draft=report_draft,
             team_draft=team_draft,
+            data_pull_request=dpr,
         )
+
+    @staticmethod
+    def _parse_data_pull_request(raw) -> DataPullRequest | None:
+        """Construct a DataPullRequest from the raw LLM dict, or None on any
+        parse failure. Returning None is fine — the field is optional.
+        """
+        if not isinstance(raw, dict):
+            return None
+        try:
+            severity = raw.get("severity") if raw.get("severity") in ("low", "medium", "high") else "low"
+            would_pull = [str(x) for x in (raw.get("would_pull") or [])
+                          if isinstance(x, (str, int, float))]
+            return DataPullRequest(
+                needed=bool(raw.get("needed", False)),
+                reason=str(raw.get("reason", "")),
+                would_pull=would_pull,
+                severity=severity,
+            )
+        except Exception:
+            return None
 
     @staticmethod
     def _balance_fallback(
