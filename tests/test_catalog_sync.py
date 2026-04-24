@@ -38,8 +38,8 @@ columns:
         "col_one,col_two\n1,a\n2,b\n"
     )
 
-    from data.catalog import DataCatalog
-    from data.gateway import SimulatedDataGateway
+    from datalayer.catalog import DataCatalog
+    from datalayer.gateway import SimulatedDataGateway
     from agents.data_manager_agent import DataManagerAgent
 
     class _NullLogger:

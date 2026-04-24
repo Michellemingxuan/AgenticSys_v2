@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agents.data_manager_agent import DataManagerAgent
-from data.catalog import DataCatalog
-from data.gateway import SimulatedDataGateway
-from data.generator import DataGenerator
+from datalayer.catalog import DataCatalog
+from datalayer.gateway import SimulatedDataGateway
+from datalayer.generator import DataGenerator
 from logger.event_logger import EventLogger
 from tools.data_tools import init_tools
 

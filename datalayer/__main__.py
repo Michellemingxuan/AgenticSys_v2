@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import argparse
 
-from data.generator import DataGenerator
+from datalayer.generator import DataGenerator
 
 DEFAULT_N_CASES = 50
 

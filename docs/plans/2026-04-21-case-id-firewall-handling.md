@@ -288,9 +288,10 @@ case_id's row count determined the generation size."
 
 **Files:**
 - Modify: `data/catalog.py`
-- Test: `tests/test_data/test_gateway.py` (piggy-back if catalog tests live there) or add a quick catalog test
+- Modify: `tests/test_data/test_gateway.py` — update `test_catalog_get_schema` (it asserts `"case_id" in schema`, which is now false after Task 2)
+- Test: `tests/test_data/test_generator.py` (add `test_catalog_prompt_context_has_no_case_id`)
 
-Once Task 2 lands, the defensive filter at `data/catalog.py:94-95` is dead code. Removing it prevents the catalog from silently hiding a column it no longer knows about.
+Once Task 2 lands, the defensive filter at `data/catalog.py:94-95` is dead code. Removing it prevents the catalog from silently hiding a column it no longer knows about. Task 2 also broke an existing catalog test assertion — fix it here as part of the same "catalog knows case_id is infrastructure" surface.
 
 - [ ] **Step 1: Write a failing test asserting `to_prompt_context()` omits `case_id` naturally**
 

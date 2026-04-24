@@ -22,9 +22,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from data import adapter
-from data.catalog import DataCatalog
-from data.gateway import SimulatedDataGateway
+from datalayer import adapter
+from datalayer.catalog import DataCatalog
+from datalayer.gateway import SimulatedDataGateway
 from gateway.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger
 from skills.loader import load_skill as _load_skill

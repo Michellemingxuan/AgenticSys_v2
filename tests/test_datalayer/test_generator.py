@@ -7,7 +7,7 @@ import tempfile
 
 import pytest
 
-from data.generator import DataGenerator
+from datalayer.generator import DataGenerator
 
 PROFILE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "config", "data_profiles")
 
@@ -117,7 +117,7 @@ def test_generator_injects_case_id_column(tmp_path):
         "    description: placeholder\n"
     )
 
-    from data.generator import DataGenerator, CASE_ID_COLUMN, CASE_ID_FORMAT
+    from datalayer.generator import DataGenerator, CASE_ID_COLUMN, CASE_ID_FORMAT
     gen = DataGenerator(profile_dir=str(profile_dir), seed=1, cases=3)
     gen.load_profiles()
     tables = gen.generate_all()
@@ -153,7 +153,7 @@ def test_generator_preserves_profile_declared_case_id(tmp_path):
         "    description: placeholder\n"
     )
 
-    from data.generator import DataGenerator
+    from datalayer.generator import DataGenerator
     gen = DataGenerator(profile_dir=str(profile_dir), seed=1, cases=3)
     gen.load_profiles()
     tables = gen.generate_all()
@@ -164,7 +164,7 @@ def test_generator_preserves_profile_declared_case_id(tmp_path):
 
 
 def test_catalog_prompt_context_has_no_case_id():
-    from data.catalog import DataCatalog
+    from datalayer.catalog import DataCatalog
     cat = DataCatalog(profile_dir=PROFILE_DIR)
     ctx = cat.to_prompt_context()
     # No profile declares case_id anymore; catalog must not mention it either.
@@ -178,7 +178,7 @@ def test_generator_full_suite_no_profile_case_id():
     After Task 2, no profile declares case_id. The generator should still produce
     a case_id column in every table (via the infrastructure injection from Task 1).
     """
-    from data.generator import DataGenerator, CASE_ID_COLUMN
+    from datalayer.generator import DataGenerator, CASE_ID_COLUMN
 
     gen = DataGenerator(profile_dir=PROFILE_DIR, seed=42, cases=5)
     gen.load_profiles()

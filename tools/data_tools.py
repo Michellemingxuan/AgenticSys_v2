@@ -11,8 +11,8 @@ import operator
 import re
 from typing import Any, Callable
 
-from data.catalog import DataCatalog
-from data.gateway import DataGateway
+from datalayer.catalog import DataCatalog
+from datalayer.gateway import DataGateway
 
 _gateway: DataGateway | None = None
 _catalog: DataCatalog | None = None

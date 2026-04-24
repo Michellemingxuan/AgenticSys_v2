@@ -8,9 +8,9 @@ import pytest
 
 from agents.general_specialist import GeneralSpecialist
 from agents.session_registry import SessionRegistry
-from data.catalog import DataCatalog
-from data.gateway import SimulatedDataGateway
-from data.generator import DataGenerator
+from datalayer.catalog import DataCatalog
+from datalayer.gateway import SimulatedDataGateway
+from datalayer.generator import DataGenerator
 from logger.event_logger import EventLogger
 from models.types import LLMResult, ReviewReport, SpecialistOutput, TeamDraft
 from orchestrator.orchestrator import Orchestrator

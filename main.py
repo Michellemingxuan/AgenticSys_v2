@@ -13,9 +13,9 @@ from agents.helper_tools import build_helper_tools
 from agents.report_agent import ReportAgent
 from agents.session_registry import SessionRegistry
 from config.pillar_loader import PillarLoader
-from data.catalog import DataCatalog
-from data.gateway import SimulatedDataGateway
-from data.generator import DataGenerator
+from datalayer.catalog import DataCatalog
+from datalayer.gateway import SimulatedDataGateway
+from datalayer.generator import DataGenerator
 from gateway.firewall_stack import FirewallStack
 from gateway.llm_factory import build_llm
 from logger.event_logger import EventLogger

@@ -2,8 +2,8 @@
 
 import pytest
 
-from data.catalog import DataCatalog
-from data.gateway import SimulatedDataGateway
+from datalayer.catalog import DataCatalog
+from datalayer.gateway import SimulatedDataGateway
 from tools import data_tools
 
 

@@ -2,8 +2,8 @@
 
 import pytest
 
-from data.catalog import DataCatalog
-from data.gateway import SimulatedDataGateway
+from datalayer.catalog import DataCatalog
+from datalayer.gateway import SimulatedDataGateway
 
 
 # ── Catalog fixtures ──────────────────────────────────────────────
@@ -157,7 +157,7 @@ def test_gateway_from_generated():
 
 def test_gateway_error_uses_neutral_path_token():
     """Error strings surfaced to callers must use <case> token, not the raw case ID."""
-    from data.gateway import SimulatedDataGateway
+    from datalayer.gateway import SimulatedDataGateway
 
     gw = SimulatedDataGateway(case_data={"77165907010": {"payments": [{"amt": 100}]}})
     gw.set_case("77165907010")

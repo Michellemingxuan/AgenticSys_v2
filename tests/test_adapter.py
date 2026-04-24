@@ -1,4 +1,4 @@
-"""Tests for data.adapter — the sync-time schema reconciler."""
+"""Tests for datalayer.adapter — the sync-time schema reconciler."""
 
 from __future__ import annotations
 
@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from data import adapter
+from datalayer import adapter
 
 
 REPO_ROOT = Path(__file__).parent.parent
 SCOPE_GUARDED_PATHS = [
-    "data/gateway.py",
-    "data/catalog.py",
+    "datalayer/gateway.py",
+    "datalayer/catalog.py",
     "agents",
     "tools",
 ]
@@ -27,7 +27,7 @@ def test_adapter_module_importable():
 
 
 def test_pandas_scope():
-    """pandas must ONLY be imported inside data/adapter.py — never by gateway,
+    """pandas must ONLY be imported inside datalayer.adapter — never by gateway,
     catalog, agents, or tools. Enforced via grep over the guarded paths.
     """
     for rel in SCOPE_GUARDED_PATHS:
@@ -216,7 +216,7 @@ def test_infer_parse_hint_rejects_numeric():
 
 def test_reconcile_case_produces_three_buckets():
     """End-to-end reconciliation of one case against a tiny catalog."""
-    from data.gateway import SimulatedDataGateway
+    from datalayer.gateway import SimulatedDataGateway
 
     case_data = {
         "case_A": {
@@ -245,7 +245,7 @@ def test_reconcile_case_produces_three_buckets():
 
 def test_reconcile_case_flags_unknown_tables():
     """A table not in canonical lands in new_tables; its columns go to new."""
-    from data.gateway import SimulatedDataGateway
+    from datalayer.gateway import SimulatedDataGateway
 
     case_data = {
         "case_A": {
@@ -264,7 +264,7 @@ def test_reconcile_case_flags_unknown_tables():
 
 def test_reconcile_case_drafts_description_for_common_patterns():
     """Columns with obvious-naming patterns get an agent-drafted description."""
-    from data.gateway import SimulatedDataGateway
+    from datalayer.gateway import SimulatedDataGateway
 
     case_data = {
         "case_A": {
@@ -290,7 +290,7 @@ def test_reconcile_case_drafts_description_for_common_patterns():
 
 def test_write_profile_patch_appends_alias(tmp_path):
     """Round-trip: write_profile_patch appends an alias, reload confirms it."""
-    from data.catalog import DataCatalog
+    from datalayer.catalog import DataCatalog
 
     profile_dir = tmp_path / "profiles"
     profile_dir.mkdir()
@@ -314,7 +314,7 @@ columns:
 
 
 def test_write_profile_patch_adds_new_column(tmp_path):
-    from data.catalog import DataCatalog
+    from datalayer.catalog import DataCatalog
 
     profile_dir = tmp_path / "profiles"
     profile_dir.mkdir()
@@ -348,7 +348,7 @@ columns:
 
 def test_write_profile_patch_creates_new_table_file(tmp_path):
     """If the table doesn't exist yet, write_profile_patch creates its file."""
-    from data.catalog import DataCatalog
+    from datalayer.catalog import DataCatalog
 
     profile_dir = tmp_path / "profiles"
     profile_dir.mkdir()
@@ -373,8 +373,8 @@ def test_write_profile_patch_creates_new_table_file(tmp_path):
 
 def test_apply_diff_writes_auto_and_new_not_ambiguous(tmp_path):
     """apply_diff persists auto + new; leaves ambiguous alone."""
-    from data.catalog import DataCatalog
-    from data.gateway import SimulatedDataGateway
+    from datalayer.catalog import DataCatalog
+    from datalayer.gateway import SimulatedDataGateway
 
     profile_dir = tmp_path / "profiles"
     profile_dir.mkdir()
@@ -422,7 +422,7 @@ columns:
 
 def test_to_prompt_context_full_is_unchanged_by_default(tmp_path):
     """Default no-arg call preserves existing behavior (backwards compat)."""
-    from data.catalog import DataCatalog
+    from datalayer.catalog import DataCatalog
 
     profile_dir = tmp_path / "profiles"
     profile_dir.mkdir()
@@ -444,7 +444,7 @@ columns:
 
 def test_to_prompt_context_case_filtered(tmp_path):
     """case_schema filters tables to those physically present in the case."""
-    from data.catalog import DataCatalog
+    from datalayer.catalog import DataCatalog
 
     profile_dir = tmp_path / "profiles"
     profile_dir.mkdir()
@@ -473,7 +473,7 @@ columns:
 
 def test_to_prompt_context_unverified_marker_and_banner(tmp_path):
     """Pending columns show [UNVERIFIED] + case emits warning banner."""
-    from data.catalog import DataCatalog
+    from datalayer.catalog import DataCatalog
 
     profile_dir = tmp_path / "profiles"
     profile_dir.mkdir()
@@ -501,7 +501,7 @@ columns:
 
 def test_to_prompt_context_canonical_annotation_when_real_differs(tmp_path):
     """When real column name differs from canonical, [canonical: X] is added."""
-    from data.catalog import DataCatalog
+    from datalayer.catalog import DataCatalog
 
     profile_dir = tmp_path / "profiles"
     profile_dir.mkdir()
@@ -539,7 +539,7 @@ def test_data_catalog_sync_skill_loads():
 
 def test_to_prompt_context_omits_canonical_when_same(tmp_path):
     """When real_name == canonical_name, no [canonical: X] annotation."""
-    from data.catalog import DataCatalog
+    from datalayer.catalog import DataCatalog
 
     profile_dir = tmp_path / "profiles"
     profile_dir.mkdir()
