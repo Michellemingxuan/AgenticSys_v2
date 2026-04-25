@@ -216,10 +216,10 @@ class FinalAnswer(BaseModel):
 FinalOutput = TeamDraft
 
 
-class GuardrailVerdict(BaseModel):
-    """Output of the Guardrail Agent's screen() — whether a reviewer's
-    question is in-scope for case review, and what the redacted version
-    of the question looks like after the redact skill ran.
+class ScreenVerdict(BaseModel):
+    """Output of ChatAgent.screen() — whether a reviewer's question is in-scope
+    for case review, and what the redacted version of the question looks like
+    after the redact skill ran.
 
     `passed=False` short-circuits the Orchestrator; `reason` is the
     reviewer-facing message explaining why.
@@ -228,3 +228,9 @@ class GuardrailVerdict(BaseModel):
     passed: bool
     reason: str = ""
     redacted_question: str
+
+
+# Backwards-compat alias — `GuardrailVerdict` was the old name when input
+# screening lived in a separate `GuardrailAgent`. Removed in a follow-up
+# after external consumers migrate.
+GuardrailVerdict = ScreenVerdict
