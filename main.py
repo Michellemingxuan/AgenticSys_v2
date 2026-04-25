@@ -8,7 +8,7 @@ import sys
 import uuid
 from pathlib import Path
 
-from agents.guardrail_agent import GuardrailAgent
+from agents.chat_agent import ChatAgent
 from agents.helper_tools import build_helper_tools
 from agents.report_agent import ReportAgent
 from agents.session_registry import SessionRegistry
@@ -20,7 +20,6 @@ from llm.firewall_stack import FirewallStack
 from llm.factory import build_llm
 from logger.event_logger import EventLogger
 from models.types import FinalAnswer
-from orchestrator.chat_agent import ChatAgent
 from orchestrator.orchestrator import Orchestrator
 from tools.data_tools import init_tools
 
@@ -156,20 +155,19 @@ async def amain():
     registry = SessionRegistry()
     helper_tools = build_helper_tools()
     chat_agent = ChatAgent(llm, logger, tools=helper_tools)
-    guardrail = GuardrailAgent(llm, logger)
 
     async def _screen_and_run(question: str) -> str:
-        """Screen via Guardrail; if rejected, return the reason.
+        """Screen via ChatAgent; if rejected, return the reason.
         Otherwise route the redacted question through run_question and format.
         """
-        verdict = await guardrail.screen(question)
+        verdict = await chat_agent.screen(question)
         if not verdict.passed:
             return f"[rejected] {verdict.reason}"
         final = await run_question(
             verdict.redacted_question, args.pillar,
             llm, logger, registry, pillar_yaml, case_id, catalog=catalog,
         )
-        return chat_agent.format_final_answer(final)
+        return chat_agent.format(final)
 
     if args.question:
         print(await _screen_and_run(args.question))

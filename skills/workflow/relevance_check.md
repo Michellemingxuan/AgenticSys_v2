@@ -2,7 +2,7 @@
 name: Relevance Check
 description: Decide whether a reviewer question is in-scope for case review; reject off-topic prompts upstream of the Orchestrator
 type: workflow
-owner: [guardrail_agent]
+owner: [chat_agent]
 mode: inline
 inputs:
   question: str

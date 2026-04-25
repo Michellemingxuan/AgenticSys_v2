@@ -2,7 +2,7 @@
 name: Redact
 description: Mask identifiers (account numbers, case IDs, role-injection tokens) in inbound text before it reaches downstream agents or the LLM
 type: workflow
-owner: [guardrail_agent, data_manager]
+owner: [chat_agent, data_manager]
 mode: inline
 inputs:
   text: str
@@ -15,7 +15,7 @@ outputs:
 
 You are the Redact step. Given arbitrary text, return a redacted version where identifiers and injection tokens have been masked. You run in two places:
 
-1. **Guardrail Agent** — on every reviewer-inbound question, before the Orchestrator sees it.
+1. **Chat Agent** — on every reviewer-inbound question, before the Orchestrator sees it.
 2. **Data Manager Agent** — on every data payload returned from the gateway, before specialists or the LLM see it.
 
 The same patterns and output shape apply in both contexts.
