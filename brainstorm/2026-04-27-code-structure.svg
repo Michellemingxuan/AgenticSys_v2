@@ -1,0 +1,219 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 2064" font-family="-apple-system,BlinkMacSystemFont,'Inter',Helvetica,Arial,sans-serif">
+<rect width="1320" height="2064" fill="#FAF9F6"/>
+<rect x="0" y="0" width="1320" height="110" fill="#FFFFFF" stroke="#E8E8E5" stroke-width="1"/>
+<defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="0"><stop offset="0%" stop-color="#1D4ED8"/><stop offset="50%" stop-color="#3B82F6"/><stop offset="100%" stop-color="#60A5FA"/></linearGradient></defs>
+<rect x="0" y="0" width="1320" height="3" fill="url(#g)"/>
+<text x="32" y="58" font-size="32" font-weight="500" fill="#1A1A1A" font-family="Iowan Old Style, Source Serif Pro, Georgia, serif" letter-spacing="-0.02em">Code Tree <tspan font-style="italic" fill="#2563EB" font-weight="400">v2</tspan></text>
+<text x="32" y="86" font-size="11" font-weight="600" fill="#6B6B6B" letter-spacing="2.5">AGENTIC CASE REVIEW · FILESYSTEM LAYOUT</text>
+<text x="1288" y="58" font-size="11" font-weight="600" fill="#6B6B6B" letter-spacing="2.2" text-anchor="end">18 DIRECTORIES · 66 FILES</text>
+<text x="1288" y="78" font-size="11" font-weight="500" fill="#9A9A9A" text-anchor="end">brainstorm/ &amp; ralph/ &amp; tests/ &amp; notebooks/ &amp; reports/ omitted</text>
+<text x="32" y="134" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1A1A1A" font-weight="700">AgenticSys_v2/</text>
+<text x="380" y="134" font-size="12" fill="#6B6B6B" font-style="italic">— credit-risk multi-agent system</text>
+<text x="32" y="156" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">├── </text>
+<text x="64" y="156" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">main.py</text>
+<text x="380" y="156" font-size="12" fill="#6B6B6B" font-style="italic">— CLI entry — pillar / case-id / question</text>
+<text x="32" y="178" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">├── </text>
+<text x="64" y="178" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#2563EB" font-weight="700">agents/</text>
+<text x="380" y="178" font-size="12" fill="#6B6B6B" font-style="italic">— specialist + chat + report</text>
+<text x="32" y="200" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="200" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">base_agent.py</text>
+<text x="380" y="200" font-size="12" fill="#6B6B6B" font-style="italic">— 3-step specialist chain</text>
+<text x="32" y="222" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="222" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">chat_agent.py</text>
+<text x="380" y="222" font-size="12" fill="#6B6B6B" font-style="italic">— screen · redact · format · converse</text>
+<text x="32" y="244" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="244" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">data_manager_agent.py</text>
+<text x="380" y="244" font-size="12" fill="#6B6B6B" font-style="italic">— query · describe · sync_catalog</text>
+<text x="32" y="266" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="266" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">general_specialist.py</text>
+<text x="380" y="266" font-size="12" fill="#6B6B6B" font-style="italic">— comparison + gaps</text>
+<text x="32" y="288" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="288" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">helper_tools.py</text>
+<text x="32" y="310" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="310" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">report_agent.py</text>
+<text x="380" y="310" font-size="12" fill="#6B6B6B" font-style="italic">— needle + analysis over reports/</text>
+<text x="32" y="332" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   └── </text>
+<text x="96" y="332" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">session_registry.py</text>
+<text x="380" y="332" font-size="12" fill="#6B6B6B" font-style="italic">— warm specialist cache</text>
+<text x="32" y="354" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">├── </text>
+<text x="64" y="354" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#2563EB" font-weight="700">orchestrator/</text>
+<text x="380" y="354" font-size="12" fill="#6B6B6B" font-style="italic">— team planning + synthesis</text>
+<text x="32" y="376" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   └── </text>
+<text x="96" y="376" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">orchestrator.py</text>
+<text x="380" y="376" font-size="12" fill="#6B6B6B" font-style="italic">— plan_team · run · synthesize · balance</text>
+<text x="32" y="398" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">├── </text>
+<text x="64" y="398" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#2563EB" font-weight="700">datalayer/</text>
+<text x="380" y="398" font-size="12" fill="#6B6B6B" font-style="italic">— catalog + gateway + sync</text>
+<text x="32" y="420" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="420" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">__main__.py</text>
+<text x="380" y="420" font-size="12" fill="#6B6B6B" font-style="italic">— python -m datalayer …</text>
+<text x="32" y="442" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="442" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">access_control.py</text>
+<text x="32" y="464" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="464" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">adapter.py</text>
+<text x="380" y="464" font-size="12" fill="#6B6B6B" font-style="italic">— schema reconciler (4-stage matcher)</text>
+<text x="32" y="486" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="486" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">catalog.py</text>
+<text x="380" y="486" font-size="12" fill="#6B6B6B" font-style="italic">— DataCatalog (YAML profiles)</text>
+<text x="32" y="508" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="508" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">gateway.py</text>
+<text x="380" y="508" font-size="12" fill="#6B6B6B" font-style="italic">— LocalDataGateway (CSV + rbind hook)</text>
+<text x="32" y="530" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="530" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">generator.py</text>
+<text x="380" y="530" font-size="12" fill="#6B6B6B" font-style="italic">— simulated-data producer</text>
+<text x="32" y="552" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   └── </text>
+<text x="96" y="552" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">sync.py</text>
+<text x="380" y="552" font-size="12" fill="#6B6B6B" font-style="italic">— python -m datalayer.sync — CLI</text>
+<text x="32" y="574" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">├── </text>
+<text x="64" y="574" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#2563EB" font-weight="700">tools/</text>
+<text x="380" y="574" font-size="12" fill="#6B6B6B" font-style="italic">— tool-callable functions</text>
+<text x="32" y="596" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="596" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">acropedia.py</text>
+<text x="380" y="596" font-size="12" fill="#6B6B6B" font-style="italic">— domain glossary lookup</text>
+<text x="32" y="618" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   └── </text>
+<text x="96" y="618" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">data_tools.py</text>
+<text x="380" y="618" font-size="12" fill="#6B6B6B" font-style="italic">— list_tables · get_schema · query</text>
+<text x="32" y="640" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">├── </text>
+<text x="64" y="640" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#2563EB" font-weight="700">skills/</text>
+<text x="380" y="640" font-size="12" fill="#6B6B6B" font-style="italic">— decision procedures (markdown)</text>
+<text x="32" y="662" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="662" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">loader.py</text>
+<text x="380" y="662" font-size="12" fill="#6B6B6B" font-style="italic">— frontmatter parser</text>
+<text x="32" y="684" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="684" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#2563EB" font-weight="700">domain/</text>
+<text x="380" y="684" font-size="12" fill="#6B6B6B" font-style="italic">— 7 specialist skills</text>
+<text x="32" y="706" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   ├── </text>
+<text x="128" y="706" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">loader.py</text>
+<text x="32" y="728" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   ├── </text>
+<text x="128" y="728" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">bureau.md</text>
+<text x="32" y="750" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   ├── </text>
+<text x="128" y="750" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">capacity_afford.md</text>
+<text x="32" y="772" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   ├── </text>
+<text x="128" y="772" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">crossbu.md</text>
+<text x="32" y="794" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   ├── </text>
+<text x="128" y="794" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">customer_rel.md</text>
+<text x="32" y="816" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   ├── </text>
+<text x="128" y="816" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">modeling.md</text>
+<text x="32" y="838" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   ├── </text>
+<text x="128" y="838" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">spend_payments.md</text>
+<text x="32" y="860" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   └── </text>
+<text x="128" y="860" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">wcc.md</text>
+<text x="32" y="882" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="882" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#2563EB" font-weight="700">workflow/</text>
+<text x="380" y="882" font-size="12" fill="#6B6B6B" font-style="italic">— 12 cross-cutting skills</text>
+<text x="32" y="904" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   ├── </text>
+<text x="128" y="904" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">balancing.md</text>
+<text x="32" y="926" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   ├── </text>
+<text x="128" y="926" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">comparison.md</text>
+<text x="32" y="948" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   ├── </text>
+<text x="128" y="948" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">data_analysis.md</text>
+<text x="32" y="970" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   ├── </text>
+<text x="128" y="970" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">data_catalog.md</text>
+<text x="32" y="992" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   ├── </text>
+<text x="128" y="992" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">data_catalog_sync.md</text>
+<text x="32" y="1014" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   ├── </text>
+<text x="128" y="1014" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">data_query.md</text>
+<text x="32" y="1036" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   ├── </text>
+<text x="128" y="1036" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">redact.md</text>
+<text x="32" y="1058" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   ├── </text>
+<text x="128" y="1058" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">relevance_check.md</text>
+<text x="32" y="1080" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   ├── </text>
+<text x="128" y="1080" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">report_analysis.md</text>
+<text x="32" y="1102" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   ├── </text>
+<text x="128" y="1102" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">report_needle.md</text>
+<text x="32" y="1124" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   ├── </text>
+<text x="128" y="1124" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">synthesis.md</text>
+<text x="32" y="1146" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   └── </text>
+<text x="128" y="1146" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">team_construction.md</text>
+<text x="32" y="1168" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   └── </text>
+<text x="96" y="1168" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#2563EB" font-weight="700">helper/</text>
+<text x="380" y="1168" font-size="12" fill="#6B6B6B" font-style="italic">— 2 chat-side skills</text>
+<text x="32" y="1190" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│       ├── </text>
+<text x="128" y="1190" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">acropedia.md</text>
+<text x="32" y="1212" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│       └── </text>
+<text x="128" y="1212" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#7C3AED" font-weight="500">web_browser.md</text>
+<text x="32" y="1234" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">├── </text>
+<text x="64" y="1234" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#2563EB" font-weight="700">llm/</text>
+<text x="380" y="1234" font-size="12" fill="#6B6B6B" font-style="italic">— firewall + LangChain wrapper</text>
+<text x="32" y="1256" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="1256" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">case_scrubber.py</text>
+<text x="380" y="1256" font-size="12" fill="#6B6B6B" font-style="italic">— case-ID redaction</text>
+<text x="32" y="1278" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="1278" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">factory.py</text>
+<text x="380" y="1278" font-size="12" fill="#6B6B6B" font-style="italic">— build_llm(model, firewall)</text>
+<text x="32" y="1300" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   └── </text>
+<text x="96" y="1300" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">firewall_stack.py</text>
+<text x="380" y="1300" font-size="12" fill="#6B6B6B" font-style="italic">— FirewalledModel (retry · scrub · tools)</text>
+<text x="32" y="1322" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">├── </text>
+<text x="64" y="1322" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#2563EB" font-weight="700">config/</text>
+<text x="380" y="1322" font-size="12" fill="#6B6B6B" font-style="italic">— loaders + YAML configs</text>
+<text x="32" y="1344" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="1344" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#047857" font-weight="500">chat_template.yaml</text>
+<text x="32" y="1366" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="1366" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">pillar_loader.py</text>
+<text x="32" y="1388" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="1388" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">report_loader.py</text>
+<text x="32" y="1410" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="1410" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#2563EB" font-weight="700">prompts/</text>
+<text x="32" y="1432" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   └── </text>
+<text x="128" y="1432" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#047857" font-weight="500">prompts.yaml</text>
+<text x="380" y="1432" font-size="12" fill="#6B6B6B" font-style="italic">— specialist + workflow prompt templates</text>
+<text x="32" y="1454" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   ├── </text>
+<text x="96" y="1454" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#2563EB" font-weight="700">pillars/</text>
+<text x="380" y="1454" font-size="12" fill="#6B6B6B" font-style="italic">— 3 review-pillar configs</text>
+<text x="32" y="1476" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   ├── </text>
+<text x="128" y="1476" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#047857" font-weight="500">cbo.yaml</text>
+<text x="32" y="1498" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   ├── </text>
+<text x="128" y="1498" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#047857" font-weight="500">credit_risk.yaml</text>
+<text x="32" y="1520" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   │   └── </text>
+<text x="128" y="1520" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#047857" font-weight="500">escalation.yaml</text>
+<text x="32" y="1542" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   └── </text>
+<text x="96" y="1542" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#2563EB" font-weight="700">data_profiles/</text>
+<text x="380" y="1542" font-size="12" fill="#6B6B6B" font-style="italic">— 13 canonical table profiles</text>
+<text x="32" y="1564" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│       ├── </text>
+<text x="128" y="1564" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#047857" font-weight="500">bureau.yaml</text>
+<text x="32" y="1586" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│       ├── </text>
+<text x="128" y="1586" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#047857" font-weight="500">crossbu_cards.yaml</text>
+<text x="32" y="1608" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│       ├── </text>
+<text x="128" y="1608" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#047857" font-weight="500">crossbu_merchants.yaml</text>
+<text x="32" y="1630" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│       ├── </text>
+<text x="128" y="1630" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#047857" font-weight="500">cust_tenure.yaml</text>
+<text x="32" y="1652" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│       ├── </text>
+<text x="128" y="1652" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#047857" font-weight="500">demographics_data.yaml</text>
+<text x="32" y="1674" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│       ├── </text>
+<text x="128" y="1674" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#047857" font-weight="500">income_dti.yaml</text>
+<text x="32" y="1696" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│       ├── </text>
+<text x="128" y="1696" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#047857" font-weight="500">model_scores.yaml</text>
+<text x="32" y="1718" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│       ├── </text>
+<text x="128" y="1718" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#047857" font-weight="500">payments.yaml</text>
+<text x="32" y="1740" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│       ├── </text>
+<text x="128" y="1740" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#047857" font-weight="500">score_drivers.yaml</text>
+<text x="32" y="1762" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│       ├── </text>
+<text x="128" y="1762" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#047857" font-weight="500">spends.yaml</text>
+<text x="32" y="1784" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│       ├── </text>
+<text x="128" y="1784" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#047857" font-weight="500">txn_monthly.yaml</text>
+<text x="32" y="1806" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│       ├── </text>
+<text x="128" y="1806" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#047857" font-weight="500">wcc.yaml</text>
+<text x="32" y="1828" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│       └── </text>
+<text x="128" y="1828" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#047857" font-weight="500">xbu_summary.yaml</text>
+<text x="32" y="1850" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">├── </text>
+<text x="64" y="1850" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#2563EB" font-weight="700">models/</text>
+<text x="32" y="1872" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   └── </text>
+<text x="96" y="1872" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">types.py</text>
+<text x="380" y="1872" font-size="12" fill="#6B6B6B" font-style="italic">— LLMResult · TeamDraft · FinalAnswer</text>
+<text x="32" y="1894" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">├── </text>
+<text x="64" y="1894" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#2563EB" font-weight="700">logger/</text>
+<text x="32" y="1916" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">│   └── </text>
+<text x="96" y="1916" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="500">event_logger.py</text>
+<text x="380" y="1916" font-size="12" fill="#6B6B6B" font-style="italic">— JSONL session log</text>
+<text x="32" y="1938" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">└── </text>
+<text x="64" y="1938" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#2563EB" font-weight="700">docs/</text>
+<text x="380" y="1938" font-size="12" fill="#6B6B6B" font-style="italic">— design specs + implementation plans</text>
+<text x="32" y="1960" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">    ├── </text>
+<text x="96" y="1960" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#2563EB" font-weight="700">specs/</text>
+<text x="380" y="1960" font-size="12" fill="#6B6B6B" font-style="italic">— 7 design docs</text>
+<text x="32" y="1982" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9A9A9A">    └── </text>
+<text x="96" y="1982" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#2563EB" font-weight="700">plans/</text>
+<text x="380" y="1982" font-size="12" fill="#6B6B6B" font-style="italic">— 7 implementation plans</text>
+<text x="32" y="2042" font-size="10" fill="#9A9A9A">generated 2026-04-27  ·  blue=python · green=yaml · purple=markdown · navy=directory</text>
+</svg>
