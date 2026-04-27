@@ -1,65 +1,87 @@
 table: payments
-description: "Payment records — one row per payment attempt per case. Contains successful payments and returned payments with reasons. Covers 2024-2025 with data cut-off 2025-12."
-rows_per_case: 20              # TUNE: number of payment rows per case
+description: Payment records — one row per payment attempt per case. Real data lives
+  in two CSVs (`payments_success.csv` + `payments_returns.csv`) which the gateway
+  rbinds at load time, adding a synthetic `payment_status` column ("success" or "return")
+  to disambiguate. Covers 2024-2025 with data cut-off 2025-12.
+rows_per_case: 20
 one_row_per_case: false
-
+aliases:
+- payments_success
+- payments_returns
 columns:
+  payment_status:
+    dtype: categorical
+    categories:
+      success: 0.88
+      return: 0.12
+    description: Synthetic discriminator added by the gateway when rbinding `payments_success.csv`
+      (→ "success") and `payments_returns.csv` (→ "return") into a single `payments`
+      table.
   card_number:
     dtype: categorical
     categories:
-      "****1234": 0.25           # TUNE: distribution across cards held by the customer
-      "****5678": 0.20
-      "****9012": 0.15
-      "****3456": 0.15
-      "****7890": 0.10
-      "****2468": 0.10
-      "****1357": 0.05
-    description: "Masked card number the payment was applied to (last 4 digits shown)"
-
+      '****1234': 0.25
+      '****5678': 0.2
+      '****9012': 0.15
+      '****3456': 0.15
+      '****7890': 0.1
+      '****2468': 0.1
+      '****1357': 0.05
+    description: Masked card number the payment was applied to (last 4 digits shown)
+    aliases:
+    - Card Number
   payment_date:
     dtype: date
-    year: [2024, 2025]
-    description: "Date the payment was attempted (YYYY-MM-DD). Range: 2024-2025; data cut-off is 2025-12."
-
+    year:
+    - 2024
+    - 2025
+    description: 'Date the payment was attempted (YYYY-MM-DD). Range: 2024-2025; data
+      cut-off is 2025-12.'
+    aliases:
+    - Payment Date
   payment_amount:
     dtype: float
     distribution: normal
-    mean: 1800                   # TUNE: average payment amount (USD)
+    mean: 1800
     std: 2500
     min: 25
     max: 50000
-    description: "Payment amount in USD"
-
+    description: Payment amount in USD
+    aliases:
+    - Payment Amount
   payment_bank_account:
     dtype: categorical
     categories:
-      "Chase ****2211": 0.25
-      "Bank of America ****8812": 0.20
-      "Wells Fargo ****5544": 0.15
-      "Citi ****3377": 0.12
-      "US Bank ****9900": 0.10
-      "Capital One ****4422": 0.08
-      "Ally Bank ****6633": 0.05
-      "Business Checking ****1111": 0.05
-    description: "Bank account the payment was drawn from (masked)"
-
+      Chase ****2211: 0.25
+      Bank of America ****8812: 0.2
+      Wells Fargo ****5544: 0.15
+      Citi ****3377: 0.12
+      US Bank ****9900: 0.1
+      Capital One ****4422: 0.08
+      Ally Bank ****6633: 0.05
+      Business Checking ****1111: 0.05
+    description: Bank account the payment was drawn from (masked)
+    aliases:
+    - Payment Bank Account
   return_flag:
     dtype: categorical
     categories:
-      success: 0.88              # TUNE: share of payments that cleared successfully
-      returned: 0.12             # TUNE: share of payments that were returned
-    description: "Whether the payment cleared (success) or was returned (returned)"
-
+      success: 0.88
+      returned: 0.12
+    description: Whether the payment cleared (success) or was returned (returned)
+    aliases:
+    - Return Flag
   return_reason:
     dtype: categorical
     categories:
-      "": 0.88                   # TUNE: matches success rate — empty when payment succeeded
-      "Insufficient Funds": 0.06
-      "Account Closed": 0.02
-      "Stop Payment": 0.01
-      "Invalid Account Number": 0.01
-      "Unauthorized / Disputed": 0.01
-      "Bank Processing Error": 0.01
-    description: "Reason for return. Empty when return_flag = success."
-
-# No correlations — return_flag is categorical and can't be rank-correlated with numeric fields.
+      ? ''
+      : 0.88
+      Insufficient Funds: 0.06
+      Account Closed: 0.02
+      Stop Payment: 0.01
+      Invalid Account Number: 0.01
+      Unauthorized / Disputed: 0.01
+      Bank Processing Error: 0.01
+    description: Reason for return. Empty when return_flag = success.
+    aliases:
+    - Return Reason

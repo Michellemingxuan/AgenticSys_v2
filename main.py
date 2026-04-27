@@ -73,6 +73,7 @@ async def run_question(
     pillar_yaml: dict,
     case_id: str,
     catalog=None,
+    gateway=None,
 ) -> FinalAnswer:
     """Entry point for a single reviewer question.
 
@@ -81,7 +82,7 @@ async def run_question(
     """
     orchestrator = Orchestrator(
         llm, logger, registry, pillar,
-        pillar_config=pillar_yaml, catalog=catalog,
+        pillar_config=pillar_yaml, catalog=catalog, gateway=gateway,
     )
     report_agent = ReportAgent(llm, logger)
     case_folder = _REPORTS_DIR / case_id
@@ -165,7 +166,8 @@ async def amain():
             return f"[rejected] {verdict.reason}"
         final = await run_question(
             verdict.redacted_question, args.pillar,
-            llm, logger, registry, pillar_yaml, case_id, catalog=catalog,
+            llm, logger, registry, pillar_yaml, case_id,
+            catalog=catalog, gateway=gateway,
         )
         return chat_agent.format(final)
 

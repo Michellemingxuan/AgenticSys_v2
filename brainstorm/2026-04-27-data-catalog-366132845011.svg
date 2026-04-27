@@ -1,0 +1,179 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 1232" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif">
+<rect width="1280" height="1232" fill="#F8FAFC"/>
+<rect x="0" y="0" width="1280" height="130" fill="#0B1A4A"/>
+<rect x="0" y="0" width="1280" height="6" fill="#2563EB"/>
+<text x="32" y="58" font-size="32" font-weight="700" fill="#FFFFFF">Data Catalog</text>
+<text x="32" y="92" font-size="13" font-weight="600" fill="#93C5FD" letter-spacing="2">CASE 366132845011  ·  AGENTIC CREDIT-RISK REVIEW</text>
+<rect x="0" y="130" width="1280" height="44" fill="#FFFFFF" stroke="#93C5FD" stroke-width="1"/>
+<text x="32" y="158" font-size="20" font-weight="700" fill="#0B1A4A">9</text>
+<text x="51" y="158" font-size="11" fill="#64748B" letter-spacing="1.5">TABLES IN CASE</text>
+<text x="179" y="158" font-size="20" font-weight="700" fill="#0B1A4A">135</text>
+<text x="224" y="158" font-size="11" fill="#64748B" letter-spacing="1.5">COLUMNS</text>
+<text x="303" y="158" font-size="20" font-weight="700" fill="#0B1A4A">13</text>
+<text x="335" y="158" font-size="11" fill="#64748B" letter-spacing="1.5">CATALOG FILES</text>
+<text x="456" y="158" font-size="20" font-weight="700" fill="#0B1A4A">4</text>
+<text x="475" y="158" font-size="11" fill="#64748B" letter-spacing="1.5">PROFILE-ONLY (HIDDEN)</text>
+<text x="652" y="158" font-size="20" font-weight="700" fill="#0B1A4A">0</text>
+<text x="671" y="158" font-size="11" fill="#64748B" letter-spacing="1.5">PENDING DESCRIPTIONS</text>
+<rect x="32" y="206" width="384" height="280" fill="#FFFFFF" stroke="#93C5FD" stroke-width="1" rx="6" ry="6"/>
+<rect x="32" y="206" width="4" height="280" fill="#2563EB" rx="2"/>
+<text x="50" y="236" font-size="17" font-weight="700" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0B1A4A">bureau_data</text>
+<text x="50" y="256" font-size="11" fill="#64748B">→ canonical: <tspan font-weight="600" fill="#1E3A8A">bureau</tspan></text>
+<rect x="324" y="218" width="80" height="26" rx="13" fill="#DBEAFE"/>
+<text x="364.0" y="236" font-size="11" font-weight="700" fill="#1E3A8A" text-anchor="middle">18 COLUMNS</text>
+<text x="50" y="288" font-size="12" fill="#0F172A">Credit bureau data — one row per external tradeline per</text>
+<text x="50" y="304" font-size="12" fill="#0F172A">case. Each row carries the case-level aggregated scores</text>
+<text x="50" y="320" font-size="12" fill="#0F172A">(FICO, SBFE, LN, CSS, FSS, Paydex) plus the</text>
+<line x1="50" y1="356" x2="398" y2="356" stroke="#93C5FD" stroke-width="1"/>
+<text x="50" y="376" font-size="10" font-weight="700" fill="#64748B" letter-spacing="1">COLUMNS</text>
+<text x="50" y="398" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">month</text>
+<text x="50" y="413" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">SBFE Score</text>
+<text x="50" y="428" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Delinquent External Trades</text>
+<text x="50" y="443" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">External Delinquency Amount (USD)</text>
+<text x="50" y="458" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Total Tradelines</text>
+<text x="50" y="473" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Overall External Exposure (USD)</text>
+<text x="50" y="488" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Overall External Revolving Balance (…</text>
+<text x="50" y="503" font-size="11" fill="#64748B" font-style="italic">+ 11 more</text>
+<rect x="448" y="206" width="384" height="280" fill="#FFFFFF" stroke="#93C5FD" stroke-width="1" rx="6" ry="6"/>
+<rect x="448" y="206" width="4" height="280" fill="#2563EB" rx="2"/>
+<text x="466" y="236" font-size="17" font-weight="700" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0B1A4A">crossbu_cards_data</text>
+<text x="466" y="256" font-size="11" fill="#64748B">→ canonical: <tspan font-weight="600" fill="#1E3A8A">crossbu_cards</tspan></text>
+<rect x="740" y="218" width="80" height="26" rx="13" fill="#DBEAFE"/>
+<text x="780.0" y="236" font-size="11" font-weight="700" fill="#1E3A8A" text-anchor="middle">9 COLUMNS</text>
+<text x="466" y="288" font-size="12" fill="#0F172A">Cross-business-unit cards view — one row per card per</text>
+<text x="466" y="304" font-size="12" fill="#0F172A">case-month. Tracks details of all cards held by the</text>
+<text x="466" y="320" font-size="12" fill="#0F172A">customer (limit, balance, tenure, status, delinquencies)</text>
+<line x1="466" y1="356" x2="814" y2="356" stroke="#93C5FD" stroke-width="1"/>
+<text x="466" y="376" font-size="10" font-weight="700" fill="#64748B" letter-spacing="1">COLUMNS</text>
+<text x="466" y="398" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Month</text>
+<text x="466" y="413" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Card Name</text>
+<text x="466" y="428" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Card Type</text>
+<text x="466" y="443" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Card Limit</text>
+<text x="466" y="458" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Card Tenure</text>
+<text x="466" y="473" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Balance</text>
+<text x="466" y="488" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Account Status</text>
+<text x="466" y="503" font-size="11" fill="#64748B" font-style="italic">+ 2 more</text>
+<rect x="864" y="206" width="384" height="280" fill="#FFFFFF" stroke="#93C5FD" stroke-width="1" rx="6" ry="6"/>
+<rect x="864" y="206" width="4" height="280" fill="#2563EB" rx="2"/>
+<text x="882" y="236" font-size="17" font-weight="700" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0B1A4A">crossbu_merchants_data</text>
+<text x="882" y="256" font-size="11" fill="#64748B">→ canonical: <tspan font-weight="600" fill="#1E3A8A">crossbu_merchants</tspan></text>
+<rect x="1156" y="218" width="80" height="26" rx="13" fill="#DBEAFE"/>
+<text x="1196.0" y="236" font-size="11" font-weight="700" fill="#1E3A8A" text-anchor="middle">0 COLUMNS</text>
+<text x="882" y="288" font-size="12" fill="#0F172A">Cross-business-unit merchants view — one row per</text>
+<text x="882" y="304" font-size="12" fill="#0F172A">merchant relationship per case-month. Tracks businesses</text>
+<text x="882" y="320" font-size="12" fill="#0F172A">owned by the customer that accept Amex as a payment</text>
+<line x1="882" y1="356" x2="1230" y2="356" stroke="#93C5FD" stroke-width="1"/>
+<text x="882" y="376" font-size="10" font-weight="700" fill="#64748B" letter-spacing="1">COLUMNS</text>
+<text x="882" y="406" font-size="11" fill="#64748B" font-style="italic">no rows in this case (header-only)</text>
+<rect x="32" y="518" width="384" height="280" fill="#FFFFFF" stroke="#93C5FD" stroke-width="1" rx="6" ry="6"/>
+<rect x="32" y="518" width="4" height="280" fill="#2563EB" rx="2"/>
+<text x="50" y="548" font-size="17" font-weight="700" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0B1A4A">demographics_data</text>
+<text x="50" y="568" font-size="11" fill="#64748B">canonical (no rename)</text>
+<rect x="324" y="530" width="80" height="26" rx="13" fill="#DBEAFE"/>
+<text x="364.0" y="548" font-size="11" font-weight="700" fill="#1E3A8A" text-anchor="middle">16 COLUMNS</text>
+<text x="50" y="600" font-size="12" fill="#0F172A">Customer demographic and business-profile snapshot — one</text>
+<text x="50" y="616" font-size="12" fill="#0F172A">row per case. Combines internal CRM demographics (name,</text>
+<text x="50" y="632" font-size="12" fill="#0F172A">DOB, age, portfolio, limits, tenure) with bureau-sourced</text>
+<line x1="50" y1="668" x2="398" y2="668" stroke="#93C5FD" stroke-width="1"/>
+<text x="50" y="688" font-size="10" font-weight="700" fill="#64748B" letter-spacing="1">COLUMNS</text>
+<text x="50" y="710" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">customer_name</text>
+<text x="50" y="725" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">rel_type</text>
+<text x="50" y="740" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">cust_dob_raw</text>
+<text x="50" y="755" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">cust_dob</text>
+<text x="50" y="770" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">customer_age</text>
+<text x="50" y="785" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">account_tenure_months</text>
+<text x="50" y="800" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">portfolio_cd</text>
+<text x="50" y="815" font-size="11" fill="#64748B" font-style="italic">+ 9 more</text>
+<rect x="448" y="518" width="384" height="280" fill="#FFFFFF" stroke="#93C5FD" stroke-width="1" rx="6" ry="6"/>
+<rect x="448" y="518" width="4" height="280" fill="#2563EB" rx="2"/>
+<text x="466" y="548" font-size="17" font-weight="700" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0B1A4A">modelling_data</text>
+<text x="466" y="568" font-size="11" fill="#64748B">→ canonical: <tspan font-weight="600" fill="#1E3A8A">model_scores</tspan></text>
+<rect x="740" y="530" width="80" height="26" rx="13" fill="#DBEAFE"/>
+<text x="780.0" y="548" font-size="11" font-weight="700" fill="#1E3A8A" text-anchor="middle">54 COLUMNS</text>
+<text x="466" y="600" font-size="12" fill="#0F172A">Internal model scoring features — one row per scoring</text>
+<text x="466" y="616" font-size="12" fill="#0F172A">run per case. Contains the model input variables that</text>
+<text x="466" y="632" font-size="12" fill="#0F172A">real `modelling_data.csv` carries (originally 264 in the</text>
+<line x1="466" y1="668" x2="814" y2="668" stroke="#93C5FD" stroke-width="1"/>
+<text x="466" y="688" font-size="10" font-weight="700" fill="#64748B" letter-spacing="1">COLUMNS</text>
+<text x="466" y="710" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">trans_month</text>
+<text x="466" y="725" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">cust_lexis_nexis_tot_tax_assess_val_…</text>
+<text x="466" y="740" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">cust_cash_tot_liab_yr1_rt_max</text>
+<text x="466" y="755" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">cbr_score_max</text>
+<text x="466" y="770" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">max_agec_agel_dyldage_max</text>
+<text x="466" y="785" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">cust_eff_se_cdss_5_180_day_score_max</text>
+<text x="466" y="800" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">cust_expsr_avg_rem_12m_ratio_max</text>
+<text x="466" y="815" font-size="11" fill="#64748B" font-style="italic">+ 47 more</text>
+<rect x="864" y="518" width="384" height="280" fill="#FFFFFF" stroke="#93C5FD" stroke-width="1" rx="6" ry="6"/>
+<rect x="864" y="518" width="4" height="280" fill="#2563EB" rx="2"/>
+<text x="882" y="548" font-size="17" font-weight="700" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0B1A4A">payments</text>
+<text x="882" y="568" font-size="11" fill="#64748B">canonical (no rename)</text>
+<rect x="1156" y="530" width="80" height="26" rx="13" fill="#DBEAFE"/>
+<text x="1196.0" y="548" font-size="11" font-weight="700" fill="#1E3A8A" text-anchor="middle">7 COLUMNS</text>
+<text x="882" y="600" font-size="12" fill="#0F172A">Payment records — one row per payment attempt per case.</text>
+<text x="882" y="616" font-size="12" fill="#0F172A">Real data lives in two CSVs (`payments_success.csv` +</text>
+<text x="882" y="632" font-size="12" fill="#0F172A">`payments_returns.csv`) which the gateway rbinds at load</text>
+<line x1="882" y1="668" x2="1230" y2="668" stroke="#93C5FD" stroke-width="1"/>
+<text x="882" y="688" font-size="10" font-weight="700" fill="#64748B" letter-spacing="1">COLUMNS</text>
+<text x="882" y="710" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Card Number</text>
+<text x="882" y="725" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Payment Date</text>
+<text x="882" y="740" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Payment Amount</text>
+<text x="882" y="755" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Payment Bank Account</text>
+<text x="882" y="770" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Return Flag</text>
+<text x="882" y="785" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Return Reason</text>
+<text x="882" y="800" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">payment_status</text>
+<rect x="32" y="830" width="384" height="280" fill="#FFFFFF" stroke="#93C5FD" stroke-width="1" rx="6" ry="6"/>
+<rect x="32" y="830" width="4" height="280" fill="#2563EB" rx="2"/>
+<text x="50" y="860" font-size="17" font-weight="700" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0B1A4A">score_drivers_data</text>
+<text x="50" y="880" font-size="11" fill="#64748B">→ canonical: <tspan font-weight="600" fill="#1E3A8A">score_drivers</tspan></text>
+<rect x="324" y="842" width="80" height="26" rx="13" fill="#DBEAFE"/>
+<text x="364.0" y="860" font-size="11" font-weight="700" fill="#1E3A8A" text-anchor="middle">21 COLUMNS</text>
+<text x="50" y="912" font-size="12" fill="#0F172A">Monthly snapshot of the top-5 and bottom-5 contributing</text>
+<text x="50" y="928" font-size="12" fill="#0F172A">variable names for two model scores (CDSS and TSR), per</text>
+<text x="50" y="944" font-size="12" fill="#0F172A">case per month. Used to explain which features pushed</text>
+<line x1="50" y1="980" x2="398" y2="980" stroke="#93C5FD" stroke-width="1"/>
+<text x="50" y="1000" font-size="10" font-weight="700" fill="#64748B" letter-spacing="1">COLUMNS</text>
+<text x="50" y="1022" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">trans_month</text>
+<text x="50" y="1037" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">top_cdss1</text>
+<text x="50" y="1052" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">top_cdss2</text>
+<text x="50" y="1067" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">top_cdss3</text>
+<text x="50" y="1082" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">top_cdss4</text>
+<text x="50" y="1097" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">top_cdss5</text>
+<text x="50" y="1112" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">bottom_cdss1</text>
+<text x="50" y="1127" font-size="11" fill="#64748B" font-style="italic">+ 14 more</text>
+<rect x="448" y="830" width="384" height="280" fill="#FFFFFF" stroke="#93C5FD" stroke-width="1" rx="6" ry="6"/>
+<rect x="448" y="830" width="4" height="280" fill="#2563EB" rx="2"/>
+<text x="466" y="860" font-size="17" font-weight="700" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0B1A4A">spends_data</text>
+<text x="466" y="880" font-size="11" fill="#64748B">→ canonical: <tspan font-weight="600" fill="#1E3A8A">spends</tspan></text>
+<rect x="740" y="842" width="80" height="26" rx="13" fill="#DBEAFE"/>
+<text x="780.0" y="860" font-size="11" font-weight="700" fill="#1E3A8A" text-anchor="middle">8 COLUMNS</text>
+<text x="466" y="912" font-size="12" fill="#0F172A">Transaction-level spend data — multiple rows per case.</text>
+<text x="466" y="928" font-size="12" fill="#0F172A">Each row is one transaction (spend) with merchant</text>
+<text x="466" y="944" font-size="12" fill="#0F172A">details and risk scores.</text>
+<line x1="466" y1="980" x2="814" y2="980" stroke="#93C5FD" stroke-width="1"/>
+<text x="466" y="1000" font-size="10" font-weight="700" fill="#64748B" letter-spacing="1">COLUMNS</text>
+<text x="466" y="1022" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Date</text>
+<text x="466" y="1037" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Amount</text>
+<text x="466" y="1052" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Merchant Name</text>
+<text x="466" y="1067" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Merchant Industry</text>
+<text x="466" y="1082" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Merchant Risk Score</text>
+<text x="466" y="1097" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Spend Concentration</text>
+<text x="466" y="1112" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">RNN Spend Score</text>
+<text x="466" y="1127" font-size="11" fill="#64748B" font-style="italic">+ 1 more</text>
+<rect x="864" y="830" width="384" height="280" fill="#FFFFFF" stroke="#93C5FD" stroke-width="1" rx="6" ry="6"/>
+<rect x="864" y="830" width="4" height="280" fill="#2563EB" rx="2"/>
+<text x="882" y="860" font-size="17" font-weight="700" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0B1A4A">wcc</text>
+<text x="882" y="880" font-size="11" fill="#64748B">canonical (no rename)</text>
+<rect x="1156" y="842" width="80" height="26" rx="13" fill="#DBEAFE"/>
+<text x="1196.0" y="860" font-size="11" font-weight="700" fill="#1E3A8A" text-anchor="middle">2 COLUMNS</text>
+<text x="882" y="912" font-size="12" fill="#0F172A">Customer-service / agent-call notes log. One row per</text>
+<text x="882" y="928" font-size="12" fill="#0F172A">logged interaction, with a free-text note attached to a</text>
+<text x="882" y="944" font-size="12" fill="#0F172A">date. Sourced from agent chat and call transcripts;</text>
+<line x1="882" y1="980" x2="1230" y2="980" stroke="#93C5FD" stroke-width="1"/>
+<text x="882" y="1000" font-size="10" font-weight="700" fill="#64748B" letter-spacing="1">COLUMNS</text>
+<text x="882" y="1022" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Date</text>
+<text x="882" y="1037" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#0F172A">Note</text>
+<rect x="0" y="1142" width="1280" height="90" fill="#0B1A4A"/>
+<text x="32" y="1170" font-size="11" font-weight="700" fill="#93C5FD" letter-spacing="2">PROFILE-ONLY (in catalog, hidden from this case via case-filtered view)</text>
+<text x="32" y="1196" font-size="13" fill="#FFFFFF" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">cust_tenure, income_dti, txn_monthly, xbu_summary</text>
+<text x="32" y="1220" font-size="10" fill="#93C5FD">generated 2026-04-27 · python -m datalayer.sync · case 366132845011</text>
+</svg>

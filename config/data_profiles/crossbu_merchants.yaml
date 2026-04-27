@@ -1,0 +1,51 @@
+table: crossbu_merchants
+description: Cross-business-unit merchants view — one row per merchant relationship
+  per case-month. Tracks businesses owned by the customer that accept Amex as a payment
+  method, including monthly charge volume processed through that merchant account
+  (a revenue signal for the customer's business).
+rows_per_case: 3
+one_row_per_case: false
+aliases:
+- crossbu_merchants_data
+columns:
+  Month:
+    dtype: string
+    parse_hint: '%b-%Y'
+    description: Monthly snapshot date for this merchant record (e.g. "Jan-2024").
+    aliases:
+    - Month
+  merchant_name:
+    dtype: categorical
+    categories:
+      ? ''
+      : 0.5
+      ABC Construction LLC: 0.05
+      Metro Dental Group: 0.04
+      Pacific Auto Repair: 0.04
+      Summit Consulting: 0.04
+      Eastside Medical Practice: 0.03
+      River City Logistics: 0.03
+      Golden Gate Catering: 0.03
+      Pinnacle IT Solutions: 0.03
+      Heritage Accounting: 0.03
+      Atlas Manufacturing: 0.03
+      Coastal Property Mgmt: 0.03
+      Urban Fitness Studio: 0.03
+      Greenfield Landscaping: 0.03
+      BlueSky Travel Agency: 0.03
+      Midwest Auto Dealers: 0.03
+    description: Name of the customer's business that has a merchant relationship
+      with Amex (accepts Amex for payments). Empty if no merchant relationship.
+    aliases:
+    - Merchant Name
+  merchant_charge_volume:
+    dtype: float
+    distribution: normal
+    mean: 25000
+    std: 40000
+    min: 0
+    max: 500000
+    description: Estimated payments (USD) made at the customer's business that accepts
+      Amex — a source of revenue for the customer's business. 0 if no merchant relationship.
+    aliases:
+    - Merchant Charge Volume

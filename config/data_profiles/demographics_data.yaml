@@ -1,0 +1,112 @@
+table: demographics_data
+description: Customer demographic and business-profile snapshot — one row per case.
+  Combines internal CRM demographics (name, DOB, age, portfolio, limits, tenure)
+  with bureau-sourced employment info (company/employer names, job title,
+  self-employed flag).
+columns:
+  customer_name:
+    dtype: string
+    description: Customer's full name (e.g. "MOSHE BENAYON").
+    description_pending: false
+    aliases:
+    - customer_name
+  rel_type:
+    dtype: string
+    description: Relationship type with the bank (e.g. "BASIC", "PREMIUM"). Categorical
+      label drawn from the internal CRM.
+    description_pending: false
+    aliases:
+    - rel_type
+  cust_dob_raw:
+    dtype: string
+    description: Date of birth as originally reported by the source system. Raw form
+      may carry source-specific formatting; use cust_dob for canonical YYYY-MM-DD.
+    description_pending: false
+    aliases:
+    - cust_dob_raw
+  cust_dob:
+    dtype: date
+    parse_hint: "%Y-%m-%d"
+    description: Canonical date of birth (YYYY-MM-DD), parsed from cust_dob_raw.
+    description_pending: false
+    aliases:
+    - cust_dob
+  customer_age:
+    dtype: int
+    description: Customer age in years as of the snapshot.
+    description_pending: false
+    aliases:
+    - customer_age
+  account_tenure_months:
+    dtype: int
+    description: Tenure of the customer's primary account, in months.
+    description_pending: false
+    aliases:
+    - account_tenure_months
+  portfolio_cd:
+    dtype: string
+    description: Portfolio code identifying which Amex portfolio the customer belongs
+      to (e.g. "X").
+    description_pending: false
+    aliases:
+    - portfolio_cd
+  global_limit:
+    dtype: int
+    description: Global credit limit across all customer accounts (USD).
+    description_pending: false
+    aliases:
+    - global_limit
+  lexis_nexis_tenure:
+    dtype: int
+    description: Tenure of the customer in months as recorded by LexisNexis.
+    description_pending: false
+    aliases:
+    - lexis_nexis_tenure
+  homeownership_ind:
+    dtype: int
+    description: Homeownership indicator (1 = customer owns home, 0 = does not).
+    description_pending: false
+    aliases:
+    - homeownership_ind
+  current_address_age:
+    dtype: int
+    description: Months at customer's current address.
+    description_pending: false
+    aliases:
+    - current_address_age
+  primary_job_title:
+    dtype: string
+    description: Customer's primary job title as reported on the application or
+      bureau record. May be empty when not on file.
+    description_pending: false
+    aliases:
+    - primary_job_title
+  company_name:
+    dtype: string
+    description: Customer's company / business name (e.g. "SHAARE TORAH"). For
+      self-employed customers this often matches employer_name.
+    description_pending: false
+    aliases:
+    - company_name
+  employer_name:
+    dtype: string
+    description: Employer name on file in the internal CRM. Often matches
+      company_name for self-employed customers.
+    description_pending: false
+    aliases:
+    - employer_name
+  bureau_employer_name:
+    dtype: string
+    description: Employer name reported by the external credit bureau. May differ
+      from employer_name when the bureau record is stale or sourced from a
+      different system.
+    description_pending: false
+    aliases:
+    - bureau_employer_name
+  self_employed_ind:
+    dtype: int
+    description: Self-employed indicator (1 = self-employed, 0 = not). May be empty
+      when not on file.
+    description_pending: false
+    aliases:
+    - self_employed_ind

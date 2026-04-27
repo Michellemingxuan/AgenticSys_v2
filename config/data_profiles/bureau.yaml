@@ -1,277 +1,227 @@
 table: bureau
-description: "Credit bureau data — one row per external tradeline per case. Each row carries the case-level aggregated scores (FICO, SBFE, LN, CSS, FSS, Paydex) plus the tradeline-specific details (balance, limit, utilization, DPD status). Case-level fields repeat across rows for the same case."
+description: Credit bureau data — one row per external tradeline per case. Each row
+  carries the case-level aggregated scores (FICO, SBFE, LN, CSS, FSS, Paydex) plus
+  the tradeline-specific details (balance, limit, utilization, DPD status). Case-level
+  fields repeat across rows for the same case.
 rows_per_case: 4
 one_row_per_case: false
-
 columns:
-  # ── Case-Level Credit Scores (same value across all tradelines for a case) ──
-
+  month:
+    dtype: string
+    parse_hint: '%b-%Y'
+    description: Monthly snapshot date for this bureau record (e.g. "Jan-2024"). One
+      row per case per month across the review window.
+    description_pending: false
+    aliases:
+    - month
   fico_score:
     dtype: int
     distribution: normal
-    mean: 740                    # TUNE: average FICO score for cases under review
+    mean: 740
     std: 60
     min: 300
     max: 850
-    description: "FICO Score — industry-standard credit risk score. Values below 721 are risky."
-
+    description: FICO Score — industry-standard credit risk score. Values below 721
+      are risky.
+    aliases:
+    - FICO Score
   sbfe_score:
     dtype: int
     distribution: normal
-    mean: 875                    # TUNE: average SBFE score
+    mean: 875
     std: 30
     min: 500
     max: 950
-    description: "SBFE Score — business credit score predicting financial delinquency or failure. Values below 863 are risky."
-
+    description: SBFE Score — business credit score predicting financial delinquency
+      or failure. Values below 863 are risky.
+    aliases:
+    - SBFE Score
   ln_credit_score:
     dtype: int
     distribution: normal
-    mean: 710                    # TUNE: average LN credit score
+    mean: 710
     std: 50
     min: 300
     max: 900
-    description: "LexisNexis Credit Score — predicts consumer likelihood of default. Values below 681 are risky."
-
+    description: LexisNexis Credit Score — predicts consumer likelihood of default.
+      Values below 681 are risky.
+    aliases:
+    - LN Credit Score
   ln_blended_score:
     dtype: int
     distribution: normal
-    mean: 720                    # TUNE: average LN blended score
+    mean: 720
     std: 50
     min: 300
     max: 900
-    description: "LexisNexis Blended Score — combines traditional credit data with alternative data. Values below 694 are risky."
-
+    description: LexisNexis Blended Score — combines traditional credit data with
+      alternative data. Values below 694 are risky.
+    aliases:
+    - LN Blended Score
   css_score:
     dtype: int
     distribution: normal
-    mean: 78                     # TUNE: average CSS score
+    mean: 78
     std: 15
     min: 1
     max: 100
-    description: "CSS Score — business credit risk score using commercial trade data and financials. Values below 71 are risky."
-
+    description: CSS Score — business credit risk score using commercial trade data
+      and financials. Values below 71 are risky.
+    aliases:
+    - CSS Score
   fss_score:
     dtype: int
     distribution: normal
-    mean: 60                     # TUNE: average FSS score
+    mean: 60
     std: 15
     min: 1
     max: 100
-    description: "FSS Score — business financial strength/stability score. Values below 51 are risky."
-
+    description: FSS Score — business financial strength/stability score. Values below
+      51 are risky.
+    aliases:
+    - FSS Score
   paydex_score:
     dtype: int
     distribution: normal
-    mean: 72                     # TUNE: average Paydex score
+    mean: 72
     std: 15
     min: 0
     max: 100
-    description: "Paydex Score — business payment performance score. Values below 61 are risky."
-
-  # ── Case-Level External Exposure Aggregates ──
-
+    description: Paydex Score — business payment performance score. Values below 61
+      are risky.
+    aliases:
+    - Paydex Score
   delinquent_external_trades:
     dtype: int
     distribution: poisson
-    lambda: 0.4                  # TUNE: average number of defaulted external credit lines
+    lambda: 0.4
     min: 0
     max: 20
-    description: "Total count of external credit lines on which the customer defaulted."
-
+    description: Total count of external credit lines on which the customer defaulted.
+    aliases:
+    - Delinquent External Trades
   external_delinquency_amount:
     dtype: float
     distribution: normal
-    mean: 2000                   # TUNE: average default amount (USD)
+    mean: 2000
     std: 8000
     min: 0
     max: 500000
-    description: "Total default amount on external credit lines (USD)."
-
+    description: Total default amount on external credit lines (USD).
+    aliases:
+    - External Delinquency Amount (USD)
   total_tradelines:
     dtype: int
     distribution: normal
-    mean: 12                     # TUNE: average total external credit lines
+    mean: 12
     std: 6
     min: 0
     max: 50
-    description: "Overall count of external credit lines linked to the customer."
-
+    description: Overall count of external credit lines linked to the customer.
+    aliases:
+    - Total Tradelines
   overall_external_exposure:
     dtype: float
     distribution: normal
-    mean: 45000                  # TUNE: average total outstanding balance (USD)
+    mean: 45000
     std: 40000
     min: 0
     max: 500000
-    description: "Total outstanding balance on all external credit lines (USD)."
-
+    description: Total outstanding balance on all external credit lines (USD).
+    aliases:
+    - Overall External Exposure (USD)
   overall_external_revolving_balance:
     dtype: float
     distribution: normal
-    mean: 15000                  # TUNE: average revolving balance (USD)
+    mean: 15000
     std: 18000
     min: 0
     max: 300000
-    description: "Total revolving balance on all external credit lines (USD)."
-
+    description: Total revolving balance on all external credit lines (USD).
+    aliases:
+    - Overall External Revolving Balance (USD)
   avg_external_utilization:
     dtype: float
     distribution: normal
-    mean: 0.35                   # TUNE: average utilization across all external credit lines
+    mean: 0.35
     std: 0.2
     min: 0.0
     max: 1.5
-    description: "Average utilization across all external credit lines."
-
+    description: Average utilization across all external credit lines.
+    aliases:
+    - Average External Utlization
   amex_primary_lender_indicator:
     dtype: int
     distribution: poisson
-    lambda: 0.25                 # TUNE: ~25% of cases have Amex as primary lender
+    lambda: 0.25
     min: 0
     max: 1
-    description: "1 = Amex is primary lender (>= 40% of overall exposure). Considered risky."
-
-  # ── Case-Level Business Valuation & Legal ──
-
+    description: 1 = Amex is primary lender (>= 40% of overall exposure). Considered
+      risky.
+    aliases:
+    - Amex Primary Lender Indicator
   ln_business_value:
     dtype: float
     distribution: normal
-    mean: 1500000                # TUNE: average tax-assessed value (USD)
+    mean: 1500000
     std: 500000
     min: 0
     max: 10000000
-    description: "LexisNexis Business Value — total tax-assessed value of business address (USD). Decrement is a negative sign."
-
+    description: LexisNexis Business Value — total tax-assessed value of business
+      address (USD). Decrement is a negative sign.
+    aliases:
+    - LN Business Value (USD)
   judgements_org_count:
     dtype: int
     distribution: poisson
-    lambda: 0.15                 # TUNE: average court judgments — most cases have 0
+    lambda: 0.15
     min: 0
     max: 10
-    description: "Number of court judgments filed against the organization."
-
+    description: Number of court judgments filed against the organization.
+    aliases:
+    - Judgements Org Count
   lien_org_count:
     dtype: int
     distribution: poisson
-    lambda: 0.2                  # TUNE: average active liens — most cases have 0
+    lambda: 0.2
     min: 0
     max: 10
-    description: "Number of active liens filed against the organization's assets."
-
-  score_date:
-    dtype: date
-    year: 2024
-    description: "Date of last bureau score refresh"
-
-  # ── Tradeline-Level Detail (varies per row) ──
-
-  trade_type:
-    dtype: categorical
-    categories:
-      revolving: 0.40
-      installment: 0.30
-      mortgage: 0.15
-      commercial: 0.10
-      other: 0.05
-    description: "Type of external credit line"
-
-  balance:
-    dtype: float
-    distribution: normal
-    mean: 8500                   # TUNE: average outstanding balance per tradeline (USD)
-    std: 15000
-    min: 0
-    max: 500000
-    description: "Current outstanding balance on this tradeline (USD)"
-
-  credit_limit:
-    dtype: float
-    distribution: normal
-    mean: 20000                  # TUNE: average credit limit per tradeline (USD)
-    std: 25000
-    min: 0
-    max: 500000
-    description: "Credit limit or original loan amount (USD)"
-
-  utilization:
-    dtype: float
-    distribution: normal
-    mean: 0.35
-    std: 0.25
-    min: 0.0
-    max: 1.5
-    description: "Utilization rate for this tradeline (balance / credit_limit). Above 1.0 = overlimit."
-
-  dpd_status:
-    dtype: categorical
-    categories:
-      current: 0.72
-      30dpd: 0.10
-      60dpd: 0.07
-      90dpd: 0.06
-      120plus: 0.03
-      defaulted: 0.02
-    description: "Days-past-due status of the tradeline"
-
-  delinquency_amount:
-    dtype: float
-    distribution: normal
-    mean: 500
-    std: 3000
-    min: 0
-    max: 200000
-    description: "Delinquent amount on this tradeline (USD). 0 for current tradelines."
-
-  is_revolving:
-    dtype: int
-    distribution: poisson
-    lambda: 0.45
-    min: 0
-    max: 1
-    description: "1 if this is a revolving credit line, 0 otherwise"
-
-  open_date:
-    dtype: date
-    year: [2015, 2024]
-    description: "Date the tradeline was originally opened"
-
-  last_reported_date:
-    dtype: date
-    year: [2023, 2024]
-    description: "Date the tradeline was last reported to the bureau"
-
-# ──────────────────────────────────────────────────────────────────
-# CORRELATIONS
-# ──────────────────────────────────────────────────────────────────
+    description: Number of active liens filed against the organization's assets.
+    aliases:
+    - Lien Org Count
 correlations:
-  - columns: [fico_score, delinquent_external_trades]
-    direction: negative
-    strength: 0.7
-  - columns: [fico_score, avg_external_utilization]
-    direction: negative
-    strength: 0.5
-  - columns: [sbfe_score, delinquent_external_trades]
-    direction: negative
-    strength: 0.6
-  - columns: [overall_external_exposure, overall_external_revolving_balance]
-    direction: positive
-    strength: 0.7
-  - columns: [balance, credit_limit]
-    direction: positive
-    strength: 0.6
-  - columns: [balance, utilization]
-    direction: positive
-    strength: 0.7
-  - columns: [balance, delinquency_amount]
-    direction: positive
-    strength: 0.4
-  - columns: [judgements_org_count, lien_org_count]
-    direction: positive
-    strength: 0.5
-  - columns: [ln_credit_score, fico_score]
-    direction: positive
-    strength: 0.7
-  - columns: [css_score, fss_score]
-    direction: positive
-    strength: 0.6
+- columns:
+  - fico_score
+  - delinquent_external_trades
+  direction: negative
+  strength: 0.7
+- columns:
+  - fico_score
+  - avg_external_utilization
+  direction: negative
+  strength: 0.5
+- columns:
+  - sbfe_score
+  - delinquent_external_trades
+  direction: negative
+  strength: 0.6
+- columns:
+  - overall_external_exposure
+  - overall_external_revolving_balance
+  direction: positive
+  strength: 0.7
+- columns:
+  - judgements_org_count
+  - lien_org_count
+  direction: positive
+  strength: 0.5
+- columns:
+  - ln_credit_score
+  - fico_score
+  direction: positive
+  strength: 0.7
+- columns:
+  - css_score
+  - fss_score
+  direction: positive
+  strength: 0.6

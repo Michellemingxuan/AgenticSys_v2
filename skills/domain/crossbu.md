@@ -4,7 +4,7 @@ description: Cross-BU domain skill — cross-product exposure and contagion patt
 type: domain
 owner: [base_specialist]
 mode: inline
-data_hints: [xbu_summary]
+data_hints: [crossbu_cards, crossbu_merchants, xbu_summary]
 interpretation_guide: >
   High total exposure across multiple products increases contagion risk.
   Utilisation above 1.0 indicates over-limit usage. Compare product-level exposure

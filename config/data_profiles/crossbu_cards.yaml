@@ -1,0 +1,127 @@
+table: crossbu_cards
+description: Cross-business-unit cards view — one row per card per case-month. Tracks
+  details of all cards held by the customer (limit, balance, tenure, status, delinquencies)
+  across the 12 months preceding default on the business credit card.
+rows_per_case: 3
+one_row_per_case: false
+aliases:
+- crossbu_cards_data
+columns:
+  Month:
+    dtype: string
+    parse_hint: '%b-%Y'
+    description: Monthly snapshot date for this card record (e.g. "Jan-2024"). One
+      row per card per month.
+    aliases:
+    - Month
+  card_name:
+    dtype: categorical
+    categories:
+      Business Platinum Card: 0.15
+      Business Gold Card: 0.15
+      Business Green Card: 0.1
+      Blue Business Plus: 0.1
+      Blue Business Cash: 0.08
+      Corporate Card: 0.08
+      Plum Card: 0.06
+      Business Line of Credit: 0.06
+      Kabbage Business Line: 0.05
+      Business Checking: 0.04
+      SimplyCash Plus: 0.05
+      Amazon Business Card: 0.04
+      Delta SkyMiles Business: 0.04
+    description: Name of the card used by the customer
+    aliases:
+    - Card Name
+  card_type:
+    dtype: categorical
+    categories:
+      charge: 0.45
+      lending: 0.4
+      loc: 0.15
+    description: Type of card — Charge (pay-in-full), Lending (revolving credit),
+      or LOC (line of credit)
+    aliases:
+    - Card Type
+  card_portfolio:
+    dtype: categorical
+    categories:
+      Small Business: 0.35
+      Corporate: 0.2
+      Consumer Premium: 0.15
+      Consumer Core: 0.1
+      Lending: 0.1
+      Kabbage: 0.05
+      Cobrand: 0.05
+    description: Amex portfolio to which the card belongs
+    aliases:
+    - Card Portfolio
+  card_limit:
+    dtype: float
+    distribution: normal
+    mean: 35000
+    std: 30000
+    min: 500
+    max: 500000
+    description: Credit card limit in USD. Charge cards may have no preset spending
+      limit (NPSL) — represented as high values.
+    aliases:
+    - Card Limit
+  balance:
+    dtype: float
+    distribution: normal
+    mean: 12000
+    std: 18000
+    min: 0
+    max: 500000
+    description: Outstanding exposure on the card in USD
+    aliases:
+    - Balance
+  card_tenure:
+    dtype: int
+    distribution: normal
+    mean: 48
+    std: 36
+    min: 1
+    max: 360
+    description: Tenure of the card account in months
+    aliases:
+    - Card Tenure
+  account_status:
+    dtype: categorical
+    categories:
+      current: 0.7
+      30dpb: 0.12
+      60dpb: 0.08
+      90dpb: 0.05
+      120dpb: 0.03
+      closed: 0.02
+    description: Account status — 'Current' means up to date, 30/60/90/120 DPB means
+      days past billing due
+    aliases:
+    - Account Status
+  past_delinquencies_12m:
+    dtype: int
+    distribution: poisson
+    lambda: 0.5
+    min: 0
+    max: 12
+    description: Count of past delinquencies (30 DPB) on the card in the last 12 months
+    aliases:
+    - Past Delinquencies (Last 12M)
+correlations:
+- columns:
+  - card_limit
+  - balance
+  direction: positive
+  strength: 0.6
+- columns:
+  - balance
+  - past_delinquencies_12m
+  direction: positive
+  strength: 0.4
+- columns:
+  - card_tenure
+  - card_limit
+  direction: positive
+  strength: 0.4

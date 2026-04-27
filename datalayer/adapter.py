@@ -372,13 +372,48 @@ def reconcile_case(gateway, canonical: dict, case_id: str) -> Diff:
     return diff
 
 
+def _resolve_canonical_table_name(
+    real_table: str,
+    canonical_tables: list[str],
+    catalog=None,
+) -> str | None:
+    """Find which canonical table a real table should fold into.
+
+    Cascade: exact key → table-level aliases (when ``catalog`` is supplied)
+    → equal under normalization → substring overlap of normalized forms.
+    Returns None when nothing matches — caller treats the real table as a
+    brand-new canonical entry.
+    """
+    if real_table in canonical_tables:
+        return real_table
+    if catalog is not None:
+        for canonical in canonical_tables:
+            profile = catalog._profiles.get(canonical, {}) or {}
+            if real_table in (profile.get("aliases") or []):
+                return canonical
+    real_norm = _normalize_name(real_table)
+    for canonical in canonical_tables:
+        if _normalize_name(canonical) == real_norm:
+            return canonical
+    for canonical in canonical_tables:
+        canonical_norm = _normalize_name(canonical)
+        if canonical_norm and (canonical_norm in real_norm or real_norm in canonical_norm):
+            return canonical
+    return None
+
+
 def apply_diff(diff: Diff, catalog) -> None:
     """Persist auto_aliased + new entries to the catalog's YAML profiles.
 
-    Does NOT persist ambiguous entries — those are returned to the caller
-    for human review.
+    New columns route via :func:`_resolve_canonical_table_name` so that a
+    real table that maps to an existing canonical (e.g. ``bureau_data``
+    ↔ ``bureau``) folds its new columns into that canonical's YAML rather
+    than spawning a separate file. Real tables with no canonical match
+    create a new canonical YAML keyed on the real name. Ambiguous entries
+    are NOT persisted — they go to the caller for human review.
     """
     patches: dict[str, dict] = {}
+    canonical_tables = list(catalog._profiles.keys())
 
     def _patch_for(table: str) -> dict:
         if table not in patches:
@@ -388,7 +423,6 @@ def apply_diff(diff: Diff, catalog) -> None:
     for entry in diff.auto_aliased:
         if entry.chosen is None:
             continue
-        # Skip if the real name IS the canonical name — nothing to add.
         if entry.real_col == entry.chosen.canonical_col:
             continue
         t = _patch_for(entry.chosen.canonical_table)
@@ -398,7 +432,11 @@ def apply_diff(diff: Diff, catalog) -> None:
             col_patch["aliases"].append(entry.real_col)
 
     for entry in diff.new:
-        t = _patch_for(entry.real_table)
+        target_table = (
+            _resolve_canonical_table_name(entry.real_table, canonical_tables, catalog=catalog)
+            or entry.real_table
+        )
+        t = _patch_for(target_table)
         col_patch: dict = {
             "dtype": entry.real_dtype,
             "description": entry.drafted_description,
@@ -411,3 +449,145 @@ def apply_diff(diff: Diff, catalog) -> None:
 
     for table, patch in patches.items():
         catalog.write_profile_patch(table, patch)
+
+
+# ── Multi-case aggregation ────────────────────────────────────────────────
+
+
+@dataclass
+class AggregatedDiff:
+    """Catalog-wide diff aggregated across all scanned cases.
+
+    Each list is deduped by (real_table, real_col) — an entry that recurs
+    across cases is reported once. ``dtype_conflicts`` flags real columns
+    whose inferred dtype differs across cases (rare; usually a data-quality
+    smell worth surfacing).
+    """
+    case_count: int
+    auto_aliased: list[ColumnDiff] = field(default_factory=list)
+    ambiguous: list[ColumnDiff] = field(default_factory=list)
+    new_columns: list[ColumnDiff] = field(default_factory=list)
+    new_tables: list[str] = field(default_factory=list)
+    dtype_conflicts: list[tuple[str, str, set[str]]] = field(default_factory=list)
+
+
+def aggregate_diffs(diffs: list[Diff]) -> AggregatedDiff:
+    """Merge per-case diffs into a single catalog-wide view.
+
+    Dedup key is ``(real_table, real_col)``. The first occurrence wins; later
+    occurrences are discarded but their ``real_dtype`` is checked against
+    the first to detect conflicts.
+    """
+    seen_auto: dict[tuple[str, str], ColumnDiff] = {}
+    seen_ambig: dict[tuple[str, str], ColumnDiff] = {}
+    seen_new: dict[tuple[str, str], ColumnDiff] = {}
+    seen_tables: set[str] = set()
+    dtype_seen: dict[tuple[str, str], set[str]] = {}
+
+    def _track_dtype(entry: ColumnDiff) -> None:
+        key = (entry.real_table, entry.real_col)
+        dtype_seen.setdefault(key, set()).add(entry.real_dtype)
+
+    for d in diffs:
+        for entry in d.auto_aliased:
+            key = (entry.real_table, entry.real_col)
+            _track_dtype(entry)
+            seen_auto.setdefault(key, entry)
+        for entry in d.ambiguous:
+            key = (entry.real_table, entry.real_col)
+            _track_dtype(entry)
+            seen_ambig.setdefault(key, entry)
+        for entry in d.new:
+            key = (entry.real_table, entry.real_col)
+            _track_dtype(entry)
+            seen_new.setdefault(key, entry)
+        for table in d.new_tables:
+            seen_tables.add(table)
+
+    conflicts = [
+        (table, col, dtypes)
+        for (table, col), dtypes in dtype_seen.items()
+        if len(dtypes) > 1
+    ]
+
+    return AggregatedDiff(
+        case_count=len(diffs),
+        auto_aliased=list(seen_auto.values()),
+        ambiguous=list(seen_ambig.values()),
+        new_columns=list(seen_new.values()),
+        new_tables=sorted(seen_tables),
+        dtype_conflicts=conflicts,
+    )
+
+
+# ── Profile-only audit (canonical entries no real case has) ───────────────
+
+
+@dataclass
+class ProfileOnlyEntry:
+    """A canonical column not observed in any scanned real case."""
+    table: str
+    column: str
+
+
+@dataclass
+class ProfileOnlyAudit:
+    """Result of comparing the canonical catalog against observed real data."""
+    profile_only_tables: list[str] = field(default_factory=list)
+    profile_only_columns: list[ProfileOnlyEntry] = field(default_factory=list)
+
+
+def audit_profile_only(
+    catalog,
+    observed: dict[str, set[str]],
+) -> ProfileOnlyAudit:
+    """Find canonical tables/columns that no scanned case observed.
+
+    Parameters
+    ----------
+    catalog : DataCatalog
+        The canonical catalog (reads ``_profiles``).
+    observed : dict[str, set[str]]
+        ``{real_table_name: {real_col_name, ...}}`` aggregated across all
+        scanned real cases.
+
+    A canonical table is considered "observed" if some real table's
+    normalized name matches or substring-overlaps the canonical's
+    normalized name. A canonical column is considered "observed" if its
+    canonical name OR any of its aliases (normalized) appears in the
+    union of observed columns from any matching real table.
+    """
+    audit = ProfileOnlyAudit()
+
+    for canonical_table in catalog.list_tables():
+        canonical_norm = _normalize_name(canonical_table)
+        canonical_aliases = set(catalog._profiles[canonical_table].get("aliases") or [])
+        matching_obs = [
+            obs for obs in observed
+            if (
+                obs in canonical_aliases
+                or _normalize_name(obs) == canonical_norm
+                or canonical_norm in _normalize_name(obs)
+                or _normalize_name(obs) in canonical_norm
+            )
+        ]
+
+        if not matching_obs:
+            audit.profile_only_tables.append(canonical_table)
+            continue
+
+        observed_cols: set[str] = set()
+        for t in matching_obs:
+            observed_cols |= observed[t]
+        observed_norm = {_normalize_name(c) for c in observed_cols}
+
+        cols = catalog._profiles[canonical_table].get("columns", {}) or {}
+        for canonical_col, spec in cols.items():
+            aliases = spec.get("aliases", []) or []
+            names_norm = {_normalize_name(n) for n in {canonical_col, *aliases}}
+            if not (names_norm & observed_norm):
+                audit.profile_only_columns.append(
+                    ProfileOnlyEntry(table=canonical_table, column=canonical_col)
+                )
+
+    return audit

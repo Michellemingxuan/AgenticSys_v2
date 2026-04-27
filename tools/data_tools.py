@@ -31,6 +31,71 @@ _FILTER_OPS: dict[str, Callable[[Any, Any], bool]] = {
 }
 
 
+# Lightweight table-name normalization for real→canonical resolution.
+# Mirrors datalayer.adapter._normalize_name without importing the adapter
+# module (which pulls pandas — sync-time only).
+_NON_ALNUM = re.compile(r"[^a-z0-9]")
+_TRAILING_DIGITS = re.compile(r"\d+$")
+
+
+def _normalize(name: str) -> str:
+    return _TRAILING_DIGITS.sub("", _NON_ALNUM.sub("", name.lower()))
+
+
+def _resolve_canonical_table(real_table: str) -> str | None:
+    """Find the primary canonical table name that matches a real table name.
+
+    Returns the highest-priority match from the cascade in
+    :func:`_resolve_canonical_tables` (or ``None`` if nothing matches).
+    """
+    matches = _resolve_canonical_tables(real_table)
+    return matches[0] if matches else None
+
+
+def _resolve_canonical_tables(real_table: str) -> list[str]:
+    """Find all canonical tables relevant to a real table, in priority order.
+
+    Matching cascade:
+      1. Exact key in catalog ``_profiles``.
+      2. Table-level ``aliases`` declared in any canonical profile (e.g.
+         ``model_scores.yaml`` declares ``aliases: [modelling_data]``).
+      3. Equal under normalization (case/punctuation only).
+      4. Substring overlap of normalized forms (``bureau`` ⊂ ``bureau_data``).
+
+    Returns a deduped list — the first entry is the primary match, the rest
+    are fallbacks. Useful when a hand-written real-data profile (like
+    ``bureau_data.yaml``) only carries a subset of columns and the rest
+    need to be looked up under the broader canonical (``bureau.yaml``).
+    """
+    if _catalog is None:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(name: str) -> None:
+        if name not in seen:
+            seen.add(name)
+            out.append(name)
+
+    if real_table in _catalog._profiles:
+        _add(real_table)
+
+    # Stage 2: table-level aliases.
+    for canonical, profile in _catalog._profiles.items():
+        if real_table in (profile.get("aliases") or []):
+            _add(canonical)
+
+    real_norm = _normalize(real_table)
+    for canonical in _catalog._profiles:
+        if _normalize(canonical) == real_norm:
+            _add(canonical)
+    for canonical in _catalog._profiles:
+        canonical_norm = _normalize(canonical)
+        if canonical_norm and (canonical_norm in real_norm or real_norm in canonical_norm):
+            _add(canonical)
+    return out
+
+
 _MONTHS: dict[str, int] = {
     m: i
     for i, m in enumerate(
@@ -214,11 +279,17 @@ def list_available_tables() -> str:
     def _render(tables: list[str]) -> str:
         lines: list[str] = []
         for t in tables:
-            desc = _catalog.get_description(t) if _catalog else ""
+            canonical = _resolve_canonical_table(t) or t
+            desc = _catalog.get_description(canonical) if _catalog else ""
+            label = (
+                f"{t} [canonical: {canonical}]"
+                if canonical != t and desc
+                else t
+            )
             if desc:
-                lines.append(f"- {t}: {desc}")
+                lines.append(f"- {label}: {desc}")
             else:
-                lines.append(f"- {t}")
+                lines.append(f"- {label}")
         return "\n".join(lines)
 
     if _gateway is not None and _gateway.get_case_id() is not None:
@@ -241,12 +312,59 @@ def list_available_tables() -> str:
 
 
 def get_table_schema(table_name: str) -> str:
-    """Get the column schema for a specific table."""
+    """Get the column schema for a specific table.
+
+    When a case is active, the schema is filtered to only the columns
+    physically present in the case's CSV (i.e., the simulated catalog's
+    extra columns are hidden). Each real column is annotated with the
+    canonical column's dtype + description if a match exists in the
+    canonical profile (via name, alias, or normalized fuzzy match).
+    Columns present in the CSV but absent from the canonical are emitted
+    with ``type: unknown`` and a "(not in catalog)" description so the
+    LLM still sees they exist.
+    """
     _log_call("get_table_schema", {"table_name": table_name})
     if _catalog is None:
         out = "Data unavailable"
         _log_result("get_table_schema", result=out)
         return out
+
+    if _gateway is not None and _gateway.get_case_id() is not None:
+        rows = _gateway.query(table_name) or []
+        if not rows:
+            out = f"Data unavailable: table '{table_name}' not found for current case."
+            _log_result("get_table_schema", result=out,
+                        extra={"table_name": table_name, "found": False})
+            return out
+
+        canonical_tables = _resolve_canonical_tables(table_name)
+        # Build a merged column-spec map across all matching canonical tables.
+        # Earlier entries win, so a hand-written real-data profile takes
+        # precedence over the broader canonical it shares a name with.
+        merged_cols: dict[str, dict] = {}
+        for ct in canonical_tables:
+            for col, spec in (_catalog._profiles.get(ct, {}).get("columns", {}) or {}).items():
+                merged_cols.setdefault(col, spec)
+
+        schema: dict[str, dict] = {}
+        for real_col in rows[0].keys():
+            spec = _find_column_spec(merged_cols, real_col)
+            if spec is not None:
+                schema[real_col] = {
+                    "type": spec.get("dtype", "unknown"),
+                    "description": spec.get("description", ""),
+                }
+            else:
+                schema[real_col] = {"type": "unknown", "description": "(not in catalog)"}
+
+        out = json.dumps(schema, indent=2)
+        _log_result("get_table_schema", result=out,
+                    extra={"table_name": table_name, "found": True,
+                           "canonical": canonical_tables[0] if canonical_tables else None,
+                           "canonical_chain": canonical_tables,
+                           "column_count": len(schema)})
+        return out
+
     schema = _catalog.get_schema(table_name)
     if schema is None:
         out = "Data unavailable"
@@ -258,6 +376,26 @@ def get_table_schema(table_name: str) -> str:
                 extra={"table_name": table_name, "found": True,
                        "column_count": len(schema)})
     return out
+
+
+def _find_column_spec(canonical_cols: dict, real_col: str) -> dict | None:
+    """Return the canonical spec matching a real column name (or None).
+
+    Checks: exact key, alias list, normalized form across both.
+    """
+    if real_col in canonical_cols:
+        return canonical_cols[real_col]
+    real_norm = _normalize(real_col)
+    for spec in canonical_cols.values():
+        if real_col in (spec.get("aliases") or []):
+            return spec
+    for canonical_col, spec in canonical_cols.items():
+        if _normalize(canonical_col) == real_norm:
+            return spec
+        for alias in spec.get("aliases") or []:
+            if _normalize(alias) == real_norm:
+                return spec
+    return None
 
 
 def query_table(

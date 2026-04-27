@@ -35,6 +35,17 @@ from skills.loader import load_skill as _load_skill
 _WORKFLOW_DIR = Path(__file__).parent.parent / "skills" / "workflow"
 
 
+# Table-name normalization for canonical↔real mapping. Mirrors
+# ``datalayer.adapter._normalize_name`` without importing the adapter
+# module (which pulls pandas — sync-time only).
+_NON_ALNUM = re.compile(r"[^a-z0-9]")
+_TRAILING_DIGITS = re.compile(r"\d+$")
+
+
+def _normalize(name: str) -> str:
+    return _TRAILING_DIGITS.sub("", _NON_ALNUM.sub("", name.lower()))
+
+
 def _extract_section(body: str, heading_prefix: str) -> str:
     """Extract a markdown section starting with the given heading prefix.
 
@@ -71,6 +82,7 @@ class Orchestrator:
         pillar: str,
         pillar_config: dict | None = None,
         catalog=None,
+        gateway=None,
     ):
         self.llm = llm
         self.logger = logger
@@ -78,6 +90,24 @@ class Orchestrator:
         self.pillar = pillar
         self.pillar_config = pillar_config or {}
         self.catalog = catalog
+        self.gateway = gateway
+
+    def _build_case_schema(self) -> dict[str, list[str]] | None:
+        """Return ``{real_table: [real_col_names]}`` for the active case,
+        or None if no gateway/case is available.
+
+        Drives the case-filtered view in ``catalog.to_prompt_context`` and
+        the per-table column projection in ``_build_specialist_descriptions``
+        so the simulated catalog's extra tables/columns do not leak into
+        team-construction or specialist prompts.
+        """
+        if self.gateway is None or self.gateway.get_case_id() is None:
+            return None
+        schema: dict[str, list[str]] = {}
+        for table in self.gateway.list_tables():
+            rows = self.gateway.query(table) or []
+            schema[table] = list(rows[0].keys()) if rows else []
+        return schema
 
     # ──────────────────────────────────────────────────────────────
     # Team planning — two sequential LLM calls:
@@ -135,7 +165,10 @@ class Orchestrator:
         """
         catalog_view = ""
         if self.catalog is not None:
-            catalog_view = self.catalog.to_prompt_context() + "\n"
+            case_schema = self._build_case_schema()
+            catalog_view = (
+                self.catalog.to_prompt_context(case_schema=case_schema) + "\n"
+            )
 
         roster_lines = ["=== SPECIALIST ROSTER ==="]
         for domain in available_specialists:
@@ -205,6 +238,8 @@ class Orchestrator:
         return self._parse_plan(result.data, selected_specialists, question)
 
     def _build_specialist_descriptions(self, available: list[str]) -> str:
+        case_schema = self._build_case_schema()
+
         lines: list[str] = []
         for domain in available:
             skill = load_domain_skill(domain)
@@ -217,19 +252,65 @@ class Orchestrator:
             desc += f"\n    Tables: {', '.join(skill.data_hints)}"
 
             if self.catalog:
-                for table in skill.data_hints:
-                    schema = self.catalog.get_schema(table)
-                    if schema:
-                        col_names = list(schema.keys())
+                for canonical_table in skill.data_hints:
+                    col_names = self._case_aware_columns(
+                        canonical_table=canonical_table,
+                        case_schema=case_schema,
+                    )
+                    if col_names is None:
+                        desc += f"\n    Columns ({canonical_table}): (not present in this case)"
+                    elif col_names:
                         if len(col_names) > 15:
-                            desc += f"\n    Columns ({table}): {', '.join(col_names[:15])}... (+{len(col_names)-15} more)"
+                            desc += (
+                                f"\n    Columns ({canonical_table}): "
+                                f"{', '.join(col_names[:15])}... "
+                                f"(+{len(col_names) - 15} more)"
+                            )
                         else:
-                            desc += f"\n    Columns ({table}): {', '.join(col_names)}"
+                            desc += (
+                                f"\n    Columns ({canonical_table}): "
+                                f"{', '.join(col_names)}"
+                            )
 
             desc += f"\n    Risk signals: {', '.join(skill.risk_signals[:3])}"
             lines.append(desc)
 
         return "\n".join(lines)
+
+    def _case_aware_columns(
+        self,
+        canonical_table: str,
+        case_schema: dict[str, list[str]] | None,
+    ) -> list[str] | None:
+        """Return the columns to display for a canonical-table reference.
+
+        - When ``case_schema`` is None (no active case): full canonical
+          schema columns from the YAML.
+        - When a real table maps to ``canonical_table`` (via normalized
+          name match or substring overlap): the real column names.
+        - When no real table maps: ``None`` (signals "not present in case").
+        """
+        if case_schema is None:
+            schema = self.catalog.get_schema(canonical_table)
+            return list(schema.keys()) if schema else []
+
+        canonical_norm = _normalize(canonical_table)
+        # Honor table-level aliases declared on the canonical's YAML profile.
+        canonical_profile = (
+            self.catalog._profiles.get(canonical_table, {}) if self.catalog else {}
+        )
+        canonical_aliases = set(canonical_profile.get("aliases") or [])
+        for real_table, real_cols in case_schema.items():
+            if real_table in canonical_aliases:
+                return real_cols
+            real_norm = _normalize(real_table)
+            if (
+                real_norm == canonical_norm
+                or canonical_norm in real_norm
+                or real_norm in canonical_norm
+            ):
+                return real_cols
+        return None
 
     def _parse_team_selection(
         self,

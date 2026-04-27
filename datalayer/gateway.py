@@ -143,7 +143,15 @@ class LocalDataGateway(DataGateway):
 
     @classmethod
     def from_case_folders(cls, data_dir: str) -> "LocalDataGateway":
-        """Load per-case data from folder structure: data_dir/{case_id}/{table}.csv."""
+        """Load per-case data from folder structure: data_dir/{case_id}/{table}.csv.
+
+        Post-load hook: when both ``payments_success.csv`` and ``payments_returns.csv``
+        are present for a case, they are rbound into a single ``payments`` table
+        with a synthetic ``payment_status`` column (``"success"`` / ``"return"``).
+        The two source tables are removed from the case's table set after the
+        merge so consumers see a single ``payments`` table aligned with the
+        canonical ``payments`` profile.
+        """
         case_data: dict[str, dict[str, list[dict]]] = {}
         data_path = Path(data_dir)
 
@@ -158,11 +166,33 @@ class LocalDataGateway(DataGateway):
 
             for csv_file in sorted(case_dir.glob("*.csv")):
                 table_name = csv_file.stem
-                with open(csv_file) as f:
+                # utf-8-sig auto-strips a leading BOM, which Excel exports
+                # often add and which would otherwise corrupt the first
+                # column header (e.g. "﻿customer_name").
+                with open(csv_file, encoding="utf-8-sig") as f:
                     reader = csv.DictReader(f)
                     case_data[case_id][table_name] = list(reader)
 
+            cls._rbind_payments(case_data[case_id])
+
         return cls(case_data=case_data)
+
+    @staticmethod
+    def _rbind_payments(tables: dict[str, list[dict]]) -> None:
+        """Merge payments_success + payments_returns into a single 'payments' table
+        with a synthetic 'payment_status' discriminator. In-place mutation.
+        """
+        succ = tables.pop("payments_success", None)
+        retn = tables.pop("payments_returns", None)
+        if succ is None and retn is None:
+            return
+        merged: list[dict] = []
+        for row in (succ or []):
+            merged.append({**row, "payment_status": "success"})
+        for row in (retn or []):
+            merged.append({**row, "payment_status": "return"})
+        if merged:
+            tables["payments"] = merged
 
 
 # Backwards-compat alias — `SimulatedDataGateway` is the old name of the class

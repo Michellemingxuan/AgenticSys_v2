@@ -68,16 +68,37 @@ def test_list_tables_no_case_set():
 
 
 def test_get_schema():
-    result = data_tools.get_table_schema("bureau")
-    assert "type" in result
+    """Case-aware schema returns columns physically present in the case CSV.
+
+    The fixture's case has table ``bureau_full`` whose normalized name
+    contains canonical ``bureau`` — the resolver maps it to that profile,
+    and the real columns are returned (annotated as ``unknown`` when the
+    canonical profile doesn't carry them).
+    """
+    result = data_tools.get_table_schema("bureau_full")
+    assert "score" in result
+    assert "derog_count" in result
     # case_id is infrastructure, not schema — must not appear in LLM-bound schema output.
     assert "case_id" not in result
     assert "CASE-" not in result
 
 
+def test_get_schema_filters_to_case_columns():
+    """When a case is active, get_table_schema must NOT return canonical
+    columns that the case CSV doesn't actually contain. The fixture case
+    only has 'score' + 'derog_count' — sibling canonical columns like
+    'fico_score' (a different name in the bureau profile) must NOT appear.
+    """
+    result = data_tools.get_table_schema("bureau_full")
+    # 'fico_score' is in canonical bureau profile but the case CSV uses
+    # different column names → must be absent from the case-filtered view
+    assert "fico_score" not in result
+    assert "delinquent_external_trades" not in result
+
+
 def test_get_schema_missing():
     result = data_tools.get_table_schema("nonexistent")
-    assert result == "Data unavailable"
+    assert "unavailable" in result.lower()
 
 
 def test_query_all():

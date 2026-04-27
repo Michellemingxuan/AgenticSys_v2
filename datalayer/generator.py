@@ -46,11 +46,42 @@ class DataGenerator:
     # ------------------------------------------------------------------
 
     def generate_all(self, row_count_override: int | None = None) -> dict[str, dict[str, list]]:
-        """Generate all tables, returning {table_name: {col_name: [values]}}."""
+        """Generate all tables, returning {table_name: {col_name: [values]}}.
+
+        Skips profiles that lack generation hints (e.g., sync-created profiles
+        for real-data tables that only carry dtype/description/aliases). Such
+        profiles serve the catalog/query path but have no statistical params
+        for the simulator.
+        """
         self._tables.clear()
         for name, profile in self.profiles.items():
+            if not self._is_generatable(profile):
+                continue
             self._tables[name] = self._generate_table(profile, row_count_override)
         return self._tables
+
+    @staticmethod
+    def _column_is_generatable(spec: dict) -> bool:
+        return any(
+            k in spec
+            for k in ("distribution", "categories", "derive_from",
+                      "value", "year", "format")
+        )
+
+    @staticmethod
+    def _is_generatable(profile: dict) -> bool:
+        """True iff the profile has row-count info AND at least one generatable column.
+
+        Profiles that mix simulator columns with real-data-only columns
+        (added by sync) are still generatable — the per-column loop in
+        ``_generate_table`` skips columns without generation hints.
+        """
+        if not any(k in profile for k in ("rows_per_case", "row_count", "one_row_per_case")):
+            return False
+        cols = profile.get("columns", {}) or {}
+        if not cols:
+            return False
+        return any(DataGenerator._column_is_generatable(spec) for spec in cols.values())
 
     def _generate_table(
         self, profile: dict, row_count_override: int | None = None
@@ -70,11 +101,14 @@ class DataGenerator:
         columns: dict[str, list] = {}
         col_specs = profile["columns"]
 
-        # First pass: generate non-derived columns
+        # First pass: generate non-derived columns. Skip columns that lack
+        # generation hints (real-data-only columns merged in by sync).
         derived_specs: dict[str, dict] = {}
         for col_name, spec in col_specs.items():
             if "derive_from" in spec:
                 derived_specs[col_name] = spec
+                continue
+            if not self._column_is_generatable(spec):
                 continue
             columns[col_name] = self._generate_column(spec, n, rng, profile)
 

@@ -12,7 +12,6 @@ Given a question and the rows returned by `query_table`, synthesise findings and
 
 - `findings`: 1-2 sentence summary — the main takeaway in answer to the question.
 - `evidence`: list of specific row-level citations (e.g., "payment_date=2024-09-24, return_flag='returned'"). Quote dates and amounts verbatim from the returned rows; never from filter bounds.
-- `implications`: list of risk-relevant inferences that follow from the evidence.
 - `data_gaps`: list of things that would sharpen the answer but weren't available (empty if none).
 
 **Rules:**

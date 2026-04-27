@@ -141,6 +141,88 @@ class DataManagerAgent:
         )
         return diff
 
+    async def draft_description(
+        self,
+        table: str,
+        column: str,
+        samples: list,
+        sibling_columns: list[str] | None = None,
+        dtype: str | None = None,
+    ) -> str:
+        """Use the LLM to draft a one-sentence column description.
+
+        Falls back to an empty string when the LLM is unavailable or the
+        firewall blocks the call. Caller is responsible for the regex-based
+        fallback (``adapter._draft_description``) if it wants one.
+        """
+        if self.llm is None or not hasattr(self.llm, "ainvoke"):
+            return ""
+
+        sample_strs = [
+            str(s)[:80] for s in samples[:10] if s is not None and s != ""
+        ]
+        samples_block = ", ".join(sample_strs) if sample_strs else "(no non-null samples)"
+        dtype_block = f"Inferred dtype: {dtype}\n" if dtype else ""
+        sibling_block = ""
+        if sibling_columns:
+            sibling_block = (
+                f"Other columns in table '{table}': "
+                f"{', '.join(sibling_columns[:25])}\n"
+            )
+
+        user = (
+            f"Table: {table}\n"
+            f"Column: {column}\n"
+            f"{dtype_block}"
+            f"Sample values: {samples_block}\n"
+            f"{sibling_block}\n"
+            "Write ONE sentence describing this column for use by credit-risk "
+            "analysts. Mention units (USD, %, days, count, etc.) if you can "
+            "infer them from the samples or name. Do NOT speculate beyond "
+            "what the name and samples support. Return only the sentence — "
+            "no quotes, no preamble."
+        )
+
+        result = await self.llm.ainvoke(
+            system_prompt=(
+                "You are a senior data steward writing concise column "
+                "descriptions for a credit-risk analytics catalog."
+            ),
+            user_message=user,
+        )
+        if result.status != "success" or not result.data:
+            return ""
+        text = str(result.data.get("response", "")).strip()
+        return text.strip('"').strip("'").strip()
+
+    async def draft_table_description(
+        self,
+        table: str,
+        column_names: list[str],
+    ) -> str:
+        """Use the LLM to draft a one-sentence table description."""
+        if self.llm is None or not hasattr(self.llm, "ainvoke"):
+            return ""
+
+        cols_block = ", ".join(column_names[:30])
+        user = (
+            f"Table: {table}\n"
+            f"Columns: {cols_block}\n\n"
+            "Write ONE sentence describing what this table contains, for "
+            "use by credit-risk analysts. Return only the sentence."
+        )
+        result = await self.llm.ainvoke(
+            system_prompt=(
+                "You are a senior data steward writing concise table "
+                "descriptions for a credit-risk analytics catalog."
+            ),
+            user_message=user,
+        )
+        if result.status != "success" or not result.data:
+            return ""
+        text = str(result.data.get("response", "")).strip()
+        return text.strip('"').strip("'").strip()
+
     def verify_description(
         self,
         table: str,

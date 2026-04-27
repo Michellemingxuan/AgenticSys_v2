@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Data Catalog v2 — Case 366132845011</title>
+<style>
+:root {
+  /* Claude blue palette — refined, editorial */
+  --ink: #1A1A1A;
+  --ink-soft: #2A2A2A;
+  --muted: #6B6B6B;
+  --muted-soft: #9A9A9A;
+  --hairline: #E8E8E5;
+  --hairline-strong: #D4D4D0;
+  --paper: #FAF9F6;        /* warm Claude paper */
+  --paper-deep: #F2F0EA;
+  --white: #FFFFFF;
+
+  --blue-50:  #F0F7FF;
+  --blue-100: #E0EEFF;
+  --blue-200: #BFDBFE;
+  --blue-400: #60A5FA;
+  --blue-500: #3B82F6;
+  --blue-600: #2563EB;
+  --blue-700: #1D4ED8;
+  --blue-900: #0E2A6E;
+
+  --green-bg:  #ECFDF5; --green-text:  #047857; --green-border:  #A7F3D0;
+  --amber-bg:  #FEF6E0; --amber-text:  #92400E; --amber-border:  #FDE3A6;
+  --red-bg:    #FEF2F2; --red-text:    #991B1B; --red-border:    #FECACA;
+  --purple-bg: #F4F1FE; --purple-text: #5B21B6; --purple-border: #DDD6FE;
+  --sky-bg:    #ECFEFF; --sky-text:    #075985; --sky-border:    #BAE6FD;
+
+  --serif: "Tiempos Headline", "Iowan Old Style", "Source Serif Pro", Georgia, "Times New Roman", serif;
+  --sans:  "Söhne", -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Helvetica, Arial, sans-serif;
+  --mono:  ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--sans);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── HERO ── */
+.hero {
+  background: var(--white);
+  color: var(--ink);
+  padding: 48px 60px 36px;
+  border-bottom: 1px solid var(--hairline);
+  position: relative;
+}
+.blue-stripe {
+  position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--blue-700) 0%, var(--blue-500) 50%, var(--blue-400) 100%);
+}
+.hero-row { display: flex; align-items: flex-start; flex-direction: column; gap: 6px; }
+.amex-logo, .logo-american, .logo-express { display: none; }   /* drop the Amex glyph */
+.hero h1 {
+  font-family: var(--serif);
+  font-size: 42px; font-weight: 500;
+  letter-spacing: -0.025em;
+  color: var(--ink);
+  line-height: 1.05;
+}
+.hero h1 span {
+  color: var(--blue-600);
+  font-style: italic;
+  font-weight: 400;
+}
+.hero-sub {
+  font-family: var(--sans);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  margin-top: 14px;
+}
+
+/* stats strip */
+.stats {
+  display: flex; align-items: baseline; gap: 24px;
+  margin-top: 28px; padding-top: 22px;
+  border-top: 1px solid var(--hairline);
+}
+.stat { display: flex; align-items: baseline; gap: 10px; }
+.stat-num {
+  font-family: var(--serif);
+  font-size: 32px; font-weight: 500;
+  color: var(--blue-700);
+  letter-spacing: -0.025em;
+}
+.stat-label {
+  font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.14em;
+  color: var(--muted);
+}
+.stat-dot { font-size: 16px; color: var(--hairline-strong); font-weight: 400; }
+
+/* ── LAYOUT ── */
+.page {
+  max-width: 1480px; margin: 0 auto;
+  display: grid; grid-template-columns: 270px 1fr; gap: 40px;
+  padding: 36px 60px 80px;
+}
+
+/* ── SIDEBAR ── */
+.sidebar {
+  position: sticky; top: 24px;
+  align-self: start;
+  max-height: calc(100vh - 48px);
+  display: flex; flex-direction: column; gap: 14px;
+}
+.case-toggle {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  background: var(--blue-50);
+  border: 1px solid var(--blue-200);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.case-toggle input[type="checkbox"] {
+  accent-color: var(--blue-600);
+  width: 14px; height: 14px;
+}
+.case-toggle label {
+  cursor: pointer; user-select: none;
+  color: var(--blue-900); font-weight: 600;
+  line-height: 1.3;
+}
+.search-wrap { position: relative; }
+.search-wrap input {
+  width: 100%; padding: 11px 14px 11px 36px;
+  font-size: 13px; font-family: inherit;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 8px;
+  background: var(--white); color: var(--ink);
+  outline: none; transition: all 0.15s;
+}
+.search-wrap input::placeholder { color: var(--muted-soft); }
+.search-wrap input:focus {
+  border-color: var(--blue-500);
+  box-shadow: 0 0 0 3px var(--blue-100);
+}
+.search-wrap::before {
+  content: ""; position: absolute; left: 13px; top: 50%; transform: translateY(-50%);
+  width: 13px; height: 13px;
+  border: 1.5px solid var(--muted); border-radius: 50%;
+  box-shadow: 6px 6px 0 -5px var(--muted);
+}
+.side-controls { display: flex; gap: 6px; }
+.side-controls button {
+  flex: 1; padding: 8px 10px;
+  font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.1em;
+  background: var(--white); color: var(--muted);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 6px;
+  cursor: pointer; font-family: inherit;
+  transition: all 0.15s;
+}
+.side-controls button:hover {
+  color: var(--blue-700);
+  border-color: var(--blue-400);
+  background: var(--blue-50);
+}
+.table-nav {
+  background: var(--white);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 8px 6px;
+  overflow-y: auto;
+  max-height: calc(100vh - 280px);
+}
+.nav-header {
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.16em;
+  color: var(--muted-soft);
+  padding: 8px 12px 10px;
+}
+.nav-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 13px; font-family: var(--mono);
+  color: var(--ink-soft);
+  text-decoration: none;
+  border-radius: 6px;
+  transition: all 0.12s;
+  border-left: 2px solid transparent;
+}
+.nav-item:hover {
+  background: var(--blue-50);
+  color: var(--blue-700);
+}
+.nav-item.active {
+  background: var(--blue-50);
+  color: var(--blue-700);
+  border-left-color: var(--blue-600);
+  font-weight: 600;
+}
+.nav-item.hidden { display: none; }
+.nav-item-name { flex: 1; }
+.nav-item-count {
+  font-size: 10px; color: var(--muted-soft);
+  font-family: var(--sans); font-weight: 600;
+  padding: 1px 6px; background: var(--paper-deep); border-radius: 8px;
+}
+.nav-item.active .nav-item-count {
+  background: var(--blue-100); color: var(--blue-700);
+}
+
+/* ── MAIN / CARDS ── */
+.cards { display: flex; flex-direction: column; gap: 14px; }
+.card {
+  background: var(--white);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.card:hover { border-color: var(--blue-200); }
+.card.hidden { display: none; }
+.card.profile-only { opacity: 0.55; }
+.card.profile-only.hidden-by-toggle { display: none; }
+
+.card-head {
+  display: flex; align-items: center; gap: 16px;
+  padding: 22px 24px;
+  cursor: pointer;
+  border-left: 3px solid var(--blue-600);
+}
+.card.profile-only .card-head { border-left-color: var(--amber-border); }
+.card-title-wrap { flex: 1; min-width: 0; }
+.card-title-row {
+  display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap; margin-bottom: 6px;
+}
+.card-title {
+  font-family: var(--serif);
+  font-size: 22px; font-weight: 500;
+  color: var(--ink);
+  letter-spacing: -0.015em;
+}
+.card-desc {
+  font-size: 13.5px; color: var(--muted);
+  line-height: 1.55; max-width: 78ch;
+}
+.chevron {
+  font-size: 22px; color: var(--muted-soft);
+  transition: transform 0.2s, color 0.15s;
+  flex-shrink: 0;
+}
+.card.expanded .chevron { transform: rotate(90deg); color: var(--blue-600); }
+.card-body { display: none; padding: 0 24px 24px; }
+.card.expanded .card-body { display: block; }
+
+/* badges & pills */
+.col-count-pill {
+  font-family: var(--sans); font-size: 10px; font-weight: 700;
+  padding: 4px 10px; border-radius: 20px;
+  background: var(--paper-deep); color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.1em;
+  border: 1px solid var(--hairline-strong);
+}
+.alias-pill, .case-pill, .profile-only-pill, .pending-pill {
+  font-family: var(--sans); font-size: 10px; font-weight: 700;
+  padding: 4px 9px; border-radius: 20px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  border: 1px solid;
+}
+.case-pill { background: var(--green-bg); color: var(--green-text); border-color: var(--green-border); }
+.profile-only-pill { background: var(--amber-bg); color: var(--amber-text); border-color: var(--amber-border); }
+.alias-pill { background: var(--purple-bg); color: var(--purple-text); border-color: var(--purple-border); }
+.pending-pill { background: var(--red-bg); color: var(--red-text); border-color: var(--red-border); }
+
+/* column table */
+.col-table {
+  width: 100%; border-collapse: collapse;
+  font-size: 13px;
+  border-top: 1px solid var(--hairline);
+}
+.col-table th {
+  text-align: left; padding: 12px 14px;
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.14em;
+  color: var(--muted-soft);
+  background: var(--paper);
+  border-bottom: 1px solid var(--hairline);
+}
+.col-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--hairline);
+  vertical-align: top;
+}
+.col-table tr:last-child td { border-bottom: none; }
+.col-table tr:hover td { background: var(--blue-50); }
+.col-table tr.hidden { display: none; }
+.col-name {
+  font-family: var(--mono); font-size: 12.5px; font-weight: 600;
+  color: var(--blue-900);
+}
+.col-aliases {
+  font-size: 11px; color: var(--muted-soft);
+  margin-top: 3px;
+  font-family: var(--mono);
+}
+.col-aliases::before { content: "↳ "; color: var(--muted-soft); }
+.col-desc { color: var(--ink-soft); line-height: 1.55; }
+.w-name { width: 28%; }
+.w-type { width: 16%; }
+
+/* type tags */
+.col-type {
+  display: inline-block;
+  font-family: var(--sans); font-size: 10px; font-weight: 700;
+  padding: 2px 7px; border-radius: 4px;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  border: 1px solid;
+}
+.t-int       { background: var(--blue-50);   color: var(--blue-700);   border-color: var(--blue-200); }
+.t-float     { background: var(--sky-bg);    color: var(--sky-text);   border-color: var(--sky-border); }
+.t-string    { background: var(--paper-deep);color: var(--ink-soft);   border-color: var(--hairline-strong); }
+.t-date      { background: var(--purple-bg); color: var(--purple-text);border-color: var(--purple-border); }
+.t-categorical { background: var(--green-bg); color: var(--green-text); border-color: var(--green-border); }
+.t-unknown   { background: var(--amber-bg);  color: var(--amber-text); border-color: var(--amber-border); }
+
+.col-flags { display: inline-flex; gap: 4px; margin-left: 6px; }
+.col-flag {
+  font-family: var(--sans); font-size: 9px; font-weight: 700;
+  padding: 2px 6px; border-radius: 4px;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  border: 1px solid;
+}
+.col-flag.parse   { background: var(--sky-bg); color: var(--sky-text); border-color: var(--sky-border); }
+.col-flag.pending { background: var(--red-bg); color: var(--red-text); border-color: var(--red-border); }
+
+.no-match {
+  display: none; padding: 60px 24px; text-align: center;
+  color: var(--muted); font-size: 14px;
+  border: 1px dashed var(--hairline-strong); border-radius: 12px;
+}
+.no-match.show { display: block; }
+
+@media (max-width: 980px) {
+  .page { grid-template-columns: 1fr; padding: 24px 24px 60px; }
+  .sidebar { position: static; max-height: none; }
+  .table-nav { max-height: 240px; }
+  .hero { padding: 36px 24px 28px; }
+  .hero h1 { font-size: 32px; }
+}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="blue-stripe"></div>
+  <div class="hero-row">
+    <div class="amex-logo">
+      <span class="logo-american">American</span>
+      <span class="logo-express">Express</span>
+    </div>
+    <div>
+      <h1>Data Catalog <span>v2</span></h1>
+      <div class="hero-sub">Agentic Case Review · Data Profiles</div>
+    </div>
+  </div>
+  <div class="stats">
+    <div class="stat"><span class="stat-num" id="stat-tables">0</span><span class="stat-label">Tables</span></div>
+    <span class="stat-dot">·</span>
+    <div class="stat"><span class="stat-num" id="stat-columns">0</span><span class="stat-label">Columns</span></div>
+    <span class="stat-dot">·</span>
+    <div class="stat"><span class="stat-num" id="stat-corr">0</span><span class="stat-label">Correlations</span></div>
+  </div>
+</div>
+
+<div class="page">
+  <aside class="sidebar">
+      <div class="case-toggle"><input type="checkbox" id="case-only" checked><label for="case-only">Show only tables in case 366132845011</label></div>
+    <div class="search-wrap">
+      <input type="text" id="search" placeholder="Search tables and columns…" autocomplete="off">
+    </div>
+    <div class="side-controls">
+      <button id="expand-all">Expand all</button>
+      <button id="collapse-all">Collapse all</button>
+    </div>
+    <nav class="table-nav" id="table-nav">
+      <div class="nav-header">Tables</div>
+    </nav>
+  </aside>
+
+  <main class="cards" id="cards">
+    <div class="no-match" id="no-match">No tables or columns match your search.</div>
+  </main>
+</div>
+
+<script>
+const CATALOG = [{"table": "bureau", "description": "Credit bureau data — one row per external tradeline per case. Each row carries the case-level aggregated scores (FICO, SBFE, LN, CSS, FSS, Paydex) plus the tradeline-specific details (balance, limit, utilization, DPD status). Case-level fields repeat across rows for the same case.", "columns": [{"name": "month", "type": "string", "description": "Monthly snapshot date for this bureau record (e.g. \"Jan-2024\"). One row per case per month across the review window.", "parse_hint": "%b-%Y"}, {"name": "fico_score", "type": "int", "description": "FICO Score — industry-standard credit risk score. Values below 721 are risky.", "aliases": ["FICO Score"]}, {"name": "sbfe_score", "type": "int", "description": "SBFE Score — business credit score predicting financial delinquency or failure. Values below 863 are risky.", "aliases": ["SBFE Score"]}, {"name": "ln_credit_score", "type": "int", "description": "LexisNexis Credit Score — predicts consumer likelihood of default. Values below 681 are risky.", "aliases": ["LN Credit Score"]}, {"name": "ln_blended_score", "type": "int", "description": "LexisNexis Blended Score — combines traditional credit data with alternative data. Values below 694 are risky.", "aliases": ["LN Blended Score"]}, {"name": "css_score", "type": "int", "description": "CSS Score — business credit risk score using commercial trade data and financials. Values below 71 are risky.", "aliases": ["CSS Score"]}, {"name": "fss_score", "type": "int", "description": "FSS Score — business financial strength/stability score. Values below 51 are risky.", "aliases": ["FSS Score"]}, {"name": "paydex_score", "type": "int", "description": "Paydex Score — business payment performance score. Values below 61 are risky.", "aliases": ["Paydex Score"]}, {"name": "delinquent_external_trades", "type": "int", "description": "Total count of external credit lines on which the customer defaulted.", "aliases": ["Delinquent External Trades"]}, {"name": "external_delinquency_amount", "type": "float", "description": "Total default amount on external credit lines (USD).", "aliases": ["External Delinquency Amount (USD)"]}, {"name": "total_tradelines", "type": "int", "description": "Overall count of external credit lines linked to the customer.", "aliases": ["Total Tradelines"]}, {"name": "overall_external_exposure", "type": "float", "description": "Total outstanding balance on all external credit lines (USD).", "aliases": ["Overall External Exposure (USD)"]}, {"name": "overall_external_revolving_balance", "type": "float", "description": "Total revolving balance on all external credit lines (USD).", "aliases": ["Overall External Revolving Balance (USD)"]}, {"name": "avg_external_utilization", "type": "float", "description": "Average utilization across all external credit lines.", "aliases": ["Average External Utlization"]}, {"name": "amex_primary_lender_indicator", "type": "int", "description": "1 = Amex is primary lender (>= 40% of overall exposure). Considered risky.", "aliases": ["Amex Primary Lender Indicator"]}, {"name": "ln_business_value", "type": "float", "description": "LexisNexis Business Value — total tax-assessed value of business address (USD). Decrement is a negative sign.", "aliases": ["LN Business Value (USD)"]}, {"name": "judgements_org_count", "type": "int", "description": "Number of court judgments filed against the organization.", "aliases": ["Judgements Org Count"]}, {"name": "lien_org_count", "type": "int", "description": "Number of active liens filed against the organization's assets.", "aliases": ["Lien Org Count"]}], "correlations_count": 7, "case_present": true, "pending_count": 0}, {"table": "crossbu_cards", "description": "Cross-business-unit cards view — one row per card per case-month. Tracks details of all cards held by the customer (limit, balance, tenure, status, delinquencies) across the 12 months preceding default on the business credit card.", "columns": [{"name": "Month", "type": "string", "description": "Monthly snapshot date for this card record (e.g. \"Jan-2024\"). One row per card per month.", "parse_hint": "%b-%Y"}, {"name": "card_name", "type": "categorical", "description": "Name of the card used by the customer", "aliases": ["Card Name"]}, {"name": "card_type", "type": "categorical", "description": "Type of card — Charge (pay-in-full), Lending (revolving credit), or LOC (line of credit)", "aliases": ["Card Type"]}, {"name": "card_portfolio", "type": "categorical", "description": "Amex portfolio to which the card belongs", "aliases": ["Card Portfolio"]}, {"name": "card_limit", "type": "float", "description": "Credit card limit in USD. Charge cards may have no preset spending limit (NPSL) — represented as high values.", "aliases": ["Card Limit"]}, {"name": "balance", "type": "float", "description": "Outstanding exposure on the card in USD", "aliases": ["Balance"]}, {"name": "card_tenure", "type": "int", "description": "Tenure of the card account in months", "aliases": ["Card Tenure"]}, {"name": "account_status", "type": "categorical", "description": "Account status — 'Current' means up to date, 30/60/90/120 DPB means days past billing due", "aliases": ["Account Status"]}, {"name": "past_delinquencies_12m", "type": "int", "description": "Count of past delinquencies (30 DPB) on the card in the last 12 months", "aliases": ["Past Delinquencies (Last 12M)"]}], "correlations_count": 3, "case_present": true, "pending_count": 0, "table_aliases": ["crossbu_cards_data"]}, {"table": "crossbu_merchants", "description": "Cross-business-unit merchants view — one row per merchant relationship per case-month. Tracks businesses owned by the customer that accept Amex as a payment method, including monthly charge volume processed through that merchant account (a revenue signal for the customer's business).", "columns": [{"name": "Month", "type": "string", "description": "Monthly snapshot date for this merchant record (e.g. \"Jan-2024\").", "parse_hint": "%b-%Y"}, {"name": "merchant_name", "type": "categorical", "description": "Name of the customer's business that has a merchant relationship with Amex (accepts Amex for payments). Empty if no merchant relationship.", "aliases": ["Merchant Name"]}, {"name": "merchant_charge_volume", "type": "float", "description": "Estimated payments (USD) made at the customer's business that accepts Amex — a source of revenue for the customer's business. 0 if no merchant relationship.", "aliases": ["Merchant Charge Volume"]}], "correlations_count": 0, "case_present": true, "pending_count": 0, "table_aliases": ["crossbu_merchants_data"]}, {"table": "cust_tenure", "description": "Customer relationship, one row per case", "columns": [{"name": "tenure_months", "type": "int", "description": "Length of customer relationship in months"}, {"name": "products_held", "type": "int", "description": "Number of distinct products the customer currently holds"}, {"name": "segment", "type": "categorical", "description": "Customer wealth segment"}], "correlations_count": 0, "case_present": false, "pending_count": 0}, {"table": "demographics_data", "description": "Customer demographic and business-profile snapshot — one row per case. Combines internal CRM demographics (name, DOB, age, portfolio, limits, tenure) with bureau-sourced employment info (company/employer names, job title, self-employed flag).", "columns": [{"name": "customer_name", "type": "string", "description": "Customer's full name (e.g. \"MOSHE BENAYON\")."}, {"name": "rel_type", "type": "string", "description": "Relationship type with the bank (e.g. \"BASIC\", \"PREMIUM\"). Categorical label drawn from the internal CRM."}, {"name": "cust_dob_raw", "type": "string", "description": "Date of birth as originally reported by the source system. Raw form may carry source-specific formatting; use cust_dob for canonical YYYY-MM-DD."}, {"name": "cust_dob", "type": "date", "description": "Canonical date of birth (YYYY-MM-DD), parsed from cust_dob_raw.", "parse_hint": "%Y-%m-%d"}, {"name": "customer_age", "type": "int", "description": "Customer age in years as of the snapshot."}, {"name": "account_tenure_months", "type": "int", "description": "Tenure of the customer's primary account, in months."}, {"name": "portfolio_cd", "type": "string", "description": "Portfolio code identifying which Amex portfolio the customer belongs to (e.g. \"X\")."}, {"name": "global_limit", "type": "int", "description": "Global credit limit across all customer accounts (USD)."}, {"name": "lexis_nexis_tenure", "type": "int", "description": "Tenure of the customer in months as recorded by LexisNexis."}, {"name": "homeownership_ind", "type": "int", "description": "Homeownership indicator (1 = customer owns home, 0 = does not)."}, {"name": "current_address_age", "type": "int", "description": "Months at customer's current address."}, {"name": "primary_job_title", "type": "string", "description": "Customer's primary job title as reported on the application or bureau record. May be empty when not on file."}, {"name": "company_name", "type": "string", "description": "Customer's company / business name (e.g. \"SHAARE TORAH\"). For self-employed customers this often matches employer_name."}, {"name": "employer_name", "type": "string", "description": "Employer name on file in the internal CRM. Often matches company_name for self-employed customers."}, {"name": "bureau_employer_name", "type": "string", "description": "Employer name reported by the external credit bureau. May differ from employer_name when the bureau record is stale or sourced from a different system."}, {"name": "self_employed_ind", "type": "int", "description": "Self-employed indicator (1 = self-employed, 0 = not). May be empty when not on file."}], "correlations_count": 0, "case_present": true, "pending_count": 0}, {"table": "income_dti", "description": "Income & capacity, one row per case", "columns": [{"name": "income_est", "type": "float", "description": "Estimated annual income used for credit decisioning (USD)"}, {"name": "total_debt", "type": "float", "description": "Total outstanding debt obligations across all lenders (USD)"}, {"name": "dti_ratio", "type": "float", "description": "Debt-to-income ratio (total monthly debt payments / gross monthly income)"}], "correlations_count": 2, "case_present": false, "pending_count": 0}, {"table": "model_scores", "description": "Internal model scoring features — one row per scoring run per case. Contains the model input variables that real `modelling_data.csv` carries (originally 264 in the simulator; trimmed to 54 to match real-data schema). Covers bureau scores, delinquency indicators, exposure ratios, payment behavior, spend patterns, and third-party risk scores. CSV wire format quirks to know about — (a) every numeric column is stored as a quoted string (\"668.00\" for ints, \"0.00\" for zero counts); (b) large monetary values carry a unit suffix (\"X thousands\", \"X millions\") to dodge the 6+digit firewall mask, so callers must strip the suffix and multiply (×1e3 / ×1e6) before computing; (c) some values use comma-separated thousands (\"9,005.00\").", "columns": [{"name": "cbr_score_max", "type": "int", "description": "customer credit bureau score (max)"}, {"name": "exp_pif_max", "type": "float", "description": "Pay-In-Full exposure (max over scoring window). Stored as string with a \"thousands\" suffix (e.g. \"188.8 thousands\" → 188800.0) to dodge firewall masking on 6+digit runs."}, {"name": "ons_30_trd_mean", "type": "int", "description": "ons 30 trades (mean)"}, {"name": "trans_month", "type": "date", "description": "Date of the model scoring run (YYYY-MM-DD). Use this for time-range filtering."}, {"name": "last_cycle_cut_revolve_rate", "type": "float", "description": "last cycle cut revolve rate. Values below 0.46 are risky", "aliases": ["last_cycle_cut_revolve_rate_min"]}, {"name": "times_30_dpd", "type": "int", "description": "No. of times 30 days past due. Values above 1 are risky.", "aliases": ["times_30_dpd_max"]}, {"name": "cust_expsr_avg_rem_12m_ratio", "type": "float", "description": "Customer Exposure / (Average Remit In 2-12 Months). Values above 3.15 are risky.", "aliases": ["cust_expsr_avg_rem_12m_ratio_max"]}, {"name": "cust_lndexpsr_minloc_6m_ratio", "type": "float", "description": "customer lending exposure minloc 6 months ratio", "aliases": ["cust_lndexpsr_minloc_6m_ratio_max"]}, {"name": "max_agec_agel_dyldage", "type": "int", "description": "Customer daily Age", "aliases": ["max_agec_agel_dyldage_max"]}, {"name": "cb_ten_to_amex_tenure", "type": "int", "description": "Credit bureau tenure to company tenure", "aliases": ["cb_ten_to_amex_tenure_max"]}, {"name": "tpf_internal_delinq_idx", "type": "float", "description": "Internal Delinquency Index. Values above 5.8 are considered risky.", "aliases": ["tpf_internal_delinq_idx_max"]}, {"name": "tpf_cust_mod_tenure", "type": "int", "description": "Customer Tenure", "aliases": ["tpf_cust_mod_tenure_max"]}, {"name": "ratio_30_90dys_trig_amt", "type": "float", "description": "ratio of 30-90 days trigger amount. Values above 0 are considered risky.", "aliases": ["ratio_30_90dys_trig_amt_max"]}, {"name": "avutil_exrvlv_balgt50", "type": "float", "description": "Average utilization in all the external consumer revolving trades with balance more than US$ 50. Values above 75 are risky.", "aliases": ["avutil_exrvlv_balgt50_max"]}, {"name": "calx_ratio_daily_max_age", "type": "float", "description": "Ratio of Daily delinquency age by Max delinquency age in last 6 months", "aliases": ["calx_ratio_daily_max_age_max"]}, {"name": "hcam_src_trnd_indx", "type": "float", "description": "FICO Trend Index. Values below -19 are risky.", "aliases": ["hcam_src_trnd_indx_min"]}, {"name": "lvrg_debt_remit", "type": "float", "description": "leverage commercial debt", "aliases": ["lvrg_debt_remit_max"]}, {"name": "sum_tot_rsky_evnt", "type": "int", "description": "total risky events", "aliases": ["sum_tot_rsky_evnt_max"]}, {"name": "delnqncy_ind_intrnl", "type": "float", "description": "internal delinquency indicator. Values above 0.5 are risky.", "aliases": ["delnqncy_ind_intrnl_mean"]}, {"name": "cust_debt_pymcpty_tm_inc", "type": "float", "description": "debt to payment capacity", "aliases": ["cust_debt_pymcpty_tm_inc_max"]}, {"name": "credit_loss_prob", "type": "float", "description": "ML model score predicting likelihood of default in next 18 months. Scores from 10-100 are considered risky.", "aliases": ["credit_loss_prob_max"]}, {"name": "tot_struct_risk_score", "type": "float", "description": "ML model score predicting likelihood of default on internal/external trades in next 18 months. Scores from 20-100 are considered risky.", "aliases": ["tot_struct_risk_score_max"]}, {"name": "avg_remit_minus_max", "type": "float", "description": "average remit (USD). Stored as string with \"thousands\" suffix (e.g. \"221.4 thousands\" → 221400.0) to dodge firewall masking on 6+digit runs.", "aliases": ["avg_remit_minus_max_max"]}, {"name": "positive_events", "type": "int", "description": "positive events", "aliases": ["positive_events_max"]}, {"name": "tpf_cust_hi_rvlv_line_am", "type": "int", "description": "The amount of a customer's highest revolving lines. Values below 77 are risky.", "aliases": ["tpf_cust_hi_rvlv_line_am_min"]}, {"name": "oop_interaction", "type": "float", "description": "Out of Pattern Spend index wrt to Exposure. Values above 28 are risky.", "aliases": ["oop_interaction_max"]}, {"name": "sum_o30dn_o60dn_o90dn", "type": "int", "description": "No of triggers greater than 30 days with amount > $500. Values on or above 1 are risky", "aliases": ["sum_o30dn_o60dn_o90dn_max"]}, {"name": "hcam_bal_trnd_indx", "type": "float", "description": "hcam balance trend index. Values above 2.65 are risky.", "aliases": ["hcam_bal_trnd_indx_max"]}, {"name": "product_risk_attribute", "type": "float", "description": "product risk attribute", "aliases": ["product_risk_attribute_max"]}, {"name": "cust_ext_delinq_idx", "type": "float", "description": "External Delinquency Index. Values above 5 are risky.", "aliases": ["cust_ext_delinq_idx_max"]}, {"name": "tm_wt_q_score", "type": "float", "description": "Time Weighted United Q Score (only for low tenure)", "aliases": ["tm_wt_q_score_max"]}, {"name": "cust_eff_se_cdss_5_180_day_score", "type": "float", "description": "Merchant Risk Score. Values above 2 are risky.", "aliases": ["cust_eff_se_cdss_5_180_day_score_max"]}, {"name": "cust_expr_to_arb_inc_ratio", "type": "float", "description": "Total exposure to arbitrated income ratio. Values above 0.08 are risky.", "aliases": ["cust_expr_to_arb_inc_ratio_max"]}, {"name": "cust_lend_acct_paydown", "type": "float", "description": "customer level paydown on lending account. Values below 0.1 are risky.", "aliases": ["cust_lend_acct_paydown_min"]}, {"name": "cust_experian_trans_union_inq_idx", "type": "float", "description": "risk based index of inquiries from credit bureau. Values above 4.65 are considered risky.", "aliases": ["cust_experian_trans_union_inq_idx_max"]}, {"name": "cust_intr_extnl_unscr_tt_debt_srvc_rt1", "type": "float", "description": "Customer total debt servicing ratio. Values above 0.15 are considered risky.", "aliases": ["cust_intr_extnl_unscr_tt_debt_srvc_rt1_max"]}, {"name": "cust_open_acct_paydown", "type": "float", "description": "customer level paydown on open account. Values below 0.3 are risky.", "aliases": ["cust_open_acct_paydown_min"]}, {"name": "cust_old_rec_age", "type": "int", "description": "time since the oldest recorded event for the card member", "aliases": ["cust_old_rec_age_max"]}, {"name": "cust_atp_arb_incom_am", "type": "int", "description": "Arbitrated income", "aliases": ["cust_atp_arb_incom_am_max"]}, {"name": "cust_cash_tot_liab_yr1_rt", "type": "float", "description": "ratio of cash to total liability corresponding to latest full year financial", "aliases": ["cust_cash_tot_liab_yr1_rt_max"]}, {"name": "cust_pymt_chan_risk_score", "type": "float", "description": "Customer payment channel risk score. Values above 0.05 are considered risky.", "aliases": ["cust_pymt_chan_risk_score_max"]}, {"name": "cust_lexis_nexis_tot_tax_assess_val_am", "type": "float", "description": "Total tax-assessed value of the customer business address (USD) from LexisNexis. Stored as string with \"millions\" suffix (e.g. \"3.6 millions\" → 3600000.0) to dodge firewall masking on 6+digit runs.", "aliases": ["cust_lexis_nexis_tot_tax_assess_val_am_max"]}, {"name": "cust_enhnc_one_way_spend_concentration_30day_rt1", "type": "float", "description": "one way spend concentration risk rate. Values above 2.4 are considered risky.", "aliases": ["cust_enhnc_one_way_spend_concentration_30day_rt1_max"]}, {"name": "time_wtd_return_index", "type": "float", "description": "Internal Payment Return Index. Values above 0.2 are considered risky.", "aliases": ["time_wtd_return_index_max"]}, {"name": "cust_rnn_score", "type": "float", "description": "Timeseries Spend Variable. Values above 0.028 are considered risky.", "aliases": ["cust_rnn_score_max"]}, {"name": "cust_min_due_12mo_avg", "type": "float", "description": "average number of only minimum due paid in last 12 months. Values above 0.08 are considered risky.", "aliases": ["cust_min_due_12mo_avg_max"]}, {"name": "gam_clr_erly_risk_score", "type": "float", "description": "Clear early risk score. Values below 785 are risky. Stored in CSV with comma-separated thousands (e.g. \"9,005.00\") — strip commas before parsing.", "aliases": ["gam_clr_erly_risk_score_min"]}, {"name": "gam_mtge_loan_actl_pymt_am", "type": "float", "description": "Mortgage Loan (Actual Payment Amount). Sentinel -99999999999 = no mortgage on file", "aliases": ["gam_mtge_loan_actl_pymt_am_max"]}, {"name": "se_no_norm_wtd_pd_unpaid_amt", "type": "float", "description": "normalised accum amount weighted by merchant percentage. Values above 0 are risky.", "aliases": ["se_no_norm_wtd_pd_unpaid_amt_max"]}, {"name": "cust_net_pymt_unbl1", "type": "float", "description": "Net remit done by a customer in the unbilled period (USD). Stored as string with \"thousands\" suffix (e.g. \"156.2 thousands\" → 156200.0) to dodge firewall masking on 6+digit runs.", "aliases": ["cust_net_pymt_unbl1_max"]}, {"name": "cust_lexis_nexis_blended_score", "type": "int", "description": "score merges business and owner credit data. Values below 693 are risky.", "aliases": ["cust_lexis_nexis_blended_score_min"]}, {"name": "cust_sbfe_score", "type": "int", "description": "Business credit score. Values below 863 are risky.", "aliases": ["cust_sbfe_score_min"]}, {"name": "cust_dnb_paydex_score", "type": "int", "description": "Paydex score measures payment performance. Values below 61 are risky.", "aliases": ["cust_dnb_paydex_score_min"]}, {"name": "tot_cons_comm_trds_g30", "type": "int", "description": "total consumer and commercial trades greater than 30", "aliases": ["tot_cons_comm_trds_g75_max"]}], "correlations_count": 0, "case_present": true, "pending_count": 0, "table_aliases": ["modelling_data"]}, {"table": "payments", "description": "Payment records — one row per payment attempt per case. Real data lives in two CSVs (`payments_success.csv` + `payments_returns.csv`) which the gateway rbinds at load time, adding a synthetic `payment_status` column (\"success\" or \"return\") to disambiguate. Covers 2024-2025 with data cut-off 2025-12.", "columns": [{"name": "payment_status", "type": "categorical", "description": "Synthetic discriminator added by the gateway when rbinding `payments_success.csv` (→ \"success\") and `payments_returns.csv` (→ \"return\") into a single `payments` table."}, {"name": "card_number", "type": "categorical", "description": "Masked card number the payment was applied to (last 4 digits shown)", "aliases": ["Card Number"]}, {"name": "payment_date", "type": "date", "description": "Date the payment was attempted (YYYY-MM-DD). Range: 2024-2025; data cut-off is 2025-12.", "aliases": ["Payment Date"]}, {"name": "payment_amount", "type": "float", "description": "Payment amount in USD", "aliases": ["Payment Amount"]}, {"name": "payment_bank_account", "type": "categorical", "description": "Bank account the payment was drawn from (masked)", "aliases": ["Payment Bank Account"]}, {"name": "return_flag", "type": "categorical", "description": "Whether the payment cleared (success) or was returned (returned)", "aliases": ["Return Flag"]}, {"name": "return_reason", "type": "categorical", "description": "Reason for return. Empty when return_flag = success.", "aliases": ["Return Reason"]}], "correlations_count": 0, "case_present": true, "pending_count": 0, "table_aliases": ["payments_success", "payments_returns"]}, {"table": "score_drivers", "description": "Monthly snapshot of the top-5 and bottom-5 contributing variable names for two model scores (CDSS and TSR), per case per month. Used to explain which features pushed each model's score up or down.", "columns": [{"name": "trans_month", "type": "string", "description": "Monthly snapshot date for this score-driver record (e.g. \"Jan-2024\"). One row per case per month across the review window.", "parse_hint": "%b-%Y"}, {"name": "top_cdss1", "type": "string", "description": "Name of the rank-1 top contributing variable to the CDSS model score for this case-month."}, {"name": "top_cdss2", "type": "string", "description": "Name of the rank-2 top contributing variable to the CDSS model score for this case-month."}, {"name": "top_cdss3", "type": "string", "description": "Name of the rank-3 top contributing variable to the CDSS model score for this case-month."}, {"name": "top_cdss4", "type": "string", "description": "Name of the rank-4 top contributing variable to the CDSS model score for this case-month."}, {"name": "top_cdss5", "type": "string", "description": "Name of the rank-5 top contributing variable to the CDSS model score for this case-month."}, {"name": "bottom_cdss1", "type": "string", "description": "Name of the rank-1 bottom contributing variable to the CDSS model score for this case-month."}, {"name": "bottom_cdss2", "type": "string", "description": "Name of the rank-2 bottom contributing variable to the CDSS model score for this case-month."}, {"name": "bottom_cdss3", "type": "string", "description": "Name of the rank-3 bottom contributing variable to the CDSS model score for this case-month."}, {"name": "bottom_cdss4", "type": "string", "description": "Name of the rank-4 bottom contributing variable to the CDSS model score for this case-month."}, {"name": "bottom_cdss5", "type": "string", "description": "Name of the rank-5 bottom contributing variable to the CDSS model score for this case-month."}, {"name": "top_tsr1", "type": "string", "description": "Name of the rank-1 top contributing variable to the TSR model score for this case-month."}, {"name": "top_tsr2", "type": "string", "description": "Name of the rank-2 top contributing variable to the TSR model score for this case-month."}, {"name": "top_tsr3", "type": "string", "description": "Name of the rank-3 top contributing variable to the TSR model score for this case-month."}, {"name": "top_tsr4", "type": "string", "description": "Name of the rank-4 top contributing variable to the TSR model score for this case-month."}, {"name": "top_tsr5", "type": "string", "description": "Name of the rank-5 top contributing variable to the TSR model score for this case-month."}, {"name": "bottom_tsr1", "type": "string", "description": "Name of the rank-1 bottom contributing variable to the TSR model score for this case-month."}, {"name": "bottom_tsr2", "type": "string", "description": "Name of the rank-2 bottom contributing variable to the TSR model score for this case-month."}, {"name": "bottom_tsr3", "type": "string", "description": "Name of the rank-3 bottom contributing variable to the TSR model score for this case-month."}, {"name": "bottom_tsr4", "type": "string", "description": "Name of the rank-4 bottom contributing variable to the TSR model score for this case-month."}, {"name": "bottom_tsr5", "type": "string", "description": "Name of the rank-5 bottom contributing variable to the TSR model score for this case-month."}], "correlations_count": 0, "case_present": true, "pending_count": 0, "table_aliases": ["score_drivers_data"]}, {"table": "spends", "description": "Transaction-level spend data — multiple rows per case. Each row is one transaction (spend) with merchant details and risk scores.", "columns": [{"name": "spend_date", "type": "date", "description": "Date of the spend transaction (DD-Mon-YYYY, e.g., 05-Nov-2024).", "aliases": ["Date"], "parse_hint": "%d-%b-%Y"}, {"name": "amount", "type": "float", "description": "Spend amount in USD", "aliases": ["Amount"]}, {"name": "merchant_name", "type": "categorical", "description": "Name of the merchant where spend was made"}, {"name": "merchant_industry", "type": "categorical", "description": "Merchant industry based on SIC4 code. Some rows may be empty — search industry via merchant name if needed.", "aliases": ["Merchant Industry"]}, {"name": "merchant_risk_score", "type": "float", "description": "Risk score of the merchant (0-1). Values above 0.7 are considered risky.", "aliases": ["Merchant Risk Score"]}, {"name": "spend_concentration", "type": "float", "description": "One-way spend concentration risk rate of a customer at merchants in last 30 days. Values above 2.4 are considered risky.", "aliases": ["Spend Concentration"]}, {"name": "rnn_spend_score", "type": "float", "description": "RNN risk score for spend patterns. Values above 0.017 are considered risky.", "aliases": ["RNN Spend Score"]}, {"name": "spend_divergence_index", "type": "float", "description": "Index for spend divergence from historical patterns. Values below 1.0 are considered risky (indicating abnormal deviation).", "aliases": ["Spend Divergence Index"]}], "correlations_count": 3, "case_present": true, "pending_count": 0}, {"table": "txn_monthly", "description": "Monthly transaction aggregates, multiple rows", "columns": [{"name": "month", "type": "date", "description": "Calendar month of the transaction aggregate (YYYY-MM-DD). Range: 2024-2025; data cut-off is 2025-12."}, {"name": "spend_total", "type": "float", "description": "Total spend amount for the month (USD)"}, {"name": "txn_count", "type": "int", "description": "Number of individual transactions in the month"}, {"name": "category", "type": "categorical", "description": "Merchant category of the aggregated transactions"}], "correlations_count": 0, "case_present": false, "pending_count": 0}, {"table": "wcc", "description": "Customer-service / agent-call notes log. One row per logged interaction, with a free-text note attached to a date. Sourced from agent chat and call transcripts; replaces the earlier simulator-only `wcc_flags` schema.", "columns": [{"name": "Date", "type": "date", "description": "Date the agent note was logged. Stored on disk as ISO YYYY-MM-DD (e.g. \"2024-12-07\"). Note that Excel/Numbers may display it as M/D/YY (e.g. \"12/7/24\") — that is a spreadsheet rendering artifact, not the underlying value.", "parse_hint": "%Y-%m-%d"}, {"name": "Note", "type": "string", "description": "Free-text note from the agent interaction (chat or call transcript). Often contains action codes, payment-promise (PTP) markers, or escalation notes."}], "correlations_count": 0, "case_present": true, "pending_count": 0}, {"table": "xbu_summary", "description": "Cross-BU exposure, multiple rows", "columns": [{"name": "product", "type": "categorical", "description": "Product type across business units"}, {"name": "exposure", "type": "float", "description": "Total exposure (outstanding balance + committed undrawn) for this product (USD)"}, {"name": "utilization", "type": "float", "description": "Utilization rate (balance / limit); values above 1.0 indicate overlimit"}], "correlations_count": 0, "case_present": false, "pending_count": 0}];
+
+const TYPES = ['int', 'float', 'string', 'date', 'categorical'];
+
+const escapeHtml = (s) => String(s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+function typeTag(t) {
+  const cls = TYPES.includes(t) ? `t-${t}` : 't-string';
+  return `<span class="col-type ${cls}">${escapeHtml(t || 'unknown')}</span>`;
+}
+
+// ── Stats ──
+document.getElementById('stat-tables').textContent = CATALOG.length;
+document.getElementById('stat-columns').textContent = CATALOG.reduce((n, t) => n + t.columns.length, 0);
+document.getElementById('stat-corr').textContent = CATALOG.reduce((n, t) => n + (t.correlations_count || 0), 0);
+
+// ── Render sidebar ──
+const nav = document.getElementById('table-nav');
+CATALOG.forEach((t, i) => {
+  const a = document.createElement('a');
+  a.className = 'nav-item';
+  a.href = `#card-${t.table}`;
+  a.dataset.table = t.table;
+  a.innerHTML = `<span class="nav-item-name">${escapeHtml(t.table)}</span><span class="nav-item-count">${t.columns.length}</span>`;
+  a.addEventListener('click', (e) => {
+    e.preventDefault();
+    const card = document.getElementById(`card-${t.table}`);
+    if (card) {
+      if (!card.classList.contains('expanded')) card.classList.add('expanded');
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+  nav.appendChild(a);
+});
+
+// ── Render cards ──
+const cardsRoot = document.getElementById('cards');
+const noMatch = document.getElementById('no-match');
+
+CATALOG.forEach((t, i) => {
+  const card = document.createElement('article');
+  card.className = 'card' + (i === 0 ? ' expanded' : '');
+  card.id = `card-${t.table}`;
+  card.dataset.table = t.table;
+
+  const rows = t.columns.map(c => {
+    const aliasesLine = (c.aliases && c.aliases.length)
+      ? `<div class="col-aliases">${c.aliases.map(escapeHtml).join(', ')}</div>` : '';
+    const flags = [
+      c.parse_hint ? `<span class="col-flag parse">parse: ${escapeHtml(c.parse_hint)}</span>` : '',
+      c.pending ? '<span class="col-flag pending">unverified</span>' : '',
+    ].join('');
+    const flagsBlock = flags ? `<span class="col-flags">${flags}</span>` : '';
+    return `
+    <tr data-col-name="${escapeHtml(c.name.toLowerCase())}" data-col-desc="${escapeHtml((c.description || '').toLowerCase())}">
+      <td><span class="col-name">${escapeHtml(c.name)}</span>${aliasesLine}</td>
+      <td>${typeTag(c.type)}${flagsBlock}</td>
+      <td class="col-desc">${escapeHtml(c.description || '')}</td>
+    </tr>`;
+  }).join('');
+
+  const tableAliases = (t.table_aliases || []).map(a => `<span class="alias-pill">alias: ${escapeHtml(a)}</span>`).join('');
+  const presenceBadge = t.case_present
+    ? '<span class="case-pill">in this case</span>'
+    : '<span class="profile-only-pill">profile-only</span>';
+  const pendingBadge = t.pending_count > 0
+    ? `<span class="pending-pill">${t.pending_count} pending</span>`
+    : '';
+  card.innerHTML = `
+    <div class="card-head">
+      <div class="card-title-wrap">
+        <div class="card-title-row">
+          <span class="card-title">${escapeHtml(t.table)}</span>
+          <span class="col-count-pill">${t.columns.length} columns</span>
+          ${presenceBadge}
+          ${tableAliases}
+          ${pendingBadge}
+        </div>
+        <div class="card-desc">${escapeHtml(t.description || '')}</div>
+      </div>
+      <span class="chevron">›</span>
+    </div>
+    <div class="card-body">
+      <table class="col-table">
+        <colgroup><col class="w-name"><col class="w-type"><col></colgroup>
+        <thead><tr><th>Column</th><th>Type</th><th>Description</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+  card.querySelector('.card-head').addEventListener('click', () => {
+    card.classList.toggle('expanded');
+  });
+  cardsRoot.insertBefore(card, noMatch);
+});
+
+// ── Expand / collapse all ──
+document.getElementById('expand-all').addEventListener('click', () => {
+  document.querySelectorAll('.card').forEach(c => c.classList.add('expanded'));
+});
+document.getElementById('collapse-all').addEventListener('click', () => {
+  document.querySelectorAll('.card').forEach(c => c.classList.remove('expanded'));
+});
+
+// ── Search ──
+const searchInput = document.getElementById('search');
+searchInput.addEventListener('input', () => {
+  const q = searchInput.value.trim().toLowerCase();
+  let anyVisible = false;
+
+  CATALOG.forEach(t => {
+    const card = document.getElementById(`card-${t.table}`);
+    const navItem = nav.querySelector(`.nav-item[data-table="${t.table}"]`);
+    const tableNameMatch = !q || t.table.toLowerCase().includes(q);
+    const tableDescMatch = !q || (t.description || '').toLowerCase().includes(q);
+
+    let anyColMatch = false;
+    const rows = card.querySelectorAll('tbody tr');
+    rows.forEach(r => {
+      const nameMatch = r.dataset.colName.includes(q);
+      const descMatch = r.dataset.colDesc.includes(q);
+      const show = !q || nameMatch || descMatch || tableNameMatch || tableDescMatch;
+      r.classList.toggle('hidden', !show);
+      if (!q || nameMatch || descMatch) anyColMatch = true;
+    });
+
+    const cardVisible = !q || tableNameMatch || tableDescMatch || anyColMatch;
+    card.classList.toggle('hidden', !cardVisible);
+    navItem.classList.toggle('hidden', !cardVisible);
+    if (cardVisible) anyVisible = true;
+
+    // when searching, auto-expand cards with column matches
+    if (q && anyColMatch) card.classList.add('expanded');
+  });
+
+  noMatch.classList.toggle('show', !anyVisible);
+});
+
+// ── Active section tracking via IntersectionObserver ──
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      const table = entry.target.dataset.table;
+      document.querySelectorAll('.nav-item').forEach(a => a.classList.remove('active'));
+      const navItem = nav.querySelector(`.nav-item[data-table="${table}"]`);
+      if (navItem) navItem.classList.add('active');
+    }
+  });
+}, { rootMargin: '-20% 0px -70% 0px', threshold: 0 });
+
+document.querySelectorAll('.card').forEach(c => observer.observe(c));
+
+
+// ── Case-only filter toggle ──
+const caseToggle = document.getElementById('case-only');
+function applyCaseFilter() {
+  const onlyCase = caseToggle.checked;
+  CATALOG.forEach(t => {
+    const card = document.getElementById(`card-${t.table}`);
+    const navItem = nav.querySelector(`.nav-item[data-table="${t.table}"]`);
+    if (!card || !navItem) return;
+    if (!t.case_present) {
+      card.classList.add('profile-only');
+      card.classList.toggle('hidden-by-toggle', onlyCase);
+      navItem.classList.toggle('hidden', onlyCase);
+    } else {
+      card.classList.remove('profile-only', 'hidden-by-toggle');
+      navItem.classList.remove('hidden');
+    }
+  });
+}
+caseToggle.addEventListener('change', applyCaseFilter);
+applyCaseFilter();
+
+</script>
+</body>
+</html>

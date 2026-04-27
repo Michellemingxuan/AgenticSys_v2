@@ -1,0 +1,18 @@
+table: wcc
+description: Customer-service / agent-call notes log. One row per logged interaction,
+  with a free-text note attached to a date. Sourced from agent chat and call
+  transcripts; replaces the earlier simulator-only `wcc_flags` schema.
+columns:
+  Date:
+    dtype: date
+    parse_hint: "%Y-%m-%d"
+    description: Date the agent note was logged. Stored on disk as ISO YYYY-MM-DD (e.g. "2024-12-07"). Note that Excel/Numbers may display it as M/D/YY (e.g. "12/7/24") — that is a spreadsheet rendering artifact, not the underlying value.
+    description_pending: false
+    aliases:
+    - Date
+  Note:
+    dtype: string
+    description: Free-text note from the agent interaction (chat or call transcript). Often contains action codes, payment-promise (PTP) markers, or escalation notes.
+    description_pending: false
+    aliases:
+    - Note

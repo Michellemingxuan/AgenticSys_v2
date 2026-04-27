@@ -102,7 +102,12 @@ class DataCatalog:
         self._merge_patch(profile, patch)
 
         with open(profile_path, "w") as f:
-            yaml.safe_dump(profile, f, default_flow_style=False, sort_keys=False)
+            yaml.safe_dump(
+                profile, f,
+                default_flow_style=False,
+                sort_keys=False,
+                allow_unicode=True,
+            )
 
         self._profiles[table] = profile
 

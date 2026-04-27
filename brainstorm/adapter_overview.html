@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LLM Adapter — Firewall Avoidance</title>
+<title>FirewallStack — LLM Boundary (v2)</title>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <style>
 :root {
@@ -32,13 +32,13 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 /* STRATEGY BANNER */
 .strategy {
   background: linear-gradient(to right, #F8FAFC, #fff);
-  border: 1px solid var(--gray-border); border-left: 4px solid var(--red); border-radius: 3px;
+  border: 1px solid var(--gray-border); border-left: 4px solid var(--blue); border-radius: 3px;
   padding: 14px 18px; margin-bottom: 26px;
   display: flex; gap: 16px; align-items: center;
 }
-.strategy-icon { flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%; background: var(--red-bg); display: flex; align-items: center; justify-content: center; color: var(--red); }
+.strategy-icon { flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%; background: #DBEAFE; display: flex; align-items: center; justify-content: center; color: var(--blue); }
 .strategy-body { flex: 1; min-width: 0; }
-.strategy-label { font-size: 9px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--red); }
+.strategy-label { font-size: 9px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--blue); }
 .strategy-title { font-family: Georgia, serif; font-size: 17px; font-weight: 700; color: var(--navy); margin-top: 2px; line-height: 1.35; }
 .strategy-pills { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 .pill {
@@ -54,29 +54,29 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 .section-note { font-size: 11px; color: var(--gray-text); font-style: italic; }
 .mono { font-family: 'SF Mono', 'Monaco', 'Consolas', monospace; font-size: 11px; color: var(--navy); background: #EEF2F7; padding: 1px 5px; border-radius: 2px; }
 
-/* ADAPTER COMPARISON */
+/* CHOKEPOINTS (formerly adapters) */
 .adapters { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 28px; }
 .adapter {
   background: var(--white); border: 1px solid var(--gray-border); border-left: 3px solid var(--blue); border-radius: 3px;
   padding: 14px 16px;
 }
-.adapter.red { border-left-color: var(--red); }
+.adapter.purple { border-left-color: var(--purple); }
 .adapter-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .adapter-icon { width: 32px; height: 32px; border-radius: 3px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: #DBEAFE; color: var(--blue); }
-.adapter.red .adapter-icon { background: var(--red-bg); color: var(--red); }
+.adapter.purple .adapter-icon { background: var(--purple-bg); color: var(--purple); }
 .adapter-title { font-size: 13px; font-weight: 700; color: var(--navy); font-family: 'SF Mono', 'Monaco', 'Consolas', monospace; }
 .adapter-sub { font-size: 9px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gray-text); margin-top: 1px; }
 .adapter-tag {
   display: inline-flex; margin-left: auto; font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 2px;
   letter-spacing: 0.1em; text-transform: uppercase;
 }
-.adapter.blue .adapter-tag { background: #DBEAFE; color: var(--blue); border: 1px solid #93C5FD; }
-.adapter.red  .adapter-tag { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
+.adapter.blue   .adapter-tag { background: #DBEAFE; color: var(--blue); border: 1px solid #93C5FD; }
+.adapter.purple .adapter-tag { background: var(--purple-bg); color: var(--purple); border: 1px solid var(--purple-border); }
 .adapter-desc { font-size: 12px; color: var(--slate); line-height: 1.5; margin-bottom: 10px; }
 .adapter-rules { display: flex; flex-direction: column; gap: 6px; }
 .rule { display: flex; align-items: flex-start; gap: 8px; font-size: 11.5px; line-height: 1.45; }
 .rule-dot { flex-shrink: 0; width: 5px; height: 5px; border-radius: 50%; background: var(--blue); margin-top: 7px; }
-.adapter.red .rule-dot { background: var(--red); }
+.adapter.purple .rule-dot { background: var(--purple); }
 .rule-text { color: var(--slate); flex: 1; }
 .rule-text strong { color: var(--navy); font-weight: 700; }
 
@@ -107,6 +107,7 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 .diff-content .masked { background: var(--red-bg); color: var(--red); padding: 0 3px; border-radius: 2px; font-weight: 700; }
 .diff-content .filtered { background: var(--red-bg); color: var(--red); padding: 0 3px; border-radius: 2px; font-weight: 700; }
 .diff-content .hl-bad { text-decoration: line-through; color: var(--red); opacity: 0.7; }
+.diff-content .untouched { background: var(--amber-bg); color: var(--amber); padding: 0 3px; border-radius: 2px; font-weight: 700; }
 .diff-arrow {
   display: flex; align-items: center; justify-content: center; padding: 0 8px;
   background: var(--gray-light); border-left: 1px solid var(--gray-border); border-right: 1px solid var(--gray-border);
@@ -135,16 +136,16 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 .tech-when.pre   { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); }
 .tech-when.post  { background: #DBEAFE; color: var(--blue); border: 1px solid #93C5FD; }
 .tech-when.loop  { background: var(--purple-bg); color: var(--purple); border: 1px solid var(--purple-border); }
+.tech-when.always{ background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
 .tech-why { color: var(--gray-text); font-size: 11.5px; }
 
-/* TOOL-CALLING COMPARISON */
-.tools { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 28px; }
+/* TOOL CARD */
+.tools { display: grid; grid-template-columns: 1fr; gap: 14px; margin-bottom: 28px; }
 .tool-card {
   background: var(--white); border: 1px solid var(--gray-border); border-radius: 3px; padding: 14px 16px;
   display: flex; flex-direction: column; gap: 10px;
 }
 .tool-card.blue { border-left: 3px solid var(--blue); }
-.tool-card.red  { border-left: 3px solid var(--red); }
 .tool-title { font-size: 13px; font-weight: 700; color: var(--navy); font-family: 'SF Mono', 'Monaco', 'Consolas', monospace; }
 .tool-sub { font-size: 9px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gray-text); }
 .tool-desc { font-size: 11.5px; color: var(--slate); line-height: 1.5; }
@@ -157,7 +158,7 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 .tool-code .c-str { color: var(--green); }
 .tool-code .c-comm { color: var(--gray-text); font-style: italic; }
 
-/* EXECUTION LIFECYCLE */
+/* LIFECYCLE INSIGHTS */
 .lifecycle-insights {
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0;
 }
@@ -197,6 +198,7 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 .status-infer { background: #DBEAFE; color: var(--blue); border: 1px solid #93C5FD; }
 .status-exec  { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
 .status-term  { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); }
+.status-block { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
 .status-dot {
   width: 6px; height: 6px; border-radius: 50%;
 }
@@ -204,10 +206,11 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 .status-infer .status-dot { background: var(--blue); animation: pulse 1.2s infinite; }
 .status-exec  .status-dot { background: var(--green); }
 .status-term  .status-dot { background: var(--amber); }
+.status-block .status-dot { background: var(--red); }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
 
 /* WIRE EXAMPLES */
-.wire-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 28px; }
+.wire-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 28px; }
 .wire {
   background: var(--white); border: 1px solid var(--gray-border); border-radius: 3px; overflow: hidden;
 }
@@ -255,7 +258,7 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 .xref-link:hover { color: var(--navy); border-bottom-color: var(--navy); }
 
 @media (max-width: 980px) {
-  .adapters, .tools, .lifecycle-insights, .wire-grid { grid-template-columns: 1fr; }
+  .adapters, .lifecycle-insights, .wire-grid { grid-template-columns: 1fr; }
   .diff-body { grid-template-columns: 1fr; }
   .diff-arrow { border-left: none; border-right: none; border-top: 1px solid var(--gray-border); border-bottom: 1px solid var(--gray-border); padding: 6px 0; }
   .diff-col.before { border-right: none; border-bottom: 1px solid var(--gray-border); }
@@ -273,8 +276,8 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
       <span class="logo-express">Express</span>
     </div>
     <div>
-      <h1>LLM Adapter · Firewall Avoidance</h1>
-      <div class="hero-sub">Agentic Case Review · How the adapter shapes prompts to pass SafeChain</div>
+      <h1>FirewallStack · LLM Boundary (v2)</h1>
+      <div class="hero-sub">Agentic Case Review · how every LangChain call is wrapped, retried, and capped</div>
     </div>
   </div>
 </div>
@@ -284,26 +287,29 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
   <!-- STRATEGY BANNER -->
   <div class="strategy">
     <div class="strategy-icon">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
     </div>
     <div class="strategy-body">
-      <div class="strategy-label">Strategy</div>
-      <div class="strategy-title">The adapter is where every prompt is normalized to pass SafeChain — pattern-free, digit-safe, tool-transparent</div>
+      <div class="strategy-label">Strategy · v2</div>
+      <div class="strategy-title">Wrap LangChain ChatOpenAI · catch FirewallRejection · retry with guidance · scrub identifiers · cap concurrency</div>
       <div class="strategy-pills">
-        <span class="pill">neutral role labels</span>
-        <span class="pill">collapse to single human msg</span>
-        <span class="pill">mask 8+ digits · filter exec/eval</span>
-        <span class="pill">prompt-injected tools (no native fn-calling)</span>
-        <span class="pill">401 silent refresh · 403/400 → FirewallRejection</span>
+        <span class="pill">firewall.wrap(ChatOpenAI)</span>
+        <span class="pill">retry on FirewallRejection</span>
+        <span class="pill">FIREWALL_GUIDANCE on retry</span>
+        <span class="pill">CASE-ID → [CASE-ID]</span>
+        <span class="pill">\d{6,} → ***MASKED***</span>
+        <span class="pill">native bind_tools</span>
+        <span class="pill">transit bus · firewall.send</span>
+        <span class="pill">asyncio.Semaphore(8)</span>
       </div>
     </div>
   </div>
 
-  <!-- TWO ADAPTERS -->
+  <!-- TWO CHOKEPOINTS -->
   <div class="section">
-    <span class="section-label">Two adapters · two paths</span>
+    <span class="section-label">Two chokepoints · one FirewallStack</span>
     <span class="section-line"></span>
-    <span class="section-note">Same BaseLLMAdapter ABC · very different wire behavior</span>
+    <span class="section-note">Every LLM call and every inter-agent edge passes through the stack</span>
   </div>
 
   <div class="adapters">
@@ -311,41 +317,42 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
     <div class="adapter blue">
       <div class="adapter-head">
         <div class="adapter-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4"/></svg>
         </div>
         <div>
-          <div class="adapter-title">OpenAIAdapter</div>
-          <div class="adapter-sub">Dev · direct API</div>
+          <div class="adapter-title">wrap(model).ainvoke(...)</div>
+          <div class="adapter-sub">LLM-call boundary</div>
         </div>
-        <span class="adapter-tag">Bypass path</span>
+        <span class="adapter-tag">Chokepoint A</span>
       </div>
-      <div class="adapter-desc">Thin wrapper over <span class="mono">openai.chat.completions.create</span>. No firewall simulation. Uses the platform's <strong>native function-calling</strong> — tools become <span class="mono">tools=[{type:"function",...}]</span>. Used locally for iteration.</div>
+      <div class="adapter-desc"><span class="mono">FirewallStack.wrap(ChatOpenAI(...))</span> returns a <span class="mono">FirewalledModel</span>. Every call site goes through <span class="mono">await llm.ainvoke(system_prompt, user_message, tools, output_type)</span>.</div>
       <div class="adapter-rules">
-        <div class="rule"><span class="rule-dot"></span><span class="rule-text">Sends <span class="mono">[system, user]</span> messages as-is.</span></div>
-        <div class="rule"><span class="rule-dot"></span><span class="rule-text">Native tool calls: OpenAI returns <span class="mono">tool_calls</span> → adapter dispatches to Python functions → <span class="mono">role:"tool"</span> response appended.</span></div>
-        <div class="rule"><span class="rule-dot"></span><span class="rule-text">No digit masking, no keyword filtering, no role-label rewriting.</span></div>
-        <div class="rule"><span class="rule-dot"></span><span class="rule-text">Does not raise <span class="mono">FirewallRejection</span> — FirewallStack effectively passes through.</span></div>
+        <div class="rule"><span class="rule-dot"></span><span class="rule-text">Pre-step: <span class="mono">case_scrubber.scrub</span> replaces the literal <strong>active case-ID</strong> with <span class="mono">&lt;case&gt;</span> at word boundaries.</span></div>
+        <div class="rule"><span class="rule-dot"></span><span class="rule-text"><span class="mono">model.bind_tools(tools)</span> if tools are passed — native OpenAI-style <span class="mono">tool_calls</span>.</span></div>
+        <div class="rule"><span class="rule-dot"></span><span class="rule-text">Drives <span class="mono">_tool_loop</span> up to <span class="mono">max_tool_turns = 12</span>, dispatching <span class="mono">tool_calls</span> to a Python <span class="mono">tool_map</span> and appending <span class="mono">ToolMessage</span> back.</span></div>
+        <div class="rule"><span class="rule-dot"></span><span class="rule-text">On <span class="mono">FirewallRejection</span>: log, increment attempt, append <span class="mono">FIREWALL_GUIDANCE</span> to the system prompt, re-sanitize and retry. Bounded by <span class="mono">firewall.max_retries</span> (default 2).</span></div>
+        <div class="rule"><span class="rule-dot"></span><span class="rule-text">Returns <span class="mono">LLMResult(status="success" | "blocked", data | error)</span> — never raises to caller.</span></div>
+        <div class="rule"><span class="rule-dot"></span><span class="rule-text">Each successful call appends a <span class="mono">StepRecord(prompt, message, result, attempt)</span> to <span class="mono">firewall.step_history</span>.</span></div>
       </div>
     </div>
 
-    <div class="adapter red">
+    <div class="adapter purple">
       <div class="adapter-head">
         <div class="adapter-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>
         </div>
         <div>
-          <div class="adapter-title">SafeChainAdapter</div>
-          <div class="adapter-sub">Deployment · firewall-wrapped</div>
+          <div class="adapter-title">send(message, from, to)</div>
+          <div class="adapter-sub">Inter-agent transit boundary</div>
         </div>
-        <span class="adapter-tag">Hardened path</span>
+        <span class="adapter-tag">Chokepoint B</span>
       </div>
-      <div class="adapter-desc">Runs inside the SafeChain LLM pipeline (<span class="mono">ValidChatPromptTemplate</span>). All firewall avoidance happens here — every message is transformed before the LLM sees it.</div>
+      <div class="adapter-desc"><span class="mono">await firewall.send(payload, from_agent, to_agent)</span> is invoked on every cross-agent edge so redaction patterns apply <strong>even when content never hits the LLM</strong> — e.g., specialist outputs handed to the orchestrator.</div>
       <div class="adapter-rules">
-        <div class="rule"><span class="rule-dot"></span><span class="rule-text"><strong>Collapses</strong> all messages into a <strong>single human message</strong> (SafeChain requirement).</span></div>
-        <div class="rule"><span class="rule-dot"></span><span class="rule-text">Uses <strong>neutral role labels</strong>: <span class="mono">Context:</span> / <span class="mono">Request:</span> / <span class="mono">Response:</span> — no <span class="mono">[SYSTEM]</span> markers.</span></div>
-        <div class="rule"><span class="rule-dot"></span><span class="rule-text">Pre-masks <strong>8+ digits</strong>, filters <span class="mono">exec</span>/<span class="mono">eval</span>/<span class="mono">import</span>/<span class="mono">__dunder__</span>.</span></div>
-        <div class="rule"><span class="rule-dot"></span><span class="rule-text"><strong>No native function-calling</strong> — tools described in text; model responds with JSON the adapter parses in a loop.</span></div>
-        <div class="rule"><span class="rule-dot"></span><span class="rule-text">401 → token refresh + local retry · 403/400 → <span class="mono">FirewallRejection</span> for upstream retry.</span></div>
+        <div class="rule"><span class="rule-dot"></span><span class="rule-text">Logs the transit (<span class="mono">firewall_send</span> event) with <span class="mono">from</span>, <span class="mono">to</span>, payload <span class="mono">type</span>.</span></div>
+        <div class="rule"><span class="rule-dot"></span><span class="rule-text"><span class="mono">_redact_payload</span> walks the value: strings → <span class="mono">_sanitize_message</span>; Pydantic models round-trip via <span class="mono">model_dump → model_validate</span>; dicts/lists/tuples recurse; other types pass through.</span></div>
+        <div class="rule"><span class="rule-dot"></span><span class="rule-text">Sanitization rules are exactly the same as the LLM boundary: <span class="mono">CASE-\d+ → [CASE-ID]</span> and <span class="mono">\d{6,} → ***MASKED***</span>.</span></div>
+        <div class="rule"><span class="rule-dot"></span><span class="rule-text">Returns the redacted payload so callers can thread it into the next agent's input.</span></div>
       </div>
     </div>
 
@@ -353,81 +360,81 @@ body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: 
 
   <!-- BEFORE / AFTER PANEL -->
   <div class="section">
-    <span class="section-label">What the prompt looks like · before vs after SafeChain</span>
+    <span class="section-label">What sanitization actually does · before vs after _sanitize_message</span>
     <span class="section-line"></span>
-    <span class="section-note">Same input · two wire representations</span>
+    <span class="section-note">Same input · two wire representations · note what is <em>not</em> rewritten</span>
   </div>
 
   <div class="diff">
-    <div class="diff-head">Prompt transformation · same 3 messages, two renderings</div>
+    <div class="diff-head">Sanitization · two regex rules + advisory guidance on retry</div>
     <div class="diff-body">
       <div class="diff-col before">
-        <div class="diff-col-title">✗ What would trigger · role markers + raw digits + exec keyword</div>
-        <div class="diff-content"><span class="label">[SYSTEM]</span>
+        <div class="diff-col-title">✗ Raw input · case-ID + long digits + role markers</div>
+        <div class="diff-content"><span class="label">SystemMessage:</span>
 You are a bureau-data analyst. You may call tools.
 
-<span class="label">[USER]</span>
-Analyze account <span class="hl-bad">372412345678901</span> for case CASE-00001.
-Use <span class="hl-bad">import</span> pandas if needed.
+<span class="label">HumanMessage:</span>
+Analyze account <span class="hl-bad">372412345678901</span> for case <span class="hl-bad">CASE-00001</span>.
+The reviewer asked about role-injection like [SYSTEM] or [USER];
+also notes referenced exec(payload), import os.
 
-<span class="label">[ASSISTANT]</span>
-I'll pull the bureau rows first.</div>
+(content arrives at LLM boundary)</div>
       </div>
       <div class="diff-arrow">→</div>
       <div class="diff-col after">
-        <div class="diff-col-title">✓ Post-SafeChain · single human message, sanitized</div>
-        <div class="diff-content"><span class="label good">Context:</span>
+        <div class="diff-col-title">✓ After _sanitize_message · two regex rules applied</div>
+        <div class="diff-content"><span class="label good">SystemMessage:</span>
 You are a bureau-data analyst. You may call tools.
 
-<span class="label good">Request:</span>
-Analyze account <span class="masked">***MASKED***</span> for case CASE-00001.
-Use <span class="filtered">[FILTERED]</span> pandas if needed.
+<span class="label good">HumanMessage:</span>
+Analyze account <span class="masked">***MASKED***</span> for case <span class="masked">[CASE-ID]</span>.
+The reviewer asked about role-injection like <span class="untouched">[SYSTEM]</span> or <span class="untouched">[USER]</span>;
+also notes referenced <span class="untouched">exec(payload)</span>, <span class="untouched">import os</span>.
 
-<span class="label good">Response:</span>
-I'll pull the bureau rows first.</div>
+(role markers + exec keywords pass through —
+ only mentioned in FIREWALL_GUIDANCE on retry)</div>
       </div>
     </div>
   </div>
 
   <!-- FLOW DIAGRAM -->
   <div class="section">
-    <span class="section-label">Inside SafeChainAdapter._invoke</span>
+    <span class="section-label">Inside FirewalledModel.ainvoke</span>
     <span class="section-line"></span>
-    <span class="section-note">Every call · same transformations · same error translation</span>
+    <span class="section-note">Retry loop · semaphore · tool loop · LLMResult</span>
   </div>
 
   <div class="flow-wrap">
     <div class="mermaid">
 flowchart TD
-    IN["messages = [{role:system, …}, {role:user, …}, {role:assistant, …}]"]:::in
-    LLMCHECK{"llm is None?"}:::check
-    REFRESH["_refresh_llm()<br/><i>load safechain model</i>"]:::soft
-    COMBINE["Combine all messages<br/><i>Context: / Request: / Response:</i>"]:::step
-    MASK["Regex mask<br/><i>\\d{8,} → ***MASKED***</i>"]:::step
-    FILTER["Regex filter<br/><i>(exec|eval|import|__\\w+__) → [FILTERED]</i>"]:::step
-    TEMPLATE["ValidChatPromptTemplate<br/><i>[('human', '{__input__}')]</i>"]:::step
-    INVOKE["chain.invoke({__input__: text})"]:::llm
-    RESP{"response?"}:::check
-    OK["return result.content"]:::ok
-    R401["HTTP 401"]:::soft
-    R403["HTTP 403"]:::bad
-    R400["HTTP 400"]:::bad
-    REF2["_refresh_llm() + retry once"]:::soft
-    FREJ["raise FirewallRejection(code, msg)"]:::bad
+    IN["ainvoke(system_prompt, user_message,<br/>tools=None, output_type=None,<br/>max_tool_turns=12)"]:::in
+    SCRUB["case_scrubber.scrub(user_message,<br/>case_id=None)"]:::step
+    BIND["bound_model = model.bind_tools(tools)<br/><i>if tools else model</i>"]:::step
+    LOOP{{"attempt = 0<br/>while attempt &lt;= max_retries:"}}:::check
+    BUILD["messages = [SystemMessage, HumanMessage]"]:::step
+    TLOOP["_tool_loop(bound_model, messages,<br/>tool_map, max_tool_turns)"]:::llm
+    SEM[("async with firewall._semaphore:<br/>await bound_model.ainvoke(messages)")]:::sem
+    TC{"response.tool_calls?"}:::check
+    DISPATCH["fn(**args) → ToolMessage(tool_call_id)<br/>append to messages · loop"]:::step
+    PARSE["parse content<br/>(output_type or {response: content})"]:::step
+    RECORD["append StepRecord<br/>return LLMResult(status='success', data)"]:::ok
+    EX{"FirewallRejection?"}:::check
+    GUIDE["current_system += FIREWALL_GUIDANCE<br/>current_message = sanitize(scrub(user_message))<br/>attempt += 1"]:::soft
+    BLOCK["return LLMResult(status='blocked',<br/>error=last_error)"]:::bad
 
-    IN --> LLMCHECK
-    LLMCHECK -->|yes| REFRESH --> COMBINE
-    LLMCHECK -->|no| COMBINE
-    COMBINE --> MASK --> FILTER --> TEMPLATE --> INVOKE --> RESP
-    RESP -->|success| OK
-    RESP -.->|401| R401 --> REF2 -.-> INVOKE
-    RESP -->|403| R403 --> FREJ
-    RESP -->|400| R400 --> FREJ
+    IN --> SCRUB --> BIND --> LOOP --> BUILD --> TLOOP
+    TLOOP --> SEM --> TC
+    TC -->|yes| DISPATCH --> SEM
+    TC -->|no| PARSE --> RECORD
+    TLOOP -.->|raises| EX
+    EX -->|attempt &lt; max| GUIDE --> LOOP
+    EX -->|attempt &gt; max| BLOCK
 
     classDef in    fill:#F4F6F9,stroke:#CBD5E1,color:#334155;
     classDef check fill:#EDE9FE,stroke:#4C1D95,color:#00175A,stroke-width:1.5px;
     classDef step  fill:#FEF3C7,stroke:#92400E,color:#00175A,stroke-width:1.5px;
     classDef llm   fill:#DBEAFE,stroke:#006FCF,color:#00175A,stroke-width:1.5px;
+    classDef sem   fill:#DCFCE7,stroke:#166534,color:#00175A,stroke-width:1.5px;
     classDef ok    fill:#DCFCE7,stroke:#166534,color:#00175A,stroke-width:1.5px;
     classDef bad   fill:#FEE2E2,stroke:#991B1B,color:#991B1B,stroke-width:1.5px;
     classDef soft  fill:#F4F6F9,stroke:#CBD5E1,color:#334155;
@@ -436,178 +443,179 @@ flowchart TD
 
   <!-- TECHNIQUES TABLE -->
   <div class="section">
-    <span class="section-label">Seven avoidance techniques</span>
+    <span class="section-label">Seven mechanisms in v2</span>
     <span class="section-line"></span>
-    <span class="section-note">What · when · why it helps</span>
+    <span class="section-note">What · when · why it matters</span>
   </div>
 
   <div class="techniques">
     <table>
       <thead>
         <tr>
-          <th style="width:28%">Technique</th>
-          <th style="width:100px">When</th>
-          <th>Why it avoids the firewall</th>
+          <th style="width:28%">Mechanism</th>
+          <th style="width:110px">When</th>
+          <th>Why</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td><span class="tech-name">Neutral role labels</span><br><span class="tech-why"><span class="mono">Context:</span> / <span class="mono">Request:</span> / <span class="mono">Response:</span></span></td>
+          <td><span class="tech-name">case_scrubber.scrub</span><br><span class="tech-why">replaces the active <em>literal</em> case-ID with <span class="mono">&lt;case&gt;</span></span></td>
           <td><span class="tech-when pre">pre-invoke</span></td>
-          <td>SafeChain pattern-matches <span class="mono">[SYSTEM]</span> / <span class="mono">[USER]</span> / <span class="mono">[ASSISTANT]</span> as role-injection markers. Neutral nouns don't trigger.</td>
+          <td>Production case IDs are bare digit strings; once mixed with other values they're indistinguishable from data. Scrubbing at the boundary keeps the LLM from ever seeing the raw ID, regardless of where it leaks in from.</td>
         </tr>
         <tr>
-          <td><span class="tech-name">Collapse to single human message</span><br><span class="tech-why">all roles merged into one string</span></td>
-          <td><span class="tech-when pre">pre-invoke</span></td>
-          <td>SafeChain's <span class="mono">ValidChatPromptTemplate</span> accepts only <span class="mono">("human", "{__input__}")</span>. Also removes role-juncture patterns entirely.</td>
+          <td><span class="tech-name">_CASE_ID_RE</span><br><span class="tech-why"><span class="mono">CASE-\d+ → [CASE-ID]</span></span></td>
+          <td><span class="tech-when always">both edges</span></td>
+          <td>Normalizes the canonical "CASE-NNNN" form everywhere — applied by both <span class="mono">_sanitize_message</span> (LLM boundary) and <span class="mono">send</span> (inter-agent transit).</td>
         </tr>
         <tr>
-          <td><span class="tech-name">Mask 8+ digit runs</span><br><span class="tech-why"><span class="mono">\d{8,} → ***MASKED***</span></span></td>
-          <td><span class="tech-when pre">pre-invoke</span></td>
-          <td>Account numbers / long IDs trip PII detectors. Masking at send-time keeps the LLM from ever seeing the raw value.</td>
+          <td><span class="tech-name">_DIGIT_RUN_RE</span><br><span class="tech-why"><span class="mono">\d{6,} → ***MASKED***</span></span></td>
+          <td><span class="tech-when always">both edges</span></td>
+          <td>Catches account numbers, long IDs, anything 6+ digits that could trip a content-safety filter or leak PII through a downstream redact step.</td>
         </tr>
         <tr>
-          <td><span class="tech-name">Filter code-exec keywords</span><br><span class="tech-why"><span class="mono">exec</span> / <span class="mono">eval</span> / <span class="mono">import</span> / <span class="mono">__dunder__</span> → <span class="mono">[FILTERED]</span></span></td>
-          <td><span class="tech-when pre">pre-invoke</span></td>
-          <td>Prevents RCE-lookalike signatures in tool results from triggering SafeChain's code-execution heuristics.</td>
+          <td><span class="tech-name">FIREWALL_GUIDANCE on retry</span><br><span class="tech-why">appended to system prompt, then re-prompt</span></td>
+          <td><span class="tech-when post">on rejection</span></td>
+          <td>Tells the LLM <em>why</em> the previous response was blocked (raw account #, PII, role-injection like <span class="mono">[SYSTEM]</span>, exec keywords) and asks for masked / descriptive language. Cheaper than expanding the regex set.</td>
         </tr>
         <tr>
-          <td><span class="tech-name">Prompt-injected tool calling</span><br><span class="tech-why">tools described in text · model emits JSON</span></td>
+          <td><span class="tech-name">model.bind_tools(...)</span><br><span class="tech-why">native LangChain tool binding</span></td>
           <td><span class="tech-when loop">tool loop</span></td>
-          <td>SafeChain's wire format is pure text in / text out. Native function-calling would bypass the sanitizers entirely — not allowed.</td>
+          <td>Uses OpenAI's structured <span class="mono">tool_calls</span> field — no prompt injection, no JSON-shape parsing in the adapter. <span class="mono">_tool_loop</span> dispatches each call to <span class="mono">tool_map[name]</span> and appends a <span class="mono">ToolMessage(tool_call_id=...)</span> back.</td>
         </tr>
         <tr>
-          <td><span class="tech-name">401 silent refresh</span><br><span class="tech-why">detect "401" in error → <span class="mono">_refresh_llm()</span> + retry</span></td>
-          <td><span class="tech-when post">on error</span></td>
-          <td>Token expiry during long sessions doesn't surface as a firewall block — adapter refreshes transparently.</td>
+          <td><span class="tech-name">asyncio.Semaphore(concurrency_cap)</span><br><span class="tech-why">global cap across all wrapped models</span></td>
+          <td><span class="tech-when always">every invoke</span></td>
+          <td>Default 8. Parallel fan-out (Reports + Team in parallel · per-pillar specialists in parallel) would otherwise trip provider rate limits — the semaphore is shared by every <span class="mono">FirewalledModel</span> under one <span class="mono">FirewallStack</span>.</td>
         </tr>
         <tr>
-          <td><span class="tech-name">403/400 → FirewallRejection</span><br><span class="tech-why">translate HTTP → typed exception</span></td>
-          <td><span class="tech-when post">on error</span></td>
-          <td>Gives the upstream <span class="mono">FirewallStack</span> a uniform signal to retry with guidance + extra sanitization.</td>
+          <td><span class="tech-name">firewall.send(msg, from, to)</span><br><span class="tech-why">redacts &amp; logs every cross-agent edge</span></td>
+          <td><span class="tech-when always">inter-agent</span></td>
+          <td>Specialist outputs, team drafts, review reports all flow through here on the way to the orchestrator. Pydantic models round-trip cleanly so type info survives the redaction pass.</td>
         </tr>
       </tbody>
     </table>
   </div>
 
-  <!-- TOOL-CALLING COMPARISON -->
+  <!-- TOOL CALLING -->
   <div class="section">
-    <span class="section-label">Tool calling · native vs prompt-injected</span>
+    <span class="section-label">Tool calling · native LangChain bind_tools</span>
     <span class="section-line"></span>
-    <span class="section-note">The biggest behavioral difference between the two adapters</span>
+    <span class="section-note">No prompt injection · structured <span class="mono">tool_calls</span> field · ToolMessage round-trip</span>
   </div>
 
   <div class="tools">
-
     <div class="tool-card blue">
       <div>
-        <div class="tool-title">OpenAIAdapter · native</div>
-        <div class="tool-sub">Uses platform function-calling</div>
+        <div class="tool-title">FirewalledModel._tool_loop</div>
+        <div class="tool-sub">LangChain bind_tools · OpenAI-style tool_calls · ToolMessage</div>
       </div>
-      <div class="tool-desc">Tools become structured JSON Schema sent alongside the prompt. The API returns <span class="mono">tool_calls</span> as a typed field; the adapter dispatches, appends <span class="mono">role:"tool"</span>, and loops.</div>
-      <div class="tool-code"><span class="c-comm"># tool definition (sent as structured field)</span>
-tools=[{
-  <span class="c-key">"type"</span>: <span class="c-str">"function"</span>,
-  <span class="c-key">"function"</span>: {
-    <span class="c-key">"name"</span>: <span class="c-str">"query_table"</span>,
-    <span class="c-key">"parameters"</span>: { <span class="c-comm">/* JSON Schema */</span> }
-  }
-}]
+      <div class="tool-desc">When tools are passed to <span class="mono">ainvoke</span>, the wrapped model is bound via <span class="mono">model.bind_tools(tools)</span>. The provider returns <span class="mono">tool_calls</span> as a typed field on the AIMessage; the loop dispatches each call to the matching Python function in <span class="mono">tool_map</span>, then appends a <span class="mono">ToolMessage(content, tool_call_id)</span> back to the messages list. Loop terminates when the response has no <span class="mono">tool_calls</span>, or after <span class="mono">max_tool_turns = 12</span>.</div>
+      <div class="tool-code"><span class="c-comm"># inside FirewalledModel._tool_loop</span>
+<span class="c-key">async with</span> self.firewall._semaphore:
+    response = <span class="c-key">await</span> bound_model.ainvoke(messages)
 
-<span class="c-comm"># response (typed)</span>
-choice.message.tool_calls[0].function.name
-choice.message.tool_calls[0].function.arguments</div>
+tool_calls = <span class="c-key">getattr</span>(response, <span class="c-str">"tool_calls"</span>, <span class="c-key">None</span>)
+<span class="c-key">if not</span> tool_calls:
+    <span class="c-key">return</span> response                       <span class="c-comm"># final AIMessage</span>
+
+messages.append(response)                  <span class="c-comm"># the AIMessage carrying tool_calls</span>
+<span class="c-key">for</span> tc <span class="c-key">in</span> tool_calls:
+    name = tc.get(<span class="c-str">"name"</span>) <span class="c-key">if isinstance</span>(tc, <span class="c-key">dict</span>) <span class="c-key">else</span> tc.name
+    args = tc.get(<span class="c-str">"args"</span>) <span class="c-key">if isinstance</span>(tc, <span class="c-key">dict</span>) <span class="c-key">else</span> tc.args
+    tc_id = tc.get(<span class="c-str">"id"</span>)   <span class="c-key">if isinstance</span>(tc, <span class="c-key">dict</span>) <span class="c-key">else</span> tc.id
+    fn = tool_map.get(name)
+    result = <span class="c-key">str</span>(fn(**(args <span class="c-key">or</span> {}))) <span class="c-key">if</span> fn <span class="c-key">else</span> <span class="c-str">f"error: unknown tool {name}"</span>
+    messages.append(ToolMessage(content=result, tool_call_id=tc_id))</div>
     </div>
-
-    <div class="tool-card red">
-      <div>
-        <div class="tool-title">SafeChainAdapter · prompt-injected</div>
-        <div class="tool-sub">Tool schema embedded in system prompt · JSON response parsed</div>
-      </div>
-      <div class="tool-desc">Tool signatures are formatted as text and appended to the system prompt. The LLM is instructed to respond with <strong>only</strong> a specific JSON shape. The adapter parses each response, dispatches to the Python function, and injects the result back as a user message.</div>
-      <div class="tool-code"><span class="c-comm"># appended to system prompt (plain text)</span>
-You have access to the following tools.
-To call a tool, respond with ONLY this JSON:
-  {<span class="c-key">"tool_call"</span>: {<span class="c-key">"name"</span>: <span class="c-str">"..."</span>, <span class="c-key">"arguments"</span>: {...}}}
-When final: {<span class="c-key">"output"</span>: {...}}
-
-Available tools:
-  - <span class="c-str">query_table</span>(table_name: string, ...)
-    Query a data table for the current case.</div>
-    </div>
-
   </div>
 
-  <!-- EXECUTION LIFECYCLE -->
+  <!-- LIFECYCLE -->
   <div class="section">
-    <span class="section-label">Execution lifecycle · where the code runs · LLM status at each beat</span>
+    <span class="section-label">Execution lifecycle · where each call runs · LLM status at each beat</span>
     <span class="section-line"></span>
-    <span class="section-note">All tool code runs in Python · the LLM is stateless between invocations</span>
+    <span class="section-note">All tool code runs in Python · FirewallRejection bubbles up from upstream provider/policy</span>
   </div>
 
-  <!-- KEY INSIGHTS -->
   <div class="lifecycle-insights">
     <div class="insight">
-      <div class="insight-title">Code runs in Python</div>
-      <div class="insight-body">The LLM <strong>never executes code</strong>. It emits a JSON <span class="mono">{"tool_call":...}</span>; the adapter dispatches to a regular Python function (<span class="mono">query_table</span>, <span class="mono">get_table_schema</span>, …) and captures the return value.</div>
+      <div class="insight-title">One semaphore, many models</div>
+      <div class="insight-body"><span class="mono">firewall._semaphore</span> is shared across <strong>every</strong> <span class="mono">FirewalledModel</span> built from the same <span class="mono">FirewallStack</span>. Parallel specialists + parallel report scan all draw from the same 8 slots.</div>
     </div>
     <div class="insight">
-      <div class="insight-title">LLM has no memory</div>
-      <div class="insight-body">Every <span class="mono">_invoke()</span> call is independent. Context lives only in the <span class="mono">messages</span> list maintained by the adapter; each round feeds the full history back.</div>
+      <div class="insight-title">FirewallRejection is upstream-typed</div>
+      <div class="insight-body">The wrapper doesn't <em>raise</em> blocks — it raises only inside the inner provider integration; the wrapper catches and translates to <span class="mono">LLMResult(status="blocked")</span> after retries are exhausted.</div>
     </div>
     <div class="insight">
-      <div class="insight-title">Status is binary</div>
-      <div class="insight-body">The LLM is either <span class="llm-status status-infer"><span class="status-dot"></span>inferring</span> during <span class="mono">_invoke()</span>, or <span class="llm-status status-idle"><span class="status-dot"></span>idle</span>. No background processing, no warm state.</div>
+      <div class="insight-title">Two retry layers · independent budgets</div>
+      <div class="insight-body">LangChain's <span class="mono">ChatOpenAI(max_retries=2)</span> handles 5xx/429/timeout. <span class="mono">firewall.max_retries=2</span> handles content-safety blocks. They compose multiplicatively in the worst case.</div>
     </div>
   </div>
 
-  <!-- SEQUENCE DIAGRAM -->
   <div class="flow-wrap">
     <div class="mermaid">
 sequenceDiagram
     autonumber
-    participant Py as Python · Adapter
-    participant LLM as LLM (SafeChain)
+    participant Caller as Caller (agent)
+    participant FM as FirewalledModel
+    participant Sem as Semaphore
+    participant LC as LangChain ChatOpenAI
     participant Tool as Python tool fn
 
-    Note over LLM: 💤 idle
-    Py->>Py: assemble messages<br/>inject tool schema block
+    Note over LC: 💤 idle
+    Caller->>FM: ainvoke(system_prompt, user_msg, tools)
+    FM->>FM: case_scrubber.scrub(user_msg)
+    FM->>FM: bound_model = model.bind_tools(tools)
+    FM->>FM: build SystemMessage + HumanMessage
 
-    Py->>LLM: _invoke(messages) · round 1
-    activate LLM
-    Note over LLM: 🔄 inferring
-    LLM-->>Py: raw JSON text
-    deactivate LLM
-    Note over LLM: 💤 idle
+    FM->>Sem: acquire (cap=8)
+    activate Sem
+    FM->>LC: bound_model.ainvoke(messages)
+    activate LC
+    Note over LC: 🔄 inferring
+    LC-->>FM: AIMessage(tool_calls=[...])
+    deactivate LC
+    Note over LC: 💤 idle
+    Sem-->>FM: release
+    deactivate Sem
 
-    Py->>Py: json.loads(raw)<br/>detect "tool_call"
+    FM->>FM: append AIMessage to messages
 
-    Py->>Tool: fn(**fn_args) — local Python exec
-    activate Tool
-    Note over Tool: runs in-process · gateway reads case_data
-    Tool-->>Py: result string
-    deactivate Tool
+    loop for each tool_call
+        FM->>Tool: fn(**args) — local Python exec
+        activate Tool
+        Tool-->>FM: result string
+        deactivate Tool
+        FM->>FM: append ToolMessage(tool_call_id=...)
+    end
 
-    Py->>Py: truncate if > 3000 chars<br/>append {assistant: raw, user: tool_result}
+    FM->>Sem: acquire
+    FM->>LC: bound_model.ainvoke(messages)
+    activate LC
+    Note over LC: 🔄 inferring · larger context
+    LC-->>FM: AIMessage (no tool_calls · final)
+    deactivate LC
+    Sem-->>FM: release
 
-    Py->>LLM: _invoke(messages) · round 2
-    activate LLM
-    Note over LLM: 🔄 inferring · larger context
-    LLM-->>Py: JSON with "output"
-    deactivate LLM
-    Note over LLM: ✅ idle · terminal
-
-    Py->>Py: return parsed["output"]
+    alt success
+        FM->>FM: parse content (output_type or wrap)
+        FM->>FM: append StepRecord
+        FM-->>Caller: LLMResult(status='success', data)
+    else FirewallRejection
+        FM->>FM: log · attempt += 1
+        FM->>FM: system += FIREWALL_GUIDANCE · re-sanitize
+        Note over FM: retry next loop iteration
+    end
     </div>
   </div>
 
-  <!-- BEAT TIMELINE TABLE -->
+  <!-- BEAT TIMELINE -->
   <div class="timeline">
     <table>
       <thead>
         <tr>
           <th style="width:70px">Beat</th>
-          <th style="width:140px">LLM status</th>
+          <th style="width:160px">LLM status</th>
           <th>Python action · code execution locus</th>
           <th style="width:120px">messages size</th>
         </tr>
@@ -616,50 +624,56 @@ sequenceDiagram
         <tr>
           <td><span class="tl-beat">T1</span></td>
           <td><span class="llm-status status-idle"><span class="status-dot"></span>idle</span></td>
-          <td class="tl-action">Adapter builds <span class="mono">tool schema block</span>, appends to system prompt, initializes <span class="mono">messages</span>.</td>
-          <td class="tl-size">2</td>
+          <td class="tl-action"><span class="mono">case_scrubber.scrub(user_message, case_id)</span> — boundary scrub of the active case-ID literal.</td>
+          <td class="tl-size">—</td>
         </tr>
         <tr>
           <td><span class="tl-beat">T2</span></td>
-          <td><span class="llm-status status-infer"><span class="status-dot"></span>inferring</span></td>
-          <td class="tl-action"><span class="mono">_invoke(messages)</span> — sanitize · collapse · ValidChatPromptTemplate · SafeChain forward pass.</td>
+          <td><span class="llm-status status-idle"><span class="status-dot"></span>idle</span></td>
+          <td class="tl-action"><span class="mono">bound_model = model.bind_tools(tools)</span> + build <span class="mono">[SystemMessage, HumanMessage]</span>.</td>
           <td class="tl-size">2</td>
         </tr>
         <tr>
           <td><span class="tl-beat">T3</span></td>
-          <td><span class="llm-status status-idle"><span class="status-dot"></span>idle</span></td>
-          <td class="tl-action">Adapter receives raw text · <span class="mono">json.loads(raw)</span> · detects <span class="mono">{"tool_call":...}</span>.</td>
+          <td><span class="llm-status status-infer"><span class="status-dot"></span>inferring · in semaphore</span></td>
+          <td class="tl-action"><span class="mono">async with firewall._semaphore:</span> first <span class="mono">bound_model.ainvoke(messages)</span> — provider returns AIMessage, possibly with <span class="mono">tool_calls</span>.</td>
           <td class="tl-size">2</td>
         </tr>
         <tr>
           <td><span class="tl-beat">T4</span></td>
           <td><span class="llm-status status-exec"><span class="status-dot"></span>idle · Python runs tool</span></td>
-          <td class="tl-action"><strong>Code executes in Python:</strong> <span class="mono">fn(**fn_args)</span> — e.g. <span class="mono">query_table('model_scores', ...)</span> hits the in-process gateway.</td>
-          <td class="tl-size">2</td>
+          <td class="tl-action"><strong>Code executes in Python:</strong> for each <span class="mono">tool_call</span>, <span class="mono">tool_map[name](**args)</span> — e.g. <span class="mono">query_table('model_scores', ...)</span> hits the in-process DataGateway.</td>
+          <td class="tl-size">2 → 3</td>
         </tr>
         <tr>
           <td><span class="tl-beat">T5</span></td>
           <td><span class="llm-status status-idle"><span class="status-dot"></span>idle</span></td>
-          <td class="tl-action">Adapter truncates result if > 3000 chars · appends <span class="mono">{"role":"assistant", ...}</span> + <span class="mono">{"role":"user","content":"Tool result for …"}</span>.</td>
-          <td class="tl-size">4</td>
+          <td class="tl-action">Append <span class="mono">ToolMessage(content=result, tool_call_id=tc_id)</span> for each call. AIMessage from T3 is also appended before the ToolMessages.</td>
+          <td class="tl-size">2 + 1 + N</td>
         </tr>
         <tr>
           <td><span class="tl-beat">T6</span></td>
-          <td><span class="llm-status status-infer"><span class="status-dot"></span>inferring</span></td>
-          <td class="tl-action"><span class="mono">_invoke(messages)</span> again — LLM sees <em>all</em> prior rounds as text. May emit another <span class="mono">tool_call</span> or a final <span class="mono">{"output":…}</span>.</td>
-          <td class="tl-size">4</td>
+          <td><span class="llm-status status-infer"><span class="status-dot"></span>inferring · larger context</span></td>
+          <td class="tl-action">Loop iteration — re-acquire semaphore, re-invoke <span class="mono">bound_model</span>. May emit more <span class="mono">tool_calls</span> or a final response.</td>
+          <td class="tl-size">prev + 1</td>
         </tr>
         <tr>
           <td><span class="tl-beat">…</span></td>
           <td><span class="llm-status status-idle"><span class="status-dot"></span>idle</span> ↔ <span class="llm-status status-infer"><span class="status-dot"></span>inferring</span></td>
-          <td class="tl-action">Loop repeats up to <span class="mono">max_iterations = 12</span>. Each tool round grows <span class="mono">messages</span> by 2.</td>
-          <td class="tl-size">+2 / round</td>
+          <td class="tl-action">Loop repeats up to <span class="mono">max_tool_turns = 12</span>. Each round adds 1 AIMessage + N ToolMessages.</td>
+          <td class="tl-size">+1+N / round</td>
         </tr>
         <tr>
           <td><span class="tl-beat">T<sub>n</sub></span></td>
           <td><span class="llm-status status-term"><span class="status-dot"></span>idle · terminal</span></td>
-          <td class="tl-action">LLM emits <span class="mono">{"output":{...}}</span> · adapter returns the parsed dict to <span class="mono">FirewallStack</span>.</td>
+          <td class="tl-action">Final AIMessage (no <span class="mono">tool_calls</span>). Adapter parses <span class="mono">content</span> via <span class="mono">output_type(**parsed)</span> when set, else returns <span class="mono">{response: content}</span>. Appends <span class="mono">StepRecord</span>.</td>
           <td class="tl-size">final</td>
+        </tr>
+        <tr>
+          <td><span class="tl-beat">T<sub>r</sub></span></td>
+          <td><span class="llm-status status-block"><span class="status-dot"></span>blocked · retry</span></td>
+          <td class="tl-action">If <span class="mono">FirewallRejection</span> raised inside <span class="mono">_tool_loop</span>: log, increment attempt, append <span class="mono">FIREWALL_GUIDANCE</span> to <span class="mono">current_system</span>, re-sanitize <span class="mono">current_message</span>, restart the outer <span class="mono">while</span> loop with fresh <span class="mono">[SystemMessage, HumanMessage]</span>.</td>
+          <td class="tl-size">reset to 2</td>
         </tr>
       </tbody>
     </table>
@@ -667,84 +681,82 @@ sequenceDiagram
 
   <!-- WIRE EXAMPLES -->
   <div class="section">
-    <span class="section-label">Example wire content · Q1 modeling specialist</span>
+    <span class="section-label">Example wire content · LangChain message types</span>
     <span class="section-line"></span>
-    <span class="section-note">Literal strings that cross the boundaries</span>
+    <span class="section-note">Literal payloads that cross the FirewalledModel ↔ LangChain ↔ tool boundaries</span>
   </div>
 
   <div class="wire-grid">
 
-    <!-- Beat T2 → T3 : raw JSON text from LLM -->
+    <!-- LangChain → Python: AIMessage with tool_calls -->
     <div class="wire from-llm">
       <div class="wire-head">
-        <span class="wire-tag">LLM → Python</span>
-        <span class="wire-beat">Beat T2 · raw text response</span>
+        <span class="wire-tag">LangChain → FirewalledModel</span>
+        <span class="wire-beat">Beat T3 · AIMessage</span>
       </div>
-      <div class="wire-body">{
-  <span class="c-key">"tool_call"</span>: {
-    <span class="c-key">"name"</span>: <span class="c-str">"query_table"</span>,
-    <span class="c-key">"arguments"</span>: {
-      <span class="c-key">"table_name"</span>: <span class="c-str">"model_scores"</span>,
-      <span class="c-key">"columns"</span>: <span class="c-str">"trans_month,positive_events"</span>
+      <div class="wire-body">AIMessage(
+  content=<span class="c-str">""</span>,
+  tool_calls=[
+    {
+      <span class="c-key">"id"</span>: <span class="c-str">"call_8f3a..."</span>,
+      <span class="c-key">"name"</span>: <span class="c-str">"query_table"</span>,
+      <span class="c-key">"args"</span>: {
+        <span class="c-key">"table_name"</span>: <span class="c-str">"model_scores"</span>,
+        <span class="c-key">"columns"</span>: <span class="c-str">"trans_month,positive_events"</span>
+      }
     }
-  }
-}
-<span class="c-comm"># json.loads(raw) succeeds
-# "tool_call" key detected → dispatch</span></div>
+  ]
+)
+<span class="c-comm"># typed field · no JSON parse needed</span></div>
     </div>
 
-    <!-- Beat T4 → T5 : result string from tool function -->
+    <!-- Python → tool function -->
     <div class="wire to-tool">
       <div class="wire-head">
-        <span class="wire-tag">Tool → Python</span>
-        <span class="wire-beat">Beat T4 · result string</span>
+        <span class="wire-tag">FirewalledModel → tool fn</span>
+        <span class="wire-beat">Beat T4 · dispatch</span>
       </div>
-      <div class="wire-body"><span class="c-comm"># query_table returns JSON string</span>
-[
-  {<span class="c-key">"trans_month"</span>: <span class="c-str">"2024-07-01"</span>, <span class="c-key">"positive_events"</span>: <span class="c-num">0</span>},
-  {<span class="c-key">"trans_month"</span>: <span class="c-str">"2024-09-01"</span>, <span class="c-key">"positive_events"</span>: <span class="c-num">1</span>},
-  {<span class="c-key">"trans_month"</span>: <span class="c-str">"2025-02-01"</span>, <span class="c-key">"positive_events"</span>: <span class="c-num">2</span>},
-  {<span class="c-key">"trans_month"</span>: <span class="c-str">"2025-07-01"</span>, <span class="c-key">"positive_events"</span>: <span class="c-num">1</span>},
-  <span class="c-comm">… remaining rows</span>
-]
-<span class="c-comm"># len(result_str) = 2 847 → under 3000 cap</span></div>
+      <div class="wire-body"><span class="c-comm"># tool_map = {fn.__name__: fn for fn in tools}</span>
+fn = tool_map[<span class="c-str">"query_table"</span>]
+result = <span class="c-key">str</span>(fn(
+  table_name=<span class="c-str">"model_scores"</span>,
+  columns=<span class="c-str">"trans_month,positive_events"</span>
+))
+<span class="c-comm"># in-process · gateway reads case data
+# str(...) is the *raw* tool-fn return,
+# coerced to string for ToolMessage.content</span></div>
     </div>
 
-    <!-- Beat T5 : appended messages payload -->
+    <!-- ToolMessage appended back to messages -->
     <div class="wire to-messages">
       <div class="wire-head">
-        <span class="wire-tag">Python → messages</span>
-        <span class="wire-beat">Beat T5 · two new entries</span>
+        <span class="wire-tag">FirewalledModel → messages</span>
+        <span class="wire-beat">Beat T5 · ToolMessage</span>
       </div>
-      <div class="wire-body"><span class="c-comm"># appended to messages list</span>
-{<span class="c-key">"role"</span>: <span class="c-str">"assistant"</span>,
- <span class="c-key">"content"</span>: <span class="c-str">'{"tool_call": {"name": "query_table", …}}'</span>}
-
-{<span class="c-key">"role"</span>: <span class="c-str">"user"</span>,
- <span class="c-key">"content"</span>: <span class="c-str">"Tool result for query_table:\n[{\"trans_month\": \"2024-07-01\", …}, …]"</span>}
-
-<span class="c-comm"># next _invoke sees all 4 messages
-# LLM re-sanitized on send</span></div>
+      <div class="wire-body">messages.append(AIMessage(...))   <span class="c-comm"># first, the AIMessage carrying the tool_calls</span>
+messages.append(ToolMessage(
+  content=<span class="c-str">'[{"trans_month":"2024-07-01","positive_events":0},...]'</span>,
+  tool_call_id=<span class="c-str">"call_8f3a..."</span>
+))
+<span class="c-comm"># next round: bound_model.ainvoke(messages)
+# LangChain serializes the full thread to the provider</span></div>
     </div>
 
-  </div>
-
-  <div class="wire-grid" style="grid-template-columns: 1fr; margin-bottom: 28px;">
+    <!-- Terminal AIMessage -->
     <div class="wire terminal">
       <div class="wire-head">
-        <span class="wire-tag">LLM → Python</span>
-        <span class="wire-beat">Beat T<sub>n</sub> · terminal response</span>
+        <span class="wire-tag">LangChain → FirewalledModel</span>
+        <span class="wire-beat">Beat T<sub>n</sub> · terminal AIMessage</span>
       </div>
-      <div class="wire-body">{
-  <span class="c-key">"output"</span>: {
-    <span class="c-key">"findings"</span>: <span class="c-str">"Positive events occurred in 3 of 17 model runs in the last 18 months, roughly 18% frequency, with no recent clustering."</span>,
-    <span class="c-key">"evidence"</span>: [<span class="c-str">"2024-09: 1 positive event"</span>, <span class="c-str">"2025-02: 2 positive events"</span>, <span class="c-str">"2025-07: 1 positive event"</span>],
-    <span class="c-key">"implications"</span>: [<span class="c-str">"Frequency is low; no sustained limit-increase trajectory"</span>],
-    <span class="c-key">"data_gaps"</span>: []
-  }
-}
-<span class="c-comm"># "output" key detected → return parsed["output"] to FirewallStack → SpecialistOutput</span></div>
+      <div class="wire-body">AIMessage(
+  content=<span class="c-str">'{"findings":"Positive events occurred in 3 of 17 model runs in the last 18 months — about 18% frequency, no recent clustering.","evidence":["2024-09: 1","2025-02: 2","2025-07: 1"],"implications":["Frequency low; no sustained limit-increase trajectory"],"data_gaps":[]}'</span>,
+  tool_calls=[]
+)
+<span class="c-comm"># no tool_calls → loop exits
+# output_type=SpecialistOutput → output_type(**json.loads(content)).model_dump()
+# → LLMResult(status="success", data={...}) → caller</span></div>
     </div>
+
   </div>
 
   <!-- CROSS-REF -->
@@ -753,8 +765,8 @@ sequenceDiagram
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
     </div>
     <div class="xref-body">
-      <span class="xref-label">See also · firewall layers + block propagation</span>
-      <a href="firewall_overview.html" class="xref-link">firewall_overview.html →</a> covers what happens <em>above</em> the adapter: retry loop, guidance injection on retry, and how a blocked call bubbles up to the reviewer as an <span class="mono">INCOMPLETE ANALYSES</span> marker.
+      <span class="xref-label">See also · system architecture in v2</span>
+      <a href="../docs/architecture.svg" class="xref-link">docs/architecture.svg →</a> shows where the FirewallStack sits in the full pipeline: ChatAgent at the boundary, Orchestrator driving three paths, and every LLM call flowing through the wrapper covered above.
     </div>
   </div>
 
