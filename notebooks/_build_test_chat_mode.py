@@ -68,16 +68,21 @@ cells.append(code(
     "PILLAR = \"credit_risk\"\n"
     "MODEL = \"gpt-4o\"\n\n"
     "# ─── data source: 'auto' resolves real → simulated → generator ───\n"
-    "DATA_SOURCE = \"auto\""
+    "DATA_SOURCE = \"auto\"\n\n"
+    "# ─── LLM transport: 'openai' (dev) or 'safechain' (private/prod) ───\n"
+    "# Use 'safechain' only if the safechain package is installed.\n"
+    "BACKEND = \"openai\""
 ))
 
 # 3. Build session clients
 cells.append(md(
     "## 2. Build session clients (the SDK + firewall layer)\n\n"
     "This is the **same wiring `main.py` uses**: `FirewallStack` holds the semaphore + "
-    "retry policy; `build_session_clients` produces a `FirewalledAsyncOpenAI` wrapping "
-    "the real `openai.AsyncOpenAI` plus an `OpenAIChatCompletionsModel` adapter for the "
-    "Agents SDK; `FirewalledChatShim` preserves `ChatAgent`'s legacy `ainvoke` surface."
+    "retry policy; `build_session_clients(backend=BACKEND)` chooses the LLM transport — "
+    "either `FirewalledAsyncOpenAI` over `openai.AsyncOpenAI` (dev) or "
+    "`SafeChainAsyncOpenAI` (private/prod). Either way it returns an "
+    "`OpenAIChatCompletionsModel` for the Agents SDK; the architecture downstream is "
+    "identical. `FirewalledChatShim` preserves `ChatAgent`'s legacy `ainvoke` surface."
 ))
 cells.append(code(
     "from llm.firewall_stack import FirewallStack\n"
@@ -85,8 +90,9 @@ cells.append(code(
     "from logger.event_logger import EventLogger\n\n"
     "logger = EventLogger(session_id='nb-demo', log_dir=os.path.join(PROJECT_ROOT, 'logs'))\n"
     "firewall = FirewallStack(logger=logger, max_retries=2, concurrency_cap=8)\n"
-    "clients = build_session_clients(firewall, model_name=MODEL)\n"
+    "clients = build_session_clients(firewall, model_name=MODEL, backend=BACKEND)\n"
     "chat_llm = FirewalledChatShim(clients)\n\n"
+    "print(f'backend                   : {clients.backend!r}')\n"
     "print('clients.firewalled_client :', type(clients.firewalled_client).__name__)\n"
     "print('clients.model              :', type(clients.model).__name__)\n"
     "print('chat_llm                    :', type(chat_llm).__name__)"
