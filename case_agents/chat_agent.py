@@ -8,8 +8,8 @@ and the orchestrator-side `ChatAgent` (output).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
-from llm.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger
 from models.types import FinalAnswer, ScreenVerdict
 from skills.loader import load_skill as _load_skill
@@ -38,7 +38,7 @@ class ChatAgent:
 
     def __init__(
         self,
-        llm: FirewalledModel,
+        llm: Any,
         logger: EventLogger,
         tools: list | None = None,
     ):
