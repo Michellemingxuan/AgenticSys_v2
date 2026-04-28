@@ -25,6 +25,28 @@ FIREWALL_GUIDANCE = (
 )
 
 
+def sanitize_message(message: str) -> str:
+    """Mask identifiers: long digit runs (6+ digits) and CASE-\\d+ tokens."""
+    masked = _CASE_ID_RE.sub("[CASE-ID]", message)
+    return _DIGIT_RUN_RE.sub("***MASKED***", masked)
+
+
+def redact_payload(payload: Any) -> Any:
+    if isinstance(payload, str):
+        return sanitize_message(payload)
+    if isinstance(payload, BaseModel):
+        dumped = payload.model_dump()
+        redacted = redact_payload(dumped)
+        return type(payload).model_validate(redacted)
+    if isinstance(payload, dict):
+        return {k: redact_payload(v) for k, v in payload.items()}
+    if isinstance(payload, list):
+        return [redact_payload(v) for v in payload]
+    if isinstance(payload, tuple):
+        return tuple(redact_payload(v) for v in payload)
+    return payload
+
+
 class FirewallRejection(Exception):
     """Raised when a firewall rule blocks an LLM response."""
 
@@ -91,25 +113,11 @@ class FirewallStack:
 
     @classmethod
     def _redact_payload(cls, payload: Any) -> Any:
-        if isinstance(payload, str):
-            return cls._sanitize_message(payload)
-        if isinstance(payload, BaseModel):
-            dumped = payload.model_dump()
-            redacted = cls._redact_payload(dumped)
-            return type(payload).model_validate(redacted)
-        if isinstance(payload, dict):
-            return {k: cls._redact_payload(v) for k, v in payload.items()}
-        if isinstance(payload, list):
-            return [cls._redact_payload(v) for v in payload]
-        if isinstance(payload, tuple):
-            return tuple(cls._redact_payload(v) for v in payload)
-        return payload
+        return redact_payload(payload)
 
     @staticmethod
     def _sanitize_message(message: str) -> str:
-        """Mask identifiers: long digit runs (6+ digits) and CASE-\\d+ tokens."""
-        masked = _CASE_ID_RE.sub("[CASE-ID]", message)
-        return _DIGIT_RUN_RE.sub("***MASKED***", masked)
+        return sanitize_message(message)
 
 
 class FirewalledModel:
