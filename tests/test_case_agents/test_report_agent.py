@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agents.report_agent import ReportAgent
+from case_agents.report_agent import ReportAgent
 from logger.event_logger import EventLogger
 from models.types import LLMResult, ReportDraft
 

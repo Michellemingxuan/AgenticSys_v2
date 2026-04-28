@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgenticSys v2 — Workflow (React Flow)</title>
+  <link rel="stylesheet" href="https://esm.sh/reactflow@11.11.4/dist/style.css">
+  <style>
+    html, body, #root { margin: 0; padding: 0; width: 100%; height: 100%; }
+    body {
+      font-family: ui-sans-serif, -apple-system, "Segoe UI", system-ui, Helvetica, sans-serif;
+      background: #FFFFFF; color: #2D2D2D;
+    }
+    #root { background: #FFFFFF; }
+
+    .doc-hdr {
+      position: fixed; top: 14px; left: 24px; z-index: 5; pointer-events: none;
+      max-width: 70vw;
+    }
+    .doc-hdr h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.3px; color: #2D2D2D; }
+    .doc-hdr .sub { font-size: 12px; color: #7A7569; margin-top: 4px; }
+    .doc-hdr .rule { margin-top: 8px; height: 1px; background: #E5E0D2; width: min(80vw, 1428px); }
+
+    /* ── question / answer pill ── */
+    .endpoint {
+      width: 200px; height: 56px; border-radius: 28px;
+      background: #DCE7F4; border: 1.4px solid #3D6BA8;
+      display: flex; align-items: center; gap: 10px;
+      font-size: 12.5px; font-weight: 700; color: #1F3A5F;
+      box-shadow: 0 1.5px 4px rgba(0,0,0,0.14);
+      padding: 0 16px;
+    }
+    .endpoint svg { width: 18px; height: 18px; stroke: #3D6BA8; fill: none; flex-shrink: 0; }
+    .endpoint .label { font-size: 8.5px; font-weight: 700; letter-spacing: 1.5px; color: #4F6B8C; text-transform: uppercase; }
+    .endpoint .text { line-height: 1.25; }
+
+    /* ── compact agent card · NO skills in main body ── */
+    .card {
+      background: #FFFFFF; border: 1px solid #BFD3E8; border-radius: 10px;
+      box-shadow: 0 1.5px 5px rgba(0,0,0,0.10);
+      display: flex; align-items: stretch; overflow: hidden;
+    }
+    .card .left {
+      flex: 1; display: flex; align-items: center; gap: 10px;
+      padding: 12px 16px; min-width: 0;
+    }
+    .icon-box {
+      width: 36px; height: 36px; flex-shrink: 0;
+      border-radius: 8px; background: #E5EDF6;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .icon-box svg { width: 20px; height: 20px; stroke: #3D6BA8; fill: none; }
+    .card .text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .card .name { font-size: 13px; font-weight: 700; color: #1F3A5F; line-height: 1.2; }
+    .card .action { font-size: 11px; color: #5C5044; line-height: 1.3; }
+
+/* ── DYNAMIC TEAM frame · contains GeneralSpec · NO skill chips ── */
+    .team-frame {
+      background: #F4F8FD;
+      border: 1.5px dashed #3D6BA8;
+      border-radius: 12px;
+      padding: 12px 14px;
+      box-shadow: 0 2px 8px rgba(61,107,168,0.12);
+    }
+    .team-frame .head {
+      font-size: 10.5px; font-weight: 700; letter-spacing: 1.4px;
+      color: #3D6BA8; text-transform: uppercase; text-align: center;
+    }
+    .team-frame .head-sub {
+      font-size: 9.5px; color: #7A9BC1; font-style: italic; text-align: center; margin-top: 2px;
+    }
+    .team-frame .specs {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+      margin-top: 12px;
+    }
+    .team-frame .spec {
+      background: #FFFFFF; border: 1px solid #BFD3E8; border-radius: 8px;
+      padding: 10px 4px;
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+    }
+    .team-frame .spec .ico {
+      width: 32px; height: 32px; border-radius: 6px;
+      background: #E5EDF6;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .team-frame .spec .ico svg { width: 18px; height: 18px; stroke: #3D6BA8; fill: none; }
+    .team-frame .spec .name {
+      font-size: 11px; font-weight: 700; color: #1F3A5F; text-align: center;
+      line-height: 1.15;
+    }
+    /* "more specialists" placeholder card */
+    .team-frame .spec.more {
+      background: #FAFCFE;
+      border: 1px dashed #BFD3E8;
+    }
+    .team-frame .spec.more .ico {
+      background: transparent;
+    }
+    .team-frame .spec.more .ico .dots {
+      font-size: 22px; font-weight: 700; color: #7A9BC1;
+      letter-spacing: 1.5px; line-height: 1;
+    }
+    .team-frame .spec.more .name {
+      color: #7A9BC1; font-style: italic; font-weight: 500;
+    }
+    .team-frame .review-arrow {
+      margin-top: 14px; padding-top: 10px;
+      border-top: 1px dashed #BFD3E8;
+      text-align: center;
+      font-size: 9.5px; color: #4F6B8C; font-style: italic;
+    }
+    .team-frame .gs {
+      background: #FFFFFF; border: 1px solid #BFD3E8; border-radius: 8px;
+      padding: 9px 12px;
+      display: flex; align-items: center; gap: 10px;
+      margin-top: 6px;
+    }
+    .team-frame .gs .ico {
+      width: 32px; height: 32px; border-radius: 6px;
+      background: #E5EDF6;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .team-frame .gs .ico svg { width: 19px; height: 19px; stroke: #3D6BA8; fill: none; }
+    .team-frame .gs .text { flex: 1; display: flex; flex-direction: column; gap: 1px; }
+    .team-frame .gs .name { font-size: 12px; font-weight: 700; color: #1F3A5F; }
+    .team-frame .gs .action { font-size: 9.5px; color: #5C5044; font-style: italic; }
+
+    .react-flow__handle {
+      width: 8px; height: 8px;
+      background: #3D6BA8; border: 1.5px solid #FFFFFF;
+      opacity: 1;
+    }
+    .react-flow__edge.animated path {
+      stroke-dasharray: 5 4;
+      animation: rf-flow 1.0s linear infinite;
+    }
+    @keyframes rf-flow {
+      from { stroke-dashoffset: 18; }
+      to   { stroke-dashoffset: 0; }
+    }
+    .react-flow__edge-text { font-size: 10.5px; font-style: italic; fill: #1F3A5F; }
+    .react-flow__edge-textbg { fill: #FFFFFF; }
+    .react-flow__attribution { display: none; }
+    .react-flow__minimap { background: rgba(255,255,255,0.85); }
+  </style>
+</head>
+<body>
+  <div class="doc-hdr">
+    <h1>AgenticSys v2 — Workflow</h1>
+    <!-- <div class="sub">Question (left) → ChatAgent → Orchestrator → 3 parallel paths → Orchestrator → ChatAgent → Answer (left)</div>
+    <div class="rule"></div> -->
+  </div>
+  <div id="root"></div>
+
+  <script type="module">
+    import React from 'https://esm.sh/react@18.3.1';
+    import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client?deps=react@18.3.1';
+    import ReactFlow, {
+      Background, Controls, Handle, Position, MarkerType
+    } from 'https://esm.sh/reactflow@11.11.4?deps=react@18.3.1,react-dom@18.3.1';
+    import { html } from 'https://esm.sh/htm@3.1.1/react?deps=react@18.3.1';
+
+    const Ic = {
+      qmark:   html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
+      sparkle: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>`,
+      chat:    html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
+      target:  html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>`,
+      files:   html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="14" height="16" rx="2"/><path d="M7 2h10a2 2 0 0 1 2 2v14"/><line x1="6" y1="11" x2="14" y2="11"/><line x1="6" y1="14" x2="14" y2="14"/><line x1="6" y1="17" x2="11" y2="17"/></svg>`,
+      scale:   html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M3 7c2 0 4-1 6-2 2 1 4 2 6 2s4-1 6-2"/><path d="M7 14a3 3 0 1 0-6 0c0 1 .5 2 1.5 2.5l1.5.5 1.5-.5C6.5 16 7 15 7 14z"/><path d="M23 14a3 3 0 1 0-6 0c0 1 .5 2 1.5 2.5l1.5.5 1.5-.5c1-.5 1.5-1.5 1.5-2.5z"/></svg>`,
+      database:html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>`,
+      pBureau:   html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 9v12"/><path d="M15 9v12"/></svg>`,
+      pModel:    html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`,
+      pCapacity: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>`,
+    };
+
+    // ─────────── custom nodes (no skill chips in main body) ───────────
+    const QuestionNode = ({ data }) => html`
+      <div className="endpoint" style=${{ width: data.width || 200 }}>
+        ${Ic.qmark}
+        <div className="text">
+          <div className="label">question</div>
+          <div>${data.text}</div>
+        </div>
+        <${Handle} type="source" position=${Position.Right}/>
+      </div>`;
+
+    const AnswerNode = ({ data }) => html`
+      <div className="endpoint" style=${{ width: data.width || 200 }}>
+        <${Handle} type="target" position=${Position.Right}/>
+        ${Ic.sparkle}
+        <div className="text">
+          <div className="label">answer</div>
+          <div>${data.text}</div>
+        </div>
+      </div>`;
+
+    const CardNode = ({ data }) => {
+      const targetPos = data.targetLeft ? Position.Left : Position.Top;
+      const sourcePos = data.sourceLeft ? Position.Left : Position.Bottom;
+      return html`
+        <div className="card" style=${{ width: data.width || 280 }}>
+          ${data.targets
+            ? data.targets.map(t => html`<${Handle} key=${t.id} id=${t.id} type="target" position=${t.position}/>`)
+            : html`<${Handle} type="target" position=${targetPos}/>`}
+          <div className="left">
+            <div className="icon-box">${Ic[data.icon]}</div>
+            <div className="text">
+              <div className="name">${data.name}</div>
+              ${data.action && html`<div className="action">${data.action}</div>`}
+            </div>
+          </div>
+          ${data.handles
+            ? data.handles.map((id, i) => html`<${Handle} key=${id} id=${id} type="source" position=${Position.Bottom} style=${{ left: `${(100*(i+1))/(data.handles.length+1)}%` }}/>`)
+            : html`<${Handle} type="source" position=${sourcePos}/>`}
+        </div>`;
+    };
+
+    const TeamFrameNode = ({ data }) => html`
+      <div className="team-frame" style=${{ width: data.width || 360 }}>
+        <${Handle} type="target" position=${Position.Top}/>
+        <div className="head">Dynamic Team — recruited per question</div>
+        <div className="head-sub">× N specialists picked by team_construction</div>
+        <div className="specs">
+          <div className="spec">
+            <div className="ico">${Ic.pBureau}</div>
+            <div className="name">Bureau Spec Agent</div>
+          </div>
+          <div className="spec">
+            <div className="ico">${Ic.pModel}</div>
+            <div className="name">Modeling Spec Agent</div>
+          </div>
+          <div className="spec">
+            <div className="ico">${Ic.pCapacity}</div>
+            <div className="name">Spend Spec Agent</div>
+          </div>
+          <div className="spec more">
+            <div className="ico"><span className="dots">···</span></div>
+            <div className="name">more</div>
+          </div>
+        </div>
+        <div className="review-arrow">↓ outputs reviewed by</div>
+        <div className="gs">
+          <div className="ico">${Ic.scale}</div>
+          <div className="text">
+            <div className="name">General Spec Agent</div>
+            <div className="action">cross-domain review</div>
+          </div>
+        </div>
+        <${Handle} type="source" position=${Position.Bottom}/>
+      </div>`;
+
+    const nodeTypes = {
+      question: QuestionNode,
+      answer: AnswerNode,
+      card: CardNode,
+      teamFrame: TeamFrameNode,
+    };
+
+    const lock = { draggable: false, selectable: false };
+
+    // ─────────────────────────────────────────────────────────────
+    //  NODES — wider 3-path spread · no skills repository
+    //  cross-path edges enter synth from the SIDE so they bypass
+    //  the dynamic-team frame instead of running underneath it
+    // ─────────────────────────────────────────────────────────────
+    const initialNodes = [
+      // ── Q close to main body ──
+      { id: 'question', type: 'question', position: { x: 20, y: 144 },
+        data: { text: '"Is default risk elevated?"', width: 200 }},
+
+      // ── ChatAgent (intake) ──
+      { id: 'chat-in', type: 'card', position: { x: 470, y: 140 }, data: {
+        icon: 'chat', name: 'Chat Agent', action: 'Screen the question',
+        width: 280, targetLeft: true,
+      }},
+
+      // ── Orchestrator (decide) — 3 source handles spread across bottom ──
+      { id: 'orch-decide', type: 'card', position: { x: 470, y: 220 }, data: {
+        icon: 'target', name: 'Orchestrator', action: 'Decide how to answer',
+        width: 280, handles: ['p1', 'p2', 'p3'],
+      }},
+
+// ── PATH 1 — Report (far left) ──
+      { id: 'reportagent', type: 'card', position: { x: 80, y: 340 }, data: {
+        icon: 'files', name: 'Report Agent', action: 'Read case reports and answer from reports',
+        width: 200,
+      }},
+
+      // ── PATH 2 — Dynamic Team (center, widened so "Modeling Spec Agent" fits one line) ──
+      { id: 'team', type: 'teamFrame', position: { x: 320, y: 320 }, data: { width: 580 }},
+
+      // ── PATH 3 — Data Pull Agent (far right) ──
+      { id: 'pullsignal', type: 'card', position: { x: 940, y: 340 }, data: {
+        icon: 'database', name: 'DataPull Agent', action: 'Fetch missing data',
+        width: 200,
+      }},
+
+      // ── Orchestrator (synthesize) — 3 target handles (left/top/right) ──
+      { id: 'orch-synth', type: 'card', position: { x: 470, y: 660 }, data: {
+        icon: 'target', name: 'Orchestrator', action: 'Synthesize the answer',
+        width: 280,
+        targets: [
+          { id: 't-left',  position: Position.Left  },
+          { id: 't-top',   position: Position.Top   },
+          { id: 't-right', position: Position.Right },
+        ],
+      }},
+
+      // ── ChatAgent (format) ──
+      { id: 'chat-out', type: 'card', position: { x: 510, y: 740 }, data: {
+        icon: 'chat', name: 'Chat Agent', action: 'Conversational reply',
+        width: 200, sourceLeft: true,
+      }},
+
+      // ── A close to main body ──
+      { id: 'answer', type: 'answer', position: { x: 20, y: 740 },
+        data: { text: 'returned to reviewer', width: 200 }},
+    ];
+
+    // ─────────────────────────────────────────────────────────────
+    //  EDGES — animated, side-routed for cross paths
+    // ─────────────────────────────────────────────────────────────
+    const blue = '#3D6BA8';
+    const arrow = { type: MarkerType.ArrowClosed, color: blue, width: 14, height: 14 };
+    const flow  = { type: 'default',    animated: true, style: { stroke: blue, strokeWidth: 2.2 }, markerEnd: arrow };
+    const flowS = { type: 'smoothstep', animated: true, style: { stroke: blue, strokeWidth: 2.2 }, markerEnd: arrow, pathOptions: { borderRadius: 18 } };
+
+    const initialEdges = [
+      { id: 'q-chat',    source: 'question', target: 'chat-in',     ...flow },
+      { id: 'chat-orch', source: 'chat-in',  target: 'orch-decide', ...flow },
+
+      { id: 'orch-p1', source: 'orch-decide', sourceHandle: 'p1', target: 'reportagent', ...flow },
+      { id: 'orch-p2', source: 'orch-decide', sourceHandle: 'p2', target: 'team',        ...flow },
+      { id: 'orch-p3', source: 'orch-decide', sourceHandle: 'p3', target: 'pullsignal',  ...flow },
+
+      // path 1 / 3 → side handles on synth so the line bypasses team frame
+      { id: 'p1-synth', source: 'reportagent', target: 'orch-synth', targetHandle: 't-left',  ...flowS },
+      { id: 'p2-synth', source: 'team',        target: 'orch-synth', targetHandle: 't-top',   ...flow  },
+      { id: 'p3-synth', source: 'pullsignal',  target: 'orch-synth', targetHandle: 't-right', ...flowS },
+
+      { id: 'synth-chat', source: 'orch-synth', target: 'chat-out', ...flow },
+      { id: 'chat-ans',   source: 'chat-out',   target: 'answer',   ...flow },
+    ];
+
+    function App() {
+      return html`
+        <${ReactFlow}
+          defaultNodes=${initialNodes}
+          defaultEdges=${initialEdges}
+          nodeTypes=${nodeTypes}
+          fitView
+          fitViewOptions=${{ padding: 0.04 }}
+          minZoom=${0.25}
+          maxZoom=${2.5}
+          proOptions=${{ hideAttribution: true }}
+        >
+          <${Background} color="#E5E0D2" gap=${24} size=${1}/>
+          <${Controls} showInteractive=${false}/>
+        </${ReactFlow}>`;
+    }
+
+    createRoot(document.getElementById('root')).render(html`<${App}/>`);
+  </script>
+</body>
+</html>

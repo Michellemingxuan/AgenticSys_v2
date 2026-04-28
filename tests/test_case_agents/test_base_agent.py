@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agents.base_agent import BaseSpecialistAgent, BASE_INSTRUCTIONS
+from case_agents.base_agent import BaseSpecialistAgent, BASE_INSTRUCTIONS
 from logger.event_logger import EventLogger
 from models.types import DomainSkill, LLMResult, SpecialistOutput
 

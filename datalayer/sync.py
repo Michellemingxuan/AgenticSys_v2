@@ -622,7 +622,7 @@ async def amain() -> None:
             print(f"  ⚠ LLM unavailable ({exc}); falling back to regex drafts.")
             llm = None
 
-    from agents.data_manager_agent import DataManagerAgent
+    from case_agents.data_manager_agent import DataManagerAgent
     agent = DataManagerAgent(gateway=gateway, catalog=catalog, llm=llm, logger=logger)
 
     canonical = {t: catalog._profiles[t]["columns"] for t in catalog.list_tables()}

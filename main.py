@@ -8,10 +8,10 @@ import sys
 import uuid
 from pathlib import Path
 
-from agents.chat_agent import ChatAgent
-from agents.helper_tools import build_helper_tools
-from agents.report_agent import ReportAgent
-from agents.session_registry import SessionRegistry
+from case_agents.chat_agent import ChatAgent
+from case_agents.helper_tools import build_helper_tools
+from case_agents.report_agent import ReportAgent
+from case_agents.session_registry import SessionRegistry
 from config.pillar_loader import PillarLoader
 from datalayer.catalog import DataCatalog
 from datalayer.gateway import LocalDataGateway

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agents.base_agent import BaseSpecialistAgent
+from case_agents.base_agent import BaseSpecialistAgent
 from llm.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger
 from models.types import DomainSkill

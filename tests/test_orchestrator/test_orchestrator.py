@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agents.session_registry import SessionRegistry
+from case_agents.session_registry import SessionRegistry
 from llm.firewall_stack import FirewallStack
 from logger.event_logger import EventLogger
 from models.types import (
@@ -347,7 +347,7 @@ async def test_run_populates_timeline_with_three_stages(mock_llm, logger, tmp_pa
 
     mock_llm.ainvoke = AsyncMock(side_effect=_router)
 
-    from agents.report_agent import ReportAgent
+    from case_agents.report_agent import ReportAgent
     case_folder = tmp_path / "CASE-T"
     case_folder.mkdir()
     registry = SessionRegistry()
@@ -442,7 +442,7 @@ async def test_run_dispatches_report_and_team_and_balances(mock_llm, logger, tmp
     case_folder.mkdir()
     (case_folder / "bureau.md").write_text("# Bureau\nFICO score is 620.")
 
-    from agents.report_agent import ReportAgent
+    from case_agents.report_agent import ReportAgent
     registry = SessionRegistry()
     orch = Orchestrator(mock_llm, logger, registry, "credit_risk")
     report_agent = ReportAgent(mock_llm, logger)

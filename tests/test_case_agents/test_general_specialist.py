@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agents.general_specialist import GeneralSpecialist, COMPARE_SYSTEM_PROMPT
+from case_agents.general_specialist import GeneralSpecialist, COMPARE_SYSTEM_PROMPT
 from logger.event_logger import EventLogger
 from models.types import LLMResult, ReviewReport, SpecialistOutput
 

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agents.chat_agent import ChatAgent
+from case_agents.chat_agent import ChatAgent
 from logger.event_logger import EventLogger
 from models.types import (
     DataPullRequest,

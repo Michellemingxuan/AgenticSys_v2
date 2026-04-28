@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agents.general_specialist import GeneralSpecialist
-from agents.session_registry import SessionRegistry
+from case_agents.general_specialist import GeneralSpecialist
+from case_agents.session_registry import SessionRegistry
 from datalayer.catalog import DataCatalog
 from datalayer.gateway import LocalDataGateway
 from datalayer.generator import DataGenerator

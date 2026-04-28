@@ -9,9 +9,9 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agents.general_specialist import GeneralSpecialist
-from agents.report_agent import ReportAgent
-from agents.session_registry import SessionRegistry
+from case_agents.general_specialist import GeneralSpecialist
+from case_agents.report_agent import ReportAgent
+from case_agents.session_registry import SessionRegistry
 from config.report_loader import get_synthesis_prompt
 from llm.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger

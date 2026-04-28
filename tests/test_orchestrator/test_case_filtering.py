@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agents.session_registry import SessionRegistry
+from case_agents.session_registry import SessionRegistry
 from datalayer.catalog import DataCatalog
 from datalayer.gateway import LocalDataGateway
 from llm.firewall_stack import FirewallStack
