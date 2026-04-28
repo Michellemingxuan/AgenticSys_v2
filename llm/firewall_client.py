@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from llm.firewall_stack import FirewallStack, sanitize_message
+from llm.firewall_stack import FIREWALL_GUIDANCE, FirewallRejection, FirewallStack, sanitize_message
 
 
 def _redact_message(message: dict) -> dict:
@@ -17,6 +17,19 @@ def _redact_message(message: dict) -> dict:
     return message
 
 
+def _inject_guidance(messages: list[dict]) -> list[dict]:
+    """Append firewall guidance to the system message; resanitize all messages."""
+    out = []
+    appended = False
+    for m in messages:
+        m = _redact_message(m)
+        if not appended and m.get("role") == "system":
+            m = {**m, "content": (m.get("content") or "") + "\n\n" + FIREWALL_GUIDANCE}
+            appended = True
+        out.append(m)
+    return out
+
+
 class _FirewalledChatCompletions:
     def __init__(self, base_completions: Any, firewall: FirewallStack):
         self._base = base_completions
@@ -24,7 +37,21 @@ class _FirewalledChatCompletions:
 
     async def create(self, *, model, messages, **kw):
         messages = [_redact_message(m) for m in messages]
-        return await self._base.create(model=model, messages=messages, **kw)
+        attempt = 0
+        while True:
+            try:
+                return await self._base.create(model=model, messages=messages, **kw)
+            except FirewallRejection as e:
+                self._firewall.logger.log("firewall_rejection",
+                                          {"code": e.code, "message": e.message,
+                                           "attempt": attempt})
+                if attempt >= self._firewall.max_retries:
+                    self._firewall.logger.log("firewall_blocked",
+                                              {"code": e.code, "message": e.message,
+                                               "attempts": attempt + 1})
+                    raise
+                attempt += 1
+                messages = _inject_guidance(messages)
 
 
 class _FirewalledChat:
