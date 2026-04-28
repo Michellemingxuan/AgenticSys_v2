@@ -10,14 +10,12 @@ from pathlib import Path
 
 from case_agents.chat_agent import ChatAgent
 from case_agents.helper_tools import build_helper_tools
-from case_agents.report_agent import ReportAgent
-from case_agents.session_registry import SessionRegistry
 from config.pillar_loader import PillarLoader
 from datalayer.catalog import DataCatalog
 from datalayer.gateway import LocalDataGateway
 from datalayer.generator import DataGenerator
 from llm.firewall_stack import FirewallStack
-from llm.factory import build_llm
+from llm.factory import build_session_clients, FirewalledChatShim
 from logger.event_logger import EventLogger
 from models.types import FinalAnswer
 from orchestrator.orchestrator import Orchestrator
@@ -67,9 +65,8 @@ def _resolve_data_source(flag: str, tables_dir: Path) -> tuple[str, Path | None]
 async def run_question(
     question: str,
     pillar: str,
-    llm,
+    clients,
     logger: EventLogger,
-    registry: SessionRegistry,
     pillar_yaml: dict,
     case_id: str,
     catalog=None,
@@ -81,13 +78,14 @@ async def run_question(
     the team workflow in parallel, then merges via the Balancing skill.
     """
     orchestrator = Orchestrator(
-        llm, logger, registry, pillar,
-        pillar_config=pillar_yaml, catalog=catalog, gateway=gateway,
+        llm=None, logger=logger, registry=None,
+        pillar=pillar, pillar_config=pillar_yaml,
+        catalog=catalog, gateway=gateway,
+        clients=clients,
     )
-    report_agent = ReportAgent(llm, logger)
     case_folder = _REPORTS_DIR / case_id
 
-    return await orchestrator.run(question, case_folder, report_agent)
+    return await orchestrator.run(question, case_folder, report_agent=None)
 
 
 async def amain():
@@ -111,7 +109,8 @@ async def amain():
     logger.log("session_start", {"pillar": args.pillar, "model": args.model})
 
     firewall = FirewallStack(logger=logger)
-    llm = build_llm(args.model, firewall)
+    clients = build_session_clients(firewall, model_name=args.model)
+    chat_llm = FirewalledChatShim(clients)
 
     source, csv_dir = _resolve_data_source(args.data_source, _DATA_TABLES_DIR)
     if source == "generator":
@@ -153,9 +152,8 @@ async def amain():
     pillar_loader = PillarLoader()
     pillar_yaml = pillar_loader.load(args.pillar) or {}
 
-    registry = SessionRegistry()
     helper_tools = build_helper_tools()
-    chat_agent = ChatAgent(llm, logger, tools=helper_tools)
+    chat_agent = ChatAgent(chat_llm, logger, tools=helper_tools)
 
     async def _screen_and_run(question: str) -> str:
         """Screen via ChatAgent; if rejected, return the reason.
@@ -166,7 +164,7 @@ async def amain():
             return f"[rejected] {verdict.reason}"
         final = await run_question(
             verdict.redacted_question, args.pillar,
-            llm, logger, registry, pillar_yaml, case_id,
+            clients, logger, pillar_yaml, case_id,
             catalog=catalog, gateway=gateway,
         )
         return chat_agent.format(final)
