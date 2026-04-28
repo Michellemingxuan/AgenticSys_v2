@@ -1,10 +1,40 @@
-"""LLM factory — builds firewall-wrapped LangChain chat models."""
+"""LLM factory — builds firewall-wrapped LangChain chat models and SDK session clients."""
 
 from __future__ import annotations
 
-from langchain_openai import ChatOpenAI
+from dataclasses import dataclass
 
+from langchain_openai import ChatOpenAI
+from openai import AsyncOpenAI
+
+from agents import OpenAIChatCompletionsModel
+
+from llm.firewall_client import FirewalledAsyncOpenAI
 from llm.firewall_stack import FirewallStack, FirewalledModel
+
+
+@dataclass
+class SessionClients:
+    firewalled_client: FirewalledAsyncOpenAI
+    model: OpenAIChatCompletionsModel
+
+
+def build_session_clients(
+    firewall: FirewallStack,
+    *,
+    model_name: str = "gpt-4o",
+    base_client: AsyncOpenAI | None = None,
+) -> SessionClients:
+    """Build a firewalled AsyncOpenAI client and the SDK Model wrapping it.
+
+    This is the new-path factory used by the OpenAI Agents SDK migration.
+    The legacy ``build_llm`` function is kept alongside for backward compat
+    until Phase 6 / Task 6.4 removes LangChain entirely.
+    """
+    base = base_client or AsyncOpenAI()
+    firewalled = FirewalledAsyncOpenAI(base=base, firewall=firewall)
+    model = OpenAIChatCompletionsModel(model=model_name, openai_client=firewalled)
+    return SessionClients(firewalled_client=firewalled, model=model)
 
 
 def build_llm(

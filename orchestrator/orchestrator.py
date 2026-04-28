@@ -9,9 +9,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from case_agents.general_specialist import GeneralSpecialist
-from case_agents.report_agent import ReportAgent
+from case_agents.general_specialist import GeneralSpecialist, build_general_specialist
+from case_agents.orchestrator_agent import build_orchestrator_agent
+from case_agents.report_agent import ReportAgent, build_report_agent
 from case_agents.session_registry import SessionRegistry
+from case_agents.specialist_agent import build_specialist_agent
 from config.report_loader import get_synthesis_prompt
 from llm.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger
@@ -76,13 +78,14 @@ class Orchestrator:
 
     def __init__(
         self,
-        llm: FirewalledModel,
+        llm,                  # legacy — ignored when clients is provided
         logger: EventLogger,
-        registry: SessionRegistry,
-        pillar: str,
+        registry=None,        # legacy — ignored when clients is provided
+        pillar: str = "credit",
         pillar_config: dict | None = None,
         catalog=None,
         gateway=None,
+        clients=None,
     ):
         self.llm = llm
         self.logger = logger
@@ -91,6 +94,29 @@ class Orchestrator:
         self.pillar_config = pillar_config or {}
         self.catalog = catalog
         self.gateway = gateway
+        self.clients = clients
+
+        # Build the SDK agent graph if clients are provided. (When legacy
+        # callers haven't been updated yet, agent graph is None and the
+        # legacy Orchestrator.run path must still work — this is removed in
+        # Task 5.1 once main.py is migrated.)
+        if clients is not None:
+            domain_names = list_domain_skills()
+            specialists = [
+                build_specialist_agent(load_domain_skill(d), self.pillar_config,
+                                       model=clients.model)
+                for d in domain_names if load_domain_skill(d) is not None
+            ]
+            self.report_agent_obj = build_report_agent(model=clients.model)
+            self.general_agent = build_general_specialist(model=clients.model)
+            self.orchestrator_agent = build_orchestrator_agent(
+                specialists=specialists,
+                report_agent=self.report_agent_obj,
+                general_specialist=self.general_agent,
+                model=clients.model,
+            )
+        else:
+            self.orchestrator_agent = None
 
     def _build_case_schema(self) -> dict[str, list[str]] | None:
         """Return ``{real_table: [real_col_names]}`` for the active case,
