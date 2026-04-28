@@ -14,10 +14,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agents import Agent
 from llm.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger
 from models.types import ReportDraft
 from skills.loader import load_skill as _load_skill
+from tools.fs_tools import fs_list_files, fs_read_file
 
 
 _WORKFLOW_DIR = Path(__file__).parent.parent / "skills" / "workflow"
@@ -136,3 +138,52 @@ class ReportAgent:
             evidence_excerpts=[str(x) for x in excerpts],
             files_consulted=names_selected,
         )
+
+
+# ---------------------------------------------------------------------------
+# SDK factory (Phase 3.3)  — legacy ReportAgent above stays for Phase 7 deletion
+# ---------------------------------------------------------------------------
+
+# Compose instructions from the existing two-step prompts so the LLM has the
+# same coverage rubric (full | partial | none) and evidence-extraction format
+# the legacy class enforced in Python. The agent now decides on its own when
+# to call fs_list_files and fs_read_file.
+_NEEDLE_PROMPT = _load_skill(_WORKFLOW_DIR / "report_needle.md").body
+_ANALYSIS_PROMPT = _load_skill(_WORKFLOW_DIR / "report_analysis.md").body
+
+REPORT_AGENT_INSTRUCTIONS = f"""\
+You are the Report Agent. Your job is to scan a case folder for prior curated
+reports (markdown files), decide which are relevant to the question, read
+them, and produce a ReportDraft.
+
+You have two tools:
+- fs_list_files() — list files in the case folder
+- fs_read_file(filename) — read a named file
+
+Workflow:
+1. Call fs_list_files to see what's available.
+2. Decide coverage and which files are relevant per the rubric below.
+3. Read the relevant files via fs_read_file.
+4. Produce a ReportDraft with: answer (synthesized), coverage (full | partial
+   | none), evidence_excerpts (verbatim quotes), files_consulted (list of
+   filenames you actually read).
+
+If the folder is empty or no file is relevant, return coverage="none" with an
+empty answer and empty files_consulted.
+
+=== Coverage rubric ===
+{_NEEDLE_PROMPT}
+
+=== Evidence extraction ===
+{_ANALYSIS_PROMPT}
+"""
+
+
+def build_report_agent(model) -> Agent:
+    return Agent(
+        name="report_agent",
+        instructions=REPORT_AGENT_INSTRUCTIONS,
+        tools=[fs_list_files, fs_read_file],
+        output_type=ReportDraft,
+        model=model,
+    )
