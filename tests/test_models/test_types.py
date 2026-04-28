@@ -49,7 +49,7 @@ def test_review_report_with_resolution():
         data_requests_made=[{"intent": "bureau score timestamp"}],
     )
     assert len(report.resolved) == 1
-    assert report.resolved[0].pair == ("bureau", "spend_payments")
+    assert report.resolved[0].pair == ["bureau", "spend_payments"]
 
 
 def test_final_output_with_data_gap():

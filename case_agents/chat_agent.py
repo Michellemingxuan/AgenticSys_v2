@@ -129,12 +129,21 @@ class ChatAgent:
             parts.append("\n## Flags")
             for flag in final.flags:
                 parts.append(f"- {flag}")
-        parts.append(
-            "\n## Provenance\n"
-            f"- Report coverage: {final.report_draft.coverage}\n"
-            f"- Files consulted: {final.report_draft.files_consulted or '(none)'}\n"
-            f"- Specialists consulted: {final.team_draft.specialists_consulted or '(none)'}"
-        )
+        # Provenance is only populated under the legacy two-branch (Reports +
+        # Team) path or the beta trace-extraction fallback. Under A1 the
+        # orchestrator emits answer + flags directly without nested drafts.
+        if final.report_draft is not None or final.team_draft is not None:
+            prov_lines = ["\n## Provenance"]
+            if final.report_draft is not None:
+                prov_lines.append(f"- Report coverage: {final.report_draft.coverage}")
+                prov_lines.append(
+                    f"- Files consulted: {final.report_draft.files_consulted or '(none)'}"
+                )
+            if final.team_draft is not None:
+                prov_lines.append(
+                    f"- Specialists consulted: {final.team_draft.specialists_consulted or '(none)'}"
+                )
+            parts.append("\n".join(prov_lines))
 
         dpr = final.data_pull_request
         if dpr is not None and dpr.needed:

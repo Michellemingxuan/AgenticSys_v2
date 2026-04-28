@@ -20,7 +20,7 @@ def test_build_orchestrator_agent_wires_all_tools():
 
     assert isinstance(agent, Agent)
     assert agent.name == "orchestrator"
-    assert agent.output_type is FinalAnswer
+    assert agent.output_type.output_type is FinalAnswer
     # 2 specialists + report_agent + general_specialist = 4 tools
     assert len(agent.tools) == 4
     # Instructions absorb the four workflow skills

@@ -55,7 +55,7 @@ class SpecialistOutput(BaseModel):
 
 
 class Resolution(BaseModel):
-    pair: tuple[str, str]
+    pair: list[str]
     contradiction: str
     question_raised: str
     answer: str
@@ -64,7 +64,7 @@ class Resolution(BaseModel):
 
 
 class Conflict(BaseModel):
-    pair: tuple[str, str]
+    pair: list[str]
     contradiction: str
     question_raised: str
     reason_unresolved: str

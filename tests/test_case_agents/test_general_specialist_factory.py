@@ -7,6 +7,6 @@ def test_build_general_specialist_returns_agent():
     agent = build_general_specialist(model=None)
     assert isinstance(agent, Agent)
     assert agent.name == "general_specialist"
-    assert agent.output_type is ReviewReport
+    assert agent.output_type.output_type is ReviewReport
     assert agent.tools == []
     assert "compare" in agent.instructions.lower() or "contradiction" in agent.instructions.lower()

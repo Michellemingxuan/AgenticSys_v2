@@ -16,7 +16,7 @@ def test_build_specialist_agent_returns_agent():
 
     assert isinstance(agent, Agent)
     assert agent.name == "creditrisk"
-    assert agent.output_type is SpecialistOutput
+    assert agent.output_type.output_type is SpecialistOutput
     assert "You analyze credit risk." in agent.instructions
     assert "2025-12-01" in agent.instructions  # pillar overlay rendered
     assert len(agent.tools) == 3   # list_available_tables, get_table_schema, query_table

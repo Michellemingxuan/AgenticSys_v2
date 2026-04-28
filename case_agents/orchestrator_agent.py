@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agents import Agent
+from agents import Agent, AgentOutputSchema
 
 from case_agents.redacting_tool import redacting_tool
 from models.types import FinalAnswer
@@ -56,6 +56,8 @@ def build_orchestrator_agent(
         name="orchestrator",
         instructions=_compose_orchestrator_instructions(),
         tools=tools,
-        output_type=FinalAnswer,
+        # FinalAnswer has Optional fields (report_draft, team_draft, etc.)
+        # which OpenAI's strict JSON schema rejects. Disable strict mode.
+        output_type=AgentOutputSchema(FinalAnswer, strict_json_schema=False),
         model=model,
     )

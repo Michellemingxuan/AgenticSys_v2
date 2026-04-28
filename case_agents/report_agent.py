@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agents import Agent
+from agents import Agent, AgentOutputSchema
 from models.types import ReportDraft
 from skills.loader import load_skill as _load_skill
 from tools.fs_tools import fs_list_files, fs_read_file
@@ -66,6 +66,6 @@ def build_report_agent(model) -> Agent:
         name="report_agent",
         instructions=REPORT_AGENT_INSTRUCTIONS,
         tools=[fs_list_files, fs_read_file],
-        output_type=ReportDraft,
+        output_type=AgentOutputSchema(ReportDraft, strict_json_schema=False),
         model=model,
     )

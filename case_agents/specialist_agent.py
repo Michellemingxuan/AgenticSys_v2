@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agents import Agent
+from agents import Agent, AgentOutputSchema
 
 from models.types import DomainSkill, SpecialistOutput
 from skills.loader import load_skill as _load_skill
@@ -47,6 +47,6 @@ def build_specialist_agent(skill: DomainSkill, pillar: dict, model) -> Agent:
         name=skill.name,
         instructions=_compose_instructions(skill, pillar),
         tools=[list_available_tables, get_table_schema, query_table],
-        output_type=SpecialistOutput,
+        output_type=AgentOutputSchema(SpecialistOutput, strict_json_schema=False),
         model=model,
     )

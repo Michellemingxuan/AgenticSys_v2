@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agents import Agent
+from agents import Agent, AgentOutputSchema
 from models.types import ReviewReport
 from skills.loader import load_skill as _load_skill
 
@@ -20,6 +20,6 @@ def build_general_specialist(model) -> Agent:
         name="general_specialist",
         instructions=COMPARE_SYSTEM_PROMPT,
         tools=[],
-        output_type=ReviewReport,
+        output_type=AgentOutputSchema(ReviewReport, strict_json_schema=False),
         model=model,
     )
