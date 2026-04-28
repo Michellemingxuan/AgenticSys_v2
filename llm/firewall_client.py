@@ -40,7 +40,8 @@ class _FirewalledChatCompletions:
         attempt = 0
         while True:
             try:
-                return await self._base.create(model=model, messages=messages, **kw)
+                async with self._firewall.semaphore:
+                    return await self._base.create(model=model, messages=messages, **kw)
             except FirewallRejection as e:
                 self._firewall.logger.log("firewall_rejection",
                                           {"code": e.code, "message": e.message,

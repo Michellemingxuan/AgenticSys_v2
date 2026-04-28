@@ -82,7 +82,7 @@ class FirewallStack:
         self.max_retries = max_retries
         self.concurrency_cap = concurrency_cap
         self.step_history: list[StepRecord] = []
-        self._semaphore = asyncio.Semaphore(concurrency_cap)
+        self.semaphore = asyncio.Semaphore(concurrency_cap)
 
     def wrap(self, model: BaseChatModel) -> "FirewalledModel":
         """Wrap a LangChain model with firewall retry logic."""
@@ -221,7 +221,7 @@ class FirewalledModel:
             # FirewalledModel instances under this FirewallStack — protects
             # against rate limits on parallel fan-out (Reports + Team,
             # parallel specialists).
-            async with self.firewall._semaphore:
+            async with self.firewall.semaphore:
                 response = await bound_model.ainvoke(messages)
             tool_calls = getattr(response, "tool_calls", None)
             if not tool_calls:

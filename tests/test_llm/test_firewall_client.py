@@ -65,3 +65,40 @@ async def test_retries_exhausted_raises():
         )
     # 1 original + 2 retries = 3 attempts
     assert base.chat.completions.create.call_count == 3
+
+
+import asyncio
+
+@pytest.mark.asyncio
+async def test_concurrency_cap_holds():
+    in_flight = 0
+    max_seen = 0
+    gate = asyncio.Event()
+
+    async def slow_create(**kw):
+        nonlocal in_flight, max_seen
+        in_flight += 1
+        max_seen = max(max_seen, in_flight)
+        await gate.wait()        # hold until released
+        in_flight -= 1
+        return "ok"
+
+    base = AsyncMock()
+    base.chat.completions.create = AsyncMock(side_effect=slow_create)
+    firewall = FirewallStack(EventLogger(session_id="t"), max_retries=0, concurrency_cap=2)
+    client = FirewalledAsyncOpenAI(base=base, firewall=firewall)
+
+    async def call():
+        return await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}],
+        )
+
+    tasks = [asyncio.create_task(call()) for _ in range(5)]
+    # Let the scheduler get them queued up.
+    await asyncio.sleep(0.05)
+    assert max_seen <= 2
+
+    gate.set()
+    await asyncio.gather(*tasks)
+    assert max_seen == 2
