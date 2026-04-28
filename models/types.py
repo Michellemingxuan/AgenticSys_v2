@@ -206,8 +206,8 @@ class FinalAnswer(BaseModel):
 
     answer: str
     flags: list[str] = Field(default_factory=list)
-    report_draft: ReportDraft
-    team_draft: TeamDraft
+    report_draft: ReportDraft | None = None
+    team_draft: TeamDraft | None = None
     timeline: list[dict] = Field(default_factory=list)
     data_pull_request: DataPullRequest | None = None
 
