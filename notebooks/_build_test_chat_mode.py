@@ -69,6 +69,10 @@ cells.append(code(
     "MODEL = \"gpt-4o\"\n\n"
     "# ─── data source: 'auto' resolves real → simulated → generator ───\n"
     "DATA_SOURCE = \"auto\"\n\n"
+    "# ─── pick a case (or leave None to use the first available) ───\n"
+    "# Run §3 first to see the full list of available case IDs, then set this\n"
+    "# to the one you want to investigate and re-run from §3 onward.\n"
+    "CASE_ID = None\n\n"
     "# ─── LLM transport: 'openai' (dev) or 'safechain' (private/prod) ───\n"
     "# Use 'safechain' only if the safechain package is installed.\n"
     "BACKEND = \"openai\""
@@ -129,10 +133,38 @@ cells.append(code(
     "init_tools(gw, catalog, logger=logger)\n\n"
     "available = gw.list_case_ids()\n"
     "print(f'data source : {src}')\n"
-    "print(f'cases       : {len(available)} (showing first 5: {available[:5]})')\n"
-    "case_id = available[0]\n"
+    "print(f'cases       : {len(available)} available')\n"
+    "for i, cid in enumerate(available[:20]):\n"
+    "    print(f'   [{i:>2}] {cid}')\n"
+    "if len(available) > 20:\n"
+    "    print(f'   ... and {len(available) - 20} more')"
+))
+
+
+# 4b. Case selection — uses CASE_ID knob, falls back to first
+cells.append(md(
+    "### Pick a case to investigate\n\n"
+    "Choose a case from the list above by setting `CASE_ID` in §1 (Knobs) and "
+    "**re-running this cell**. Leave `CASE_ID = None` to default to the first "
+    "available case.\n\n"
+    "Anything downstream (ground truth panel, the agent run, the per-specialist "
+    "data preview) reads from this case via the gateway, so changing `CASE_ID` "
+    "+ rerunning from this cell onward switches the whole demo to a different case."
+))
+cells.append(code(
+    "if CASE_ID is None:\n"
+    "    case_id = available[0]\n"
+    "    print(f'CASE_ID is None — defaulting to first: {case_id}')\n"
+    "elif CASE_ID in available:\n"
+    "    case_id = CASE_ID\n"
+    "    print(f'using CASE_ID = {case_id}')\n"
+    "else:\n"
+    "    raise ValueError(\n"
+    "        f'CASE_ID={CASE_ID!r} is not in the available cases. '\n"
+    "        f'Pick one from the list printed above and re-run.'\n"
+    "    )\n\n"
     "gw.set_case(case_id)\n"
-    "print(f'using case  : {case_id}')\n"
+    "print(f'active case : {case_id}')\n"
     "print(f'tables      : {gw.list_tables()}')"
 ))
 
