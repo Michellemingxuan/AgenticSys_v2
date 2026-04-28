@@ -20,8 +20,7 @@ def _compose_orchestrator_instructions() -> str:
         _load_skill(_WORKFLOW_DIR / "balancing.md").body,
         (
             "TOOL-USE DISCIPLINE: You MUST call at least one specialist before "
-            "producing a FinalAnswer. Do NOT answer from general knowledge or "
-            "schema inference — every claim in the FinalAnswer must trace to "
+            "producing a FinalAnswer. Do NOT only answer from general knowledge or schema inference — every claim in the FinalAnswer must trace to "
             "a tool result you actually received in this run. If no specialist "
             "is relevant to the question, call report_agent first; if that "
             "returns nothing useful, return a FinalAnswer that says so "
