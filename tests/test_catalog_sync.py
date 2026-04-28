@@ -40,7 +40,7 @@ columns:
 
     from datalayer.catalog import DataCatalog
     from datalayer.gateway import LocalDataGateway
-    from agents.data_manager_agent import DataManagerAgent
+    from case_agents.data_manager_agent import DataManagerAgent
 
     class _NullLogger:
         def log(self, *args, **kwargs):

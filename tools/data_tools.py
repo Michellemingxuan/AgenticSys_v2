@@ -11,6 +11,7 @@ import operator
 import re
 from typing import Any, Callable
 
+from agents import function_tool
 from datalayer.catalog import DataCatalog
 from datalayer.gateway import DataGateway
 
@@ -268,7 +269,7 @@ def _log_result(
     _logger.log("tool_result", payload)
 
 
-def list_available_tables() -> str:
+def _list_available_tables_impl() -> str:
     """List all data tables available for the current case, each with its description."""
     _log_call("list_available_tables", {})
     if _catalog is None:
@@ -311,7 +312,13 @@ def list_available_tables() -> str:
     return out
 
 
-def get_table_schema(table_name: str) -> str:
+@function_tool
+def list_available_tables() -> str:
+    """List all data tables available for the current case, each with its description."""
+    return _list_available_tables_impl()
+
+
+def _get_table_schema_impl(table_name: str) -> str:
     """Get the column schema for a specific table.
 
     When a case is active, the schema is filtered to only the columns
@@ -378,6 +385,18 @@ def get_table_schema(table_name: str) -> str:
     return out
 
 
+@function_tool
+def get_table_schema(table_name: str) -> str:
+    """Get the column schema for a specific table.
+
+    When a case is active, the schema is filtered to only the columns
+    physically present in the case's CSV. Each real column is annotated with
+    the canonical column's dtype + description if a match exists in the
+    canonical profile.
+    """
+    return _get_table_schema_impl(table_name)
+
+
 def _find_column_spec(canonical_cols: dict, real_col: str) -> dict | None:
     """Return the canonical spec matching a real column name (or None).
 
@@ -398,7 +417,7 @@ def _find_column_spec(canonical_cols: dict, real_col: str) -> dict | None:
     return None
 
 
-def query_table(
+def _query_table_impl(
     table_name: str,
     filter_column: str = "",
     filter_value: str = "",
@@ -530,3 +549,32 @@ def query_table(
         },
     )
     return out
+
+
+@function_tool
+def query_table(
+    table_name: str,
+    filter_column: str = "",
+    filter_value: str = "",
+    filter_op: str = "eq",
+    columns: str = "",
+) -> str:
+    """Query a data table for the current case. All data is scoped to the active case.
+
+    Args:
+        table_name: the table to query.
+        filter_column: column to filter on (optional).
+        filter_value: value(s) for the filter. For ``filter_op="between"`` pass
+            "<low>,<high>" (inclusive). For ISO dates (YYYY-MM-DD) and YYYY-MM
+            strings, lexicographic order matches chronological order.
+        filter_op: one of "eq" (default), "ne", "gt", "gte", "lt", "lte", "between".
+        columns: comma-separated list of column names to return (e.g.
+            "fico_score,derog_count"). Leave empty to return all columns.
+    """
+    return _query_table_impl(
+        table_name=table_name,
+        filter_column=filter_column,
+        filter_value=filter_value,
+        filter_op=filter_op,
+        columns=columns,
+    )

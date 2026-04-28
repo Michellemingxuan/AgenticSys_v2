@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agents.helper_tools import build_helper_tools
+from case_agents.helper_tools import build_helper_tools
 
 
 def test_build_helper_tools_returns_callables():

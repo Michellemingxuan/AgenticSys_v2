@@ -21,14 +21,14 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 from datalayer import adapter
 from datalayer.catalog import DataCatalog
 from datalayer.gateway import LocalDataGateway
-from llm.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger
 from skills.loader import load_skill as _load_skill
-from tools.data_tools import query_table
+from tools.data_tools import _query_table_impl as query_table
 
 
 _WORKFLOW_DIR = Path(__file__).parent.parent / "skills" / "workflow"
@@ -50,7 +50,7 @@ class DataManagerAgent:
         self,
         gateway: LocalDataGateway,
         catalog: DataCatalog,
-        llm: FirewalledModel,
+        llm: Any,
         logger: EventLogger,
     ):
         self.gateway = gateway

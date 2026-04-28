@@ -32,7 +32,7 @@ def _setup_tools():
 
 
 def test_list_tables():
-    result = data_tools.list_available_tables()
+    result = data_tools._list_available_tables_impl()
     assert "bureau_full" in result
     assert "Tables for the current case:" in result
     # No raw case ID must leak.
@@ -52,7 +52,7 @@ def test_list_tables_no_case_set():
     catalog = DataCatalog(profile_dir="config/data_profiles")
     data_tools.init_tools(gateway, catalog)
 
-    result = data_tools.list_available_tables()
+    result = data_tools._list_available_tables_impl()
 
     # The "current case" header must NOT appear when no case is set.
     assert "Tables for the current case:" not in result
@@ -75,7 +75,7 @@ def test_get_schema():
     and the real columns are returned (annotated as ``unknown`` when the
     canonical profile doesn't carry them).
     """
-    result = data_tools.get_table_schema("bureau_full")
+    result = data_tools._get_table_schema_impl("bureau_full")
     assert "score" in result
     assert "derog_count" in result
     # case_id is infrastructure, not schema — must not appear in LLM-bound schema output.
@@ -89,7 +89,7 @@ def test_get_schema_filters_to_case_columns():
     only has 'score' + 'derog_count' — sibling canonical columns like
     'fico_score' (a different name in the bureau profile) must NOT appear.
     """
-    result = data_tools.get_table_schema("bureau_full")
+    result = data_tools._get_table_schema_impl("bureau_full")
     # 'fico_score' is in canonical bureau profile but the case CSV uses
     # different column names → must be absent from the case-filtered view
     assert "fico_score" not in result
@@ -97,21 +97,21 @@ def test_get_schema_filters_to_case_columns():
 
 
 def test_get_schema_missing():
-    result = data_tools.get_table_schema("nonexistent")
+    result = data_tools._get_table_schema_impl("nonexistent")
     assert "unavailable" in result.lower()
 
 
 def test_query_all():
-    result = data_tools.query_table("bureau_full")
+    result = data_tools._query_table_impl("bureau_full")
     assert "720" in result
     assert "680" in result
 
 
 def test_query_filtered():
-    result = data_tools.query_table("bureau_full", filter_column="score", filter_value=720)
+    result = data_tools._query_table_impl("bureau_full", filter_column="score", filter_value=720)
     assert "720" in result
 
 
 def test_query_missing():
-    result = data_tools.query_table("no_such_table")
+    result = data_tools._query_table_impl("no_such_table")
     assert "unavailable" in result.lower()

@@ -1,0 +1,351 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 870"
+     font-family="ui-sans-serif, -apple-system, 'Segoe UI', system-ui, Helvetica, sans-serif">
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.2"/>
+      <feOffset dy="1.5"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.14"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="ar-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,1 L10,5 L0,9 Z" fill="#3D6BA8"/>
+    </marker>
+    <marker id="ar-blue-sm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M0,1 L10,5 L0,9 Z" fill="#3D6BA8"/>
+    </marker>
+    <marker id="ar-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,1 L10,5 L0,9 Z" fill="#9A9387"/>
+    </marker>
+    <marker id="ar-tan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,1 L10,5 L0,9 Z" fill="#A89B7C"/>
+    </marker>
+
+    <!-- icon symbols (each: 36x36 colored square + icon path) -->
+    <symbol id="ic-user" viewBox="0 0 36 36">
+      <rect width="36" height="36" rx="8" fill="#DCE7F4"/>
+      <g transform="translate(18,18)" stroke="#3D6BA8" fill="none" stroke-width="1.6">
+        <circle cx="0" cy="-3" r="3.6" fill="#3D6BA8" stroke="none"/>
+        <path d="M-6,7 Q-6,2 -2,2 L2,2 Q6,2 6,7"/>
+      </g>
+    </symbol>
+    <symbol id="ic-chat" viewBox="0 0 36 36">
+      <rect width="36" height="36" rx="8" fill="#DCE7F4"/>
+      <g transform="translate(18,18)" fill="#3D6BA8">
+        <path d="M-9,-5 H7 Q9,-5 9,-3 V3 Q9,5 7,5 H-2 L-5,8 V5 H-9 Q-11,5 -11,3 V-3 Q-11,-5 -9,-5 Z"/>
+      </g>
+    </symbol>
+    <symbol id="ic-target" viewBox="0 0 36 36">
+      <rect width="36" height="36" rx="8" fill="#DCE7F4"/>
+      <g transform="translate(18,18)" stroke="#3D6BA8" fill="none" stroke-width="1.5">
+        <circle r="7"/>
+        <circle r="3.5"/>
+        <circle r="1" fill="#3D6BA8" stroke="none"/>
+      </g>
+    </symbol>
+    <symbol id="ic-doc" viewBox="0 0 36 36">
+      <rect width="36" height="36" rx="8" fill="#DCE7F4"/>
+      <g transform="translate(18,18)" stroke="#3D6BA8" fill="none" stroke-width="1.5" stroke-linejoin="round">
+        <path d="M-5,-8 H3 L7,-4 V8 H-5 Z"/>
+        <line x1="-2" y1="-2" x2="4" y2="-2" stroke-width="1.1"/>
+        <line x1="-2" y1="1.5" x2="4" y2="1.5" stroke-width="1.1"/>
+        <line x1="-2" y1="5" x2="4" y2="5" stroke-width="1.1"/>
+      </g>
+    </symbol>
+    <symbol id="ic-chart" viewBox="0 0 36 36">
+      <rect width="36" height="36" rx="8" fill="#DCE7F4"/>
+      <g transform="translate(18,18)">
+        <line x1="-7" y1="6" x2="8" y2="6" stroke="#3D6BA8" stroke-width="1.6"/>
+        <rect x="-6" y="-1" width="3" height="7" fill="#3D6BA8"/>
+        <rect x="-1.5" y="-5" width="3" height="11" fill="#3D6BA8"/>
+        <rect x="3" y="2" width="3" height="4" fill="#3D6BA8"/>
+      </g>
+    </symbol>
+    <symbol id="ic-scale" viewBox="0 0 36 36">
+      <rect width="36" height="36" rx="8" fill="#DCE7F4"/>
+      <g transform="translate(18,18)" stroke="#3D6BA8" fill="none" stroke-width="1.6">
+        <line x1="0" y1="-7" x2="0" y2="7"/>
+        <line x1="-7" y1="-3" x2="7" y2="-3"/>
+        <circle cx="-5" cy="0" r="1.7" fill="#3D6BA8" stroke="none"/>
+        <circle cx="5" cy="0" r="1.7" fill="#3D6BA8" stroke="none"/>
+        <rect x="-2.5" y="6" width="5" height="2" fill="#3D6BA8" stroke="none"/>
+      </g>
+    </symbol>
+    <symbol id="ic-pull" viewBox="0 0 36 36">
+      <rect width="36" height="36" rx="8" fill="#F0EAD8"/>
+      <g transform="translate(18,18)" stroke="#A89B7C" fill="none" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+        <path d="M-7,-2 H7 V5 Q7,7 5,7 H-5 Q-7,7 -7,5 Z"/>
+        <line x1="0" y1="-8" x2="0" y2="-1"/>
+        <polyline points="-3,-4 0,-1 3,-4"/>
+      </g>
+    </symbol>
+    <symbol id="ic-spark" viewBox="0 0 36 36">
+      <rect width="36" height="36" rx="8" fill="#DCE7F4"/>
+      <g transform="translate(18,18)" fill="#3D6BA8">
+        <path d="M0,-7 L1.4,-1.4 L7,0 L1.4,1.4 L0,7 L-1.4,1.4 L-7,0 L-1.4,-1.4 Z"/>
+      </g>
+    </symbol>
+  </defs>
+
+  <rect width="1500" height="870" fill="#FAF9F5"/>
+
+  <!-- ===== HEADER ===== -->
+  <text x="36" y="38" font-size="22" font-weight="700" fill="#2D2D2D" letter-spacing="-0.3">AgenticSys v2 — Workflow &amp; Roles</text>
+  <text x="36" y="58" font-size="12" fill="#7A7569">Reviewer Q&amp;A · 3-phase orchestrated pipeline · agents, their skills, and how they interact</text>
+  <line x1="36" y1="72" x2="1464" y2="72" stroke="#E5E0D2"/>
+
+  <!-- ===================================================================== -->
+  <!-- INTAKE ROW (y=85-200)                                                  -->
+  <!-- ===================================================================== -->
+  <text x="36" y="100" font-size="10" font-weight="700" fill="#A89B7C" letter-spacing="2">INTAKE</text>
+
+  <!-- Reviewer pill -->
+  <g filter="url(#shadow)">
+    <rect x="380" y="118" width="200" height="44" rx="22" fill="#DCE7F4" stroke="#3D6BA8" stroke-width="1.4"/>
+    <use href="#ic-user" x="394" y="122" width="36" height="36"/>
+    <text x="510" y="146" font-size="13" font-weight="600" fill="#1F3A5F" text-anchor="middle">Reviewer</text>
+  </g>
+
+  <!-- ChatAgent card -->
+  <g filter="url(#shadow)">
+    <rect x="700" y="110" width="280" height="100" rx="10" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8"/>
+    <use href="#ic-chat" x="712" y="120" width="36" height="36"/>
+    <text x="758" y="134" font-size="13" font-weight="700" fill="#1F3A5F">ChatAgent</text>
+    <text x="758" y="148" font-size="9.5" fill="#7A7569" font-style="italic">guardrail + chat boundary</text>
+    <text x="758" y="160" font-size="9" fill="#9A9387" font-style="italic">screens questions · formats answers</text>
+
+    <rect x="712" y="172" width="56" height="20" rx="10" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="740" y="186" font-size="9" fill="#5C5044" text-anchor="middle">redact</text>
+    <rect x="772" y="172" width="92" height="20" rx="10" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="818" y="186" font-size="9" fill="#5C5044" text-anchor="middle">relevance_check</text>
+    <rect x="868" y="172" width="58" height="20" rx="10" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="897" y="186" font-size="9" fill="#5C5044" text-anchor="middle">acropedia</text>
+    <rect x="930" y="172" width="44" height="20" rx="10" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="952" y="186" font-size="8.5" fill="#5C5044" text-anchor="middle">web_browser</text>
+  </g>
+
+  <!-- Question arrow Reviewer → ChatAgent -->
+  <line x1="582" y1="140" x2="696" y2="140" stroke="#3D6BA8" stroke-width="2.4" marker-end="url(#ar-blue)"/>
+  <text x="639" y="132" font-size="9.5" fill="#1F3A5F" text-anchor="middle" font-style="italic">question</text>
+
+  <!-- ===================================================================== -->
+  <!-- PHASE 1 — ROUTING & DISPATCH (y=220-340)                                -->
+  <!-- ===================================================================== -->
+  <rect x="50" y="220" width="1400" height="120" rx="12" fill="#EAF2FB" stroke="#3D6BA8" stroke-width="1" stroke-dasharray="6 4" opacity="0.85"/>
+  <text x="68" y="240" font-size="11" font-weight="700" fill="#3D6BA8" letter-spacing="2">PHASE 1 — ROUTING &amp; DISPATCH</text>
+  <text x="345" y="240" font-size="10" fill="#4F6B8C" font-style="italic">Orchestrator picks the team to invoke</text>
+
+  <!-- Orchestrator card (Phase 1) -->
+  <g filter="url(#shadow)">
+    <rect x="540" y="252" width="420" height="80" rx="10" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8"/>
+    <use href="#ic-target" x="552" y="262" width="36" height="36"/>
+    <text x="598" y="276" font-size="13" font-weight="700" fill="#1F3A5F">Orchestrator</text>
+    <text x="598" y="290" font-size="9.5" fill="#7A7569" font-style="italic">single fixed coordinator · constructs the team</text>
+    <text x="598" y="302" font-size="9" fill="#9A9387" font-style="italic">picks N specialists from 7 pillars per question</text>
+
+    <rect x="598" y="310" width="124" height="18" rx="9" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="660" y="323" font-size="9" fill="#5C5044" text-anchor="middle">team_construction</text>
+    <rect x="730" y="310" width="92" height="18" rx="9" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="776" y="323" font-size="9" fill="#5C5044" text-anchor="middle">data_catalog</text>
+  </g>
+
+  <!-- arrow ChatAgent → Orchestrator -->
+  <path d="M 840,210 L 840,232 L 750,232 L 750,250" stroke="#3D6BA8" stroke-width="2.4" fill="none" marker-end="url(#ar-blue)"/>
+
+  <!-- ===================================================================== -->
+  <!-- PHASE 2 — PARALLEL INVESTIGATION (y=360-510)                           -->
+  <!-- ===================================================================== -->
+  <rect x="50" y="360" width="1400" height="160" rx="12" fill="#ECF4EC" stroke="#5E8569" stroke-width="1" stroke-dasharray="6 4" opacity="0.85"/>
+  <text x="68" y="380" font-size="11" font-weight="700" fill="#5E8569" letter-spacing="2">PHASE 2 — PARALLEL INVESTIGATION</text>
+  <text x="395" y="380" font-size="10" fill="#3F5536" font-style="italic">asyncio.gather: ReportAgent + BaseSpecialist × N (here: 3) · DataPullRequest may be emitted</text>
+
+  <!-- Phase 2 cards: 5 cards × 244 + 4 × 14 = 1276, centered (start x=112) -->
+
+  <!-- ReportAgent -->
+  <g filter="url(#shadow)">
+    <rect x="112" y="396" width="244" height="108" rx="10" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8"/>
+    <use href="#ic-doc" x="124" y="406" width="36" height="36"/>
+    <text x="170" y="420" font-size="13" font-weight="700" fill="#1F3A5F">ReportAgent</text>
+    <text x="170" y="434" font-size="9.5" fill="#7A7569" font-style="italic">curated report scanner</text>
+    <text x="170" y="446" font-size="9" fill="#9A9387" font-style="italic">2-step chain: needle → analysis</text>
+
+    <rect x="124" y="456" width="100" height="18" rx="9" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="174" y="469" font-size="9" fill="#5C5044" text-anchor="middle">report_needle</text>
+    <rect x="232" y="456" width="108" height="18" rx="9" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="286" y="469" font-size="9" fill="#5C5044" text-anchor="middle">report_analysis</text>
+
+    <text x="234" y="490" font-size="8.5" fill="#9A9387" text-anchor="middle" font-style="italic">scans reports/&lt;case-id&gt;/*.md</text>
+  </g>
+
+  <!-- BaseSpec · bureau -->
+  <g filter="url(#shadow)">
+    <rect x="370" y="396" width="244" height="108" rx="10" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8"/>
+    <use href="#ic-chart" x="382" y="406" width="36" height="36"/>
+    <text x="428" y="420" font-size="13" font-weight="700" fill="#1F3A5F">BaseSpec · bureau</text>
+    <text x="428" y="434" font-size="9.5" fill="#7A7569" font-style="italic">credit-bureau analyst</text>
+    <text x="428" y="446" font-size="9" fill="#9A9387" font-style="italic">queries case data · runs analysis</text>
+
+    <rect x="382" y="456" width="92" height="18" rx="9" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="428" y="469" font-size="9" fill="#5C5044" text-anchor="middle">domain/bureau</text>
+    <rect x="482" y="456" width="68" height="18" rx="9" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="516" y="469" font-size="9" fill="#5C5044" text-anchor="middle">data_query</text>
+    <rect x="558" y="456" width="76" height="18" rx="9" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="596" y="469" font-size="9" fill="#5C5044" text-anchor="middle">data_analysis</text>
+
+    <text x="492" y="490" font-size="8.5" fill="#9A9387" text-anchor="middle" font-style="italic">→ SpecialistOutput</text>
+  </g>
+
+  <!-- BaseSpec · modeling -->
+  <g filter="url(#shadow)">
+    <rect x="628" y="396" width="244" height="108" rx="10" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8"/>
+    <use href="#ic-chart" x="640" y="406" width="36" height="36"/>
+    <text x="686" y="420" font-size="13" font-weight="700" fill="#1F3A5F">BaseSpec · modeling</text>
+    <text x="686" y="434" font-size="9.5" fill="#7A7569" font-style="italic">model-score analyst</text>
+    <text x="686" y="446" font-size="9" fill="#9A9387" font-style="italic">queries case data · runs analysis</text>
+
+    <rect x="640" y="456" width="100" height="18" rx="9" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="690" y="469" font-size="9" fill="#5C5044" text-anchor="middle">domain/modeling</text>
+    <rect x="748" y="456" width="68" height="18" rx="9" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="782" y="469" font-size="9" fill="#5C5044" text-anchor="middle">data_query</text>
+    <rect x="824" y="456" width="48" height="18" rx="9" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="848" y="469" font-size="8.5" fill="#5C5044" text-anchor="middle">data_analysis</text>
+
+    <text x="750" y="490" font-size="8.5" fill="#9A9387" text-anchor="middle" font-style="italic">→ SpecialistOutput</text>
+  </g>
+
+  <!-- BaseSpec · capacity -->
+  <g filter="url(#shadow)">
+    <rect x="886" y="396" width="244" height="108" rx="10" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8"/>
+    <use href="#ic-chart" x="898" y="406" width="36" height="36"/>
+    <text x="944" y="420" font-size="13" font-weight="700" fill="#1F3A5F">BaseSpec · capacity</text>
+    <text x="944" y="434" font-size="9.5" fill="#7A7569" font-style="italic">capacity-affordability analyst</text>
+    <text x="944" y="446" font-size="9" fill="#9A9387" font-style="italic">queries case data · runs analysis</text>
+
+    <rect x="898" y="456" width="124" height="18" rx="9" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="960" y="469" font-size="9" fill="#5C5044" text-anchor="middle">domain/capacity_afford</text>
+    <rect x="1030" y="456" width="44" height="18" rx="9" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="1052" y="469" font-size="8.5" fill="#5C5044" text-anchor="middle">data_query</text>
+    <rect x="1082" y="456" width="48" height="18" rx="9" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="1106" y="469" font-size="8.5" fill="#5C5044" text-anchor="middle">data_analysis</text>
+
+    <text x="1008" y="490" font-size="8.5" fill="#9A9387" text-anchor="middle" font-style="italic">→ SpecialistOutput</text>
+  </g>
+
+  <!-- DataPullRequest signal (conceptual) -->
+  <g filter="url(#shadow)">
+    <rect x="1144" y="396" width="244" height="108" rx="10" fill="#FFFFFF" stroke="#A89B7C" stroke-width="1.2" stroke-dasharray="6 4"/>
+    <use href="#ic-pull" x="1156" y="406" width="36" height="36"/>
+    <text x="1202" y="420" font-size="13" font-weight="700" fill="#5C5044">DataPullRequest</text>
+    <text x="1202" y="434" font-size="9.5" fill="#7A7569" font-style="italic">conceptual signal · no agent</text>
+    <text x="1202" y="446" font-size="9" fill="#9A9387" font-style="italic">emitted when evidence insufficient</text>
+
+    <rect x="1156" y="456" width="92" height="18" rx="9" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="1202" y="469" font-size="9" fill="#5C5044" text-anchor="middle">data_catalog</text>
+    <rect x="1256" y="456" width="68" height="18" rx="9" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="1290" y="469" font-size="9" fill="#5C5044" text-anchor="middle">balancing</text>
+
+    <text x="1266" y="490" font-size="8.5" fill="#9A9387" text-anchor="middle" font-style="italic">future: re-pull + re-run</text>
+  </g>
+
+  <!-- arrows: Orchestrator → 5 cards (fan-out) -->
+  <line x1="750" y1="334" x2="234" y2="394" stroke="#3D6BA8" stroke-width="1.8" marker-end="url(#ar-blue-sm)"/>
+  <line x1="750" y1="334" x2="492" y2="394" stroke="#3D6BA8" stroke-width="1.8" marker-end="url(#ar-blue-sm)"/>
+  <line x1="750" y1="334" x2="750" y2="394" stroke="#3D6BA8" stroke-width="1.8" marker-end="url(#ar-blue-sm)"/>
+  <line x1="750" y1="334" x2="1008" y2="394" stroke="#3D6BA8" stroke-width="1.8" marker-end="url(#ar-blue-sm)"/>
+  <line x1="750" y1="334" x2="1266" y2="394" stroke="#A89B7C" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ar-tan)"/>
+
+  <!-- ===================================================================== -->
+  <!-- PHASE 3 — AGGREGATION & SYNTHESIS (y=540-700)                          -->
+  <!-- ===================================================================== -->
+  <rect x="50" y="540" width="1400" height="160" rx="12" fill="#FBF3E5" stroke="#8B6235" stroke-width="1" stroke-dasharray="6 4" opacity="0.85"/>
+  <text x="68" y="560" font-size="11" font-weight="700" fill="#8B6235" letter-spacing="2">PHASE 3 — AGGREGATION &amp; SYNTHESIS</text>
+  <text x="430" y="560" font-size="10" fill="#7A4A1A" font-style="italic">peer-review the specialists, then Orchestrator synthesizes the FinalAnswer</text>
+
+  <!-- GeneralSpec card -->
+  <g filter="url(#shadow)">
+    <rect x="320" y="576" width="320" height="108" rx="10" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8"/>
+    <use href="#ic-scale" x="332" y="586" width="36" height="36"/>
+    <text x="378" y="600" font-size="13" font-weight="700" fill="#1F3A5F">GeneralSpec</text>
+    <text x="378" y="614" font-size="9.5" fill="#7A7569" font-style="italic">cross-domain peer reviewer</text>
+    <text x="378" y="626" font-size="9" fill="#9A9387" font-style="italic">pairwise compare · itertools.combinations(specs, 2)</text>
+
+    <rect x="332" y="636" width="76" height="18" rx="9" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="370" y="649" font-size="9" fill="#5C5044" text-anchor="middle">comparison</text>
+    <text x="510" y="649" font-size="9" fill="#9A9387" font-style="italic">→ ReviewReport (conflicts)</text>
+
+    <text x="480" y="672" font-size="8.5" fill="#9A9387" text-anchor="middle" font-style="italic">surfaces disagreement between specialists</text>
+  </g>
+
+  <!-- Orchestrator card (Phase 3, synthesis) -->
+  <g filter="url(#shadow)">
+    <rect x="860" y="576" width="320" height="108" rx="10" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8"/>
+    <use href="#ic-target" x="872" y="586" width="36" height="36"/>
+    <text x="918" y="600" font-size="13" font-weight="700" fill="#1F3A5F">Orchestrator</text>
+    <text x="918" y="614" font-size="9.5" fill="#7A7569" font-style="italic">same fixed agent · now synthesizing</text>
+    <text x="918" y="626" font-size="9" fill="#9A9387" font-style="italic">resolves conflicts · merges into FinalAnswer</text>
+
+    <rect x="872" y="636" width="68" height="18" rx="9" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="906" y="649" font-size="9" fill="#5C5044" text-anchor="middle">balancing</text>
+    <rect x="948" y="636" width="68" height="18" rx="9" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="982" y="649" font-size="9" fill="#5C5044" text-anchor="middle">synthesis</text>
+    <text x="1100" y="649" font-size="9" fill="#9A9387" font-style="italic">→ FinalAnswer</text>
+
+    <text x="1020" y="672" font-size="8.5" fill="#9A9387" text-anchor="middle" font-style="italic">also reads ReportDraft + DataPullRequest fields</text>
+  </g>
+
+  <!-- arrows: 3 specs converge → GeneralSpec -->
+  <path d="M 492,504 Q 510,540 470,576" stroke="#9A9387" stroke-width="1.2" fill="none" marker-end="url(#ar-gray)"/>
+  <path d="M 750,504 Q 700,540 480,576" stroke="#9A9387" stroke-width="1.2" fill="none" marker-end="url(#ar-gray)"/>
+  <path d="M 1008,504 Q 850,540 490,576" stroke="#9A9387" stroke-width="1.2" fill="none" marker-end="url(#ar-gray)"/>
+
+  <!-- arrow GeneralSpec → Orchestrator (within Phase 3) -->
+  <line x1="640" y1="630" x2="858" y2="630" stroke="#3D6BA8" stroke-width="2" marker-end="url(#ar-blue)"/>
+  <text x="749" y="622" font-size="9" fill="#1F3A5F" text-anchor="middle" font-style="italic">ReviewReport</text>
+
+  <!-- arrow ReportAgent → Orchestrator (parallel branch) -->
+  <path d="M 234,504 Q 220,560 220,580 Q 220,640 858,640" stroke="#9A9387" stroke-width="1.2" stroke-dasharray="4 4" fill="none" marker-end="url(#ar-gray)"/>
+  <text x="222" y="558" font-size="9" fill="#9A9387" font-style="italic">ReportDraft</text>
+
+  <!-- arrow DataPullRequest → Orchestrator (conceptual) -->
+  <path d="M 1266,504 Q 1280,560 1280,580 Q 1280,640 1182,640" stroke="#A89B7C" stroke-width="1.2" stroke-dasharray="4 3" fill="none" marker-end="url(#ar-tan)"/>
+  <text x="1280" y="558" font-size="9" fill="#A89B7C" font-style="italic" text-anchor="middle">DataPullRequest</text>
+
+  <!-- ===================================================================== -->
+  <!-- OUTPUT (y=720-790)                                                     -->
+  <!-- ===================================================================== -->
+  <text x="36" y="738" font-size="10" font-weight="700" fill="#A89B7C" letter-spacing="2">OUTPUT</text>
+
+  <!-- FinalAnswer pill -->
+  <g filter="url(#shadow)">
+    <rect x="600" y="746" width="280" height="46" rx="23" fill="#DCE7F4" stroke="#3D6BA8" stroke-width="1.4"/>
+    <use href="#ic-spark" x="614" y="751" width="36" height="36"/>
+    <text x="752" y="772" font-size="13" font-weight="700" fill="#1F3A5F" text-anchor="middle">FinalAnswer</text>
+    <text x="752" y="785" font-size="9" fill="#4F6B8C" text-anchor="middle" font-style="italic">answer · provenance · timeline · pull-request</text>
+  </g>
+
+  <!-- arrow Orchestrator (phase 3) → FinalAnswer -->
+  <path d="M 1020,684 L 1020,720 L 752,720 L 752,744" stroke="#3D6BA8" stroke-width="2.4" fill="none" marker-end="url(#ar-blue)"/>
+
+  <!-- return arrow: FinalAnswer → ChatAgent → Reviewer (curve up right side) -->
+  <path d="M 880,768 C 1300,768 1300,140 988,140" stroke="#3D6BA8" stroke-width="2" stroke-dasharray="6 4" fill="none" marker-end="url(#ar-blue)"/>
+  <text x="1305" y="450" font-size="10" fill="#1F3A5F" font-style="italic" transform="rotate(-90 1305 450)" text-anchor="middle">FinalAnswer → ChatAgent.format → Reviewer</text>
+
+  <!-- ===================================================================== -->
+  <!-- FOOTER LEGEND                                                          -->
+  <!-- ===================================================================== -->
+  <g transform="translate(40, 838)">
+    <text x="0" y="0" font-size="10" font-weight="700" fill="#5C5044" letter-spacing="1.5">LEGEND</text>
+    <line x1="60" y1="-3" x2="90" y2="-3" stroke="#3D6BA8" stroke-width="2.4" marker-end="url(#ar-blue)"/>
+    <text x="98" y="0" font-size="10" fill="#5C5044">primary flow</text>
+    <line x1="200" y1="-3" x2="230" y2="-3" stroke="#9A9387" stroke-width="1.2" stroke-dasharray="4 4" marker-end="url(#ar-gray)"/>
+    <text x="238" y="0" font-size="10" fill="#5C5044">specialist output / consult</text>
+    <line x1="400" y1="-3" x2="430" y2="-3" stroke="#A89B7C" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ar-tan)"/>
+    <text x="438" y="0" font-size="10" fill="#5C5044">conceptual / future</text>
+    <rect x="580" y="-9" width="14" height="12" rx="2" fill="#FFFFFF" stroke="#D4C5A9"/>
+    <text x="600" y="0" font-size="10" fill="#5C5044">agent (icon + name + skills)</text>
+    <rect x="780" y="-9" width="14" height="12" rx="6" fill="#F4F0E6" stroke="#D4C5A9"/>
+    <text x="800" y="0" font-size="10" fill="#5C5044">skill</text>
+    <rect x="850" y="-9" width="14" height="12" rx="6" fill="#DCE7F4" stroke="#3D6BA8" stroke-width="1.4"/>
+    <text x="870" y="0" font-size="10" fill="#5C5044">terminal pill (Reviewer / FinalAnswer)</text>
+  </g>
+  <text x="1464" y="838" font-size="10" fill="#9A9387" text-anchor="end" font-style="italic">v2  ·  workflow view  ·  2026-04-27</text>
+</svg>
