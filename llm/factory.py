@@ -1,8 +1,22 @@
-"""LLM factory — builds firewalled SDK session clients."""
+"""LLM factory — builds firewalled SDK session clients.
+
+Two backends supported:
+
+- ``backend="openai"`` (default, dev/test) — wraps ``openai.AsyncOpenAI`` with
+  :class:`llm.firewall_client.FirewalledAsyncOpenAI`.
+- ``backend="safechain"`` (private/prod) — uses
+  :class:`llm.safechain_client.SafeChainAsyncOpenAI`, which mimics the
+  AsyncOpenAI shape but routes ``chat.completions.create`` through SafeChain.
+
+The agent architecture downstream (Agent, Runner, redacting_tool, β fallback)
+is *identical* in both cases — only the HTTP client differs.
+"""
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
+from typing import Any, Literal
 
 from openai import AsyncOpenAI
 
@@ -12,10 +26,14 @@ from llm.firewall_client import FirewalledAsyncOpenAI
 from llm.firewall_stack import FirewallStack
 
 
+Backend = Literal["openai", "safechain"]
+
+
 @dataclass
 class SessionClients:
-    firewalled_client: FirewalledAsyncOpenAI
+    firewalled_client: Any  # FirewalledAsyncOpenAI or SafeChainAsyncOpenAI
     model: OpenAIChatCompletionsModel
+    backend: Backend = "openai"
 
 
 def build_session_clients(
@@ -23,12 +41,37 @@ def build_session_clients(
     *,
     model_name: str = "gpt-4o",
     base_client: AsyncOpenAI | None = None,
+    backend: Backend | None = None,
 ) -> SessionClients:
-    """Build a firewalled AsyncOpenAI client and the SDK Model wrapping it."""
-    base = base_client or AsyncOpenAI()
-    firewalled = FirewalledAsyncOpenAI(base=base, firewall=firewall)
-    model = OpenAIChatCompletionsModel(model=model_name, openai_client=firewalled)
-    return SessionClients(firewalled_client=firewalled, model=model)
+    """Build a firewalled HTTP-client + SDK Model wrapping it.
+
+    ``backend`` selects the LLM transport:
+
+    - If unset, falls back to the ``LLM_BACKEND`` env var, then to ``"openai"``.
+    - ``"openai"`` builds a :class:`FirewalledAsyncOpenAI` over either
+      ``base_client`` or a fresh ``AsyncOpenAI()``.
+    - ``"safechain"`` builds a :class:`SafeChainAsyncOpenAI`. ``base_client``
+      is ignored; ``safechain.lcel.model(...)`` is loaded lazily on first use.
+    """
+    if backend is None:
+        backend = os.environ.get("LLM_BACKEND", "openai")  # type: ignore[assignment]
+
+    if backend == "safechain":
+        # Lazy import — safechain is unavailable in the dev env, but we still
+        # want this module to import successfully for tests.
+        from llm.safechain_client import SafeChainAsyncOpenAI
+
+        client: Any = SafeChainAsyncOpenAI(model_name=model_name, firewall=firewall)
+    elif backend == "openai":
+        base = base_client or AsyncOpenAI()
+        client = FirewalledAsyncOpenAI(base=base, firewall=firewall)
+    else:
+        raise ValueError(
+            f"Unknown LLM backend {backend!r}. Use 'openai' or 'safechain'."
+        )
+
+    model = OpenAIChatCompletionsModel(model=model_name, openai_client=client)
+    return SessionClients(firewalled_client=client, model=model, backend=backend)
 
 
 

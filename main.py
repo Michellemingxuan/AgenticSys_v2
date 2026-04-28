@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -102,14 +103,22 @@ async def amain():
         default="auto",
         help="Where to load case data from. 'auto' resolves to real → simulated → generator.",
     )
+    parser.add_argument(
+        "--backend",
+        choices=["openai", "safechain"],
+        default=None,
+        help="LLM transport. Default: env var LLM_BACKEND, then 'openai'. "
+             "Use 'safechain' in the private/prod environment.",
+    )
     args = parser.parse_args()
 
     session_id = str(uuid.uuid4())[:8]
     logger = EventLogger(session_id=session_id)
-    logger.log("session_start", {"pillar": args.pillar, "model": args.model})
+    logger.log("session_start", {"pillar": args.pillar, "model": args.model,
+                                  "backend": args.backend or os.environ.get("LLM_BACKEND", "openai")})
 
     firewall = FirewallStack(logger=logger)
-    clients = build_session_clients(firewall, model_name=args.model)
+    clients = build_session_clients(firewall, model_name=args.model, backend=args.backend)
     chat_llm = FirewalledChatShim(clients)
 
     source, csv_dir = _resolve_data_source(args.data_source, _DATA_TABLES_DIR)

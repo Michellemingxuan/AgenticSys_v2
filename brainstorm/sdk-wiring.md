@@ -51,19 +51,43 @@ following without our code touching it:
 Anything outside the agent loop, anything customizing how the LLM client
 behaves, and anything that touches infrastructure beyond the SDK's awareness.
 
-## 2.1 The LLM client itself (`llm/firewall_client.py`)
+## 2.1 The LLM client itself (`llm/firewall_client.py` and `llm/safechain_client.py`)
 
 The SDK calls `openai_client.chat.completions.create(...)` to talk to OpenAI.
-We *substitute* a wrapped client (`FirewalledAsyncOpenAI`) that:
+We *substitute* a wrapped client. **Two implementations**, selected by
+`build_session_clients(backend=…)`:
 
-- Redacts PII from every outbound message before forwarding to the real client
-- Catches `FirewallRejection` and retries with `FIREWALL_GUIDANCE` injected
-  into the system message (up to `max_retries`)
-- Acquires a shared `asyncio.Semaphore` around each request so global
-  in-flight calls are capped
+- **`backend="openai"`** (dev/test) — `FirewalledAsyncOpenAI` wrapping
+  `openai.AsyncOpenAI`:
 
-The SDK has no idea this layer exists. It just sees an `AsyncOpenAI`-shaped
-object.
+  - Redacts PII from every outbound message before forwarding to the real
+    client
+  - Catches `FirewallRejection` and retries with `FIREWALL_GUIDANCE` injected
+    into the system message (up to `max_retries`)
+  - Acquires a shared `asyncio.Semaphore` around each request so global
+    in-flight calls are capped
+
+- **`backend="safechain"`** (private/prod) — `SafeChainAsyncOpenAI` mimics the
+  same `AsyncOpenAI` shape but routes through SafeChain's
+  `ValidChatPromptTemplate` chain:
+
+  - Flattens multi-turn `messages` into a single human message with neutral
+    role labels (`Context`, `Request`, `Response`, `Tool result`) — SafeChain
+    requires single-message input
+  - Injects a tool-schema text block when the SDK sends `tools=[...]`, since
+    SafeChain has no native function-calling
+  - Parses the LLM's `{"tool_call": …}` / `{"output": …}` JSON response and
+    *synthesises* an OpenAI `ChatCompletion` Pydantic with a real
+    `tool_calls=[…]` array, so the SDK never knows it isn't talking to a real
+    OpenAI server
+  - Refreshes the safechain model on HTTP 401 (token expiry); raises
+    `FirewallRejection` on 403 / 400
+  - Same retry-with-guidance + semaphore behaviour as the OpenAI path
+
+The SDK has no idea either layer exists. It just sees an `AsyncOpenAI`-shaped
+object. The agent architecture downstream — `Agent`, `Runner`, `redacting_tool`,
+β fallback — is **identical** regardless of backend; only this HTTP-client
+layer differs.
 
 ## 2.2 Inter-agent transit redaction (`case_agents/redacting_tool.py`)
 
