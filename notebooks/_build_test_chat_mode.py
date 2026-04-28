@@ -157,9 +157,102 @@ cells.append(code(
     "    print(f'   • {t.name:<22}  — {t.description[:70]}')"
 ))
 
+# 5b. GROUND TRUTH — case data preview (real situation before the agents run)
+cells.append(md(
+    "## 5. GROUND TRUTH — what's actually in the case\n\n"
+    "Before running any agents, dump the raw case data so we have a baseline to "
+    "compare the agents' answers against. **Read this section first**, then come "
+    "back to it after Stage E to verify the specialists' claims trace to the data."
+))
+cells.append(code(
+    "# Row counts per table\n"
+    "print('═══ tables in this case ═══')\n"
+    "table_rows = {}\n"
+    "for t in gw.list_tables():\n"
+    "    rows = gw.query(t) or []\n"
+    "    table_rows[t] = rows\n"
+    "    print(f'  {t:<25} {len(rows):>4} rows')\n"
+    "print()"
+))
+cells.append(md(
+    "### Risk-relevant snapshots\n\n"
+    "Pulls the columns most reviewers actually look at when assessing credit risk: "
+    "FICO trajectory, DTI/exposure ratios, recent payment behavior, delinquencies, "
+    "and the modeling layer's headline scores. This is your **'truth view'**."
+))
+cells.append(code(
+    "def _row_subset(rows, cols, n=3):\n"
+    "    if not rows:\n"
+    "        return []\n"
+    "    available = [c for c in cols if c in rows[0]]\n"
+    "    return [{c: r.get(c) for c in available} for r in rows[:n]]\n\n"
+    "from IPython.display import display\n"
+    "import pandas as pd\n\n"
+    "# Bureau — credit scores + delinquencies\n"
+    "for tbl, cols in [\n"
+    "    ('bureau', ['fico_score', 'sbfe_score', 'paydex_score', 'ln_credit_score',\n"
+    "                'delinquencies_30d', 'delinquencies_60d', 'delinquencies_90d',\n"
+    "                'public_records_count']),\n"
+    "    ('income_dti', ['dti', 'income_monthly', 'exposure_to_income']),\n"
+    "    ('model_scores', ['trans_month', 'pd_score', 'lgd_score', 'risk_rating',\n"
+    "                      'positive_events', 'fraud_score']),\n"
+    "    ('cross_bu', ['product_type', 'limit', 'utilization', 'days_past_due',\n"
+    "                  'is_delinquent']),\n"
+    "    ('spend_payments', ['payment_date', 'payment_amount', 'days_late',\n"
+    "                        'payment_status']),\n"
+    "    ('wcc_flags', ['flag_type', 'severity', 'flag_date']),\n"
+    "]:\n"
+    "    rows = table_rows.get(tbl, [])\n"
+    "    if not rows:\n"
+    "        continue\n"
+    "    subset = _row_subset(rows, cols, n=3)\n"
+    "    if not subset or not subset[0]:\n"
+    "        continue\n"
+    "    print(f'━━━ {tbl}  ({len(rows)} rows total, showing first 3) ━━━')\n"
+    "    try:\n"
+    "        display(pd.DataFrame(subset))\n"
+    "    except Exception:\n"
+    "        for r in subset:\n"
+    "            print(f'  {r}')\n"
+    "    print()"
+))
+cells.append(code(
+    "# Quick risk-flag heuristics (purely descriptive — what a reviewer eyeballs)\n"
+    "print('═══ quick risk indicators (heuristic — for orientation, not adjudication) ═══')\n"
+    "flags = []\n"
+    "for r in table_rows.get('bureau', [])[:1]:\n"
+    "    fico = r.get('fico_score')\n"
+    "    if isinstance(fico, (int, float)) and fico < 580:\n"
+    "        flags.append(f'  • FICO {fico} (subprime)')\n"
+    "    elif isinstance(fico, (int, float)) and fico < 670:\n"
+    "        flags.append(f'  • FICO {fico} (near-prime)')\n"
+    "    if isinstance(r.get('delinquencies_90d'), (int, float)) and r['delinquencies_90d'] > 0:\n"
+    "        flags.append(f'  • 90+ day delinquencies: {r[\"delinquencies_90d\"]}')\n"
+    "    if isinstance(r.get('public_records_count'), (int, float)) and r['public_records_count'] > 0:\n"
+    "        flags.append(f'  • public records: {r[\"public_records_count\"]}')\n"
+    "for r in table_rows.get('income_dti', [])[:1]:\n"
+    "    dti = r.get('dti')\n"
+    "    if isinstance(dti, (int, float)) and dti > 0.43:\n"
+    "        flags.append(f'  • DTI {dti:.2f} (above 0.43 threshold)')\n"
+    "ms_rows = sorted(table_rows.get('model_scores', []),\n"
+    "                 key=lambda r: r.get('trans_month', ''), reverse=True)[:1]\n"
+    "for r in ms_rows:\n"
+    "    pd_score = r.get('pd_score')\n"
+    "    if isinstance(pd_score, (int, float)) and pd_score > 0.20:\n"
+    "        flags.append(f'  • most-recent PD score {pd_score:.3f} (elevated)')\n"
+    "for r in table_rows.get('cross_bu', []):\n"
+    "    if r.get('is_delinquent'):\n"
+    "        flags.append(f'  • delinquent product: {r.get(\"product_type\", \"?\")}')\n"
+    "if flags:\n"
+    "    print('\\n'.join(flags))\n"
+    "else:\n"
+    "    print('  (no obvious flags — case appears clean by simple heuristics)')"
+))
+
+
 # 6. Stage A — Screen
 cells.append(md(
-    "## 5. STAGE A — `ChatAgent.screen(question)`\n\n"
+    "## 6. STAGE A — `ChatAgent.screen(question)`\n\n"
     "First boundary. ChatAgent decides whether the question is safe + in scope and "
     "produces a redacted version (CASE-IDs and 6+ digit runs masked)."
 ))
@@ -176,7 +269,7 @@ cells.append(code(
 
 # 7. Stage B — Relevance check (optional, runs only if screen passed)
 cells.append(md(
-    "## 6. STAGE B — `ChatAgent.relevance_check(question)`  (in-scope test)\n\n"
+    "## 7. STAGE B — `ChatAgent.relevance_check(question)`  (in-scope test)\n\n"
     "Independent in-scope/out-of-scope check. The legacy code uses this to decide "
     "whether a question even warrants the orchestrator pipeline. Today's `main.py` "
     "doesn't call it explicitly (`screen` already covers most cases) — surfacing it "
@@ -195,7 +288,7 @@ cells.append(code(
 
 # 8. Stage C — Run the orchestrator agent (direct Runner.run for trace access)
 cells.append(md(
-    "## 7. STAGE C — `Runner.run(orchestrator_agent, …)`\n\n"
+    "## 8. STAGE C — `Runner.run(orchestrator_agent, …)`\n\n"
     "Single SDK call. The orchestrator agent's instructions tell it to call specialists "
     "in parallel, then synthesize a `FinalAnswer`. We call `Runner.run` directly here "
     "(rather than `Orchestrator.run`) because we want post-run access to "
@@ -227,7 +320,7 @@ cells.append(code(
 
 # 9. Stage D — Tool calls = sub-questions
 cells.append(md(
-    "## 8. STAGE D — Sub-questions (tool calls the orchestrator emitted)\n\n"
+    "## 9. STAGE D — Sub-questions (tool calls the orchestrator emitted)\n\n"
     "Each `ToolCallItem` in `result.new_items` is a tool the orchestrator's LLM "
     "decided to call. The tool name tells us **which specialist** got the call; the "
     "JSON args tell us **what sub-question** they were asked.\n\n"
@@ -256,7 +349,7 @@ cells.append(code(
 
 # 10. Stage E — Tool outputs = specialist findings
 cells.append(md(
-    "## 9. STAGE E — Specialist findings (tool outputs)\n\n"
+    "## 10. STAGE E — Specialist findings (tool outputs)\n\n"
     "Each `ToolCallOutputItem.output` is the **already-deserialized Pydantic** the "
     "wrapped sub-agent returned (`SpecialistOutput`, `ReportDraft`, or `ReviewReport`), "
     "post `redact_payload`. Pairing with the corresponding `ToolCallItem` above, you "
@@ -291,9 +384,69 @@ cells.append(code(
     "        print()"
 ))
 
+# 10b. Per-specialist data preview — pairs with Stage E findings
+cells.append(md(
+    "## 11. PER-SPECIALIST GROUND TRUTH (pair with Stage E)\n\n"
+    "For each specialist the orchestrator actually called, dump the data tables that "
+    "specialist's `DomainSkill.data_hints` points at. **Read this alongside the matching "
+    "Stage E finding** to verify the specialist's claims actually trace to the data — "
+    "without this comparison you can't tell whether a confident-sounding answer was "
+    "data-grounded or hallucinated."
+))
+cells.append(code(
+    "from skills.domain.loader import load_domain_skill\n\n"
+    "if result is None:\n"
+    "    print('No result; skipping.')\n"
+    "else:\n"
+    "    called_specialists = []\n"
+    "    for tc in [x for x in result.new_items if isinstance(x, ToolCallItem)]:\n"
+    "        raw = tc.raw_item\n"
+    "        name = getattr(raw, 'name', None) or (raw.get('name') if isinstance(raw, dict) else None)\n"
+    "        if name and name not in ('report_agent', 'general_specialist'):\n"
+    "            called_specialists.append(name)\n\n"
+    "    if not called_specialists:\n"
+    "        print('No domain specialists were called by the orchestrator on this run.')\n"
+    "    else:\n"
+    "        for spec_name in called_specialists:\n"
+    "            print(f'━━━━━━━ specialist: {spec_name} ━━━━━━━')\n"
+    "            skill = load_domain_skill(spec_name)\n"
+    "            if skill is None:\n"
+    "                print(f'  (no domain skill loaded — unexpected)')\n"
+    "                continue\n"
+    "            print(f'  data_hints   : {skill.data_hints}')\n"
+    "            print(f'  risk_signals : {skill.risk_signals[:3]}')\n"
+    "            print()\n"
+    "            for hint in skill.data_hints:\n"
+    "                # data_hints reference canonical names; the gateway exposes real names\n"
+    "                # — try the hint directly first, then fuzzy-match across real tables\n"
+    "                rows = gw.query(hint)\n"
+    "                if rows is None:\n"
+    "                    norm = hint.lower().replace('_', '').replace(' ', '')\n"
+    "                    for real_t in gw.list_tables():\n"
+    "                        rn = real_t.lower().replace('_', '').replace(' ', '')\n"
+    "                        if norm in rn or rn in norm:\n"
+    "                            rows = gw.query(real_t)\n"
+    "                            print(f'  ↳ resolved canonical {hint!r} → real {real_t!r}')\n"
+    "                            hint = real_t\n"
+    "                            break\n"
+    "                if not rows:\n"
+    "                    print(f'  · {hint}: (no rows for this case)')\n"
+    "                    continue\n"
+    "                cols = list(rows[0].keys())[:8]\n"
+    "                preview = [{c: r.get(c) for c in cols} for r in rows[:2]]\n"
+    "                print(f'  · {hint} ({len(rows)} rows; first 2, first 8 cols):')\n"
+    "                try:\n"
+    "                    display(pd.DataFrame(preview))\n"
+    "                except Exception:\n"
+    "                    for r in preview:\n"
+    "                        print(f'      {r}')\n"
+    "            print()"
+))
+
+
 # 11. Stage F — General specialist's review
 cells.append(md(
-    "## 10. STAGE F — `general_specialist`'s review (if called)\n\n"
+    "## 12. STAGE F — `general_specialist`'s review (if called)\n\n"
     "Pulled out separately because contradictions / cross-domain insights are useful to "
     "highlight. If the orchestrator chose not to consult `general_specialist`, this "
     "section will be empty."
@@ -328,7 +481,7 @@ cells.append(code(
 
 # 12. Stage G — Final answer
 cells.append(md(
-    "## 11. STAGE G — Final answer (post `redact_payload` + `ChatAgent.format`)\n\n"
+    "## 13. STAGE G — Final answer (post `redact_payload` + `ChatAgent.format`)\n\n"
     "This is what `Orchestrator.run` would have returned: the redacted `FinalAnswer` "
     "rendered as reviewer-facing markdown."
 ))
@@ -346,7 +499,7 @@ cells.append(code(
 
 # 13. Stage H — Event log
 cells.append(md(
-    "## 12. STAGE H — EventLogger trail (optional)\n\n"
+    "## 14. STAGE H — EventLogger trail (optional)\n\n"
     "Hand-emitted JSONL events. Useful for spotting `firewall_rejection`, "
     "`tool_call`, `tool_result`, `orchestrator_run_blocked`, etc."
 ))
