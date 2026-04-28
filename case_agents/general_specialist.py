@@ -6,6 +6,7 @@ import itertools
 import json
 from pathlib import Path
 
+from agents import Agent
 from llm.firewall_stack import FirewalledModel
 from logger.event_logger import EventLogger
 from models.types import (
@@ -161,3 +162,13 @@ class GeneralSpecialist:
             open_conflicts=open_conflicts,
             cross_domain_insights=self._as_str_list(data.get("cross_domain_insights", [])),
         )
+
+
+def build_general_specialist(model) -> Agent:
+    return Agent(
+        name="general_specialist",
+        instructions=COMPARE_SYSTEM_PROMPT,
+        tools=[],
+        output_type=ReviewReport,
+        model=model,
+    )
