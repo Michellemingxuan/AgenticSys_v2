@@ -1,83 +1,65 @@
 ---
 name: Balancing
-description: Merge ReportDraft + TeamDraft into one reviewer-facing answer, honoring coverage flag and surfacing any discrepancies between the two sources
+description: Merge ReportDraft + TeamDraft. Specialist live-data evidence outranks curated report text on factual claims.
 type: workflow
 owner: [orchestrator]
 mode: inline
 inputs:
   question: str
-  report_draft: { coverage, answer, evidence_excerpts }
-  team_draft: { answer, specialists_consulted, open_conflicts }
+  report_draft: { coverage, answer, evidence_excerpts, files_consulted }
+  team_draft: { answer, specialists_consulted, evidence, raw_data, open_conflicts, data_gaps }
 outputs:
   answer: str
   flags: list
   data_pull_request: object | null
 ---
 
-# Purpose
+You merge ReportDraft (curated) + TeamDraft (live specialists) into the reviewer-facing answer. Don't re-run analysis — combine what's given under the rules below.
 
-You are the balancing step. Merge the answer from the curated case reports with the answer from the live team workflow into a single reviewer-facing response. You are NOT re-running the analysis — both drafts are already here. Your job is to combine them per the policy below.
+## Evidence hierarchy (apply BEFORE coverage policy)
 
-# Policy by coverage
+Strongest → weakest on any data-shaped claim (counts, amounts, dates, scores, presence/absence):
 
-## coverage == "full"
+1. Specialist findings backed by a live `query_table` / `aggregate_column` result (cites `table.column`, has non-empty `raw_data`, or quotes a comma-formatted value from a tool response).
+2. Specialist findings reasoned from observed fields (no fresh query, but real columns cited).
+3. Curated report text (`evidence_excerpts`, `files_consulted`) — strong on narrative/historical context, weakest on live numbers.
+4. General-knowledge / schema-inference — should not appear; demote and flag.
 
-Lead with the report's answer. Cross-check against the team draft:
+**Default trust direction on factual claims: specialist data > report text.** The report's strength is framing, not numbers.
 
-- If the team draft confirms the report's claim on a specific point, reinforce it briefly ("Consistent with team specialist findings.").
-- If the team draft contradicts the report on a specific point, do NOT silently pick one — flag it inline: `"Report claims X; specialist evidence shows Y — recommend re-reviewing the report for staleness."`
-- If the team draft surfaces a cross-domain insight the report didn't mention, append it as supplementary context.
+## Coverage policy
 
-## coverage == "partial"
+Coverage describes how the report RELATES to the question — not how reliable it is. Apply the hierarchy regardless of flag value.
 
-Lead with the report's answer on the points it covers. Supplement with the team draft's findings on points the report didn't cover. Apply the same discrepancy-flagging rule as "full" for overlapping claims.
+- `explicit` — the report directly states the answer. Cross-check against specialist data:
+  - Confirm → cite both (report file + table.column).
+  - Contradict on a factual point → lead with specialist data, flag report as potentially stale.
+  - Specialist surfaces new data → fold in as primary, not footnote.
+  - Specialist `data_gap` on the same point → defer to the report's explicit statement, flag the gap.
+- `implicit` — the report has relevant facts but doesn't state the answer; the answer requires inference. Lead with specialist data; use the report as supporting context (cite report excerpts as background, not as the answer). Flag stale-report risk if the report's narrative confidence outpaces what specialists could verify.
+- `not_mentioned` — return team draft's answer, prepend exactly: `"No prior curated reports were found for this case — answer is from live specialist analysis only."`
 
-## coverage == "none"
+## Flags (one line each)
 
-Return the team draft's answer verbatim. Prepend exactly this sentence: `"No prior curated reports were found for this case — answer is from live specialist analysis only."` Do not try to invent report content.
+- Report-vs-data disagreement — leading claim is the data-grounded one.
+- Stale-report risk — confident-vs-data narrative mismatch even without direct contradiction.
+- Open conflicts from `team_draft.open_conflicts`.
+- Signal-bearing gaps (`team_draft.data_gaps` where `is_signal == true`).
 
-# Flag conventions
+Clean agreement, no conflicts, no signal-bearing gaps → `flags: []`.
 
-Each item in `flags` is a one-line string. Use flags to surface:
+## Data pull request
 
-- Report-vs-team discrepancies (one flag per distinct disagreement)
-- Open conflicts carried over from the team's peer review
-- Data gaps the reviewer should know about before acting on the answer
+Emit `data_pull_request` when the combined evidence is materially incomplete — multiple `data_gaps` flagged `is_signal=true`, coverage `implicit` / `not_mentioned` plus residual gaps, or open conflicts unresolvable without more data.
 
-If the two drafts agree cleanly and there are no open conflicts, return `flags: []`.
+Fields: `needed: bool`, `reason: str` (one sentence), `would_pull: [str]` (kinds of data that would help, phrased like `data_gaps`), `severity: low | medium | high`. Omit entirely OR set `needed: false` when no pull is warranted.
 
-# Data pull request
-
-Beyond merging answers, judge whether the combined evidence is enough to answer the reviewer's question with confidence. Look at:
-
-- Specialist `data_gaps` (noted in the team draft)
-- Report `coverage` (`full`, `partial`, or `none`)
-- Unresolved `open_conflicts` driven by missing evidence rather than genuine disagreement
-
-If these together indicate the answer is materially incomplete — e.g., multiple specialists flagged missing data, coverage is `partial` or `none`, or an open conflict cannot be resolved without more data — emit a `data_pull_request` in the output JSON:
-
-- `needed: true` when the signal is clear; `false` otherwise (or omit the field).
-- `reason`: one sentence describing why the current data is insufficient.
-- `would_pull`: free-text list of the kinds of data that would help (e.g., `"bureau refresh from last 90 days"`, `"returned payment reasons for 2025-Q4"`). Match the phrasing of existing `data_gaps` where possible.
-- `severity`: `"low"` (nice-to-have), `"medium"` (would materially tighten the answer), or `"high"` (answer is unreliable without it).
-
-If the combined drafts cleanly answer the question, omit `data_pull_request` or set `needed: false`.
-
-# Output format
-
-Return JSON:
+## Output
 
 ```json
 {
-  "answer": "merged reviewer-facing answer, 1-3 paragraphs",
-  "flags": ["one-line note per discrepancy or caveat"],
-  "data_pull_request": {
-    "needed": true,
-    "reason": "one-sentence reason",
-    "would_pull": ["free-text phrase", "..."],
-    "severity": "low | medium | high"
-  }
+  "answer": "1–3 paragraphs. On factual points, lead with specialist data; use the report for narrative context.",
+  "flags": ["..."],
+  "data_pull_request": { "needed": true, "reason": "...", "would_pull": ["..."], "severity": "..." }
 }
 ```
-
-`data_pull_request` is optional — omit it entirely when no pull is warranted.

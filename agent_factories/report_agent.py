@@ -21,15 +21,16 @@ from tools.fs_tools import fs_list_files, fs_read_file
 _WORKFLOW_DIR = Path(__file__).parent.parent / "skills" / "workflow"
 
 # Valid values the agent is expected to return for coverage.
-_VALID_COVERAGES = {"full", "partial", "none"}
+_VALID_COVERAGES = {"explicit", "implicit", "not_mentioned"}
 
 # ---------------------------------------------------------------------------
 # SDK factory
 # ---------------------------------------------------------------------------
 
 # Compose instructions from the existing two-step prompts so the LLM has the
-# same coverage rubric (full | partial | none) and evidence-extraction format.
-# The agent now decides on its own when to call fs_list_files and fs_read_file.
+# same coverage rubric (explicit | implicit | not_mentioned) and evidence-
+# extraction format. The agent decides on its own when to call fs_list_files
+# and fs_read_file.
 _NEEDLE_PROMPT = _load_skill(_WORKFLOW_DIR / "report_needle.md").body
 _ANALYSIS_PROMPT = _load_skill(_WORKFLOW_DIR / "report_analysis.md").body
 
@@ -46,12 +47,12 @@ Workflow:
 1. Call fs_list_files to see what's available.
 2. Decide coverage and which files are relevant per the rubric below.
 3. Read the relevant files via fs_read_file.
-4. Produce a ReportDraft with: answer (synthesized), coverage (full | partial
-   | none), evidence_excerpts (verbatim quotes), files_consulted (list of
-   filenames you actually read).
+4. Produce a ReportDraft with: answer (synthesized), coverage (explicit |
+   implicit | not_mentioned), evidence_excerpts (verbatim quotes),
+   files_consulted (list of filenames you actually read).
 
-If the folder is empty or no file is relevant, return coverage="none" with an
-empty answer and empty files_consulted.
+If the folder is empty or no file is relevant, return
+coverage="not_mentioned" with an empty answer and empty files_consulted.
 
 === Coverage rubric ===
 {_NEEDLE_PROMPT}

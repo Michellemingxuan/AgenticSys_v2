@@ -53,6 +53,81 @@ class DataCatalog:
             return ""
         return profile.get("description", "")
 
+    def column_aliases(self, table_name: str) -> dict[str, list[str]]:
+        """Return ``{canonical_col: [alias_list]}`` declared in the table's profile.
+
+        Empty dict if the table has no profile or no columns declare aliases.
+        Consumed by query_table for filter-column resolution and by
+        get_table_schema to surface canonical/alias info to the LLM.
+        """
+        profile = self._profiles.get(table_name)
+        if profile is None:
+            return {}
+        out: dict[str, list[str]] = {}
+        for col, spec in (profile.get("columns") or {}).items():
+            aliases = spec.get("aliases") or []
+            if aliases:
+                out[col] = list(aliases)
+        return out
+
+    def table_aliases(self, table_name: str) -> list[str]:
+        """Return table-level aliases declared in the profile.
+
+        Used for team-construction reasoning (e.g., a question that mentions
+        the alias 'payments_returns' should still route to the specialist
+        owning the canonical 'payments' table) and for table-name resolution
+        in the gateway/tools layer.
+        """
+        profile = self._profiles.get(table_name)
+        if profile is None:
+            return []
+        return list(profile.get("aliases") or [])
+
+    def resolve_real_column(
+        self,
+        table_name: str,
+        requested: str,
+        real_keys: list[str],
+    ) -> str:
+        """Resolve a requested column name to the actual key in ``real_keys``.
+
+        ``requested`` may be a canonical column name (snake_case from the
+        skill / catalog) or a declared alias (real CSV header). ``real_keys``
+        are the column names physically present on the case's CSV row dicts.
+
+        Lookup order:
+          1. Exact match in real_keys.
+          2. If ``requested`` is a canonical column, return whichever of its
+             declared aliases is in real_keys (or the canonical itself).
+          3. If ``requested`` is a declared alias of some canonical, return
+             whichever of that canonical's keys (alias or canonical) is in
+             real_keys.
+          4. Fall through — return ``requested`` unchanged. Callers may
+             apply normalization-based fuzzy match as a fallback.
+        """
+        if requested in real_keys:
+            return requested
+        profile = self._profiles.get(table_name) or {}
+        columns = profile.get("columns") or {}
+
+        spec = columns.get(requested)
+        if spec is not None:
+            for alias in spec.get("aliases") or []:
+                if alias in real_keys:
+                    return alias
+            if requested in real_keys:  # redundant safety
+                return requested
+
+        for canonical, spec in columns.items():
+            if requested in (spec.get("aliases") or []):
+                if canonical in real_keys:
+                    return canonical
+                for alias in spec.get("aliases") or []:
+                    if alias in real_keys:
+                        return alias
+
+        return requested
+
     def get_column_details(self, table_name: str) -> dict | None:
         """Return full column details including distribution info.
         Useful for understanding data ranges and typical values."""
@@ -113,8 +188,19 @@ class DataCatalog:
 
     @staticmethod
     def _merge_patch(base: dict, patch: dict) -> None:
-        """Recursive merge. Lists are union-appended (dedup preserving order)."""
+        """Recursive merge. Lists are union-appended (dedup preserving order).
+
+        Sentinel: a patch dict carrying ``__replace__: True`` replaces the
+        entire base value at that key wholesale (no merge). Used by the sync
+        flow when canonical ``categories`` need to be overwritten with the
+        observed real-data vocabulary rather than unioned with the (wrong)
+        canonical one.
+        """
         for key, value in patch.items():
+            if isinstance(value, dict) and value.get("__replace__") is True:
+                replacement = {k: v for k, v in value.items() if k != "__replace__"}
+                base[key] = replacement
+                continue
             if key not in base or base[key] is None:
                 base[key] = value
                 continue
@@ -171,7 +257,11 @@ class DataCatalog:
         for table in scope_tables:
             profile = self._profiles[table]
             desc = profile.get("description", "")
-            lines.append(f"TABLE: {table}")
+            tbl_aliases = profile.get("aliases") or []
+            alias_annot = (
+                f"  [aliases: {', '.join(tbl_aliases)}]" if tbl_aliases else ""
+            )
+            lines.append(f"TABLE: {table}{alias_annot}")
             lines.append(f"  {desc}")
 
             if case_schema is not None:

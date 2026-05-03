@@ -9,7 +9,7 @@ from models.types import (
 
 def _minimal_drafts():
     return (
-        ReportDraft(coverage="none"),
+        ReportDraft(coverage="not_mentioned"),
         TeamDraft(answer="test"),
     )
 

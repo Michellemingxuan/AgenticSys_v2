@@ -89,7 +89,7 @@ object. The agent architecture downstream — `Agent`, `Runner`, `redacting_tool
 β fallback — is **identical** regardless of backend; only this HTTP-client
 layer differs.
 
-## 2.2 Inter-agent transit redaction (`case_agents/redacting_tool.py`)
+## 2.2 Inter-agent transit redaction (`agent_factories/redacting_tool.py`)
 
 When the orchestrator's LLM calls a specialist tool, the SDK passes the
 LLM-generated string straight through to the inner agent. The SDK does not
@@ -158,7 +158,7 @@ None of these run inside the SDK loop.
 
 ## 2.7 ChatAgent (entirely outside the SDK)
 
-`case_agents/chat_agent.py`'s `screen`, `redact`, `relevance_check`,
+`agent_factories/chat_agent.py`'s `screen`, `redact`, `relevance_check`,
 `converse` methods do not use `Agent`/`Runner` at all. They make plain
 `chat.completions.create` calls via the `FirewalledChatShim`
 (`llm/factory.py`). The shim mimics the legacy
@@ -239,15 +239,15 @@ patterns, the upstream / downstream pipeline, observability) is ours.
 
 | If you need to tune... | Look in |
 |---|---|
-| Orchestrator's high-level prompt | `case_agents/orchestrator_agent.py` -> `_compose_orchestrator_instructions` (incl. inline `TOOL-USE DISCIPLINE` block) |
+| Orchestrator's high-level prompt | `agent_factories/orchestrator_agent.py` -> `_compose_orchestrator_instructions` (incl. inline `TOOL-USE DISCIPLINE` block) |
 | The skill prose itself | `skills/workflow/*.md`, `skills/domain/*.md` |
-| Specialist instruction template | `case_agents/specialist_agent.py` -> `_compose_instructions` |
+| Specialist instruction template | `agent_factories/specialist_agent.py` -> `_compose_instructions` |
 | What each tool looks like to the LLM | Tool docstring (`tools/data_tools.py`, `tools/fs_tools.py`) and tool descriptions in the orchestrator factory |
 | HTTP-layer policy (redaction, retry, throttling) | `llm/firewall_client.py` |
-| Inter-agent redaction | `case_agents/redacting_tool.py` |
+| Inter-agent redaction | `agent_factories/redacting_tool.py` |
 | Beta fallback strategy | `orchestrator/orchestrator.py` -> `_trace_extraction_fallback` |
 | Data tool dependencies (gateway/catalog/logger) | `tools/data_tools.py` -> `init_tools`, called once from `main.py` |
-| Per-request context (case_folder, gateway) | `case_agents/app_context.py` -> `AppContext`, threaded by `Runner.run(context=...)` |
+| Per-request context (case_folder, gateway) | `agent_factories/app_context.py` -> `AppContext`, threaded by `Runner.run(context=...)` |
 | Pre/post-orchestrator pipeline | `main.py` (`amain`, `_screen_and_run`, `run_question`) |
 | ChatAgent's LLM calls | `llm/factory.py` -> `FirewalledChatShim` |
 | Model + decoding choice | `llm/factory.py` -> `build_session_clients(model_name=...)` and `main.py` `--model` flag |

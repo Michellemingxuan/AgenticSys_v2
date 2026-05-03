@@ -59,7 +59,7 @@ self.orchestrator_agent = build_orchestrator_agent(
 ```
 
 The orchestrator agent is the only one that *knows about* the others — it owns them as
-**tools**, not as references. From `case_agents/orchestrator_agent.py`:
+**tools**, not as references. From `agent_factories/orchestrator_agent.py`:
 
 ```python
 def build_orchestrator_agent(specialists, report_agent, general_specialist, model):
@@ -86,7 +86,7 @@ to invoke. When the LLM emits tool calls, the SDK runs them. Parallel fan-out co
 free: if the LLM emits multiple tool calls in one turn, OpenAI's API + the SDK execute
 them concurrently.
 
-`redacting_tool` (`case_agents/redacting_tool.py`) is the bridge — it wraps
+`redacting_tool` (`agent_factories/redacting_tool.py`) is the bridge — it wraps
 `agent.as_tool()` so input gets `sanitize_message`-d before the inner Agent sees it,
 and output gets `redact_payload`-d before going back to the orchestrator's LLM context.
 
@@ -147,10 +147,10 @@ module-import time:
 
 | Agent | What gets composed | Where |
 |---|---|---|
-| Specialist | `data_query.md` body + skill.system_prompt + data_hints + interpretation_guide + risk_signals + pillar overlay | `case_agents/specialist_agent.py` — `_compose_instructions()` |
-| Report | `report_needle.md` body + `report_analysis.md` body + workflow framing | `case_agents/report_agent.py` — `REPORT_AGENT_INSTRUCTIONS` |
-| General specialist | `comparison.md` body, verbatim | `case_agents/general_specialist.py` — `COMPARE_SYSTEM_PROMPT` |
-| Orchestrator | `team_construction.md` + `data_catalog.md` + `synthesis.md` + `balancing.md` bodies + inline `TOOL-USE DISCIPLINE` + `PARALLEL EXECUTION` blocks | `case_agents/orchestrator_agent.py` — `_compose_orchestrator_instructions()` |
+| Specialist | `data_query.md` body + skill.system_prompt + data_hints + interpretation_guide + risk_signals + pillar overlay | `agent_factories/specialist_agent.py` — `_compose_instructions()` |
+| Report | `report_needle.md` body + `report_analysis.md` body + workflow framing | `agent_factories/report_agent.py` — `REPORT_AGENT_INSTRUCTIONS` |
+| General specialist | `comparison.md` body, verbatim | `agent_factories/general_specialist.py` — `COMPARE_SYSTEM_PROMPT` |
+| Orchestrator | `team_construction.md` + `data_catalog.md` + `synthesis.md` + `balancing.md` bodies + inline `TOOL-USE DISCIPLINE` + `PARALLEL EXECUTION` blocks | `agent_factories/orchestrator_agent.py` — `_compose_orchestrator_instructions()` |
 
 To see the actual rendered string the orchestrator's LLM receives, see
 `brainstorm/orchestrator_instructions.md` (a snapshot generated from
@@ -207,7 +207,7 @@ async def fs_read_file(ctx: RunContextWrapper[AppContext], filename: str) -> str
 ## 3b. Agent-as-tool (`agent.as_tool()`) wrapped by `redacting_tool`
 
 Each sub-agent is exposed as a tool to the orchestrator via
-`case_agents/redacting_tool.py`:
+`agent_factories/redacting_tool.py`:
 
 ```python
 def redacting_tool(agent: Agent, name: str, description: str):

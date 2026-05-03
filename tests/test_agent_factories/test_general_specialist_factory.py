@@ -1,5 +1,5 @@
 from agents import Agent
-from case_agents.general_specialist import build_general_specialist
+from agent_factories.general_specialist import build_general_specialist
 from models.types import ReviewReport
 
 

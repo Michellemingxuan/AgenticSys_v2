@@ -8,11 +8,11 @@ from agents import Runner
 from agents.exceptions import AgentsException
 from agents.items import ToolCallOutputItem
 
-from case_agents.app_context import AppContext
-from case_agents.orchestrator_agent import build_orchestrator_agent
-from case_agents.report_agent import build_report_agent
-from case_agents.general_specialist import build_general_specialist
-from case_agents.specialist_agent import build_specialist_agent
+from agent_factories.app_context import AppContext
+from agent_factories.orchestrator_agent import build_orchestrator_agent
+from agent_factories.report_agent import build_report_agent
+from agent_factories.general_specialist import build_general_specialist
+from agent_factories.specialist_agent import build_specialist_agent
 from llm.firewall_stack import redact_payload
 from logger.event_logger import EventLogger
 from models.types import FinalAnswer
@@ -59,6 +59,8 @@ class Orchestrator:
                 report_agent=self.report_agent_obj,
                 general_specialist=self.general_agent,
                 model=clients.model,
+                catalog=self.catalog,
+                pillar_config=self.pillar_config,
             )
         else:
             self.orchestrator_agent = None

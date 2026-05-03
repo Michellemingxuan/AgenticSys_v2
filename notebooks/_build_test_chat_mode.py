@@ -176,8 +176,8 @@ cells.append(md(
     "`redacting_tool` and registered as tools on `orchestrator_agent`."
 ))
 cells.append(code(
-    "from case_agents.chat_agent import ChatAgent\n"
-    "from case_agents.helper_tools import build_helper_tools\n"
+    "from agent_factories.chat_agent import ChatAgent\n"
+    "from agent_factories.helper_tools import build_helper_tools\n"
     "from config.pillar_loader import PillarLoader\n"
     "from orchestrator.orchestrator import Orchestrator\n\n"
     "pillar_yaml = PillarLoader().load(PILLAR) or {}\n"
@@ -337,7 +337,7 @@ cells.append(md(
 cells.append(code(
     "from agents import Runner\n"
     "from agents.exceptions import AgentsException\n"
-    "from case_agents.app_context import AppContext\n"
+    "from agent_factories.app_context import AppContext\n"
     "from llm.firewall_stack import redact_payload\n\n"
     "if screened_question is None:\n"
     "    raise SystemExit('Question did not pass screen — nothing to run.')\n\n"

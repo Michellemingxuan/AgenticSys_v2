@@ -30,7 +30,7 @@ async def test_balance_fallback_recovers_partial_drafts(tmp_path):
     # (returned a SpecialistOutput), but then the orchestrator's final
     # synthesis turn was blocked, raising MaxTurnsExceeded.
     report_draft = ReportDraft(
-        answer="Prior report says X", coverage="full",
+        answer="Prior report says X", coverage="explicit",
         evidence_excerpts=[], files_consulted=["report.md"],
     )
     specialist_output = SpecialistOutput(

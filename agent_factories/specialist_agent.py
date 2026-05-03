@@ -3,11 +3,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agents import Agent, AgentOutputSchema
+from agents import Agent, AgentOutputSchema, ModelSettings
 
 from models.types import DomainSkill, SpecialistOutput
 from skills.loader import load_skill as _load_skill
-from tools.data_tools import get_table_schema, list_available_tables, query_table
+from tools.data_tools import (
+    aggregate_column,
+    get_table_schema,
+    list_available_tables,
+    query_table,
+)
 
 _WORKFLOW_DIR = Path(__file__).parent.parent / "skills" / "workflow"
 _BASE_INSTRUCTIONS = _load_skill(_WORKFLOW_DIR / "data_query.md").body
@@ -24,20 +29,25 @@ def _compose_instructions(skill: DomainSkill, pillar: dict) -> str:
     if skill.risk_signals:
         parts.append(f"Risk signals: {', '.join(skill.risk_signals)}")
     if pillar:
+        if "concept_glossary" in pillar and pillar["concept_glossary"]:
+            parts.append(str(pillar["concept_glossary"]).strip())
         if "focus" in pillar:
             parts.append(f"Pillar focus: {pillar['focus']}")
         if "overlay" in pillar:
             parts.append(f"Pillar overlay: {pillar['overlay']}")
         if "cut_off_date" in pillar:
             cutoff = pillar["cut_off_date"]
+            ramp = pillar.get("ramp_up_window_months", 3)
             parts.append(
-                f"DATA CUT-OFF DATE: {cutoff}\n"
+                f"DATA CUT-OFF DATE: {cutoff}. RAMP-UP WINDOW: {ramp} months.\n"
                 f"CRITICAL — Interpret ALL time-window language ('recent', 'current', "
-                f"'last 3 months', 'this year') relative to this cut-off, NEVER relative "
-                f"to today's calendar date.\n"
-                f"Example: 'recent 3 months' means the three months ending on "
-                f"{cutoff} (i.e., roughly the 3 months immediately preceding it), "
-                f"NOT the 3 months before today. No data exists beyond {cutoff}."
+                f"'last N months', 'this year') relative to the cut-off, NEVER relative "
+                f"to today's calendar date. 'Recent N months' = the N months ending on "
+                f"{cutoff}. No data exists beyond {cutoff}.\n"
+                f"When the question references 'the ramp-up window' / 'ramp-up period' / "
+                f"'the observation window' without naming a length, use the {ramp}-month "
+                f"window ending on {cutoff}. Override only when the question names a "
+                f"different length explicitly."
             )
     return "\n\n".join(parts)
 
@@ -46,7 +56,14 @@ def build_specialist_agent(skill: DomainSkill, pillar: dict, model) -> Agent:
     return Agent(
         name=skill.name,
         instructions=_compose_instructions(skill, pillar),
-        tools=[list_available_tables, get_table_schema, query_table],
+        tools=[list_available_tables, get_table_schema, query_table, aggregate_column],
         output_type=AgentOutputSchema(SpecialistOutput, strict_json_schema=False),
         model=model,
+        # Force the specialist to actually query the data on each invocation.
+        # Without this, models sometimes hallucinate failures like "I was
+        # unable to access the schemas" instead of calling get_table_schema /
+        # query_table. ``reset_tool_choice=True`` (Agent default) auto-flips
+        # this back to "auto" after the first tool call so the agent can
+        # synthesize the SpecialistOutput.
+        model_settings=ModelSettings(tool_choice="required"),
     )

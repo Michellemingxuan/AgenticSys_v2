@@ -1,6 +1,6 @@
 # Orchestrator Agent — Composed Instructions
 
-> Generated from `_compose_orchestrator_instructions()` in [case_agents/orchestrator_agent.py](../case_agents/orchestrator_agent.py).
+> Generated from `_compose_orchestrator_instructions()` in [agent_factories/orchestrator_agent.py](../agent_factories/orchestrator_agent.py).
 > This is the literal `instructions=` string the orchestrator Agent receives from `build_orchestrator_agent`.
 > Built from four skill files (`team_construction.md`, `data_catalog.md`, `synthesis.md`, `balancing.md`) plus two inline trailing blocks.
 

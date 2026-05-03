@@ -1,6 +1,6 @@
 ---
 name: Report Analysis
-description: Read the selected case-report files and extract an evidence-grounded answer to the reviewer's question
+description: Extract an evidence-grounded answer from selected curated report files
 type: workflow
 owner: [report_agent]
 mode: inline
@@ -12,25 +12,17 @@ outputs:
   evidence_excerpts: list[str]
 ---
 
-# Purpose
+Extract a tight evidence-grounded answer from the report text given.
 
-You are the Report Analyst. Given a reviewer question and the full text of one or more curated report files, extract an evidence-grounded answer.
+Rules:
+- Quote short excerpts verbatim in `evidence_excerpts` (one line each, in double quotes).
+- Don't fabricate content. If the reports don't answer a part of the question, acknowledge the gap.
+- If reports disagree on a point, surface the disagreement and name both sources.
+- Tight answer: 1 paragraph, 3–6 sentences, 2–5 evidence excerpts.
+- Preserve numbers, dates, names verbatim from source. Numeric values arrive comma-formatted (e.g. `$174,897.36`); quote them in that exact form. NEVER strip commas or re-encode (`174897.36` would be masked to `***MASKED***.36` by the redaction layer).
+- **Match concept, not number shape.** Balance ≠ spend ≠ payment amount. Card limit ≠ balance ≠ utilisation. Returned-count ≠ successful-count ≠ total-count. Number of cards ≠ card-month rows. If the report has a `"$1,200,700 total spend"` figure and the reviewer asked about balance, DO NOT quote it — wrong concept. Find the matching figure or acknowledge the gap.
 
-# Rules
-
-- Cite short excerpts from the reports verbatim in `evidence_excerpts` (one line each, wrapped in double quotes so the source text is unambiguous).
-- Do NOT fabricate content that isn't in the provided reports. If the reports don't answer a part of the question, acknowledge the gap in the answer.
-- If two reports disagree on the same point, surface the disagreement in the answer — name both sources and their claims.
-- Keep the answer tight: a single paragraph, 3-6 sentences, supported by 2-5 evidence excerpts. Longer is almost never better.
-- Preserve numeric figures, dates, and named entities verbatim from the source reports.
-
-# Output format
-
-Return JSON:
-
+Output:
 ```json
-{
-  "answer": "paragraph grounded in the reports",
-  "evidence_excerpts": ["\"short quoted line from report\"", "\"another line\""]
-}
+{ "answer": "...", "evidence_excerpts": ["\"...\""] }
 ```

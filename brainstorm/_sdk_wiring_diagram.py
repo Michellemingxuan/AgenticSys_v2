@@ -197,7 +197,7 @@ ax.text(RIGHT_X + RIGHT_W / 2, 53,
 
 # 6. ChatAgent shim
 box(RIGHT_X, 39, RIGHT_W, 8.5,
-    "ChatAgent (case_agents/chat_agent.py)\n"
+    "ChatAgent (agent_factories/chat_agent.py)\n"
     "uses FirewalledChatShim → same firewalled client\n"
     "but bypasses the Agents SDK entirely.\n"
     "screen / redact / relevance_check / converse",

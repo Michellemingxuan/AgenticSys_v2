@@ -137,6 +137,7 @@ class DataManagerAgent:
                 "ambiguous": len(diff.ambiguous),
                 "new": len(diff.new),
                 "new_tables": len(diff.new_tables),
+                "value_drift": len(diff.value_drift),
             },
         )
         return diff

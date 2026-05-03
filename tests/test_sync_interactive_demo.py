@@ -21,7 +21,7 @@ from datalayer import adapter
 from datalayer import sync as sync_mod
 from datalayer.catalog import DataCatalog
 from datalayer.gateway import LocalDataGateway
-from case_agents.data_manager_agent import DataManagerAgent
+from agent_factories.data_manager_agent import DataManagerAgent
 
 
 class _NullLogger:

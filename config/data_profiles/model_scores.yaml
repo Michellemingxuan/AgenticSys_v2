@@ -1,13 +1,20 @@
 table: model_scores
-description: Internal model scoring features — one row per scoring run per case. Contains
-  the model input variables that real `modelling_data.csv` carries (originally 264
-  in the simulator; trimmed to 54 to match real-data schema). Covers bureau scores,
-  delinquency indicators, exposure ratios, payment behavior, spend patterns, and third-party
-  risk scores. CSV wire format quirks to know about — (a) every numeric column is
-  stored as a quoted string ("668.00" for ints, "0.00" for zero counts); (b) large
-  monetary values carry a unit suffix ("X thousands", "X millions") to dodge the 6+digit
-  firewall mask, so callers must strip the suffix and multiply (×1e3 / ×1e6) before
-  computing; (c) some values use comma-separated thousands ("9,005.00").
+description: "Internal model scoring features — one row per scoring run per case.\
+  \ Holds\nboth the ML MODEL OUTPUT scores (risk scores produced by Amex's internal\n\
+  machine-learning models) and the FEATURES those models consume.\n\nNotable model-output\
+  \ score columns (examples; other scores may also exist\non this table — probe the\
+  \ schema):\n  - CDSS (Credit Decision Support System): e.g. `cust_eff_se_cdss_5_180_day_score_max`.\n\
+  \  - TSR (Total Structural Risk): e.g. `tot_struct_risk_score_max`.\n  - Other risk\
+  \ scores commonly present: `cbr_score_max`,\n    `credit_loss_prob_max`, `gam_clr_erly_risk_score_min`,\
+  \ `cust_pymt_chan_risk_score_max`.\n\nThe remaining columns are model-input features\
+  \ (bureau scores, delinquency\nindicators, exposure ratios, payment behavior, spend\
+  \ patterns, third-party\nrisk scores). Per-feature contribution to each output score\
+  \ is described\nin the sibling `score_drivers` table.\n\nCSV wire format quirks\
+  \ to know about — (a) every numeric column is stored\nas a quoted string (\"668.00\"\
+  \ for ints, \"0.00\" for zero counts); (b) large\nmonetary values carry a unit suffix\
+  \ (\"X thousands\", \"X millions\") to dodge\nthe 6+digit firewall mask, so callers\
+  \ must strip the suffix and multiply\n(×1e3 / ×1e6) before computing; (c) some values\
+  \ use comma-separated\nthousands (\"9,005.00\").\n"
 rows_per_case: 12
 one_row_per_case: false
 aliases:
@@ -20,13 +27,14 @@ columns:
     aliases:
     - cbr_score_max
   exp_pif_max:
-    dtype: float
+    dtype: string
     description: Pay-In-Full exposure (max over scoring window). Stored as string
       with a "thousands" suffix (e.g. "188.8 thousands" → 188800.0) to dodge firewall
       masking on 6+digit runs.
     description_pending: false
     aliases:
     - exp_pif_max
+    dtype_pending_review: true
   ons_30_trd_mean:
     dtype: int
     description: ons 30 trades (mean)
@@ -224,7 +232,7 @@ columns:
     aliases:
     - tot_struct_risk_score_max
   avg_remit_minus_max:
-    dtype: float
+    dtype: string
     distribution: normal
     mean: 100000
     std: 40000
@@ -234,6 +242,7 @@ columns:
       "221.4 thousands" → 221400.0) to dodge firewall masking on 6+digit runs.
     aliases:
     - avg_remit_minus_max_max
+    dtype_pending_review: true
   positive_events:
     dtype: int
     distribution: poisson
@@ -420,7 +429,7 @@ columns:
     aliases:
     - cust_pymt_chan_risk_score_max
   cust_lexis_nexis_tot_tax_assess_val_am:
-    dtype: float
+    dtype: string
     distribution: normal
     mean: 1500000
     std: 500000
@@ -431,6 +440,7 @@ columns:
       to dodge firewall masking on 6+digit runs.
     aliases:
     - cust_lexis_nexis_tot_tax_assess_val_am_max
+    dtype_pending_review: true
   cust_enhnc_one_way_spend_concentration_30day_rt1:
     dtype: float
     distribution: normal
@@ -474,7 +484,7 @@ columns:
     aliases:
     - cust_min_due_12mo_avg_max
   gam_clr_erly_risk_score:
-    dtype: float
+    dtype: string
     distribution: normal
     mean: 850.0
     std: 80.0
@@ -484,6 +494,7 @@ columns:
       with comma-separated thousands (e.g. "9,005.00") — strip commas before parsing.
     aliases:
     - gam_clr_erly_risk_score_min
+    dtype_pending_review: true
   gam_mtge_loan_actl_pymt_am:
     dtype: float
     distribution: normal
@@ -507,7 +518,7 @@ columns:
     aliases:
     - se_no_norm_wtd_pd_unpaid_amt_max
   cust_net_pymt_unbl1:
-    dtype: float
+    dtype: string
     distribution: normal
     mean: 60000.0
     std: 40000.0
@@ -518,6 +529,7 @@ columns:
       firewall masking on 6+digit runs.
     aliases:
     - cust_net_pymt_unbl1_max
+    dtype_pending_review: true
   cust_lexis_nexis_blended_score:
     dtype: int
     distribution: normal

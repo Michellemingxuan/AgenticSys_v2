@@ -16,13 +16,13 @@
 
 ## Phase 0 — Namespace, dependency, spike
 
-### Task 0.1: Rename local `agents/` to `case_agents/`
+### Task 0.1: Rename local `agents/` to `agent_factories/`
 
 The OpenAI Agents SDK installs as `openai-agents` but imports as `from agents import ...`. The local `agents/` directory collides with this. Rename before installing the SDK.
 
 **Files:**
-- Rename: `agents/` → `case_agents/`
-- Rename: `tests/test_agents/` → `tests/test_case_agents/`
+- Rename: `agents/` → `agent_factories/`
+- Rename: `tests/test_agents/` → `tests/test_agent_factories/`
 - Modify: every `.py` file containing `from agents.` or `import agents.`
 
 - [ ] **Step 1: Find all import sites**
@@ -38,8 +38,8 @@ Expected: a list of files including `main.py`, `orchestrator/orchestrator.py`, a
 - [ ] **Step 2: Rename directories**
 
 ```bash
-git mv agents case_agents
-git mv tests/test_agents tests/test_case_agents
+git mv agents agent_factories
+git mv tests/test_agents tests/test_agent_factories
 ```
 
 - [ ] **Step 3: Update all imports across the codebase**
@@ -47,7 +47,7 @@ git mv tests/test_agents tests/test_case_agents
 ```bash
 # macOS sed; on Linux drop the '' after -i
 find . -type f -name "*.py" \
-  -exec sed -i '' 's/from agents\./from case_agents\./g; s/import agents\./import case_agents\./g' {} +
+  -exec sed -i '' 's/from agents\./from agent_factories\./g; s/import agents\./import agent_factories\./g' {} +
 ```
 
 Verify nothing was missed:
@@ -67,7 +67,7 @@ Expected: all tests pass (same count as before).
 
 ```bash
 git add -A
-git commit -m "refactor: rename local agents/ to case_agents/ for SDK namespace"
+git commit -m "refactor: rename local agents/ to agent_factories/ for SDK namespace"
 ```
 
 ---
@@ -98,10 +98,10 @@ python -c "from agents import Agent, Runner, function_tool, RunContextWrapper; p
 ```
 Expected: `SDK import OK` (and no `ImportError`).
 
-- [ ] **Step 4: Verify the SDK's `agents` does not collide with `case_agents/`**
+- [ ] **Step 4: Verify the SDK's `agents` does not collide with `agent_factories/`**
 
 ```bash
-python -c "from case_agents.chat_agent import ChatAgent; from agents import Agent; print('Both import paths work')"
+python -c "from agent_factories.chat_agent import ChatAgent; from agents import Agent; print('Both import paths work')"
 ```
 Expected: `Both import paths work`.
 
@@ -710,15 +710,15 @@ git commit -m "feat(tools): decorate data_tools with @function_tool"
 ### Task 3.1: `build_specialist_agent` factory
 
 **Files:**
-- Create: `case_agents/specialist_agent.py`
-- Test: `tests/test_case_agents/test_specialist_agent.py`
+- Create: `agent_factories/specialist_agent.py`
+- Test: `tests/test_agent_factories/test_specialist_agent.py`
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/test_case_agents/test_specialist_agent.py`:
+Create `tests/test_agent_factories/test_specialist_agent.py`:
 ```python
 from agents import Agent
-from case_agents.specialist_agent import build_specialist_agent
+from agent_factories.specialist_agent import build_specialist_agent
 from models.types import DomainSkill, SpecialistOutput
 
 
@@ -744,13 +744,13 @@ def test_build_specialist_agent_returns_agent():
 - [ ] **Step 2: Run, expect failure**
 
 ```bash
-pytest tests/test_case_agents/test_specialist_agent.py -v
+pytest tests/test_agent_factories/test_specialist_agent.py -v
 ```
 Expected: `ModuleNotFoundError`.
 
 - [ ] **Step 3: Implement the factory**
 
-Create `case_agents/specialist_agent.py`:
+Create `agent_factories/specialist_agent.py`:
 ```python
 """Specialist Agent factory — replaces BaseSpecialistAgent under the SDK."""
 from __future__ import annotations
@@ -806,14 +806,14 @@ def build_specialist_agent(skill: DomainSkill, pillar: dict, model) -> Agent:
 - [ ] **Step 4: Run tests, expect pass**
 
 ```bash
-pytest tests/test_case_agents/test_specialist_agent.py -v
+pytest tests/test_agent_factories/test_specialist_agent.py -v
 ```
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add case_agents/specialist_agent.py tests/test_case_agents/test_specialist_agent.py
+git add agent_factories/specialist_agent.py tests/test_agent_factories/test_specialist_agent.py
 git commit -m "feat(agents): build_specialist_agent factory"
 ```
 
@@ -822,15 +822,15 @@ git commit -m "feat(agents): build_specialist_agent factory"
 ### Task 3.2: `build_general_specialist` factory
 
 **Files:**
-- Modify: `case_agents/general_specialist.py` (add factory; leave the legacy class for now)
-- Test: `tests/test_case_agents/test_general_specialist_factory.py`
+- Modify: `agent_factories/general_specialist.py` (add factory; leave the legacy class for now)
+- Test: `tests/test_agent_factories/test_general_specialist_factory.py`
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/test_case_agents/test_general_specialist_factory.py`:
+Create `tests/test_agent_factories/test_general_specialist_factory.py`:
 ```python
 from agents import Agent
-from case_agents.general_specialist import build_general_specialist
+from agent_factories.general_specialist import build_general_specialist
 from models.types import ReviewReport
 
 
@@ -846,13 +846,13 @@ def test_build_general_specialist_returns_agent():
 - [ ] **Step 2: Run, expect failure**
 
 ```bash
-pytest tests/test_case_agents/test_general_specialist_factory.py -v
+pytest tests/test_agent_factories/test_general_specialist_factory.py -v
 ```
 Expected: `ImportError: cannot import name 'build_general_specialist'`.
 
 - [ ] **Step 3: Add the factory**
 
-Append to `case_agents/general_specialist.py` (don't remove the existing class — Phase 6 deletes it):
+Append to `agent_factories/general_specialist.py` (don't remove the existing class — Phase 6 deletes it):
 ```python
 from agents import Agent
 
@@ -876,15 +876,15 @@ If the existing prompt isn't a module-level constant, refactor it into one named
 - [ ] **Step 4: Run tests, expect pass**
 
 ```bash
-pytest tests/test_case_agents/test_general_specialist_factory.py -v
-pytest tests/test_case_agents/test_general_specialist.py -v   # legacy class tests still pass
+pytest tests/test_agent_factories/test_general_specialist_factory.py -v
+pytest tests/test_agent_factories/test_general_specialist.py -v   # legacy class tests still pass
 ```
 Expected: all green.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add case_agents/general_specialist.py tests/test_case_agents/test_general_specialist_factory.py
+git add agent_factories/general_specialist.py tests/test_agent_factories/test_general_specialist_factory.py
 git commit -m "feat(agents): build_general_specialist factory"
 ```
 
@@ -895,9 +895,9 @@ git commit -m "feat(agents): build_general_specialist factory"
 The report agent reads the case folder. We thread `case_folder` via `RunContextWrapper` since it's per-request (unlike `gateway`, which is set once at session start).
 
 **Files:**
-- Modify: `case_agents/report_agent.py`
+- Modify: `agent_factories/report_agent.py`
 - Create: `tools/fs_tools.py`
-- Test: `tests/test_case_agents/test_report_agent_factory.py`
+- Test: `tests/test_agent_factories/test_report_agent_factory.py`
 - Test: `tests/test_tools/test_fs_tools.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -908,7 +908,7 @@ import pytest
 from pathlib import Path
 from agents import RunContextWrapper
 from tools.fs_tools import fs_list_files, fs_read_file
-from case_agents.app_context import AppContext
+from agent_factories.app_context import AppContext
 
 
 @pytest.mark.asyncio
@@ -936,10 +936,10 @@ async def test_fs_read_file_rejects_path_traversal(tmp_path):
     assert "denied" in out.lower() or "invalid" in out.lower()
 ```
 
-Create `tests/test_case_agents/test_report_agent_factory.py`:
+Create `tests/test_agent_factories/test_report_agent_factory.py`:
 ```python
 from agents import Agent
-from case_agents.report_agent import build_report_agent
+from agent_factories.report_agent import build_report_agent
 from models.types import ReportDraft
 
 
@@ -954,13 +954,13 @@ def test_build_report_agent_returns_agent():
 - [ ] **Step 2: Run, expect failure**
 
 ```bash
-pytest tests/test_tools/test_fs_tools.py tests/test_case_agents/test_report_agent_factory.py -v
+pytest tests/test_tools/test_fs_tools.py tests/test_agent_factories/test_report_agent_factory.py -v
 ```
 Expected: `ModuleNotFoundError` for both new modules.
 
 - [ ] **Step 3: Implement**
 
-Create `case_agents/app_context.py`:
+Create `agent_factories/app_context.py`:
 ```python
 """Per-request context object threaded through Runner.run for tools."""
 from __future__ import annotations
@@ -986,7 +986,7 @@ from pathlib import Path
 
 from agents import RunContextWrapper, function_tool
 
-from case_agents.app_context import AppContext
+from agent_factories.app_context import AppContext
 
 
 @function_tool
@@ -1014,7 +1014,7 @@ async def fs_read_file(ctx: RunContextWrapper[AppContext], filename: str) -> str
     return target.read_text()
 ```
 
-Append to `case_agents/report_agent.py` (leave the legacy `ReportAgent` class for Phase 6 deletion):
+Append to `agent_factories/report_agent.py` (leave the legacy `ReportAgent` class for Phase 6 deletion):
 ```python
 from agents import Agent
 from tools.fs_tools import fs_list_files, fs_read_file
@@ -1044,7 +1044,7 @@ If the existing legacy class has a more thorough prompt, port that text into `RE
 - [ ] **Step 4: Run tests, expect pass**
 
 ```bash
-pytest tests/test_tools/test_fs_tools.py tests/test_case_agents/test_report_agent_factory.py -v
+pytest tests/test_tools/test_fs_tools.py tests/test_agent_factories/test_report_agent_factory.py -v
 pytest tests/  # ensure legacy report agent tests still pass
 ```
 Expected: all green.
@@ -1052,7 +1052,7 @@ Expected: all green.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add case_agents/app_context.py case_agents/report_agent.py tools/fs_tools.py tests/
+git add agent_factories/app_context.py agent_factories/report_agent.py tools/fs_tools.py tests/
 git commit -m "feat(agents): build_report_agent factory + fs_tools"
 ```
 
@@ -1063,16 +1063,16 @@ git commit -m "feat(agents): build_report_agent factory + fs_tools"
 Wraps `agent.as_tool()` to apply input/output redaction at the orchestrator→specialist boundary (spec §4.3 boundaries 1+2).
 
 **Files:**
-- Create: `case_agents/redacting_tool.py`
-- Test: `tests/test_case_agents/test_redacting_tool.py`
+- Create: `agent_factories/redacting_tool.py`
+- Test: `tests/test_agent_factories/test_redacting_tool.py`
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/test_case_agents/test_redacting_tool.py`:
+Create `tests/test_agent_factories/test_redacting_tool.py`:
 ```python
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from case_agents.redacting_tool import redacting_tool
+from agent_factories.redacting_tool import redacting_tool
 
 
 @pytest.mark.asyncio
@@ -1106,13 +1106,13 @@ async def test_redacting_tool_redacts_output():
 - [ ] **Step 2: Run, expect failure**
 
 ```bash
-pytest tests/test_case_agents/test_redacting_tool.py -v
+pytest tests/test_agent_factories/test_redacting_tool.py -v
 ```
 Expected: ModuleNotFoundError.
 
 - [ ] **Step 3: Implement** (the SDK's `as_tool` invocation API was confirmed in Task 0.3 — adjust below if the spike showed a different shape)
 
-Create `case_agents/redacting_tool.py`:
+Create `agent_factories/redacting_tool.py`:
 ```python
 """Wraps agent.as_tool() with PII redaction on tool input + output."""
 from __future__ import annotations
@@ -1145,14 +1145,14 @@ If the SDK's `Tool` is immutable or `as_tool()` returns a callable rather than a
 - [ ] **Step 4: Run tests, expect pass**
 
 ```bash
-pytest tests/test_case_agents/test_redacting_tool.py -v
+pytest tests/test_agent_factories/test_redacting_tool.py -v
 ```
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add case_agents/redacting_tool.py tests/test_case_agents/test_redacting_tool.py
+git add agent_factories/redacting_tool.py tests/test_agent_factories/test_redacting_tool.py
 git commit -m "feat(agents): redacting_tool helper for inter-agent transit"
 ```
 
@@ -1161,18 +1161,18 @@ git commit -m "feat(agents): redacting_tool helper for inter-agent transit"
 ### Task 3.5: `build_orchestrator_agent` factory
 
 **Files:**
-- Create: `case_agents/orchestrator_agent.py`
-- Test: `tests/test_case_agents/test_orchestrator_agent.py`
+- Create: `agent_factories/orchestrator_agent.py`
+- Test: `tests/test_agent_factories/test_orchestrator_agent.py`
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/test_case_agents/test_orchestrator_agent.py`:
+Create `tests/test_agent_factories/test_orchestrator_agent.py`:
 ```python
 from agents import Agent
-from case_agents.orchestrator_agent import build_orchestrator_agent
-from case_agents.specialist_agent import build_specialist_agent
-from case_agents.general_specialist import build_general_specialist
-from case_agents.report_agent import build_report_agent
+from agent_factories.orchestrator_agent import build_orchestrator_agent
+from agent_factories.specialist_agent import build_specialist_agent
+from agent_factories.general_specialist import build_general_specialist
+from agent_factories.report_agent import build_report_agent
 from models.types import DomainSkill, FinalAnswer
 
 
@@ -1201,13 +1201,13 @@ def test_build_orchestrator_agent_wires_all_tools():
 - [ ] **Step 2: Run, expect failure**
 
 ```bash
-pytest tests/test_case_agents/test_orchestrator_agent.py -v
+pytest tests/test_agent_factories/test_orchestrator_agent.py -v
 ```
 Expected: ModuleNotFoundError.
 
 - [ ] **Step 3: Implement**
 
-Create `case_agents/orchestrator_agent.py`:
+Create `agent_factories/orchestrator_agent.py`:
 ```python
 """Orchestrator Agent factory — A1 maximal: specialists + report + general as tools."""
 from __future__ import annotations
@@ -1216,7 +1216,7 @@ from pathlib import Path
 
 from agents import Agent
 
-from case_agents.redacting_tool import redacting_tool
+from agent_factories.redacting_tool import redacting_tool
 from models.types import FinalAnswer
 from skills.loader import load_skill as _load_skill
 
@@ -1275,14 +1275,14 @@ def build_orchestrator_agent(
 - [ ] **Step 4: Run tests, expect pass**
 
 ```bash
-pytest tests/test_case_agents/test_orchestrator_agent.py -v
+pytest tests/test_agent_factories/test_orchestrator_agent.py -v
 ```
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add case_agents/orchestrator_agent.py tests/test_case_agents/test_orchestrator_agent.py
+git add agent_factories/orchestrator_agent.py tests/test_agent_factories/test_orchestrator_agent.py
 git commit -m "feat(agents): build_orchestrator_agent factory"
 ```
 
@@ -1374,10 +1374,10 @@ def build_session_clients(
 Modify `orchestrator/orchestrator.py` `__init__` to accept `clients` and build the agent graph (preserve all existing fields for backward compatibility during migration):
 ```python
 from skills.domain.loader import list_domain_skills, load_domain_skill
-from case_agents.orchestrator_agent import build_orchestrator_agent
-from case_agents.specialist_agent import build_specialist_agent
-from case_agents.general_specialist import build_general_specialist
-from case_agents.report_agent import build_report_agent
+from agent_factories.orchestrator_agent import build_orchestrator_agent
+from agent_factories.specialist_agent import build_specialist_agent
+from agent_factories.general_specialist import build_general_specialist
+from agent_factories.report_agent import build_report_agent
 
 class Orchestrator:
     def __init__(
@@ -1522,7 +1522,7 @@ Expected: failure (legacy `run` doesn't use `Runner.run`).
 In `orchestrator/orchestrator.py`, replace the existing `async def run(self, question, case_folder, report_agent) -> FinalAnswer` body with:
 ```python
 from agents import Runner
-from case_agents.app_context import AppContext
+from agent_factories.app_context import AppContext
 from llm.firewall_stack import redact_payload
 
 async def run(self, question, case_folder, report_agent=None) -> FinalAnswer:
@@ -1795,7 +1795,7 @@ ChatAgent's public methods (`screen`, `redact`, `relevance_check`, `converse`) s
 - [ ] **Step 1: Read ChatAgent's LLM call sites**
 
 ```bash
-grep -n "self\.llm\." case_agents/chat_agent.py
+grep -n "self\.llm\." agent_factories/chat_agent.py
 ```
 
 - [ ] **Step 2: Decide migration scope for ChatAgent**
@@ -1843,7 +1843,7 @@ chat_agent = ChatAgent(llm=chat_llm, ...)
 - [ ] **Step 4: Run ChatAgent tests**
 
 ```bash
-pytest tests/test_case_agents/test_chat_agent.py -v
+pytest tests/test_agent_factories/test_chat_agent.py -v
 pytest tests/  # full suite
 ```
 Expected: ChatAgent tests pass.
@@ -1862,17 +1862,17 @@ git commit -m "feat(llm): FirewalledChatShim preserves ChatAgent's ainvoke surfa
 ### Task 6.1: Delete `BaseSpecialistAgent`
 
 **Files:**
-- Delete: `case_agents/base_agent.py`
-- Delete: `tests/test_case_agents/test_base_agent.py`
+- Delete: `agent_factories/base_agent.py`
+- Delete: `tests/test_agent_factories/test_base_agent.py`
 - Modify: any remaining imports
 
 - [ ] **Step 1: Confirm no live importers**
 
 ```bash
-grep -rn "BaseSpecialistAgent\|from case_agents.base_agent\|from case_agents import base_agent" \
+grep -rn "BaseSpecialistAgent\|from agent_factories.base_agent\|from agent_factories import base_agent" \
   --include="*.py" .
 ```
-Expected: only references in `tests/test_case_agents/test_base_agent.py` and possibly `case_agents/__init__.py`.
+Expected: only references in `tests/test_agent_factories/test_base_agent.py` and possibly `agent_factories/__init__.py`.
 
 - [ ] **Step 2: Run pre-deletion test sanity**
 
@@ -1884,10 +1884,10 @@ Note any failures unrelated to base_agent.
 - [ ] **Step 3: Delete files and clean __init__**
 
 ```bash
-git rm case_agents/base_agent.py tests/test_case_agents/test_base_agent.py
+git rm agent_factories/base_agent.py tests/test_agent_factories/test_base_agent.py
 ```
 
-Open `case_agents/__init__.py` and remove any `from .base_agent import ...` line.
+Open `agent_factories/__init__.py` and remove any `from .base_agent import ...` line.
 
 - [ ] **Step 4: Run tests**
 
@@ -1908,8 +1908,8 @@ git commit -m "refactor: delete BaseSpecialistAgent (replaced by build_specialis
 ### Task 6.2: Delete `SessionRegistry`
 
 **Files:**
-- Delete: `case_agents/session_registry.py`
-- Delete: `tests/test_case_agents/test_session_registry.py`
+- Delete: `agent_factories/session_registry.py`
+- Delete: `tests/test_agent_factories/test_session_registry.py`
 
 - [ ] **Step 1: Confirm no live importers**
 
@@ -1927,7 +1927,7 @@ grep -rln "SessionRegistry" --include="*.py" . | xargs sed -i '' '/SessionRegist
 - [ ] **Step 3: Delete files**
 
 ```bash
-git rm case_agents/session_registry.py tests/test_case_agents/test_session_registry.py
+git rm agent_factories/session_registry.py tests/test_agent_factories/test_session_registry.py
 ```
 
 - [ ] **Step 4: Run tests**
@@ -2073,12 +2073,12 @@ git commit -m "chore: remove langchain-* dependencies"
 
 These three agent files contain both a legacy class AND the new factory function (added in Phase 3). Delete the legacy classes now that nothing references them.
 
-### Task 7.1: Strip legacy classes from `case_agents/report_agent.py`, `general_specialist.py`, `data_manager_agent.py`
+### Task 7.1: Strip legacy classes from `agent_factories/report_agent.py`, `general_specialist.py`, `data_manager_agent.py`
 
 **Files:**
-- Modify: `case_agents/report_agent.py`
-- Modify: `case_agents/general_specialist.py`
-- Modify: `case_agents/data_manager_agent.py`
+- Modify: `agent_factories/report_agent.py`
+- Modify: `agent_factories/general_specialist.py`
+- Modify: `agent_factories/data_manager_agent.py`
 - Modify/Delete: corresponding legacy tests
 
 - [ ] **Step 1: Confirm legacy classes have no live importers**
@@ -2091,7 +2091,7 @@ Expected: results only in the class definitions and their tests.
 
 - [ ] **Step 2: Delete the legacy classes**
 
-In each of `case_agents/report_agent.py`, `general_specialist.py`, `data_manager_agent.py`:
+In each of `agent_factories/report_agent.py`, `general_specialist.py`, `data_manager_agent.py`:
 - Delete the `class ReportAgent` / `class GeneralSpecialist` / `class DataManagerAgent` body
 - Keep the new `build_*` factory function and any module-level constants the factory uses
 - Remove now-unused imports (e.g., `FirewalledModel`)
@@ -2100,7 +2100,7 @@ If `data_manager_agent.py` is still using a different pattern (it sync-touches d
 
 - [ ] **Step 3: Update the legacy tests**
 
-Tests at `tests/test_case_agents/test_report_agent.py`, `test_general_specialist.py`, `test_data_manager_agent.py` likely test the deleted classes. Either:
+Tests at `tests/test_agent_factories/test_report_agent.py`, `test_general_specialist.py`, `test_data_manager_agent.py` likely test the deleted classes. Either:
 - Delete the test file if it ONLY tested the class
 - Keep and update if it also covers the factory
 
@@ -2163,4 +2163,4 @@ Expected: produces a `FinalAnswer` and exits cleanly.
 - **`agent.as_tool()` return shape:** Task 3.4 monkey-patches `raw_tool.invoke`. If the spike showed Tool objects are immutable or the invocation contract differs, switch the wrapper to a `@function_tool` that internally calls `Runner.run(agent, ...)`.
 - **`MaxTurnsExceeded` and `ToolCallOutputItem`:** Placeholders in Task 4.3 — replace with the exact names found in Phase 0.3.
 - **`OPENAI_API_KEY` for spike (Task 0.3) and smoke runs (5.1, 6.4, acceptance):** ensure it's set in your environment.
-- **Pillar config in Task 4.1:** the current code has `_build_case_schema` reading the gateway's case tables and threading them into specialist descriptions. Under A1, this logic is consumed by the orchestrator agent's instructions through `data_catalog.md`. If the new orchestrator's tool descriptions need a richer case-aware schema, build a small helper in `case_agents/orchestrator_agent.py` that injects a "current case schema" string into the orchestrator's instructions at agent-build time.
+- **Pillar config in Task 4.1:** the current code has `_build_case_schema` reading the gateway's case tables and threading them into specialist descriptions. Under A1, this logic is consumed by the orchestrator agent's instructions through `data_catalog.md`. If the new orchestrator's tool descriptions need a richer case-aware schema, build a small helper in `agent_factories/orchestrator_agent.py` that injects a "current case schema" string into the orchestrator's instructions at agent-build time.

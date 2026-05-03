@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 class DomainSkill(BaseModel):
     name: str
     system_prompt: str
+    description: str = ""  # one-line summary from skill frontmatter; used to enrich orchestrator tool descriptions for routing
     data_hints: list[str] = Field(default_factory=list)
     interpretation_guide: str = ""
     risk_signals: list[str] = Field(default_factory=list)
@@ -137,14 +138,24 @@ class StepRecord(BaseModel):
 class ReportDraft(BaseModel):
     """Result of the Report Agent's Needle + Analysis chain over `reports/<case-id>/`.
 
-    `coverage` is the Needle's verdict on how well the curated reports answer
+    `coverage` is the Needle's verdict on how the curated reports relate to
     the reviewer's question:
-      - "full":    reports fully answer the question
-      - "partial": reports cover some aspects, team workflow fills gaps
-      - "none":    no relevant reports (empty folder or nothing matched)
+      - "explicit":      the report directly states the answer (or the
+                         specific facts the question asks for).
+      - "implicit":      the report contains relevant facts but does NOT
+                         directly answer; inference / synthesis required.
+                         Lead with specialist data; use the report as
+                         supporting context.
+      - "not_mentioned": the report doesn't cover the question's topic
+                         (empty folder, irrelevant files, or no useful
+                         content).
+
+    The richer taxonomy replaces the older "full / partial / none" set,
+    which biased the Needle toward over-confidently claiming "full" when
+    a report merely touched on the topic.
     """
 
-    coverage: Literal["full", "partial", "none"]
+    coverage: Literal["explicit", "implicit", "not_mentioned"]
     answer: str = ""
     evidence_excerpts: list[str] = Field(default_factory=list)
     files_consulted: list[str] = Field(default_factory=list)
@@ -177,12 +188,19 @@ class DataPullRequest(BaseModel):
 
     No live pull backend exists today — this documents what a future Data Agent
     would target. Rendered to the reviewer by `ChatAgent.format_final_answer`.
+
+    All fields except ``needed`` are optional so the LLM can emit
+    ``{"needed": false}`` (or omit the object entirely) when no pull is
+    warranted, without tripping the SDK's strict-JSON validation. When
+    ``needed`` is true the LLM should populate ``reason`` and ``severity``;
+    if it forgets, we still accept the response and downstream rendering
+    falls back to the empty/low defaults.
     """
 
     needed: bool
-    reason: str
+    reason: str = ""
     would_pull: list[str] = Field(default_factory=list)
-    severity: Literal["low", "medium", "high"]
+    severity: Literal["low", "medium", "high"] = "low"
 
 
 class FinalAnswer(BaseModel):

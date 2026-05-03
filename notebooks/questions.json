@@ -1,0 +1,49 @@
+{
+  "case_id": "366132845011",
+  "pillar": "credit_risk",
+  "model": "gpt-4.1",
+  "backend": "openai",
+  "data_source": "real",
+  "session_id": "question-suite",
+  "test_cases": [
+    {
+      "name": "out_of_scope_lunch",
+      "question": "what to eat for lunch?"
+    },
+    {
+      "name": "payment_returns",
+      "question": "did customer have any payment returns"
+    },
+    {
+      "name": "successful_payments_count",
+      "question": "how many successful payments?"
+    },
+    {
+      "name": "successful_payments_window_chain",
+      "question": "how many successful payments in the recent 2 years?",
+      "followups": [
+        "and the total payment amount?"
+      ]
+    },
+    {
+      "name": "model_external_delinquency",
+      "question": "Does the model have information about external delinquency behavior?"
+    },
+    {
+      "name": "consumer_cards_chain",
+      "question": "How many consumer cards does the customer have?",
+      "followups": [
+        "How much total balance for all consumer cards?",
+        "How much total balance for all commercial cards?"
+      ]
+    },
+    {
+      "name": "tsr_no_reaction_ramp_up",
+      "question": "Why did TSR score not react at the early stage?"
+    },
+    {
+      "name": "cdss_volatility",
+      "question": "Why is the CDSS score volatile?"
+    }
+  ]
+}

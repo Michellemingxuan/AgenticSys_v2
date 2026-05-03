@@ -7,13 +7,14 @@ rows_per_case: 4
 one_row_per_case: false
 columns:
   month:
-    dtype: string
+    dtype: date
     parse_hint: '%b-%Y'
     description: Monthly snapshot date for this bureau record (e.g. "Jan-2024"). One
       row per case per month across the review window.
     description_pending: false
     aliases:
     - month
+    dtype_pending_review: true
   fico_score:
     dtype: int
     distribution: normal
@@ -161,7 +162,7 @@ columns:
     aliases:
     - Amex Primary Lender Indicator
   ln_business_value:
-    dtype: float
+    dtype: string
     distribution: normal
     mean: 1500000
     std: 500000
@@ -171,6 +172,7 @@ columns:
       address (USD). Decrement is a negative sign.
     aliases:
     - LN Business Value (USD)
+    dtype_pending_review: true
   judgements_org_count:
     dtype: int
     distribution: poisson

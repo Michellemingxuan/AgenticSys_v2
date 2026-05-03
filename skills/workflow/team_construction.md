@@ -1,44 +1,62 @@
 ---
 name: Team Construction
-description: Orchestrator's team selection + sub-question decomposition — decides which specialists run and what each of them answers
+description: Orchestrator's team-selection routing — concept → specialist + sub-question framing
 type: workflow
 owner: [orchestrator]
 mode: inline
 replaces: [SELECT_TEAM_PROMPT, SPLIT_SUBQUESTIONS_PROMPT]
 ---
 
-# Step 1 — Team selection
+Pick specialist tool(s) to call and frame each one's sub-question. The team roster is wired as tools; team selection = which tools to call. No JSON output for this step — the output is the tool calls you emit next.
 
-You are the orchestrator's TEAM SELECTION step. Given a reviewer's root question and a description of each available specialist (data tables and columns), pick the specialists whose data can directly contribute to answering the root.
+## Concept → specialist
 
-**Rules:**
+| Reviewer phrasing | Specialist |
+|---|---|
+| FICO, bureau score, tradelines, external delinquency, derog marks | `bureau` |
+| DTI, income, affordability, capacity, limit headroom | `capacity_afford` |
+| **cards (count/balance/limit), consumer/commercial card, cross-product exposure, portfolio mix, merchant relationships** | **`crossbu`** |
+| tenure, customer relationship, product usage history | `customer_rel` |
+| internal model score, PD, GAM, model trajectory | `modeling` |
+| payments, payment returns, spend, spend volume, delinquency timing | `spend_payments` |
+| WCC, agent call notes, customer-service log, collections call | `wcc` |
 
-- Select a specialist only if its DATA contains fields that the root question depends on. Prefer 1-3 specialists over a broad sweep.
-- Do NOT pick a specialist for 'additional context' or 'completeness'. Every pick must carry its weight in the final answer.
-- Prefer warm specialists (already active in session) when they are relevant — but do not pick a warm specialist whose data is unrelated.
-- For broad questions (e.g. 'full report'), select all specialists.
-- Return at least one specialist.
+Edge cases:
+- **balance vs spend:** balance → `crossbu` (`crossbu_cards.balance`); spend → `spend_payments` (`spends_data.Amount`). Different concepts, different specialists.
+- **default journey / DPD progression:** primary `bureau`; cross-check `modeling` if score evolution matters.
+- **broad / "full review":** select all specialists. Otherwise narrow to 1–2.
+- **"how many cards":** `crossbu` (NOT `customer_rel`, despite the name — it owns only the tenure table).
 
-Return a JSON object: `{"specialists": ["<domain1>", "<domain2>"]}`
+If phrasing doesn't match the table, fall through to the auto-generated TEAM ROSTER (`owns: <table>` lines) and route by which table carries the answer.
 
-# Step 2 — Sub-question decomposition
+## Subject vs object — route to the SUBJECT
 
-You are the orchestrator's SUB-QUESTION DECOMPOSITION step. The team has already been selected. For each selected specialist, rewrite the root question into a focused sub-question.
+When a specialist appears as the grammatical subject of the question, route there regardless of what concept appears in the predicate.
 
-**Governing principle — sub-questions must be IN SERVICE of the root:**
+| Shape | Subject = | Object = |
+|---|---|---|
+| "Does **X** have information about Y?" | X | Y |
+| "What does **X** say about Y?" / "Does **X** cover / track Y?" | X | Y |
+| "Show me **X**'s view of Y" | X | Y |
+| "What is the customer's Y?" / "How many Y?" | (no subject) | route to Y owner |
 
-- Every sub-question MUST be a piece of evidence whose answer directly contributes to answering the root question. If an answer to a sub-question would NOT change or support the answer to the root, it does not belong in the plan. Do not emit it.
-- Do NOT add sub-questions that merely expand scope, explore adjacent topics, or satisfy curiosity. No 'while we're at it' questions.
-- Before emitting each sub-question, silently ask yourself: "If the specialist answers this, does it help the reviewer answer the root?" If 'maybe' or 'only indirectly', skip or rewrite until tight.
+Examples:
+- "Does **the model** have info about external delinquency?" → `modeling`. ("the model" / "the models" in reviewer questions ALWAYS = internal ML risk-scoring models — never the agent system or a generic abstraction.)
+- "Does **WCC** show complaints about cards?" → `wcc` (cards is the topic, WCC is the data source).
+- "What does **the bureau** say about payment history?" → `bureau` (NOT `spend_payments`).
 
-**Phrasing rules:**
+## Selection rules
 
-- One sentence per sub-question.
-- Grounded in the specialist's data vocabulary (use column/table names from its data description where relevant).
-- Focused ONLY on the aspect that specialist's data can address — do not ask a specialist about data it doesn't have.
-- Orthogonal across specialists — two specialists must not be asked the same thing. Each sub-question gives the synthesizer a distinct piece.
-- Phrased so the answer slots directly into the root-question synthesis.
-- If only one specialist was selected, its sub-question may equal the root question verbatim.
+1. Minimum set. 1 is normal; 2 when the question explicitly spans domains; 3+ only on a "full review".
+2. Every pick must carry weight — no "for context", no "in case relevant".
+3. Match data, not name (`customer_rel` ≠ "questions about the customer").
+4. **Follow-ups:** prefer the specialist consulted on the prior turn if the same domain — its history is preserved within the AppContext.
+5. **Always pair with `report_agent`** on the same turn (TOOL-USE DISCIPLINE rule below). They run in parallel.
 
-Return a JSON object: `{"plan": [{"specialist": "<domain>", "sub_question": "<...>"}, ...]}`
-Produce exactly one entry per selected specialist, in the same order.
+## Sub-question framing
+
+- Serves the root — if the specialist's answer wouldn't change the final answer, drop it.
+- Stays in the specialist's domain.
+- Uses the specialist's data vocabulary (name the column/table when you know it).
+- Orthogonal across specialists — no duplicates.
+- One specialist selected → sub-question may equal the root question verbatim.

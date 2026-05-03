@@ -15,9 +15,23 @@ from agents import function_tool
 from datalayer.catalog import DataCatalog
 from datalayer.gateway import DataGateway
 
-_gateway: DataGateway | None = None
-_catalog: DataCatalog | None = None
-_logger: Any = None  # logger.event_logger.EventLogger when wired; None = silent
+# Module state — guarded against autoreload reset.
+# In notebooks with `%autoreload 2`, re-executing this module's top level
+# would reset these to None and silently break the session (the gateway the
+# notebook just initialized would vanish). The try/except preserves whatever
+# `init_tools()` last set across reloads.
+try:
+    _gateway  # type: ignore[used-before-def]  # noqa: F821
+except NameError:
+    _gateway: DataGateway | None = None
+try:
+    _catalog  # type: ignore[used-before-def]  # noqa: F821
+except NameError:
+    _catalog: DataCatalog | None = None
+try:
+    _logger  # type: ignore[used-before-def]  # noqa: F821
+except NameError:
+    _logger: Any = None  # logger.event_logger.EventLogger when wired; None = silent
 
 _MAX_CHARS = 3000
 _LOG_PREVIEW_CHARS = 500  # how much of tool output to snapshot in tool_result events
@@ -113,8 +127,11 @@ _MONTHS.update({m[:3]: i for m, i in list(_MONTHS.items())})
 _ISO_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
 _ISO_MONTH_RE = re.compile(r"^(\d{4})-(\d{2})$")
 _YEAR_RE = re.compile(r"^(\d{4})$")
-# "October'2024", "October 2024", "Oct'2024", "Oct 2024"
-_MONTH_YEAR_RE = re.compile(r"^([A-Za-z]{3,})\s*['\s]\s*(\d{4})$")
+# Month-year, separator is one of `'`, `-`, or whitespace:
+# "October'2024", "October 2024", "Oct'2024", "Oct 2024", "Jan-2024".
+_MONTH_YEAR_RE = re.compile(r"^([A-Za-z]{3,})\s*[-'\s]\s*(\d{4})$")
+# DD-MMM-YYYY: "07-Jul-2024", "7-Jul-2024".
+_DAY_MONTH_YEAR_RE = re.compile(r"^(\d{1,2})-([A-Za-z]{3,})-(\d{4})$")
 
 
 def _date_key(value: Any) -> tuple[int, int, int] | None:
@@ -122,10 +139,12 @@ def _date_key(value: Any) -> tuple[int, int, int] | None:
     (year, month, day) tuple. Returns None if unparseable.
 
     Handles formats produced across the data profiles:
-      - ``2025-11-16``           → (2025, 11, 16)
-      - ``2025-11``              → (2025, 11, 1)
-      - ``2025``                 → (2025, 1, 1)
+      - ``2025-11-16``                                     → (2025, 11, 16)
+      - ``07-Jul-2024`` / ``7-Jul-2024``                   → (2024, 7, 7)
+      - ``2025-11``                                        → (2025, 11, 1)
       - ``October'2024`` / ``October 2024`` / ``Oct'2024`` → (2024, 10, 1)
+      - ``Jan-2024`` / ``Jan 2024`` / ``January-2024``     → (2024, 1, 1)
+      - ``2025``                                           → (2025, 1, 1)
     Tuple comparison matches chronological order for any of these.
     """
     if value is None:
@@ -137,6 +156,14 @@ def _date_key(value: Any) -> tuple[int, int, int] | None:
     m = _ISO_DATE_RE.match(s)
     if m:
         return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+    # DD-MMM-YYYY (must come before _ISO_MONTH_RE since both contain hyphens
+    # but this one starts with a 1-2 digit day).
+    m = _DAY_MONTH_YEAR_RE.match(s)
+    if m:
+        month_idx = _MONTHS.get(m.group(2).lower())
+        if month_idx is not None:
+            return (int(m.group(3)), month_idx, int(m.group(1)))
 
     m = _ISO_MONTH_RE.match(s)
     if m:
@@ -174,6 +201,81 @@ def _coerce_pair(a: Any, b: Any) -> tuple[Any, Any]:
         return ak, bk
     # 3) string fallback
     return (str(a) if a is not None else ""), (str(b) if b is not None else "")
+
+
+def _resolve_real_table(requested: str) -> str:
+    """Resolve a requested table name to whatever the gateway actually carries.
+
+    Specialists call query_table with canonical names from skill data_hints
+    (e.g. ``crossbu_cards``) but real CSVs may use a slightly different name
+    (``crossbu_cards_data``). This walks: gateway exact → catalog table-level
+    aliases (canonical → real) → normalized fuzzy. Falls through unchanged
+    when nothing matches.
+    """
+    if _gateway is None or not requested:
+        return requested
+    real_tables = _gateway.list_tables() if _gateway.get_case_id() else []
+    if not real_tables:
+        return requested
+    if requested in real_tables:
+        return requested
+
+    # Canonical → real via catalog's declared table-level aliases.
+    if _catalog is not None:
+        aliases = _catalog.table_aliases(requested)
+        for alias in aliases:
+            if alias in real_tables:
+                return alias
+
+    # Normalized fuzzy fallback.
+    target = _normalize(requested)
+    if not target:
+        return requested
+    for real in real_tables:
+        if _normalize(real) == target:
+            return real
+    return requested
+
+
+def _resolve_real_column(
+    rows: list[dict],
+    requested: str,
+    table_name: str | None = None,
+) -> str:
+    """Resolve a requested column name to the actual key used in rows.
+
+    Lookup order:
+      1. Exact match in the row's real keys.
+      2. Catalog-declared aliases — most authoritative; ``payments.yaml``
+         declares e.g. ``return_flag.aliases: [Return Flag]`` so a specialist
+         passing the canonical ``return_flag`` resolves to ``Return Flag`` in
+         the real CSV.
+      3. Normalization-based fuzzy match (case + punctuation only) as a
+         fallback for variants the catalog hasn't declared.
+
+    Falls through (returns the input) when nothing matches — the filter or
+    projection will then return zero rows / drop the column, which is the
+    right behavior for a genuinely-missing column.
+    """
+    if not rows or not requested:
+        return requested
+    real_keys = list(rows[0].keys())
+    if requested in real_keys:
+        return requested
+
+    if _catalog is not None and table_name:
+        canonical_table = _resolve_canonical_table(table_name) or table_name
+        resolved = _catalog.resolve_real_column(canonical_table, requested, real_keys)
+        if resolved != requested and resolved in real_keys:
+            return resolved
+
+    target = _normalize(requested)
+    if not target:
+        return requested
+    for k in real_keys:
+        if _normalize(k) == target:
+            return k
+    return requested
 
 
 def _apply_filter(
@@ -337,32 +439,74 @@ def _get_table_schema_impl(table_name: str) -> str:
         return out
 
     if _gateway is not None and _gateway.get_case_id() is not None:
-        rows = _gateway.query(table_name) or []
+        # Resolve canonical → real table name (specialists may pass either).
+        real_table = _resolve_real_table(table_name)
+        rows = _gateway.query(real_table) or []
         if not rows:
             out = f"Data unavailable: table '{table_name}' not found for current case."
             _log_result("get_table_schema", result=out,
                         extra={"table_name": table_name, "found": False})
             return out
+        if real_table != table_name:
+            table_name = real_table
 
         canonical_tables = _resolve_canonical_tables(table_name)
         # Build a merged column-spec map across all matching canonical tables.
         # Earlier entries win, so a hand-written real-data profile takes
         # precedence over the broader canonical it shares a name with.
         merged_cols: dict[str, dict] = {}
+        canonical_lookup: dict[str, str] = {}  # col_name → canonical name
         for ct in canonical_tables:
             for col, spec in (_catalog._profiles.get(ct, {}).get("columns", {}) or {}).items():
                 merged_cols.setdefault(col, spec)
+                canonical_lookup.setdefault(col, col)
+
+        # Add table-level aliases preface so the LLM sees the table is the
+        # rbind of multiple sources when applicable.
+        table_aliases: list[str] = []
+        for ct in canonical_tables:
+            table_aliases.extend(_catalog.table_aliases(ct))
 
         schema: dict[str, dict] = {}
         for real_col in rows[0].keys():
             spec = _find_column_spec(merged_cols, real_col)
             if spec is not None:
-                schema[real_col] = {
+                # Determine the canonical name for this real column.
+                if real_col in merged_cols:
+                    canonical = real_col
+                else:
+                    canonical = next(
+                        (c for c, s in merged_cols.items()
+                         if real_col in (s.get("aliases") or [])
+                         or _normalize(c) == _normalize(real_col)
+                         or any(_normalize(a) == _normalize(real_col)
+                                for a in (s.get("aliases") or []))),
+                        real_col,
+                    )
+                entry: dict = {
                     "type": spec.get("dtype", "unknown"),
                     "description": spec.get("description", ""),
                 }
+                if canonical != real_col:
+                    entry["canonical_name"] = canonical
+                aliases = spec.get("aliases") or []
+                if aliases:
+                    entry["aliases"] = list(aliases)
+                # Surface declared categorical values when the profile has
+                # them — helps specialists pick the right filter_value
+                # vocabulary. NOTE: these are example/reference values from
+                # the catalog (post-sync they may reflect real-data
+                # observation), NOT an authoritative scope for inference.
+                # Specialists must probe the actual data when in doubt; see
+                # the SCHEMA & VOCABULARY DISCIPLINE rules in data_query.md.
+                if "categories" in spec:
+                    entry["declared_values"] = list(spec["categories"].keys())
+                schema[real_col] = entry
             else:
                 schema[real_col] = {"type": "unknown", "description": "(not in catalog)"}
+
+        if table_aliases:
+            schema["__table_aliases__"] = table_aliases
 
         out = json.dumps(schema, indent=2)
         _log_result("get_table_schema", result=out,
@@ -426,6 +570,25 @@ def _query_table_impl(
 ) -> str:
     """Query a data table for the current case. All data is scoped to the active case.
 
+    Returns a JSON object with structured count metadata and a sample of rows:
+        {
+          "table": "<name>",
+          "filter": "<col> <op> <value>" or null,
+          "columns_requested": [...] or null,
+          "total_rows_in_table": int,    # rows in the table for this case
+          "rows_matching_filter": int,   # rows after filter — the TRUE count
+          "rows_returned": int,          # rows actually included in `rows` (may be truncated)
+          "truncated": bool,
+          "truncation_note": "showing 4/186 rows, 6/12 columns" (only if truncated),
+          "rows": [ {...}, ... ]
+        }
+
+    For "how many" questions: ALWAYS read `rows_matching_filter`. NEVER count
+    the entries in the `rows` array — that array is a display sample and may
+    be truncated when the table is large or rows are wide. The sample lets
+    you verify shape and pick representative values; the count comes from
+    `rows_matching_filter`.
+
     Args:
         table_name: the table to query.
         filter_column: column to filter on (optional).
@@ -452,99 +615,118 @@ def _query_table_impl(
     })
 
     if _gateway is None:
-        out = "Data unavailable"
-        _log_result("query_table", result=out)
+        out = (
+            "Data unavailable: data layer is not initialized for this session "
+            "(no gateway is bound to tools.data_tools). This is an infrastructure "
+            "error, NOT a finding about the case data — do not interpret it as "
+            "'no data exists'. In a notebook, re-run the cell that calls "
+            "init_tools(gateway, catalog) and gateway.set_case(case_id)."
+        )
+        _log_result("query_table", result=out,
+                    extra={"reason": "no_gateway_bound"})
         return out
 
     # Fetch ALL rows for this case, then apply the filter in Python so we
     # can support range operators. The gateway itself only knows exact match.
-    rows = _gateway.query(table_name, filters=None)
+    # Resolve canonical → real table name (e.g. 'crossbu_cards' →
+    # 'crossbu_cards_data') so specialists can call with either name.
+    real_table = _resolve_real_table(table_name)
+    rows = _gateway.query(real_table, filters=None)
     if rows is None:
         out = f"Data unavailable: table '{table_name}' not found for current case."
         _log_result("query_table", result=out,
                     extra={"table_name": table_name, "found": False})
         return out
+    # Use the resolved name in the response so the LLM sees the actual table.
+    if real_table != table_name:
+        table_name = real_table
 
-    total_before_filter = len(rows)
+    total_rows_in_table = len(rows)
+    filter_descriptor: str | None = None
+    resolved_filter_column: str | None = None
     if filter_column and filter_value:
-        rows = _apply_filter(rows, filter_column, str(filter_value), filter_op)
-    rows_after_filter = len(rows)
+        # Resolve case/space variants ('return_flag' → 'Return Flag') against
+        # the real CSV headers before filtering. Without this, a specialist
+        # following the skill's snake_case names silently gets 0 rows.
+        resolved_filter_column = _resolve_real_column(rows, filter_column, table_name)
+        rows = _apply_filter(rows, resolved_filter_column, str(filter_value), filter_op)
+        if resolved_filter_column != filter_column:
+            filter_descriptor = (
+                f"{resolved_filter_column} {filter_op} {filter_value!r} "
+                f"(resolved from '{filter_column}')"
+            )
+        else:
+            filter_descriptor = f"{filter_column} {filter_op} {filter_value!r}"
+    rows_matching_filter = len(rows)
 
-    if not rows:
-        out = (
-            f"No rows matching filter ({filter_column} {filter_op} "
-            f"{filter_value!r}) in '{table_name}'."
-        )
-        _log_result(
-            "query_table", result=out, rows_returned=0,
-            extra={
-                "table_name": table_name,
-                "rows_before_filter": total_before_filter,
-                "rows_after_filter": 0,
-            },
-        )
-        return out
-
-    # Column projection — select only requested columns
+    # Column projection — select only requested columns (with the same
+    # case/space resolution as the filter column).
+    requested_cols: list[str] | None = None
     if columns:
         requested = [c.strip() for c in columns.split(",") if c.strip()]
         if requested:
-            # Project requested columns only.
-            rows = [{k: row[k] for k in requested if k in row} for row in rows]
-            if not rows or not rows[0]:
-                out = f"No requested columns {requested} found in '{table_name}'."
-                _log_result(
-                    "query_table", result=out, rows_returned=0,
-                    extra={
-                        "table_name": table_name,
-                        "rows_before_filter": total_before_filter,
-                        "rows_after_filter": rows_after_filter,
-                        "reason": "no_requested_columns_present",
-                    },
-                )
-                return out
+            requested_cols = requested
+            if rows:
+                resolved_map = {c: _resolve_real_column(rows, c, table_name) for c in requested}
+                rows = [
+                    {resolved_map[c]: row[resolved_map[c]]
+                     for c in requested if resolved_map[c] in row}
+                    for row in rows
+                ]
 
-    total_rows = len(rows)
-    total_cols = len(rows[0]) if rows else 0
     truncation_notes: list[str] = []
 
-    # Step 1: trim columns if a single row is already too wide
-    if total_cols > 0:
+    if rows:
+        total_cols = len(rows[0])
+        # Step 1: trim columns if a single row is already too wide
         single_row_size = len(json.dumps([rows[0]], indent=2, default=str))
-        if single_row_size > _MAX_CHARS - 200:
+        if single_row_size > _MAX_CHARS - 600:
             keys = list(rows[0].keys())
             keep_keys: list[str] = []
             for k in keys:
                 test_row = {kk: rows[0][kk] for kk in keep_keys + [k]}
-                if len(json.dumps([test_row], indent=2, default=str)) > _MAX_CHARS - 300:
+                if len(json.dumps([test_row], indent=2, default=str)) > _MAX_CHARS - 700:
                     break
                 keep_keys.append(k)
             rows = [{k: row[k] for k in keep_keys if k in row} for row in rows]
             truncation_notes.append(f"showing {len(keep_keys)}/{total_cols} columns")
 
-    # Step 2: reduce rows until JSON fits
-    text = json.dumps(rows, indent=2, default=str)
-    shown_rows = len(rows)
-    while len(text) > _MAX_CHARS and len(rows) > 1:
-        rows = rows[: len(rows) // 2]
-        shown_rows = len(rows)
+        # Step 2: reduce rows until JSON fits, leaving room for the wrapper
         text = json.dumps(rows, indent=2, default=str)
+        while len(text) > _MAX_CHARS - 500 and len(rows) > 1:
+            rows = rows[: len(rows) // 2]
+            text = json.dumps(rows, indent=2, default=str)
+        if len(rows) < rows_matching_filter:
+            truncation_notes.append(f"showing {len(rows)}/{rows_matching_filter} rows")
 
-    if shown_rows < total_rows:
-        truncation_notes.append(f"showing {shown_rows}/{total_rows} rows")
+    rows_returned = len(rows)
+    truncated = bool(truncation_notes)
 
-    if truncation_notes:
-        rows.append({"_truncated": ", ".join(truncation_notes)})
+    response: dict[str, Any] = {
+        "table": table_name,
+        "filter": filter_descriptor,
+        "columns_requested": requested_cols,
+        "total_rows_in_table": total_rows_in_table,
+        "rows_matching_filter": rows_matching_filter,
+        "rows_returned": rows_returned,
+        "truncated": truncated,
+        "rows": rows,
+    }
+    if truncated:
+        response["truncation_note"] = ", ".join(truncation_notes)
+        response["count_advice"] = (
+            "rows_matching_filter is the true count; the rows array below is a "
+            "display sample — do NOT count its entries for 'how many' questions."
+        )
 
-    out = json.dumps(rows, indent=2, default=str)
+    out = json.dumps(response, indent=2, default=str)
     _log_result(
-        "query_table", result=out, rows_returned=shown_rows,
+        "query_table", result=out, rows_returned=rows_returned,
         extra={
             "table_name": table_name,
-            "rows_before_filter": total_before_filter,
-            "rows_after_filter": rows_after_filter,
-            "rows_shown": shown_rows,
-            "total_rows": total_rows,
+            "rows_before_filter": total_rows_in_table,
+            "rows_after_filter": rows_matching_filter,
+            "rows_shown": rows_returned,
             "truncation": truncation_notes or None,
         },
     )
@@ -560,6 +742,13 @@ def query_table(
     columns: str = "",
 ) -> str:
     """Query a data table for the current case. All data is scoped to the active case.
+
+    Returns a JSON object: {table, filter, total_rows_in_table,
+    rows_matching_filter, rows_returned, truncated, rows: [...]}.
+
+    For 'how many' / count questions: ALWAYS read `rows_matching_filter` from
+    the response. The `rows` array is a display sample that may be truncated
+    when the table is large — counting its entries gives the wrong answer.
 
     Args:
         table_name: the table to query.
@@ -577,4 +766,204 @@ def query_table(
         filter_value=filter_value,
         filter_op=filter_op,
         columns=columns,
+    )
+
+
+# ── aggregate_column ──────────────────────────────────────────────────────
+#
+# Server-side aggregation tool. The redaction layer masks any 6+ digit run
+# (`\d{6,}`) — so when an LLM tries to compose an answer like "the total
+# balance is $174897.36", the boundary redact_payload turns it into
+# "***MASKED***.36" because `174897` is six digits. Computing the aggregate
+# in Python and formatting with thousand-separators ($174,897.36) sidesteps
+# the regex (commas break the digit run) so the value survives unchanged
+# through every redaction boundary. Specialists must use this tool for any
+# total / mean / max / min / count question instead of summing rows mentally.
+
+_MONEY_KEY = ("balance", "amount", "limit", "spend", "payment", "value", "exposure")
+
+
+def _looks_like_money(column: str) -> bool:
+    c = (column or "").lower()
+    return any(k in c for k in _MONEY_KEY)
+
+
+def _format_aggregate(value, column: str, op: str) -> str:
+    """Format an aggregate result so it survives 6+ digit redaction.
+
+    Always uses thousand separators. Prepends '$' for monetary-looking
+    columns. Counts are integer; sums/means/max/min on monetary columns
+    show two decimal places.
+    """
+    if value is None:
+        return "(no data)"
+    is_money = _looks_like_money(column) and op != "count"
+    if op == "count" or (isinstance(value, (int, float)) and float(value).is_integer()
+                         and not is_money):
+        formatted = f"{int(value):,}"
+    else:
+        formatted = f"{value:,.2f}"
+    return f"${formatted}" if is_money else formatted
+
+
+def _aggregate_column_impl(
+    table_name: str,
+    column: str,
+    op: str = "sum",
+    filter_column: str = "",
+    filter_value: str = "",
+    filter_op: str = "eq",
+) -> str:
+    """Compute an aggregate over a column, returning a formatted string."""
+    op = (op or "sum").lower()
+    _log_call("aggregate_column", {
+        "table_name": table_name, "column": column, "op": op,
+        "filter_column": filter_column, "filter_value": filter_value,
+        "filter_op": filter_op if (filter_column and filter_value) else None,
+    })
+
+    if _gateway is None:
+        out = (
+            "Data unavailable: data layer is not initialized for this session. "
+            "Infrastructure error, not a data finding."
+        )
+        _log_result("aggregate_column", result=out,
+                    extra={"reason": "no_gateway_bound"})
+        return out
+
+    real_table = _resolve_real_table(table_name)
+    rows = _gateway.query(real_table, filters=None)
+    if rows is None:
+        out = f"Data unavailable: table '{table_name}' not found for current case."
+        _log_result("aggregate_column", result=out,
+                    extra={"table_name": table_name, "found": False})
+        return out
+
+    total_rows = len(rows)
+    filter_descr = ""
+    if filter_column and filter_value:
+        resolved = _resolve_real_column(rows, filter_column, real_table)
+        rows = _apply_filter(rows, resolved, str(filter_value), filter_op)
+        filter_descr = (
+            f" filtered by {resolved} {filter_op} {filter_value!r}"
+            if resolved == filter_column
+            else f" filtered by {resolved} (resolved from '{filter_column}') "
+                 f"{filter_op} {filter_value!r}"
+        )
+
+    n_matching = len(rows)
+
+    # `count` doesn't need the column to be numeric.
+    if op == "count":
+        result_str = _format_aggregate(n_matching, column, op)
+        out = (
+            f"count{filter_descr} = {result_str} "
+            f"(out of {total_rows:,} total rows in {real_table})"
+        )
+        _log_result("aggregate_column", result=out,
+                    extra={"op": op, "n_matching": n_matching, "total": total_rows})
+        return out
+
+    if not rows:
+        out = (
+            f"{op}({column}){filter_descr} = (no matching rows; "
+            f"{total_rows:,} total in {real_table})"
+        )
+        _log_result("aggregate_column", result=out,
+                    extra={"op": op, "n_matching": 0})
+        return out
+
+    real_col = _resolve_real_column(rows, column, real_table)
+    values: list[float] = []
+    skipped = 0
+    for r in rows:
+        v = r.get(real_col)
+        if v is None or v == "":
+            skipped += 1
+            continue
+        try:
+            values.append(float(v))
+        except (TypeError, ValueError):
+            skipped += 1
+
+    if not values:
+        out = (
+            f"No numeric values for column {real_col!r} in "
+            f"{n_matching:,} matching row(s). Check column name + dtype."
+        )
+        _log_result("aggregate_column", result=out,
+                    extra={"op": op, "n_matching": n_matching, "skipped": skipped})
+        return out
+
+    if op == "sum":
+        result = sum(values)
+    elif op == "mean" or op == "avg":
+        result = sum(values) / len(values)
+    elif op == "max":
+        result = max(values)
+    elif op == "min":
+        result = min(values)
+    else:
+        out = (
+            f"Unknown aggregation op {op!r}. Supported: "
+            f"sum, mean, max, min, count."
+        )
+        _log_result("aggregate_column", result=out, extra={"op": op})
+        return out
+
+    formatted = _format_aggregate(result, column, op)
+    nonnull = len(values)
+    out = (
+        f"{op}({real_col}){filter_descr} = {formatted} "
+        f"(over {nonnull:,} non-null value(s) in {n_matching:,} matching row(s); "
+        f"{total_rows:,} total in {real_table})"
+    )
+    _log_result(
+        "aggregate_column", result=out,
+        extra={
+            "op": op, "column": real_col, "raw_value": result,
+            "n_matching": n_matching, "n_nonnull": nonnull,
+            "skipped": skipped, "total": total_rows,
+        },
+    )
+    return out
+
+
+@function_tool
+def aggregate_column(
+    table_name: str,
+    column: str,
+    op: str = "sum",
+    filter_column: str = "",
+    filter_value: str = "",
+    filter_op: str = "eq",
+) -> str:
+    """Compute an aggregate (sum / mean / max / min / count) over a column.
+
+    Use this for ANY question asking for a total, average, maximum, minimum,
+    or count. The result is formatted with thousand separators (e.g.
+    '$174,897.36') so it survives the boundary redaction layer that masks
+    long digit runs — large aggregates you compute mentally from query_table
+    rows would otherwise come back as '***MASKED***'.
+
+    Returns a one-line human-readable string like::
+        sum(balance) filtered by Card Portfolio eq 'SBS' = $174,897.36
+        (over 1 non-null value in 1 matching row; 3 total in crossbu_cards_data)
+
+    Args:
+        table_name: the table to aggregate over (canonical or real name).
+        column: the column to aggregate. Must be numeric for sum/mean/max/min.
+            Ignored for op='count'.
+        op: one of 'sum', 'mean', 'max', 'min', 'count'. Default 'sum'.
+        filter_column / filter_value / filter_op: optional row filter, same
+            semantics as query_table. When omitted, aggregates over ALL
+            rows of the table for the active case.
+    """
+    return _aggregate_column_impl(
+        table_name=table_name,
+        column=column,
+        op=op,
+        filter_column=filter_column,
+        filter_value=filter_value,
+        filter_op=filter_op,
     )

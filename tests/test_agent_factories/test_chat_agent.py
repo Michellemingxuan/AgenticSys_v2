@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from case_agents.chat_agent import ChatAgent
+from agent_factories.chat_agent import ChatAgent
 from logger.event_logger import EventLogger
 from models.types import (
     DataPullRequest,
@@ -125,7 +125,7 @@ def _final(data_pull_request=None, flags=None):
     return FinalAnswer(
         answer="test answer",
         flags=flags or [],
-        report_draft=ReportDraft(coverage="partial"),
+        report_draft=ReportDraft(coverage="implicit"),
         team_draft=TeamDraft(answer="team answer", specialists_consulted=["bureau"]),
         data_pull_request=data_pull_request,
     )
@@ -135,14 +135,14 @@ def test_format_renders_basic_answer():
     final = FinalAnswer(
         answer="The credit risk is moderate.",
         flags=["team confirms report"],
-        report_draft=ReportDraft(coverage="full", files_consulted=["bureau.md"]),
+        report_draft=ReportDraft(coverage="explicit", files_consulted=["bureau.md"]),
         team_draft=TeamDraft(answer="t", specialists_consulted=["bureau", "spend_payments"]),
     )
     formatted = ChatAgent.format(final)
     assert "credit risk is moderate" in formatted
     assert "bureau" in formatted
     assert "spend_payments" in formatted
-    assert "Report coverage: full" in formatted
+    assert "Report coverage: explicit" in formatted
     assert "team confirms report" in formatted
 
 

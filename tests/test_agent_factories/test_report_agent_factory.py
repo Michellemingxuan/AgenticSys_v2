@@ -1,5 +1,5 @@
 from agents import Agent
-from case_agents.report_agent import build_report_agent
+from agent_factories.report_agent import build_report_agent
 from models.types import ReportDraft
 
 

@@ -1,61 +1,70 @@
 table: crossbu_cards
-description: Cross-business-unit cards view — one row per card per case-month. Tracks
-  details of all cards held by the customer (limit, balance, tenure, status, delinquencies)
-  across the 12 months preceding default on the business credit card.
+description: 'Cross-business-unit cards view — one row per card per case-month. Tracks
+
+  details of all cards held by the customer (limit, balance, tenure, status,
+
+  delinquencies) across the 12 months preceding default on the business
+
+  credit card. Both consumer and commercial cards are recorded; the
+
+  CONSUMER vs COMMERCIAL split is carried by the `card_portfolio` column
+
+  (e.g., ''CPS'' = consumer product service, ''SBS'' = small buiness service).
+
+  '
 rows_per_case: 3
 one_row_per_case: false
 aliases:
 - crossbu_cards_data
 columns:
   Month:
-    dtype: string
+    dtype: date
     parse_hint: '%b-%Y'
     description: Monthly snapshot date for this card record (e.g. "Jan-2024"). One
       row per card per month.
     aliases:
     - Month
+    dtype_pending_review: true
   card_name:
     dtype: categorical
     categories:
-      Business Platinum Card: 0.15
-      Business Gold Card: 0.15
-      Business Green Card: 0.1
-      Blue Business Plus: 0.1
-      Blue Business Cash: 0.08
-      Corporate Card: 0.08
-      Plum Card: 0.06
-      Business Line of Credit: 0.06
-      Kabbage Business Line: 0.05
-      Business Checking: 0.04
-      SimplyCash Plus: 0.05
-      Amazon Business Card: 0.04
-      Delta SkyMiles Business: 0.04
+      BUSINESS PLATINUM CARD: 0.33
+      BLUE CASH PREFERRED(SM): 0.33
+      AMEX EVERYDAY(SM) PREFERRED CREDIT CARD: 0.33
     description: Name of the card used by the customer
     aliases:
     - Card Name
+    categories_pending_review: true
   card_type:
     dtype: categorical
     categories:
-      charge: 0.45
-      lending: 0.4
-      loc: 0.15
+      Lending: 0.67
+      LOC: 0.33
     description: Type of card — Charge (pay-in-full), Lending (revolving credit),
       or LOC (line of credit)
     aliases:
     - Card Type
+    categories_pending_review: true
   card_portfolio:
     dtype: categorical
     categories:
-      Small Business: 0.35
-      Corporate: 0.2
-      Consumer Premium: 0.15
-      Consumer Core: 0.1
-      Lending: 0.1
-      Kabbage: 0.05
-      Cobrand: 0.05
-    description: Amex portfolio to which the card belongs
+      CPS: 0.67
+      SBS: 0.33
+    description: "Amex portfolio segment — classifies the card as CONSUMER vs. COMMERCIAL.\n\
+      \  - CPS = Consumer Products Services. CONSUMER card (personal / individual).\n\
+      \    Reviewer terms: \"consumer card\", \"personal card\", \"individual card\"\
+      .\n  - SBS = Small Business Services. COMMERCIAL card (small-business /\n  \
+      \  business-owner). Reviewer terms: \"commercial card\", \"business card\",\n\
+      \    \"small business card\", \"SMB card\".\nFor consumer-vs-commercial questions,\
+      \ this is the canonical classifier\ncolumn. Filter recipes:\n  - \"how many\
+      \ consumer cards\"  → card_portfolio == 'CPS'\n  - \"how many commercial cards\"\
+      \ / \"business cards\" → card_portfolio == 'SBS'\n                         \
+      \           (or card_portfolio != 'CPS')\n`card_name` is a secondary signal\
+      \ (names containing \"BUSINESS\" are\ncommercial) but `card_portfolio` is authoritative\
+      \ — use it.\n"
     aliases:
     - Card Portfolio
+    categories_pending_review: true
   card_limit:
     dtype: float
     distribution: normal
@@ -90,16 +99,13 @@ columns:
   account_status:
     dtype: categorical
     categories:
-      current: 0.7
-      30dpb: 0.12
-      60dpb: 0.08
-      90dpb: 0.05
-      120dpb: 0.03
-      closed: 0.02
+      Current: 0.67
+      30 DPB: 0.33
     description: Account status — 'Current' means up to date, 30/60/90/120 DPB means
       days past billing due
     aliases:
     - Account Status
+    categories_pending_review: true
   past_delinquencies_12m:
     dtype: int
     distribution: poisson

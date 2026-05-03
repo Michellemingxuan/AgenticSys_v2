@@ -9,8 +9,8 @@ import sys
 import uuid
 from pathlib import Path
 
-from case_agents.chat_agent import ChatAgent
-from case_agents.helper_tools import build_helper_tools
+from agent_factories.chat_agent import ChatAgent
+from agent_factories.helper_tools import build_helper_tools
 from config.pillar_loader import PillarLoader
 from datalayer.catalog import DataCatalog
 from datalayer.gateway import LocalDataGateway

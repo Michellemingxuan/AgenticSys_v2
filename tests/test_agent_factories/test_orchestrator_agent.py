@@ -1,8 +1,8 @@
 from agents import Agent
-from case_agents.orchestrator_agent import build_orchestrator_agent
-from case_agents.specialist_agent import build_specialist_agent
-from case_agents.general_specialist import build_general_specialist
-from case_agents.report_agent import build_report_agent
+from agent_factories.orchestrator_agent import build_orchestrator_agent
+from agent_factories.specialist_agent import build_specialist_agent
+from agent_factories.general_specialist import build_general_specialist
+from agent_factories.report_agent import build_report_agent
 from models.types import DomainSkill, FinalAnswer
 
 

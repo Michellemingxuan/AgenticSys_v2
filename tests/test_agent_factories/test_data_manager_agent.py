@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from case_agents.data_manager_agent import DataManagerAgent
+from agent_factories.data_manager_agent import DataManagerAgent
 from datalayer.catalog import DataCatalog
 from datalayer.gateway import LocalDataGateway
 from datalayer.generator import DataGenerator

@@ -10,7 +10,7 @@ import pytest
 from pathlib import Path
 from agents import RunContextWrapper
 from tools.fs_tools import fs_list_files, fs_read_file
-from case_agents.app_context import AppContext
+from agent_factories.app_context import AppContext
 
 
 @pytest.mark.asyncio

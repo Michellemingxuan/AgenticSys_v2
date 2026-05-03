@@ -30,6 +30,8 @@ columns:
     description: Masked card number the payment was applied to (last 4 digits shown)
     aliases:
     - Card Number
+    categories_pending_review: true
+    categories_writeback_skipped: pii_suspected
   payment_date:
     dtype: date
     year:
@@ -52,25 +54,24 @@ columns:
   payment_bank_account:
     dtype: categorical
     categories:
-      Chase ****2211: 0.25
-      Bank of America ****8812: 0.2
-      Wells Fargo ****5544: 0.15
-      Citi ****3377: 0.12
-      US Bank ****9900: 0.1
-      Capital One ****4422: 0.08
-      Ally Bank ****6633: 0.05
-      Business Checking ****1111: 0.05
+      bank_account_1: 0.69
+      bank_account_2: 0.11
+      bank_account_3: 0.1
+      bank_account_5: 0.06
+      bank_account_4: 0.04
     description: Bank account the payment was drawn from (masked)
     aliases:
     - Payment Bank Account
+    categories_pending_review: true
   return_flag:
     dtype: categorical
     categories:
-      success: 0.88
-      returned: 0.12
-    description: Whether the payment cleared (success) or was returned (returned)
+      '0': 1.0
+    description: Whether the payment cleared (success) or was returned (returned),
+      0 indicating success and 1 indicating return.
     aliases:
     - Return Flag
+    categories_pending_review: true
   return_reason:
     dtype: categorical
     categories:

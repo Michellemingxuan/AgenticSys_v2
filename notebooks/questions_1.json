@@ -1,0 +1,17 @@
+{
+  "case_id": "366132845011",
+  "pillar": "credit_risk",
+  "model": "gpt-4.1",
+  "backend": "openai",
+  "data_source": "real",
+  "session_id": "question-suite",
+  "test_cases": [
+    {
+      "name": "successful_payments_window_chain",
+      "question": "how many successful payments in the recent 2 years?",
+      "followups": [
+        "and the total payment amount?"
+      ]
+    }
+  ]
+}

@@ -34,6 +34,7 @@ def load_domain_skill(name: str) -> DomainSkill | None:
     return DomainSkill(
         name=skill.name,
         system_prompt=skill.body,
+        description=str(getattr(skill, "description", "") or "").strip(),
         data_hints=list(meta.get("data_hints", [])),
         interpretation_guide=str(meta.get("interpretation_guide", "")).strip(),
         risk_signals=list(meta.get("risk_signals", [])),

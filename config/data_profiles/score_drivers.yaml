@@ -1,7 +1,15 @@
 table: score_drivers
-description: Monthly snapshot of the top-5 and bottom-5 contributing variable names
-  for two model scores (CDSS and TSR), per case per month. Used to explain which
-  features pushed each model's score up or down.
+description: "Monthly snapshot of the top-5 and bottom-5 contributing variable names\n\
+  for each internal model score, per case per month. Used to explain which\nfeatures\
+  \ pushed each model's score up (top) or down (bottom).\n\nCurrently carries drivers\
+  \ for two ML scores, with columns named by family:\n  - CDSS (Credit Decision Support\
+  \ System) — columns `top_cdss1..5`,\n    `bottom_cdss1..5`. The cell values are\
+  \ the feature names from\n    `modelling_data` that pushed the CDSS score up / down\
+  \ that month.\n  - TSR (Total Structural Risk) — columns `top_tsr1..5`, `bottom_tsr1..5`.\n\
+  \    Same pattern for the TSR score.\nNew score families would surface as new `top_<name>*`\
+  \ / `bottom_<name>*`\ncolumn groups — probe the schema rather than assuming the\
+  \ list is fixed.\n\nCross-reference: the numeric values of CDSS / TSR (and any other\
+  \ internal\nscores) live on `model_scores`, joined by `trans_month`.\n"
 rows_per_case: 12
 one_row_per_case: false
 aliases:
@@ -9,7 +17,7 @@ aliases:
 columns:
   trans_month:
     dtype: string
-    parse_hint: "%b-%Y"
+    parse_hint: '%b-%Y'
     description: Monthly snapshot date for this score-driver record (e.g. "Jan-2024").
       One row per case per month across the review window.
     description_pending: false

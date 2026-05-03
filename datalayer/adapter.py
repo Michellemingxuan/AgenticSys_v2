@@ -29,7 +29,21 @@ class Candidate:
 
 @dataclass
 class ColumnDiff:
-    """Result of matching one real column against the catalog."""
+    """Result of matching one real column against the catalog.
+
+    Drift fields (populated only for ``bucket == "auto"`` entries):
+      - ``dtype_drift``: canonical declared a non-categorical dtype that
+        disagrees with the real data (e.g. canonical=date, real=int).
+        ``categorical`` is treated as type-agnostic and never drift-flagged.
+      - ``observed_categories``: ``{value: frequency}`` computed from the
+        case's samples when the canonical column declared ``categories``.
+        Frequencies are rounded to two decimals and capped at the most
+        common 32 distinct values.
+      - ``categories_drift``: True when the observed value vocabulary is
+        disjoint from the declared one (zero overlap of keys). Partial
+        overlap is NOT flagged — a single case may not exhibit every
+        declared category, so we only flag clear contradiction.
+    """
     real_table: str
     real_col: str
     real_dtype: str
@@ -38,16 +52,26 @@ class ColumnDiff:
     chosen: Candidate | None = None
     parse_hint: str | None = None
     drafted_description: str = ""
+    dtype_drift: bool = False
+    observed_categories: dict[str, float] | None = None
+    categories_drift: bool = False
 
 
 @dataclass
 class Diff:
-    """Full diff for a case — the output of reconcile_case."""
+    """Full diff for a case — the output of reconcile_case.
+
+    ``value_drift`` is the subset of ``auto_aliased`` entries whose dtype or
+    categorical vocabulary disagrees with the canonical profile. They are
+    surfaced separately so callers (sync UI, logger) can flag what was
+    overwritten without scanning every auto-aliased entry.
+    """
     case_id: str
     auto_aliased: list[ColumnDiff] = field(default_factory=list)
     ambiguous: list[ColumnDiff] = field(default_factory=list)
     new: list[ColumnDiff] = field(default_factory=list)
     new_tables: list[str] = field(default_factory=list)
+    value_drift: list[ColumnDiff] = field(default_factory=list)
 
 
 # ── Name normalization ─────────────────────────────────────────────────────
@@ -85,6 +109,10 @@ _DATE_FORMATS = [
     "%b'%Y",
     "%b %Y",
     "%B %Y",
+    "%b-%Y",     # Jan-2024
+    "%B-%Y",     # January-2024
+    "%d-%b-%Y",  # 07-Jul-2024
+    "%d-%B-%Y",  # 07-July-2024
     "%m/%d/%Y",
     "%d/%m/%Y",
     "%m-%d-%Y",
@@ -166,6 +194,124 @@ def _infer_real_dtype(samples: list) -> str:
         if rate >= 0.95:
             return "date"
     return "string"
+
+
+_OBSERVE_MAX_UNIQUE = 32
+
+
+def _observe_categories(samples: list) -> dict[str, float] | None:
+    """Compute ``{value: frequency}`` from sample values.
+
+    Returns None if the column has too many distinct values to be
+    categorical (>{_OBSERVE_MAX_UNIQUE}) or if all samples are null/empty.
+    Frequencies are rounded to 2 decimals; values are kept as strings so
+    YAML round-trips cleanly.
+    """
+    from collections import Counter
+
+    non_null = [str(s) for s in samples if s is not None and s != ""]
+    if not non_null:
+        return None
+    counts = Counter(non_null)
+    if len(counts) > _OBSERVE_MAX_UNIQUE:
+        return None
+    total = sum(counts.values())
+    return {k: round(v / total, 2) for k, v in counts.most_common()}
+
+
+def _dtype_disagrees(canonical: str, real: str) -> bool:
+    """Whether the canonical and real dtypes are in different broad classes.
+
+    ``categorical`` and ``unknown`` never disagree (categorical is type-
+    agnostic; unknown means we have no signal). For everything else we
+    compare broad classes (numeric / date / string).
+    """
+    canonical = (canonical or "").lower()
+    real = (real or "").lower()
+    if canonical in {"categorical", "category"}:
+        return False
+    if canonical in {"unknown", ""} or real in {"unknown", ""}:
+        return False
+
+    def _broad(dt: str) -> str | None:
+        if dt in _INT_DTYPES or dt in _FLOAT_DTYPES or dt in {"numeric", "number"}:
+            return "numeric"
+        if dt in _DATE_DTYPES:
+            return "date"
+        if dt in _STRING_DTYPES:
+            return "string"
+        return None
+
+    cb, rb = _broad(canonical), _broad(real)
+    if cb is None or rb is None:
+        return False
+    return cb != rb
+
+
+_PII_NUMERIC_RE = re.compile(r"\d{6,}")
+
+
+def _looks_like_pii_vocabulary(observed: dict[str, float]) -> bool:
+    """Return True when observed keys look like raw PII (6+ digit runs).
+
+    We commit canonical YAMLs to source control, so writing unmasked card
+    numbers / SSNs / account ids into ``categories`` is unacceptable even
+    though the drift detection itself was correct. When this returns True
+    the sync still flags the drift in ``value_drift`` (so a human knows the
+    canonical is stale) but does NOT persist the new vocabulary.
+    """
+    if not observed:
+        return False
+    for key in observed.keys():
+        if _PII_NUMERIC_RE.search(str(key)):
+            return True
+    return False
+
+
+def _categories_disjoint(observed: dict[str, float], declared: dict | None) -> bool:
+    """True when observed and declared category vocabularies share no keys.
+
+    Partial overlap is NOT flagged — a single case may not exhibit every
+    declared category. Only zero-overlap is treated as clear contradiction.
+    """
+    if not observed or not declared:
+        return False
+    declared_keys = {str(k) for k in declared.keys()}
+    observed_keys = {str(k) for k in observed.keys()}
+    if not declared_keys or not observed_keys:
+        return False
+    return not (declared_keys & observed_keys)
+
+
+def _annotate_drift(
+    entry: ColumnDiff,
+    real_samples: list,
+    canonical: dict[str, dict[str, dict]],
+) -> None:
+    """Populate dtype_drift / observed_categories / categories_drift on an
+    auto-aliased entry by comparing observed samples to the canonical spec.
+
+    No-op if the entry isn't auto-bucket or has no chosen canonical.
+    """
+    if entry.bucket != "auto" or entry.chosen is None:
+        return
+    spec = (
+        canonical.get(entry.chosen.canonical_table, {}).get(entry.chosen.canonical_col)
+    )
+    if spec is None:
+        return
+
+    canonical_dtype = (spec.get("dtype") or "").lower()
+    if _dtype_disagrees(canonical_dtype, entry.real_dtype):
+        entry.dtype_drift = True
+
+    declared = spec.get("categories")
+    if declared:
+        observed = _observe_categories(real_samples)
+        if observed is not None:
+            entry.observed_categories = observed
+            if _categories_disjoint(observed, declared):
+                entry.categories_drift = True
 
 
 def match_column(
@@ -362,7 +508,10 @@ def reconcile_case(gateway, canonical: dict, case_id: str) -> Diff:
                     result.parse_hint = hint
 
             if result.bucket == "auto":
+                _annotate_drift(result, samples, canonical)
                 diff.auto_aliased.append(result)
+                if result.dtype_drift or result.categories_drift:
+                    diff.value_drift.append(result)
             elif result.bucket == "ambiguous":
                 diff.ambiguous.append(result)
             else:
@@ -423,13 +572,43 @@ def apply_diff(diff: Diff, catalog) -> None:
     for entry in diff.auto_aliased:
         if entry.chosen is None:
             continue
-        if entry.real_col == entry.chosen.canonical_col:
-            continue
-        t = _patch_for(entry.chosen.canonical_table)
-        col_patch = t["columns"].setdefault(entry.chosen.canonical_col, {})
-        col_patch.setdefault("aliases", [])
-        if entry.real_col not in col_patch["aliases"]:
-            col_patch["aliases"].append(entry.real_col)
+        canonical_table = entry.chosen.canonical_table
+        canonical_col = entry.chosen.canonical_col
+        t = _patch_for(canonical_table)
+        col_patch = t["columns"].setdefault(canonical_col, {})
+
+        # Alias-add: only when the real header differs from the canonical name.
+        if entry.real_col != canonical_col:
+            col_patch.setdefault("aliases", [])
+            if entry.real_col not in col_patch["aliases"]:
+                col_patch["aliases"].append(entry.real_col)
+
+        # Dtype drift: overwrite canonical dtype with the observed real dtype
+        # (categorical is treated as type-agnostic in _dtype_disagrees, so we
+        # never overwrite a `categorical` declaration here).
+        if entry.dtype_drift:
+            col_patch["dtype"] = entry.real_dtype
+            col_patch["dtype_pending_review"] = True
+
+        # Categories drift: replace the categories dict wholesale (using the
+        # __replace__ sentinel so DataCatalog._merge_patch swaps rather than
+        # unions). Mark for review so a human can verify the new vocabulary
+        # before downstream skills rely on it.
+        #
+        # Guard: if observed values look like raw PII (6+ digit runs — card
+        # numbers, account ids, etc.) skip the writeback. The drift is still
+        # surfaced via ``diff.value_drift`` so a human knows the canonical
+        # is stale, but we don't commit unmasked values to source control.
+        if entry.categories_drift and entry.observed_categories:
+            if _looks_like_pii_vocabulary(entry.observed_categories):
+                col_patch["categories_pending_review"] = True
+                col_patch["categories_writeback_skipped"] = "pii_suspected"
+            else:
+                col_patch["categories"] = {
+                    "__replace__": True,
+                    **entry.observed_categories,
+                }
+                col_patch["categories_pending_review"] = True
 
     for entry in diff.new:
         target_table = (
