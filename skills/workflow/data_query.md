@@ -29,7 +29,7 @@ Routing examples (probe schema first to confirm the actual column names):
 |---|---|
 | spending pattern over time | `summarize_trend('spends', 'Amount', 'Date', period='month', op='sum')` |
 | payment trajectory | `summarize_trend('payments', 'Payment Amount', 'Payment Date', period='month', op='sum')` |
-| how often returns happen by month | `summarize_trend('payments', 'Return Flag', 'Payment Date', period='month', op='count', filter_column='Return Flag', filter_value='returned')` |
+| how often returns happen by month | `summarize_trend('payments', 'payment_status', 'Payment Date', period='month', op='count', filter_column='payment_status', filter_value='return')` |
 | CDSS score evolution | `summarize_trend('model_scores', 'cust_eff_se_cdss_5_180_day_score_max', 'trans_month', period='month', op='mean')` |
 | balance progression | `summarize_trend('crossbu_cards', 'balance', 'snapshot_month', period='month', op='sum')` |
 
@@ -58,7 +58,7 @@ Routing examples (probe schema first to confirm the actual column names):
 | top merchants by total spend | `summarize_by_group('spends', 'Amount', 'Merchant Name', op='sum', top_n=5)` |
 | most-frequent (recurring) merchants | `summarize_by_group('spends', 'Amount', 'Merchant Name', op='count', top_n=5, sort_by='count')` |
 | spend mix by industry | `summarize_by_group('spends', 'Amount', 'Merchant Industry', op='sum', top_n=10)` |
-| return-reason concentration | `summarize_by_group('payments', 'Payment Amount', 'Return Reason', op='count', top_n=10, filter_column='Return Flag', filter_value='returned')` |
+| return-reason concentration | `summarize_by_group('payments', 'Payment Amount', 'Return Reason', op='count', top_n=10, filter_column='payment_status', filter_value='return')` |
 | balance share by card portfolio | `summarize_by_group('crossbu_cards', 'balance', 'card_portfolio', op='sum', top_n=5)` |
 
 ### Pairing rank → trend (the standard concentration recipe)

@@ -11,7 +11,7 @@ Given a question and the rows returned by `query_table`, synthesise findings and
 **Output shape:**
 
 - `findings`: 1-2 sentence summary — the main takeaway in answer to the question.
-- `evidence`: list of specific row-level citations (e.g., "payment_date=2024-09-24, return_flag='returned'"). Quote dates and amounts verbatim from the returned rows; never from filter bounds.
+- `evidence`: list of specific row-level citations (e.g., "payment_date=2024-09-24, payment_status='return'"). Quote dates and amounts verbatim from the returned rows; never from filter bounds.
 - `data_gaps`: list of things that would sharpen the answer but weren't available (empty if none).
 
 **Rules:**

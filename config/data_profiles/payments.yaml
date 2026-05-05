@@ -14,9 +14,16 @@ columns:
     categories:
       success: 0.88
       return: 0.12
-    description: Synthetic discriminator added by the gateway when rbinding `payments_success.csv`
-      (→ "success") and `payments_returns.csv` (→ "return") into a single `payments`
-      table.
+    description: |
+      Single source of truth for whether a payment cleared. Values 'success'
+      (cleared) vs 'return' (failed). Synthesized by the gateway when
+      rbinding payments_success.csv (→ 'success') and payments_returns.csv
+      (→ 'return') into a single `payments` table; the raw 0/1 `return_flag`
+      column from the source CSVs is dropped at the same step to avoid
+      two-column confusion.
+    aliases:
+    - Return Flag
+    - return_flag
   card_number:
     dtype: categorical
     categories:
@@ -63,15 +70,6 @@ columns:
     aliases:
     - Payment Bank Account
     categories_pending_review: true
-  return_flag:
-    dtype: categorical
-    categories:
-      '0': 1.0
-    description: Whether the payment cleared (success) or was returned (returned),
-      0 indicating success and 1 indicating return.
-    aliases:
-    - Return Flag
-    categories_pending_review: true
   return_reason:
     dtype: categorical
     categories:
@@ -83,6 +81,6 @@ columns:
       Invalid Account Number: 0.01
       Unauthorized / Disputed: 0.01
       Bank Processing Error: 0.01
-    description: Reason for return. Empty when return_flag = success.
+    description: Reason for return. Empty when payment_status = success.
     aliases:
     - Return Reason

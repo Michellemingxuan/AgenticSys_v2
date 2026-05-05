@@ -21,9 +21,10 @@ concept_glossary: |
     spend / charged / transaction volume → `spends_data.Amount` (spend_payments).
     payment amount → `payments.Payment Amount` (spend_payments).
 
-  Payment status — `payments.Return Flag` (or `payment_status`):
-    success/cleared vs returned/failed. Common encodings: '0'/'1' or
-    'success'/'return(ed)'. Verify the actual values in this case.
+  Payment status — `payments.payment_status` (canonical, values:
+    'success' / 'return'). The raw 0/1 `return_flag` column from the source
+    CSV is dropped at gateway-load time; always filter on `payment_status`.
+    Verify the actual values in this case.
 
   Scores: bureau (`bureau_data`, owned by `bureau`) vs internal model
     (`modelling_data`, owned by `modeling`). Independent — don't conflate.

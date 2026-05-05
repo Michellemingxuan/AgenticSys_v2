@@ -181,16 +181,32 @@ class LocalDataGateway(DataGateway):
     def _rbind_payments(tables: dict[str, list[dict]]) -> None:
         """Merge payments_success + payments_returns into a single 'payments' table
         with a synthetic 'payment_status' discriminator. In-place mutation.
+
+        ``payment_status`` ('success' / 'return') is the canonical discriminator
+        the specialists use. ``return_flag`` is the raw 0/1 encoding from the
+        source CSV — it carries the same information in a less-readable form
+        and was a known confusion source for the LLM (two columns, same fact,
+        different value vocabularies). Drop it here so the unified ``payments``
+        table exposes exactly one payment-status column.
         """
         succ = tables.pop("payments_success", None)
         retn = tables.pop("payments_returns", None)
         if succ is None and retn is None:
             return
+
+        # Strip raw return-flag encodings before merging — keep payment_status
+        # as the single source of truth. Names checked: lowercase canonical
+        # plus the "Return Flag" alias declared in payments.yaml.
+        _RAW_FLAG_KEYS = ("return_flag", "Return Flag")
+
+        def _drop_raw_flag(row: dict) -> dict:
+            return {k: v for k, v in row.items() if k not in _RAW_FLAG_KEYS}
+
         merged: list[dict] = []
         for row in (succ or []):
-            merged.append({**row, "payment_status": "success"})
+            merged.append({**_drop_raw_flag(row), "payment_status": "success"})
         for row in (retn or []):
-            merged.append({**row, "payment_status": "return"})
+            merged.append({**_drop_raw_flag(row), "payment_status": "return"})
         if merged:
             tables["payments"] = merged
 
