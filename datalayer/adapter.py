@@ -630,6 +630,81 @@ def apply_diff(diff: Diff, catalog) -> None:
         catalog.write_profile_patch(table, patch)
 
 
+def apply_diff_in_memory(diff: Diff, catalog) -> dict[str, dict]:
+    """Apply a Diff to the catalog's in-memory profiles only (no YAML writes).
+
+    Used by the server's first-open auto-sync path: when a case is opened we
+    want the catalog to reflect that case's actual CSV columns immediately
+    (so specialists see accurate aliases / observed_categories), but we
+    don't want to commit case-specific drift back to the source-controlled
+    YAMLs — that's still the job of the interactive ``python -m datalayer.sync``
+    flow.
+
+    Returns the patches that were applied so the caller can log a summary.
+    The merge respects the catalog's existing ``_merge_patch`` semantics:
+    list fields are appended, dicts merge recursively, scalars overwrite.
+    """
+    patches: dict[str, dict] = {}
+    canonical_tables = list(catalog._profiles.keys())
+
+    def _patch_for(table: str) -> dict:
+        if table not in patches:
+            patches[table] = {"columns": {}}
+        return patches[table]
+
+    for entry in diff.auto_aliased:
+        if entry.chosen is None:
+            continue
+        canonical_table = entry.chosen.canonical_table
+        canonical_col = entry.chosen.canonical_col
+        t = _patch_for(canonical_table)
+        col_patch = t["columns"].setdefault(canonical_col, {})
+        if entry.real_col != canonical_col:
+            col_patch.setdefault("aliases", [])
+            if entry.real_col not in col_patch["aliases"]:
+                col_patch["aliases"].append(entry.real_col)
+        if entry.dtype_drift:
+            col_patch["dtype"] = entry.real_dtype
+            col_patch["dtype_pending_review"] = True
+        if entry.categories_drift and entry.observed_categories:
+            if _looks_like_pii_vocabulary(entry.observed_categories):
+                col_patch["categories_pending_review"] = True
+                col_patch["categories_writeback_skipped"] = "pii_suspected"
+            else:
+                col_patch["categories"] = {
+                    "__replace__": True,
+                    **entry.observed_categories,
+                }
+                col_patch["categories_pending_review"] = True
+
+    for entry in diff.new:
+        target_table = (
+            _resolve_canonical_table_name(entry.real_table, canonical_tables, catalog=catalog)
+            or entry.real_table
+        )
+        t = _patch_for(target_table)
+        col_patch = {
+            "dtype": entry.real_dtype,
+            "description": entry.drafted_description,
+            "description_pending": True,
+            "aliases": [entry.real_col],
+        }
+        if entry.parse_hint:
+            col_patch["parse_hint"] = entry.parse_hint
+        t["columns"][entry.real_col] = col_patch
+
+    # Apply directly to in-memory profiles via the catalog's merge logic.
+    # Mirror ``write_profile_patch`` minus disk I/O.
+    for table, patch in patches.items():
+        profile = catalog._profiles.get(table) or {
+            "table": table, "description": "", "columns": {}
+        }
+        catalog._merge_patch(profile, patch)
+        catalog._profiles[table] = profile
+
+    return patches
+
+
 # ── Multi-case aggregation ────────────────────────────────────────────────
 
 

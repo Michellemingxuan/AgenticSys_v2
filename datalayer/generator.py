@@ -203,8 +203,25 @@ class DataGenerator:
         return self.cases
 
     def _gen_string(self, spec: dict, n: int, profile: dict) -> list:
-        fmt = spec["format"]
+        # Many profile columns (merchant names, customer names, score-driver
+        # feature names, free-text WCC notes) declare ``dtype: string`` without
+        # a ``format`` key — they're real labels, not seq-templated synthetic
+        # identifiers. When ``format`` is absent, fall back to a stable
+        # per-row placeholder so the generator doesn't crash; real CSV
+        # ingest paths bypass the generator entirely.
+        fmt = spec.get("format")
         one_row = profile.get("one_row_per_case", False)
+        if fmt is None:
+            # Try a lightweight derivation from a sample value if present;
+            # otherwise emit a generic "value_{seq}" placeholder.
+            sample = spec.get("declared_values") or spec.get("examples")
+            if isinstance(sample, list) and sample:
+                # Cycle through declared sample values across rows.
+                return [str(sample[i % len(sample)]) for i in range(n)]
+            if one_row:
+                return [f"value_{i + 1}" for i in range(n)]
+            case_count = self._get_case_count()
+            return [f"value_{(i % case_count) + 1}" for i in range(n)]
         if one_row:
             return [fmt.format(seq=i + 1) for i in range(n)]
         else:

@@ -160,6 +160,49 @@ def _split_cases(case_ids: list[str]) -> dict[str, list[str]]:
     return {"consumer": consumer, "commercial": commercial}
 
 
+def _sync_case_catalog(case_id: str, gateway, catalog, logger) -> None:
+    """Reconcile the canonical catalog against this case's actual CSV columns.
+
+    Runs once per case at first-open. Pure in-memory: auto-aliased entries
+    and observed-category drift land on `catalog._profiles[table]` so the
+    specialists' `get_table_schema` returns case-accurate column resolutions
+    (real CSV headers ↔ canonical names, observed value vocabularies, etc.).
+    YAMLs on disk are NOT touched — committing case-specific drift back to
+    source-controlled profiles is still the interactive
+    `python -m datalayer.sync` flow's job.
+
+    Skips LLM drafting for speed (regex-based descriptions only) — the
+    runtime path can't afford the 5-30s LLM round-trips on each first open.
+    """
+    from datalayer import adapter
+
+    canonical = {t: catalog._profiles[t]["columns"] for t in catalog.list_tables()}
+    try:
+        diff = adapter.reconcile_case(gateway, canonical, case_id)
+    except Exception as exc:
+        logger.log("case_catalog_sync_failed",
+                   {"case_id": case_id, "error": str(exc)})
+        print(f"  ⚠ catalog sync failed for {case_id}: {exc}")
+        return
+    patches = adapter.apply_diff_in_memory(diff, catalog)
+    logger.log("case_catalog_sync_done", {
+        "case_id": case_id,
+        "n_auto_aliased": len(diff.auto_aliased),
+        "n_ambiguous": len(diff.ambiguous),
+        "n_new_columns": len(diff.new),
+        "n_new_tables": len(diff.new_tables),
+        "n_value_drift": len(diff.value_drift),
+        "tables_patched": sorted(patches.keys()),
+    })
+    print(
+        f"  ✓ catalog synced for {case_id}: "
+        f"{len(diff.auto_aliased)} auto-aliased, "
+        f"{len(diff.new)} new col(s), "
+        f"{len(diff.ambiguous)} ambiguous, "
+        f"{len(diff.new_tables)} new table(s)"
+    )
+
+
 def _get_or_create_session(case_id: str) -> CaseSession:
     """Lazily build a CaseSession for this case_id."""
     with SESSIONS_LOCK:
@@ -177,6 +220,11 @@ def _get_or_create_session(case_id: str) -> CaseSession:
 
         case_logger = EventLogger(session_id=f"case-{case_id}-{uuid.uuid4().hex[:6]}")
         case_logger.log("case_session_open", {"case_id": case_id})
+
+        # First-open: reconcile the canonical catalog against this case's
+        # actual CSV columns so specialists' get_table_schema sees accurate
+        # aliases + observed value vocabularies for THIS case. In-memory only.
+        _sync_case_catalog(case_id, case_gateway, _CATALOG, case_logger)
 
         sess = CaseSession(
             case_id=case_id,
