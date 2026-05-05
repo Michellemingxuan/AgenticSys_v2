@@ -184,7 +184,11 @@ def _get_or_create_session(case_id: str) -> CaseSession:
             catalog=_CATALOG,
             clients=_CLIENTS,
             pillar_yaml=_PILLAR_YAML,
-            chat_agent=ChatAgent(_CHAT_LLM, case_logger, tools=_HELPER_TOOLS),
+            chat_agent=ChatAgent(
+                _CHAT_LLM, case_logger,
+                tools=_HELPER_TOOLS,
+                pillar_config=_PILLAR_YAML,
+            ),
             logger=case_logger,
         )
         SESSIONS[case_id] = sess

@@ -162,7 +162,7 @@ async def amain():
     pillar_yaml = pillar_loader.load(args.pillar) or {}
 
     helper_tools = build_helper_tools()
-    chat_agent = ChatAgent(chat_llm, logger, tools=helper_tools)
+    chat_agent = ChatAgent(chat_llm, logger, tools=helper_tools, pillar_config=pillar_yaml)
 
     async def _screen_and_run(question: str) -> str:
         """Screen via ChatAgent; if rejected, return the reason.

@@ -53,7 +53,7 @@ After deciding the question is in-scope, also compare it against `prior_question
 
 Compare along three dimensions — **a near-duplicate must match on ALL THREE**:
 
-1. **Subject** — same entity, metric, or domain. "What's the FICO score?" and "What's the customer's bureau score?" are the same subject; "FICO score" vs. "DTI" are not.
+1. **Subject** — same entity, metric, or domain. "What's the FICO score?" and "What's the customer's bureau score?" are the same subject; "FICO score" vs. "DTI" are not. **Domain synonyms count as the same subject** — when the user_message contains a "Domain vocabulary" block, use those mappings. For credit-risk: `SBS` cards ≡ `commercial` cards; `CPS` cards ≡ `consumer` cards; `FICO` ≡ `bureau score`; `the model` / `internal score` ≡ specific named scores like `CDSS` / `TSR`. Two questions whose only difference is the synonym choice ARE the same subject.
 2. **Time range** — same window, or both unspecified. "Last 6 months" ≠ "since Jan-2024" ≠ "current". An unspecified window matches another unspecified window. A narrower window does NOT match a broader prior window (the prior answer would over-cover).
 3. **Scope** — same level of aggregation / same filter. "Top merchant" ≠ "top 5 merchants"; "all returned payments" ≠ "returned payments by industry".
 
@@ -65,7 +65,9 @@ Examples:
 - Prior: *"Did the customer have any payment returns?"* — New: *"Has this customer had any returned payments?"* → near-duplicate.
 - Prior: *"What is the customer's spending pattern?"* — New: *"What is the customer's spending pattern in 2025?"* → NOT a duplicate (time range narrowed).
 - Prior: *"What is the customer's spending pattern?"* — New: *"Top merchants by spend?"* → NOT a duplicate (different scope — pattern vs. top-N).
-- Prior: *"What's the FICO score?"* — New: *"What's the bureau score?"* → near-duplicate (subject is the same external bureau score).
+- Prior: *"What's the FICO score?"* — New: *"What's the bureau score?"* → near-duplicate (subject is the same external bureau score; FICO ≡ bureau score per the glossary).
+- Prior: *"How many SBS cards does this customer have?"* — New: *"How many commercial cards does this customer have?"* → **near-duplicate** (SBS ≡ commercial per the credit-risk glossary; same subject, identical scope, no time-narrowing).
+- Prior: *"How many CPS cards?"* — New: *"How many consumer cards?"* → near-duplicate (CPS ≡ consumer).
 
 Be conservative — when in doubt, treat as NOT a duplicate. A false positive replays a stale answer; a false negative just runs the orchestrator afresh (cost only, no correctness loss).
 

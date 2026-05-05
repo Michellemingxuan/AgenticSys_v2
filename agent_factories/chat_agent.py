@@ -41,10 +41,21 @@ class ChatAgent:
         llm: Any,
         logger: EventLogger,
         tools: list | None = None,
+        pillar_config: dict | None = None,
     ):
         self.llm = llm
         self.logger = logger
         self.tools = tools
+        # `concept_glossary` is the pillar's domain-vocabulary block (e.g.
+        # "'CPS' ≈ consumer, 'SBS' ≈ commercial" for credit-risk). Surfacing
+        # it inside relevance_check lets the LLM recognise that two questions
+        # using different but synonymous terms ("how many SBS cards" vs
+        # "how many commercial cards") refer to the same subject — without
+        # which the near-duplicate detector reports them as distinct.
+        glossary = ""
+        if isinstance(pillar_config, dict):
+            glossary = str(pillar_config.get("concept_glossary") or "").strip()
+        self._concept_glossary = glossary
         self._redact_prompt = _load_skill(_WORKFLOW_DIR / "redact.md").body
         self._relevance_prompt = _load_skill(_WORKFLOW_DIR / "relevance_check.md").body
         self._clarify_prompt = _load_skill(_WORKFLOW_DIR / "clarify_intent.md").body
@@ -133,16 +144,25 @@ class ChatAgent:
             if prior else
             "\n(No prior reviewer questions yet — this is the first turn.)\n"
         )
+        glossary_block = (
+            "\nDomain vocabulary (treat these synonyms as the same subject "
+            "when comparing questions for near-duplicates):\n"
+            + self._concept_glossary
+            + "\n"
+            if self._concept_glossary else ""
+        )
         result = await self.llm.ainvoke(
             system_prompt=self._relevance_prompt,
             user_message=(
                 f"Reviewer question: {question}\n"
-                f"{prior_block}\n"
+                f"{prior_block}"
+                f"{glossary_block}\n"
                 "Decide whether this is in-scope for case review AND, if "
                 "in-scope, whether it is a near-duplicate of one of the "
-                "prior questions (matched on subject + time-range + scope). "
-                "Return JSON with passed + reason + near_duplicate_of + "
-                "near_duplicate_reason."
+                "prior questions (matched on subject + time-range + scope, "
+                "applying the domain-vocabulary synonyms above when judging "
+                "subject equivalence). Return JSON with passed + reason + "
+                "near_duplicate_of + near_duplicate_reason."
             ),
             json_mode=True,
         )
