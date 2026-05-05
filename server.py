@@ -504,14 +504,23 @@ def _start_turn(case_id: str):
 def post_rewind(case_id: str):
     body = request.get_json(silent=True) or {}
     msg_id = body.get("messageId", "")
-    # v1: backend doesn't track messages by id. Just clear the orchestrator
-    # input history so the next turn starts fresh from this case context.
+    # Both rewind-to-point and clear-history reach this endpoint. We clear the
+    # orchestrator's multi-turn input history AND the per-session exact-match
+    # qa_cache so a previously-asked question does NOT replay its cached
+    # answer when re-asked after a rewind. The front-end's clear-history
+    # action also calls this for the active case (no message id), giving us
+    # a single server-side reset path.
     try:
         sess = _get_or_create_session(case_id)
     except KeyError as exc:
         return jsonify({"error": str(exc)}), 404
     sess.input_history = []
-    sess.logger.log("rewind", {"message_id": msg_id, "case_id": case_id})
+    n_cached = len(sess.qa_cache)
+    sess.qa_cache.clear()
+    sess.logger.log("rewind", {
+        "message_id": msg_id, "case_id": case_id,
+        "qa_cache_entries_cleared": n_cached,
+    })
     return ("", 204)
 
 

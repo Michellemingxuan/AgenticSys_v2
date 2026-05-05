@@ -61,6 +61,17 @@ def build_session_clients(
         # want this module to import successfully for tests.
         from llm.safechain_client import SafeChainAsyncOpenAI
 
+        # Silence the SDK's recurring
+        #   "OPENAI_API_KEY is not set, skipping trace export"
+        # log line. In safechain mode there is no OpenAI API key by design;
+        # tracing exports are a noop and the message just adds noise.
+        try:
+            from agents import set_tracing_disabled
+
+            set_tracing_disabled(True)
+        except Exception:  # pragma: no cover — older SDK without the helper
+            pass
+
         client: Any = SafeChainAsyncOpenAI(model_name=model_name, firewall=firewall)
     elif backend == "openai":
         # `max_retries=8` lets the openai SDK back off and retry on 429
@@ -125,6 +136,9 @@ class FirewalledChatShim:
         """
         import json as _json
         from models.types import LLMResult
+
+        del tools  # signature compatibility only; ChatAgent's converse passes
+        # tools but the shim only does single-turn chat completions.
 
         kwargs: dict = {
             "model": self._model,

@@ -159,7 +159,7 @@ async def test_retry_with_guidance_on_firewall_rejection():
     # Capture each _invoke's messages so we can assert on the retry's content
     seen_messages: list[list[dict]] = []
 
-    async def fake_invoke(self, *, model, messages, tools, response_format):
+    async def fake_invoke(self, *, model, messages, tools, response_format, stream=False):
         seen_messages.append([dict(m) for m in messages])
         if len(seen_messages) == 1:
             raise FirewallRejection("PII", "first attempt blocked")
@@ -187,7 +187,7 @@ async def test_retries_exhausted_raises():
     client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
     call_count = 0
 
-    async def fake_invoke(self, *, model, messages, tools, response_format):
+    async def fake_invoke(self, *, model, messages, tools, response_format, stream=False):
         nonlocal call_count
         call_count += 1
         raise FirewallRejection("PII", "always blocked")

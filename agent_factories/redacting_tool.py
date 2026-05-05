@@ -14,6 +14,15 @@ from llm.firewall_stack import redact_payload, sanitize_message
 _SPECIALIST_MAX_TURNS = 25
 
 
+def _normalize_subq(text: str) -> str:
+    """Collapse whitespace + lowercase a sub-question for the per-AppContext
+    dedup cache. Two sub-questions with trivial wording differences ('Did
+    the customer have any returns?' vs 'did the customer have any returns')
+    map to the same key.
+    """
+    return " ".join((text or "").strip().lower().split())
+
+
 def redacting_tool(agent: Agent, name: str, description: str):
     """Return a FunctionTool that runs ``agent`` with input/output redaction.
 
@@ -43,6 +52,30 @@ def redacting_tool(agent: Agent, name: str, description: str):
         app_ctx = ctx.context if ctx else None
         histories = getattr(app_ctx, "_specialist_histories", None)
         prior = histories.get(name) if isinstance(histories, dict) else None
+
+        # Per-AppContext dedup: same (specialist, sub_question) within the
+        # same context returns the cached payload rather than re-running.
+        # This caps cost when the orchestrator (especially in safechain mode,
+        # where parallel-tool-call semantics aren't native) emits the same
+        # call multiple times in one turn with trivial wording variations.
+        cache_key = (name, _normalize_subq(redacted_in))
+        seen = getattr(app_ctx, "_specialist_call_cache", None)
+        if seen is None and app_ctx is not None:
+            try:
+                seen = {}
+                # Attach lazily so each AppContext gets its own cache; tests
+                # with a bare SimpleNamespace tolerate the attr add.
+                app_ctx._specialist_call_cache = seen  # type: ignore[attr-defined]
+            except Exception:
+                seen = None
+        if isinstance(seen, dict) and cache_key in seen:
+            cached = seen[cache_key]
+            logger = getattr(app_ctx, "logger", None)
+            if logger is not None:
+                logger.log("specialist_call_dedup_hit",
+                           {"specialist": name,
+                            "sub_question_norm": cache_key[1]})
+            return cached
 
         if prior:
             run_input = prior + [{"role": "user", "content": redacted_in}]
@@ -78,6 +111,9 @@ def redacting_tool(agent: Agent, name: str, description: str):
         if isinstance(histories, dict) and hasattr(result, "to_input_list"):
             histories[name] = result.to_input_list()
 
-        return redact_payload(result.final_output)
+        payload = redact_payload(result.final_output)
+        if isinstance(seen, dict):
+            seen[cache_key] = payload
+        return payload
 
     return _runner
