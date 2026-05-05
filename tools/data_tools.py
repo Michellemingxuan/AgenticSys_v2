@@ -124,7 +124,9 @@ _MONTHS: dict[str, int] = {
 # also accept 3-letter abbreviations
 _MONTHS.update({m[:3]: i for m, i in list(_MONTHS.items())})
 
-_ISO_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+# ISO date with optional time component:
+#   "2025-11-16", "2025-11-16 00:00:00", "2025-11-16T13:45", "2025-11-16T13:45:30Z"
+_ISO_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})(?:[T\s]\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:[Zz]|[+\-]\d{2}:?\d{2})?)?$")
 _ISO_MONTH_RE = re.compile(r"^(\d{4})-(\d{2})$")
 _YEAR_RE = re.compile(r"^(\d{4})$")
 # Month-year, separator is one of `'`, `-`, or whitespace:
@@ -132,6 +134,13 @@ _YEAR_RE = re.compile(r"^(\d{4})$")
 _MONTH_YEAR_RE = re.compile(r"^([A-Za-z]{3,})\s*[-'\s]\s*(\d{4})$")
 # DD-MMM-YYYY: "07-Jul-2024", "7-Jul-2024".
 _DAY_MONTH_YEAR_RE = re.compile(r"^(\d{1,2})-([A-Za-z]{3,})-(\d{4})$")
+# Slash-separated dates with 4-digit year. Two interpretations:
+#   - YYYY/MM/DD (ISO with slashes) — "2024/01/15"
+#   - MM/DD/YYYY (US) or DD/MM/YYYY (EU) — "01/15/2024" / "15/01/2024"
+# We try YYYY-leading first, then disambiguate the trailing-year case by
+# checking whether the first or second number can only be a day (>12).
+_ISO_SLASH_RE = re.compile(r"^(\d{4})/(\d{1,2})/(\d{1,2})$")
+_SLASH_DATE_RE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})$")
 
 
 def _date_key(value: Any) -> tuple[int, int, int] | None:
@@ -139,12 +148,14 @@ def _date_key(value: Any) -> tuple[int, int, int] | None:
     (year, month, day) tuple. Returns None if unparseable.
 
     Handles formats produced across the data profiles:
-      - ``2025-11-16``                                     → (2025, 11, 16)
-      - ``07-Jul-2024`` / ``7-Jul-2024``                   → (2024, 7, 7)
-      - ``2025-11``                                        → (2025, 11, 1)
-      - ``October'2024`` / ``October 2024`` / ``Oct'2024`` → (2024, 10, 1)
-      - ``Jan-2024`` / ``Jan 2024`` / ``January-2024``     → (2024, 1, 1)
-      - ``2025``                                           → (2025, 1, 1)
+      - ``2025-11-16``  / ``2025-11-16 00:00:00`` / ``2025-11-16T13:45Z`` → (2025, 11, 16)
+      - ``07-Jul-2024`` / ``7-Jul-2024``                                  → (2024, 7, 7)
+      - ``2025-11``                                                       → (2025, 11, 1)
+      - ``October'2024`` / ``October 2024`` / ``Oct'2024``                → (2024, 10, 1)
+      - ``Jan-2024`` / ``Jan 2024`` / ``January-2024``                    → (2024, 1, 1)
+      - ``2024/01/15``                                                    → (2024, 1, 15)
+      - ``01/15/2024`` (US, MM/DD/YYYY) / ``15/01/2024`` (EU, DD/MM/YYYY) → (2024, 1, 15)
+      - ``2025``                                                          → (2025, 1, 1)
     Tuple comparison matches chronological order for any of these.
     """
     if value is None:
@@ -174,6 +185,27 @@ def _date_key(value: Any) -> tuple[int, int, int] | None:
         month_idx = _MONTHS.get(m.group(1).lower())
         if month_idx is not None:
             return (int(m.group(2)), month_idx, 1)
+
+    # YYYY/MM/DD slash form.
+    m = _ISO_SLASH_RE.match(s)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if 1 <= mo <= 12 and 1 <= d <= 31:
+            return (y, mo, d)
+
+    # MM/DD/YYYY (US) vs DD/MM/YYYY (EU). Disambiguate by which slot can
+    # only be a day (>12). Default to MM/DD/YYYY when both slots are ≤12.
+    m = _SLASH_DATE_RE.match(s)
+    if m:
+        a, b, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if a > 12 and b <= 12:
+            day, month = a, b
+        elif b > 12 and a <= 12:
+            day, month = b, a
+        else:
+            month, day = a, b  # ambiguous → assume US MM/DD
+        if 1 <= month <= 12 and 1 <= day <= 31:
+            return (y, month, day)
 
     m = _YEAR_RE.match(s)
     if m:
@@ -1105,12 +1137,28 @@ def _aggregate_column_impl(
                 )
                 return out
 
+        # Surface a small sample of the un-parseable values so the JSONL log
+        # makes the date-format mismatch debuggable on the next regression.
+        sample_unparsed: list[str] = []
+        for r in rows:
+            v = r.get(real_col)
+            if v is None or v == "":
+                continue
+            sv = str(v)
+            if sv not in sample_unparsed:
+                sample_unparsed.append(sv)
+            if len(sample_unparsed) >= 3:
+                break
         out = (
             f"No numeric or date values for column {real_col!r} in "
             f"{n_matching:,} matching row(s). Check column name + dtype."
+            + (f" Sample value(s) seen: {sample_unparsed}" if sample_unparsed else "")
         )
         _log_result("aggregate_column", result=out,
-                    extra={"op": op, "n_matching": n_matching, "skipped": skipped})
+                    extra={"op": op, "column": real_col,
+                           "n_matching": n_matching, "skipped": skipped,
+                           "sample_unparsed_values": sample_unparsed,
+                           "kind": "no_values"})
         return out
 
     if op == "sum":
