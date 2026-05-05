@@ -217,8 +217,14 @@ async def _run_turn_streamed(sess: CaseSession, turn_id: str, question: str) -> 
     })
 
     # ── 1. Question check (screen + relevance) ─────────────────────────────
+    # Build the list of prior reviewer questions in this session so the
+    # relevance_check skill can flag near-duplicates (matched on subject +
+    # time-range + scope). The qa_cache holds raw redacted-question strings
+    # as values' "origin_question"; we surface those here.
+    prior_questions = [v.get("origin_question", "") for v in sess.qa_cache.values()]
+    prior_questions = [q for q in prior_questions if q]
     try:
-        verdict = await sess.chat_agent.screen(question)
+        verdict = await sess.chat_agent.screen(question, prior_questions=prior_questions)
     except Exception as exc:
         sess.emit("error", {"turn_id": turn_id, "message": f"screen failed: {exc}", "recoverable": True})
         sess.emit("turn_done", {"turn_id": turn_id, "ended_at": int(time.time() * 1000),
@@ -253,28 +259,50 @@ async def _run_turn_streamed(sess: CaseSession, turn_id: str, question: str) -> 
                                 "duration_ms": ts - started_at, "outcome": "screen_rejected"})
         return
 
-    # ── 1.5. Exact-match QA cache lookup ──────────────────────────────────
-    # If the same redacted question was answered earlier this session and
-    # produced a FinalAnswer, replay it instead of paying the orchestrator
-    # cost a second time. Cache key uses the redacted form so identical
+    # ── 1.5. Cache lookup — exact-match first, then near-duplicate ───────
+    # Cache key uses the redacted-question normalized form so identical
     # questions with different identifiers (case IDs etc.) collide as
     # intended. Rejections are not cached.
     cache_key = _normalize_q(verdict.redacted_question)
     cached = sess.qa_cache.get(cache_key) if cache_key else None
+    cache_hit_kind = "exact" if cached is not None else None
+    # Fall back to relevance_check's near-duplicate verdict — the LLM
+    # judged this question a near-duplicate of an earlier one along
+    # subject + time-range + scope dimensions. Look up that prior
+    # question's cached answer.
+    if cached is None and verdict.near_duplicate_of:
+        near_dup_key = _normalize_q(verdict.near_duplicate_of)
+        cached = sess.qa_cache.get(near_dup_key) if near_dup_key else None
+        if cached is not None:
+            cache_hit_kind = "near_duplicate"
+            sess.logger.log("qa_cache_hit_near_duplicate", {
+                "turn_id": turn_id,
+                "matched_prior": verdict.near_duplicate_of,
+                "match_reason": verdict.near_duplicate_reason,
+            })
     if cached is not None:
         sess.logger.log("qa_cache_hit", {
             "turn_id": turn_id, "norm_q": cache_key,
             "origin_turn_id": cached.get("turn_id_origin"),
+            "kind": cache_hit_kind,
         })
         cached_text = cached["answer"]
         # Annotate so the reviewer sees that this is a replay, not a
         # fresh run — keeps the answer faithful to the original (no
         # silent staleness) while saving the orchestrator round-trip.
-        replayed_text = (
-            cached_text
-            + "\n\n*— Reused from a prior identical question this session "
-              "(no fresh data pull).*"
-        )
+        if cache_hit_kind == "near_duplicate":
+            note = (
+                f"\n\n*— Reused from a near-duplicate prior question this "
+                f"session ({verdict.near_duplicate_reason or 'matched on subject + scope'}). "
+                f"Original question: \"{verdict.near_duplicate_of}\". "
+                f"No fresh data pull.*"
+            )
+        else:
+            note = (
+                "\n\n*— Reused from a prior identical question this session "
+                "(no fresh data pull).*"
+            )
+        replayed_text = cached_text + note
         ts = int(time.time() * 1000)
         sess.emit("final", {
             "turn_id": turn_id, "answer": replayed_text,
@@ -448,6 +476,9 @@ async def _run_turn_streamed(sess: CaseSession, turn_id: str, question: str) -> 
             "flags": list(flags or []),
             "data_pull_request": _safe_dump(data_pull),
             "turn_id_origin": turn_id,
+            # Verbatim question text used by the relevance_check skill on
+            # subsequent turns to spot near-duplicates of this one.
+            "origin_question": verdict.redacted_question,
         }
         sess.logger.log("qa_cache_store",
                         {"turn_id": turn_id, "norm_q": cache_key,

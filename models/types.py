@@ -241,11 +241,20 @@ class ScreenVerdict(BaseModel):
 
     `passed=False` short-circuits the Orchestrator; `reason` is the
     reviewer-facing message explaining why.
+
+    `near_duplicate_of` is the verbatim text of an earlier reviewer question
+    in the same session that the relevance_check skill judged this question
+    a near-duplicate of (matched on subject + time-range + scope). When set,
+    the server replays that prior question's cached answer instead of
+    re-running the orchestrator. Empty string when no match.
+    `near_duplicate_reason` is a one-sentence justification for diagnostics.
     """
 
     passed: bool
     reason: str = ""
     redacted_question: str
+    near_duplicate_of: str = ""
+    near_duplicate_reason: str = ""
 
 
 # Backwards-compat alias — `GuardrailVerdict` was the old name when input

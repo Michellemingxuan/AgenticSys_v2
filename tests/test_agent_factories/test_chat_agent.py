@@ -104,9 +104,11 @@ async def test_relevance_check_returns_passed_reason_tuple(mock_llm, logger):
         data={"passed": False, "reason": "off-topic"},
     ))
     agent = ChatAgent(mock_llm, logger)
-    passed, reason = await agent.relevance_check("anything")
+    passed, reason, near_dup, near_dup_reason = await agent.relevance_check("anything")
     assert passed is False
     assert reason == "off-topic"
+    assert near_dup == ""
+    assert near_dup_reason == ""
 
 
 async def test_relevance_check_blocked_fails_open(mock_llm, logger):
@@ -114,9 +116,55 @@ async def test_relevance_check_blocked_fails_open(mock_llm, logger):
         status="blocked", data=None, error="x",
     ))
     agent = ChatAgent(mock_llm, logger)
-    passed, reason = await agent.relevance_check("q")
+    passed, reason, near_dup, near_dup_reason = await agent.relevance_check("q")
     assert passed is True
     assert reason == ""
+    assert near_dup == ""
+    assert near_dup_reason == ""
+
+
+async def test_relevance_check_emits_near_duplicate_when_prior_matches(mock_llm, logger):
+    """When the LLM names a prior question verbatim, near_duplicate_of is surfaced."""
+    mock_llm.ainvoke = AsyncMock(return_value=LLMResult(
+        status="success",
+        data={
+            "passed": True,
+            "reason": "",
+            "near_duplicate_of": "What is the customer's spending pattern?",
+            "near_duplicate_reason": "Same subject, no time narrowing.",
+        },
+    ))
+    agent = ChatAgent(mock_llm, logger)
+    passed, reason, near_dup, near_dup_reason = await agent.relevance_check(
+        "Show me the customer's spending pattern.",
+        prior_questions=["What is the customer's spending pattern?"],
+    )
+    assert passed is True
+    assert near_dup == "What is the customer's spending pattern?"
+    assert "Same subject" in near_dup_reason
+
+
+async def test_relevance_check_drops_hallucinated_near_duplicate(mock_llm, logger):
+    """When the LLM cites a prior question that wasn't actually in the list,
+    the wrapper drops the claim defensively (avoids replaying a bogus cache hit).
+    """
+    mock_llm.ainvoke = AsyncMock(return_value=LLMResult(
+        status="success",
+        data={
+            "passed": True,
+            "reason": "",
+            "near_duplicate_of": "Some made-up prior question",
+            "near_duplicate_reason": "matches",
+        },
+    ))
+    agent = ChatAgent(mock_llm, logger)
+    passed, reason, near_dup, near_dup_reason = await agent.relevance_check(
+        "current question",
+        prior_questions=["A real prior question that doesn't match"],
+    )
+    assert passed is True
+    assert near_dup == ""
+    assert near_dup_reason == ""
 
 
 # ── format() — output ──────────────────────────────────────────────────────

@@ -51,25 +51,45 @@ class ChatAgent:
 
     # ── Input boundary ────────────────────────────────────────────────────
 
-    async def screen(self, question: str) -> ScreenVerdict:
-        """Redact identifiers, then decide in-scope vs reject.
+    async def screen(
+        self,
+        question: str,
+        prior_questions: list[str] | None = None,
+    ) -> ScreenVerdict:
+        """Redact identifiers, then decide in-scope vs reject. Also detects
+        whether ``question`` is a near-duplicate of any entry in
+        ``prior_questions`` (earlier reviewer questions in the same session,
+        most recent last) so the server can replay a cached answer.
 
         If the redact step is blocked, falls through with the raw question
         so relevance-check still gets a chance. If the relevance step is
         blocked, defaults to `passed=True` (fail-open on guardrail blocks
         so a reviewer isn't silently stonewalled by a firewall hiccup).
         """
-        self.logger.log("chat_screen_start", {"question_len": len(question)})
+        self.logger.log(
+            "chat_screen_start",
+            {"question_len": len(question),
+             "n_prior_questions": len(prior_questions or [])},
+        )
 
         redacted = await self.redact(question)
-        passed, reason = await self.relevance_check(redacted)
+        passed, reason, near_dup, near_dup_reason = await self.relevance_check(
+            redacted, prior_questions=prior_questions or []
+        )
 
         verdict = ScreenVerdict(
             passed=passed,
             reason=reason if not passed else "",
             redacted_question=redacted,
+            near_duplicate_of=near_dup if passed else "",
+            near_duplicate_reason=near_dup_reason if passed else "",
         )
-        self.logger.log("chat_screen_done", {"passed": passed, "reason": verdict.reason})
+        self.logger.log(
+            "chat_screen_done",
+            {"passed": passed, "reason": verdict.reason,
+             "near_duplicate_of": verdict.near_duplicate_of,
+             "near_duplicate_reason": verdict.near_duplicate_reason},
+        )
         return verdict
 
     async def redact(self, text: str) -> str:
@@ -93,25 +113,43 @@ class ChatAgent:
 
         return str(result.data.get("redacted", text)) or text
 
-    async def relevance_check(self, question: str) -> tuple[bool, str]:
-        """Decide whether the question is in-scope. Returns (passed, reason).
+    async def relevance_check(
+        self,
+        question: str,
+        prior_questions: list[str] | None = None,
+    ) -> tuple[bool, str, str, str]:
+        """Decide whether the question is in-scope AND whether it's a
+        near-duplicate of any prior question. Returns
+        ``(passed, reason, near_duplicate_of, near_duplicate_reason)``.
 
-        Fail-open: if the LLM is blocked, returns `(True, "")` so a firewall
-        hiccup doesn't stonewall a reviewer.
+        Fail-open: if the LLM is blocked, returns
+        ``(True, "", "", "")`` so a firewall hiccup doesn't stonewall a
+        reviewer or accidentally replay a stale cached answer.
         """
+        prior = prior_questions or []
+        prior_block = (
+            "\nPrior reviewer questions in this session (most recent last):\n"
+            + "\n".join(f"  - {q}" for q in prior)
+            if prior else
+            "\n(No prior reviewer questions yet — this is the first turn.)\n"
+        )
         result = await self.llm.ainvoke(
             system_prompt=self._relevance_prompt,
             user_message=(
-                f"Reviewer question: {question}\n\n"
-                "Decide whether this is in-scope for case review. Return JSON "
-                "with passed + reason."
+                f"Reviewer question: {question}\n"
+                f"{prior_block}\n"
+                "Decide whether this is in-scope for case review AND, if "
+                "in-scope, whether it is a near-duplicate of one of the "
+                "prior questions (matched on subject + time-range + scope). "
+                "Return JSON with passed + reason + near_duplicate_of + "
+                "near_duplicate_reason."
             ),
             json_mode=True,
         )
 
         if result.status == "blocked" or result.data is None:
             self.logger.log("chat_relevance_fallback", {"reason": "blocked — fail-open"})
-            return True, ""
+            return True, "", "", ""
 
         data = result.data
         # If JSON parse failed in the shim, the data dict carries
@@ -121,10 +159,20 @@ class ChatAgent:
             self.logger.log("chat_relevance_fallback",
                             {"reason": "json_parse_error — fail-open",
                              "raw": data.get("raw", "")[:200]})
-            return True, ""
+            return True, "", "", ""
         passed = bool(data.get("passed", True))
         reason = str(data.get("reason", "")).strip()
-        return passed, reason
+        near_dup = str(data.get("near_duplicate_of", "")).strip()
+        near_dup_reason = str(data.get("near_duplicate_reason", "")).strip()
+        # Defensive: only honour near_dup when it actually matches one of the
+        # prior questions verbatim (the LLM can hallucinate a paraphrase).
+        if near_dup and near_dup not in prior:
+            self.logger.log("chat_relevance_near_dup_dropped",
+                            {"reason": "near_duplicate_of not in prior_questions",
+                             "claimed": near_dup[:120]})
+            near_dup = ""
+            near_dup_reason = ""
+        return passed, reason, near_dup, near_dup_reason
 
     async def clarify_intent(self, question: str) -> ClarifyResult:
         """Decide whether an in-scope question's intent is clear, or whether
