@@ -5,11 +5,11 @@ and steps through every entry in `questions.json`. For each case it captures:
 
   1. ChatAgent.screen   — passed / reason / redacted question
   2. ChatAgent.relevance_check — in-scope verdict
-  3. Runner.run on the orchestrator agent — the team-construction tool calls
-     the orchestrator emitted, the report_agent's ReportDraft, every
-     specialist's SpecialistOutput (including the inner data-tool calls
-     captured in the EventLogger session log), and the orchestrator's final
-     synthesized FinalAnswer.
+  3. Runner.run on the orchestrator agent — captures the team the
+     orchestrator constructed (which specialists got which sub-question),
+     the report_agent's ReportDraft, every specialist's SpecialistOutput
+     (including the inner data-tool calls captured in the EventLogger
+     session log), and the orchestrator's final synthesized FinalAnswer.
   4. Follow-up turns — chained via `result.to_input_list()` so specialist
      memory and orchestrator history persist across the chain.
 
@@ -168,7 +168,7 @@ def _serialize_orchestrator_flow(items):
 _OUTCOME_LABELS = {
     "ok": "Completed",
     "screen_rejected": "Rejected at the safety / scope screen",
-    "out_of_scope": "Allowed in but ruled out of scope",
+    "out_of_scope": "Out of scope — orchestrator NOT triggered",
     "orchestrator_error": "Pipeline error — see error field",
 }
 
@@ -295,19 +295,45 @@ def _render_turn_md(turn, idx):
     out.append("### [QUESTION CHECK]")
     out.append("")
     sc = turn.get("screen", {})
-    out.append("- **Safety / PII screen:** "
-               + ("passed" if sc.get("passed") else f"rejected — {sc.get('reason', '')}"))
+    out.append("- **Screen (safety / PII / scope):** "
+               + ("passed" if sc.get("passed") else f"REJECTED — {sc.get('reason', '')}"))
     if sc.get("redacted_question") and sc.get("redacted_question") != turn["question"]:
         out.append(f"  - Redacted to: `{sc.get('redacted_question')}`")
-    rc = turn.get("relevance_check")
-    if rc is not None:
-        out.append("- **Scope check:** "
-                   + ("in scope" if rc.get("in_scope") else f"out of scope — {rc.get('reason', '')}"))
     outcome = turn.get("outcome", "?")
     out.append(f"- **Outcome:** {_OUTCOME_LABELS.get(outcome, outcome)}")
     if turn.get("error"):
         out.append(f"  - Error: `{turn['error']}`")
     out.append("")
+
+    # Out-of-scope rejection: surface the polished message as the final
+    # answer and stop. No clarify / orchestrator stages on this path.
+    if outcome == "out_of_scope":
+        final = turn.get("final_answer") or {}
+        if final.get("answer"):
+            out.append("### [FINAL ANSWER]")
+            out.append("")
+            out.append(f"**Answer:** {final.get('answer')}")
+            out.append("")
+        return "\n".join(out)
+
+    # ── [CLARIFY INTENT] ─────────────────────────────────────────────────
+    cl = turn.get("clarify")
+    if cl is not None:
+        out.append("### [CLARIFY INTENT]")
+        out.append("")
+        if cl.get("needs_clarification"):
+            out.append(f"- **Ambiguity:** {cl.get('reason', '')}")
+            out.append("- **Options surfaced to reviewer:**")
+            for i, opt in enumerate(cl.get("options", []), start=1):
+                marker = "→" if i == cl.get("chosen_index") else " "
+                out.append(f"    {marker} **{i}.** {opt}")
+            out.append(
+                f"- **Reviewer chose:** option {cl.get('chosen_index', 1)} → "
+                f"`{cl.get('confirmed_question', '')}`"
+            )
+        else:
+            out.append("- Question was unambiguous — dispatched directly without clarification.")
+        out.append("")
 
     # If we never reached the orchestrator, stop here.
     if outcome != "ok":
@@ -319,9 +345,22 @@ def _render_turn_md(turn, idx):
 
     # ── [TEAM CONSTRUCTION] ─────────────────────────────────────────────
     if calls:
+        # Categorize the orchestrator's chosen team: domain specialists
+        # form "the team"; report_agent and general_specialist are
+        # auxiliaries that ride along but aren't team members proper.
+        specialist_calls = [c for c in calls if c["tool"] not in ("report_agent", "general_specialist")]
+        aux_calls = [c for c in calls if c["tool"] in ("report_agent", "general_specialist")]
+        n_spec = len(specialist_calls)
+        spec_names = ", ".join(c["tool"] for c in specialist_calls) or "(none)"
         out.append("### [TEAM CONSTRUCTION]")
         out.append("")
-        out.append(f"Orchestrator selected {len(calls)} tool call(s) on this turn:")
+        out.append(
+            f"Orchestrator constructed a team of **{n_spec} specialist"
+            f"{'s' if n_spec != 1 else ''}** ({spec_names})"
+            + (" and consulted " + ", ".join(c["tool"] for c in aux_calls)
+               if aux_calls else "")
+            + ":"
+        )
         out.append("")
         for c in calls:
             sub_q = c.get("sub_question")
@@ -329,9 +368,9 @@ def _render_turn_md(turn, idx):
                 json.dumps(sub_q, default=str) if not isinstance(sub_q, str) else sub_q
             )
             role = (
-                "report agent"
+                "report agent — pulls relevant prior reports"
                 if c["tool"] == "report_agent"
-                else "cross-specialist reviewer"
+                else "cross-specialist reviewer — compares specialist outputs"
                 if c["tool"] == "general_specialist"
                 else f"{c['tool']} specialist"
             )
@@ -405,11 +444,19 @@ async def run_one_turn(
     orch,
     ctx,
     prior_result=None,
+    clarify_choice=1,
 ):
-    """Screen, relevance-check, run the orchestrator, capture flow."""
+    """Pipeline for one turn:
+       (A) screen (redact + scope) → reject if out-of-scope.
+       (B) clarify_intent → if ambiguous, pick the option indexed by
+           ``clarify_choice`` (1-based; defaults to the first option).
+       (C) Runner.run on the orchestrator with the confirmed question.
+
+    Captures every stage in the returned log dict.
+    """
     log = {"turn_id": turn_id, "question": question, "is_followup": prior_result is not None}
 
-    # Stage A — screen
+    # ── Stage A — screen (redact + scope check) ──────────────────────────
     verdict = await chat_agent.screen(question)
     log["screen"] = {
         "passed": verdict.passed,
@@ -417,23 +464,42 @@ async def run_one_turn(
         "redacted_question": verdict.redacted_question,
     }
     if not verdict.passed:
-        log["outcome"] = "screen_rejected"
-        return None, log
-
-    # Stage B — relevance check
-    in_scope, reason = await chat_agent.relevance_check(verdict.redacted_question)
-    log["relevance_check"] = {"in_scope": in_scope, "reason": reason}
-    if not in_scope:
+        # Strict reject — orchestrator NOT triggered. Surface the
+        # reviewer-facing rejection as the final answer so the rendered
+        # markdown reads cleanly.
+        rejection_msg = verdict.reason or "This is out of scope for case review."
         log["outcome"] = "out_of_scope"
+        log["final_answer"] = {
+            "answer": rejection_msg,
+            "flags": [],
+            "report_draft": None,
+            "team_draft": None,
+        }
         return None, log
 
-    # Stage C — orchestrator run (multi-turn aware)
+    # ── Stage B — clarify intent ─────────────────────────────────────────
+    clarify = await chat_agent.clarify_intent(verdict.redacted_question)
+    log["clarify"] = {
+        "needs_clarification": clarify.needs_clarification,
+        "options": clarify.options,
+        "reason": clarify.reason,
+    }
+    if clarify.needs_clarification and clarify.options:
+        # Pick by `clarify_choice` (1-based). Out-of-range falls back to 1.
+        idx = max(1, min(int(clarify_choice or 1), len(clarify.options))) - 1
+        confirmed_question = clarify.options[idx]
+        log["clarify"]["chosen_index"] = idx + 1  # 1-based for display
+        log["clarify"]["confirmed_question"] = confirmed_question
+    else:
+        confirmed_question = verdict.redacted_question
+
+    # ── Stage C — orchestrator run (multi-turn aware) ────────────────────
     if prior_result is not None:
         run_input = prior_result.to_input_list() + [
-            {"role": "user", "content": verdict.redacted_question}
+            {"role": "user", "content": confirmed_question}
         ]
     else:
-        run_input = verdict.redacted_question
+        run_input = confirmed_question
 
     try:
         result = await Runner.run(orch.orchestrator_agent, run_input, context=ctx)
@@ -442,7 +508,7 @@ async def run_one_turn(
         log["error"] = f"{type(e).__name__}: {e}"
         return None, log
 
-    # Stage D — capture flow + final answer (redacted)
+    # ── Stage D — capture flow + final answer (redacted) ─────────────────
     log["orchestrator_flow"] = _serialize_orchestrator_flow(result.new_items)
     final = redact_payload(result.final_output)
     log["final_answer"] = _safe_dump(final)
@@ -460,14 +526,21 @@ async def main():
     model_name = suite["model"]
     backend = suite["backend"]
     session_id = suite.get("session_id", "question-suite")
+    # Concurrency cap: gpt-4.1 (30K TPM tier) → 6–12 is a good range; gpt-4o
+    # → 12–24; gpt-4o-mini → 24+. Higher = faster wallclock; rate-limit
+    # bursts are absorbed by AsyncOpenAI's max_retries=8 backoff.
+    concurrency_cap = int(suite.get("concurrency_cap", 12))
 
     print(f"PROJECT_ROOT: {PROJECT_ROOT}")
     print(f"OPENAI_API_KEY set: {bool(os.environ.get('OPENAI_API_KEY'))}")
-    print(f"case_id={case_id}  pillar={pillar_name}  model={model_name}  backend={backend}")
+    print(
+        f"case_id={case_id}  pillar={pillar_name}  model={model_name}  "
+        f"backend={backend}  concurrency_cap={concurrency_cap}"
+    )
 
     # Build pipeline (mirrors notebook §2-§4)
     logger = EventLogger(session_id=session_id, log_dir=str(PROJECT_ROOT / "logs"))
-    firewall = FirewallStack(logger=logger, max_retries=2, concurrency_cap=8)
+    firewall = FirewallStack(logger=logger, max_retries=2, concurrency_cap=concurrency_cap)
     clients = build_session_clients(firewall, model_name=model_name, backend=backend)
     chat_llm = FirewalledChatShim(clients)
 
@@ -520,6 +593,16 @@ async def main():
             logger=logger,
         )
         case_log = {"name": name, "question": question, "note": note, "turns": []}
+        # Per-case clarify-choice (1-based). When the clarify_intent step
+        # surfaces N options, this picks which to dispatch. Default = 1
+        # (first option). Override per case in questions JSON via either:
+        #   "clarify_choice": 2                # applies to t0 + every t<N>
+        #   "clarify_choice": [1, 2, 1]        # one entry per turn
+        cc_raw = case.get("clarify_choice", 1)
+        if isinstance(cc_raw, list):
+            cc_per_turn = cc_raw
+        else:
+            cc_per_turn = [cc_raw] * (1 + len(followups))
 
         result, turn_log = await run_one_turn(
             f"{name}__t0",
@@ -527,6 +610,7 @@ async def main():
             chat_agent=chat_agent,
             orch=orch,
             ctx=ctx,
+            clarify_choice=cc_per_turn[0] if cc_per_turn else 1,
         )
         case_log["turns"].append(turn_log)
         print(f"  t0 outcome: {turn_log['outcome']}")
@@ -543,6 +627,7 @@ async def main():
                 orch=orch,
                 ctx=ctx,
                 prior_result=result,
+                clarify_choice=cc_per_turn[i] if i < len(cc_per_turn) else 1,
             )
             case_log["turns"].append(turn_log)
             print(f"  t{i} outcome: {turn_log['outcome']} — {fu_q!r}")

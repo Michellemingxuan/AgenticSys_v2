@@ -34,6 +34,7 @@ Bias: when in doubt, prefer `implicit` over `explicit`. Most curated reports giv
 | notable findings / what's interesting | `interestingness_exp_0.md` |
 | internal model score / PD / GAM | `modeling_exp_0.md` |
 | payments / payment returns / spend / spend spikes | `payment_spend_exp_0.md` |
+| **spending pattern / spend behavior / spend trajectory / pattern questions / what's atypical / merchant exposure / recurring transactions / high-value outliers / late-stage spends** | **`payment_spend_exp_0.md` AND `interestingness_exp_0.md`** (BOTH — payment_spend has the dataset overview, interestingness has the structurally-atypical points across temporal / merchant / persistence dimensions) |
 | recommended action / next step / treatment | `strategy_0.md` |
 | WCC / write-off / collections | `wcc_notes_exp_0.md` |
 
@@ -42,6 +43,7 @@ Rules:
 - When in doubt, over-include — reading one extra file is cheap. Add `executive_summary_exp_0.md` as fallback when uncertain.
 - NEVER return `not_mentioned` because literal keywords don't appear in filenames; translate via the table first. `not_mentioned` is only when the folder is empty OR routing+filename+domain reasoning all yield nothing.
 - Filenames may not match the canonical layout — fall back to topic-hint matching against filenames.
+- **Pattern / trajectory / "what's atypical" framings** are inherently multi-aspect — pull `interestingness_*` alongside the topic-domain file (e.g. `payment_spend_exp_0.md` + `interestingness_exp_0.md` for spending pattern). The interestingness report carries the cross-cutting structural observations that no single domain file contains.
 
 Output:
 ```json

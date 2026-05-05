@@ -1,0 +1,316 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1380 2006" font-family="-apple-system,BlinkMacSystemFont,'Inter',Helvetica,Arial,sans-serif">
+<rect width="1380" height="2006" fill="#FFFFFF"/>
+<defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="0"><stop offset="0%" stop-color="#1D4ED8"/><stop offset="50%" stop-color="#3B82F6"/><stop offset="100%" stop-color="#60A5FA"/></linearGradient></defs>
+<rect x="0" y="0" width="1380" height="3" fill="url(#g)"/>
+<text x="32" y="58" font-size="32" font-weight="500" fill="#0F172A" font-family="Iowan Old Style, Source Serif Pro, Georgia, serif" letter-spacing="-0.02em">Data Catalog <tspan font-style="italic" fill="#1D4ED8" font-weight="400">case 366132845011</tspan></text>
+<text x="32" y="86" font-size="11" font-weight="600" fill="#475569" letter-spacing="2.5">AGENTIC CREDIT-RISK REVIEW · CANONICAL ↔ REAL TABLE MAPPING</text>
+<text x="1348" y="58" font-size="11" font-weight="600" fill="#475569" letter-spacing="2.2" text-anchor="end">9 TABLES · 66 COLUMNS SHOWN · 4 ORPHAN(S) · 0 REAL-ONLY</text>
+<text x="1348" y="78" font-size="11" font-weight="500" fill="#94A3B8" text-anchor="end">columns truncated at 10 per table</text>
+<line x1="32" y1="110" x2="1348" y2="110" stroke="#E2E8F0" stroke-width="1"/>
+<text x="32" y="138" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">├── </text>
+<text x="64" y="138" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="700">bureau  ↔  bureau_data  (18 rows)</text>
+<text x="560" y="138" font-size="12" fill="#475569" font-style="italic">— Credit bureau data — one row per external tradeline per case. Each row carries the case-level aggregated scor…</text>
+<text x="32" y="160" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="160" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">month</text>
+<text x="460" y="160" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[date]</text>
+<text x="560" y="160" font-size="12" fill="#475569" font-style="italic">— Monthly snapshot date for this bureau record (e.g. &quot;Jan-2024&quot;). One row per c…</text>
+<text x="32" y="182" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="182" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">SBFE Score</text>
+<text x="460" y="182" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[int]</text>
+<text x="560" y="182" font-size="12" fill="#475569" font-style="italic">— SBFE Score — business credit score predicting financial delinquency or failur…</text>
+<text x="32" y="204" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="204" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Delinquent External Trades</text>
+<text x="460" y="204" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[int]</text>
+<text x="560" y="204" font-size="12" fill="#475569" font-style="italic">— Total count of external credit lines on which the customer defaulted.</text>
+<text x="32" y="226" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="226" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">External Delinquency Amount (USD)</text>
+<text x="460" y="226" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[float]</text>
+<text x="560" y="226" font-size="12" fill="#475569" font-style="italic">— Total default amount on external credit lines (USD).</text>
+<text x="32" y="248" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="248" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Total Tradelines</text>
+<text x="460" y="248" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[int]</text>
+<text x="560" y="248" font-size="12" fill="#475569" font-style="italic">— Overall count of external credit lines linked to the customer.</text>
+<text x="32" y="270" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="270" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Overall External Exposure (USD)</text>
+<text x="460" y="270" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[float]</text>
+<text x="560" y="270" font-size="12" fill="#475569" font-style="italic">— Total outstanding balance on all external credit lines (USD).</text>
+<text x="32" y="292" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="292" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Overall External Revolving Balance (USD)</text>
+<text x="460" y="292" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[float]</text>
+<text x="560" y="292" font-size="12" fill="#475569" font-style="italic">— Total revolving balance on all external credit lines (USD).</text>
+<text x="32" y="314" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="314" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Average External Utlization</text>
+<text x="460" y="314" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[float]</text>
+<text x="560" y="314" font-size="12" fill="#475569" font-style="italic">— Average utilization across all external credit lines.</text>
+<text x="32" y="336" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="336" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">LN Credit Score</text>
+<text x="460" y="336" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[int]</text>
+<text x="560" y="336" font-size="12" fill="#475569" font-style="italic">— LexisNexis Credit Score — predicts consumer likelihood of default. Values bel…</text>
+<text x="32" y="358" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="358" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">LN Blended Score</text>
+<text x="460" y="358" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[int]</text>
+<text x="560" y="358" font-size="12" fill="#475569" font-style="italic">— LexisNexis Blended Score — combines traditional credit data with alternative…</text>
+<text x="32" y="380" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   └── </text>
+<text x="96" y="380" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8" font-style="italic">… and 8 more column(s)</text>
+<text x="32" y="402" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">├── </text>
+<text x="64" y="402" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="700">crossbu_cards  ↔  crossbu_cards_data  (3 rows)</text>
+<text x="560" y="402" font-size="12" fill="#475569" font-style="italic">— Cross-business-unit cards view — one row per card per case-month. Tracks</text>
+<text x="32" y="424" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="424" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Month</text>
+<text x="460" y="424" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[date]</text>
+<text x="560" y="424" font-size="12" fill="#475569" font-style="italic">— Monthly snapshot date for this card record (e.g. &quot;Jan-2024&quot;). One row per car…</text>
+<text x="32" y="446" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="446" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Card Name</text>
+<text x="460" y="446" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[categorical]</text>
+<text x="560" y="446" font-size="12" fill="#475569" font-style="italic">— Name of the card used by the customer</text>
+<text x="32" y="468" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="468" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Card Type</text>
+<text x="460" y="468" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[categorical]</text>
+<text x="560" y="468" font-size="12" fill="#475569" font-style="italic">— Type of card — Charge (pay-in-full), Lending (revolving credit), or LOC (line…</text>
+<text x="32" y="490" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="490" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Card Limit</text>
+<text x="460" y="490" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[float]</text>
+<text x="560" y="490" font-size="12" fill="#475569" font-style="italic">— Credit card limit in USD. Charge cards may have no preset spending limit (NPS…</text>
+<text x="32" y="512" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="512" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Card Tenure</text>
+<text x="460" y="512" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[int]</text>
+<text x="560" y="512" font-size="12" fill="#475569" font-style="italic">— Tenure of the card account in months</text>
+<text x="32" y="534" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="534" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Balance</text>
+<text x="460" y="534" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[float]</text>
+<text x="560" y="534" font-size="12" fill="#475569" font-style="italic">— Outstanding exposure on the card in USD</text>
+<text x="32" y="556" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="556" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Account Status</text>
+<text x="460" y="556" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[categorical]</text>
+<text x="560" y="556" font-size="12" fill="#475569" font-style="italic">— Account status — &#x27;Current&#x27; means up to date, 30/60/90/120 DPB means days past…</text>
+<text x="32" y="578" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="578" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Card Portfolio</text>
+<text x="460" y="578" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[categorical]</text>
+<text x="560" y="578" font-size="12" fill="#475569" font-style="italic">— Amex portfolio segment — classifies the card as CONSUMER vs. COMMERCIAL.</text>
+<text x="32" y="600" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   └── </text>
+<text x="96" y="600" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Past Delinquencies (Last 12M)</text>
+<text x="460" y="600" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[int]</text>
+<text x="560" y="600" font-size="12" fill="#475569" font-style="italic">— Count of past delinquencies (30 DPB) on the card in the last 12 months</text>
+<text x="32" y="622" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">├── </text>
+<text x="64" y="622" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="700">crossbu_merchants  ↔  crossbu_merchants_data  (0 rows)</text>
+<text x="560" y="622" font-size="12" fill="#475569" font-style="italic">— Cross-business-unit merchants view — one row per merchant relationship per case-month. Tracks businesses owne…</text>
+<text x="32" y="644" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">├── </text>
+<text x="64" y="644" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="700">demographics_data  (1 rows)</text>
+<text x="560" y="644" font-size="12" fill="#475569" font-style="italic">— Customer demographic and business-profile snapshot — one row per case. Combines internal CRM demographics (na…</text>
+<text x="32" y="666" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="666" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">customer_name</text>
+<text x="460" y="666" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[string]</text>
+<text x="560" y="666" font-size="12" fill="#475569" font-style="italic">— Customer&#x27;s full name (e.g. &quot;MOSHE BENAYON&quot;).</text>
+<text x="32" y="688" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="688" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">rel_type</text>
+<text x="460" y="688" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[string]</text>
+<text x="560" y="688" font-size="12" fill="#475569" font-style="italic">— Relationship type with the bank (e.g. &quot;BASIC&quot;, &quot;PREMIUM&quot;). Categorical label…</text>
+<text x="32" y="710" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="710" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">cust_dob_raw</text>
+<text x="460" y="710" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[date]</text>
+<text x="560" y="710" font-size="12" fill="#475569" font-style="italic">— Date of birth as originally reported by the source system. Raw form may carry…</text>
+<text x="32" y="732" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="732" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">cust_dob</text>
+<text x="460" y="732" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[date]</text>
+<text x="560" y="732" font-size="12" fill="#475569" font-style="italic">— Canonical date of birth (YYYY-MM-DD), parsed from cust_dob_raw.</text>
+<text x="32" y="754" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="754" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">customer_age</text>
+<text x="460" y="754" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[int]</text>
+<text x="560" y="754" font-size="12" fill="#475569" font-style="italic">— Customer age in years as of the snapshot.</text>
+<text x="32" y="776" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="776" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">account_tenure_months</text>
+<text x="460" y="776" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[int]</text>
+<text x="560" y="776" font-size="12" fill="#475569" font-style="italic">— Tenure of the customer&#x27;s primary account, in months.</text>
+<text x="32" y="798" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="798" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">portfolio_cd</text>
+<text x="460" y="798" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[string]</text>
+<text x="560" y="798" font-size="12" fill="#475569" font-style="italic">— Portfolio code identifying which Amex portfolio the customer belongs to (e.g.…</text>
+<text x="32" y="820" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="820" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">global_limit</text>
+<text x="460" y="820" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[int]</text>
+<text x="560" y="820" font-size="12" fill="#475569" font-style="italic">— Global credit limit across all customer accounts (USD).</text>
+<text x="32" y="842" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="842" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">lexis_nexis_tenure</text>
+<text x="460" y="842" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[int]</text>
+<text x="560" y="842" font-size="12" fill="#475569" font-style="italic">— Tenure of the customer in months as recorded by LexisNexis.</text>
+<text x="32" y="864" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="864" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">homeownership_ind</text>
+<text x="460" y="864" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[int]</text>
+<text x="560" y="864" font-size="12" fill="#475569" font-style="italic">— Homeownership indicator (1 = customer owns home, 0 = does not).</text>
+<text x="32" y="886" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   └── </text>
+<text x="96" y="886" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8" font-style="italic">… and 6 more column(s)</text>
+<text x="32" y="908" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">├── </text>
+<text x="64" y="908" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="700">model_scores  ↔  modelling_data  (18 rows)</text>
+<text x="560" y="908" font-size="12" fill="#475569" font-style="italic">— Internal model scoring features — one row per scoring run per case. Holds</text>
+<text x="32" y="930" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="930" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">trans_month</text>
+<text x="460" y="930" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[date]</text>
+<text x="560" y="930" font-size="12" fill="#475569" font-style="italic">— Date of the model scoring run (YYYY-MM-DD). Use this for time-range filtering.</text>
+<text x="32" y="952" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="952" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">cust_lexis_nexis_tot_tax_assess_val_am_max</text>
+<text x="460" y="952" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[string]</text>
+<text x="560" y="952" font-size="12" fill="#475569" font-style="italic">— Total tax-assessed value of the customer business address (USD) from LexisNex…</text>
+<text x="32" y="974" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="974" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">cust_cash_tot_liab_yr1_rt_max</text>
+<text x="460" y="974" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[float]</text>
+<text x="560" y="974" font-size="12" fill="#475569" font-style="italic">— ratio of cash to total liability corresponding to latest full year financial</text>
+<text x="32" y="996" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="996" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">cbr_score_max</text>
+<text x="460" y="996" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[int]</text>
+<text x="560" y="996" font-size="12" fill="#475569" font-style="italic">— customer credit bureau score (max)</text>
+<text x="32" y="1018" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1018" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">max_agec_agel_dyldage_max</text>
+<text x="460" y="1018" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[int]</text>
+<text x="560" y="1018" font-size="12" fill="#475569" font-style="italic">— Customer daily Age</text>
+<text x="32" y="1040" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1040" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">cust_eff_se_cdss_5_180_day_score_max</text>
+<text x="460" y="1040" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[float]</text>
+<text x="560" y="1040" font-size="12" fill="#475569" font-style="italic">— Merchant Risk Score. Values above 2 are risky.</text>
+<text x="32" y="1062" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1062" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">cust_expsr_avg_rem_12m_ratio_max</text>
+<text x="460" y="1062" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[float]</text>
+<text x="560" y="1062" font-size="12" fill="#475569" font-style="italic">— Customer Exposure / (Average Remit In 2-12 Months). Values above 3.15 are ris…</text>
+<text x="32" y="1084" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1084" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">se_no_norm_wtd_pd_unpaid_amt_max</text>
+<text x="460" y="1084" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[float]</text>
+<text x="560" y="1084" font-size="12" fill="#475569" font-style="italic">— normalised accum amount weighted by merchant percentage. Values above 0 are r…</text>
+<text x="32" y="1106" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1106" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">tpf_internal_delinq_idx_max</text>
+<text x="460" y="1106" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[float]</text>
+<text x="560" y="1106" font-size="12" fill="#475569" font-style="italic">— Internal Delinquency Index. Values above 5.8 are considered risky.</text>
+<text x="32" y="1128" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1128" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">oop_interaction_max</text>
+<text x="460" y="1128" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[float]</text>
+<text x="560" y="1128" font-size="12" fill="#475569" font-style="italic">— Out of Pattern Spend index wrt to Exposure. Values above 28 are risky.</text>
+<text x="32" y="1150" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   └── </text>
+<text x="96" y="1150" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8" font-style="italic">… and 44 more column(s)</text>
+<text x="32" y="1172" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">├── </text>
+<text x="64" y="1172" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="700">payments  (186 rows)</text>
+<text x="560" y="1172" font-size="12" fill="#475569" font-style="italic">— Payment records — one row per payment attempt per case. Real data lives in two CSVs (`payments_success.csv` +…</text>
+<text x="32" y="1194" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1194" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Card Number</text>
+<text x="460" y="1194" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[categorical]</text>
+<text x="560" y="1194" font-size="12" fill="#475569" font-style="italic">— Masked card number the payment was applied to (last 4 digits shown)</text>
+<text x="32" y="1216" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1216" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Payment Date</text>
+<text x="460" y="1216" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[date]</text>
+<text x="560" y="1216" font-size="12" fill="#475569" font-style="italic">— Date the payment was attempted (YYYY-MM-DD). Range: 2024-2025; data cut-off i…</text>
+<text x="32" y="1238" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1238" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Payment Amount</text>
+<text x="460" y="1238" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[float]</text>
+<text x="560" y="1238" font-size="12" fill="#475569" font-style="italic">— Payment amount in USD</text>
+<text x="32" y="1260" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1260" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Payment Bank Account</text>
+<text x="460" y="1260" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[categorical]</text>
+<text x="560" y="1260" font-size="12" fill="#475569" font-style="italic">— Bank account the payment was drawn from (masked)</text>
+<text x="32" y="1282" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1282" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Return Flag</text>
+<text x="460" y="1282" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[categorical]</text>
+<text x="560" y="1282" font-size="12" fill="#475569" font-style="italic">— Whether the payment cleared (success) or was returned (returned), 0 indicatin…</text>
+<text x="32" y="1304" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1304" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Return Reason</text>
+<text x="460" y="1304" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[categorical]</text>
+<text x="560" y="1304" font-size="12" fill="#475569" font-style="italic">— Reason for return. Empty when return_flag = success.</text>
+<text x="32" y="1326" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   └── </text>
+<text x="96" y="1326" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">payment_status</text>
+<text x="460" y="1326" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[categorical]</text>
+<text x="560" y="1326" font-size="12" fill="#475569" font-style="italic">— Synthetic discriminator added by the gateway when rbinding `payments_success.…</text>
+<text x="32" y="1348" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">├── </text>
+<text x="64" y="1348" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="700">score_drivers  ↔  score_drivers_data  (18 rows)</text>
+<text x="560" y="1348" font-size="12" fill="#475569" font-style="italic">— Monthly snapshot of the top-5 and bottom-5 contributing variable names</text>
+<text x="32" y="1370" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1370" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">trans_month</text>
+<text x="460" y="1370" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[string]</text>
+<text x="560" y="1370" font-size="12" fill="#475569" font-style="italic">— Monthly snapshot date for this score-driver record (e.g. &quot;Jan-2024&quot;). One row…</text>
+<text x="32" y="1392" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1392" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">top_cdss1</text>
+<text x="460" y="1392" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[string]</text>
+<text x="560" y="1392" font-size="12" fill="#475569" font-style="italic">— Name of the rank-1 top contributing variable to the CDSS model score for this…</text>
+<text x="32" y="1414" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1414" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">top_cdss2</text>
+<text x="460" y="1414" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[string]</text>
+<text x="560" y="1414" font-size="12" fill="#475569" font-style="italic">— Name of the rank-2 top contributing variable to the CDSS model score for this…</text>
+<text x="32" y="1436" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1436" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">top_cdss3</text>
+<text x="460" y="1436" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[string]</text>
+<text x="560" y="1436" font-size="12" fill="#475569" font-style="italic">— Name of the rank-3 top contributing variable to the CDSS model score for this…</text>
+<text x="32" y="1458" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1458" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">top_cdss4</text>
+<text x="460" y="1458" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[string]</text>
+<text x="560" y="1458" font-size="12" fill="#475569" font-style="italic">— Name of the rank-4 top contributing variable to the CDSS model score for this…</text>
+<text x="32" y="1480" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1480" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">top_cdss5</text>
+<text x="460" y="1480" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[string]</text>
+<text x="560" y="1480" font-size="12" fill="#475569" font-style="italic">— Name of the rank-5 top contributing variable to the CDSS model score for this…</text>
+<text x="32" y="1502" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1502" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">bottom_cdss1</text>
+<text x="460" y="1502" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[string]</text>
+<text x="560" y="1502" font-size="12" fill="#475569" font-style="italic">— Name of the rank-1 bottom contributing variable to the CDSS model score for t…</text>
+<text x="32" y="1524" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1524" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">bottom_cdss2</text>
+<text x="460" y="1524" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[string]</text>
+<text x="560" y="1524" font-size="12" fill="#475569" font-style="italic">— Name of the rank-2 bottom contributing variable to the CDSS model score for t…</text>
+<text x="32" y="1546" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1546" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">bottom_cdss3</text>
+<text x="460" y="1546" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[string]</text>
+<text x="560" y="1546" font-size="12" fill="#475569" font-style="italic">— Name of the rank-3 bottom contributing variable to the CDSS model score for t…</text>
+<text x="32" y="1568" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1568" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">bottom_cdss4</text>
+<text x="460" y="1568" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[string]</text>
+<text x="560" y="1568" font-size="12" fill="#475569" font-style="italic">— Name of the rank-4 bottom contributing variable to the CDSS model score for t…</text>
+<text x="32" y="1590" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   └── </text>
+<text x="96" y="1590" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8" font-style="italic">… and 11 more column(s)</text>
+<text x="32" y="1612" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">├── </text>
+<text x="64" y="1612" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="700">spends  ↔  spends_data  (3,865 rows)</text>
+<text x="560" y="1612" font-size="12" fill="#475569" font-style="italic">— Transaction-level spend data — multiple rows per case. Each row is one transaction (spend) with merchant deta…</text>
+<text x="32" y="1634" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1634" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Date</text>
+<text x="460" y="1634" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[date]</text>
+<text x="560" y="1634" font-size="12" fill="#475569" font-style="italic">— Date of the spend transaction (DD-Mon-YYYY, e.g., 05-Nov-2024).</text>
+<text x="32" y="1656" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1656" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Amount</text>
+<text x="460" y="1656" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[float]</text>
+<text x="560" y="1656" font-size="12" fill="#475569" font-style="italic">— Spend amount in USD</text>
+<text x="32" y="1678" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1678" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Merchant Name</text>
+<text x="460" y="1678" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[categorical]</text>
+<text x="560" y="1678" font-size="12" fill="#475569" font-style="italic">— Name of the merchant where spend was made</text>
+<text x="32" y="1700" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1700" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Merchant Industry</text>
+<text x="460" y="1700" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[categorical]</text>
+<text x="560" y="1700" font-size="12" fill="#475569" font-style="italic">— Merchant industry based on SIC4 code. Some rows may be empty — search industr…</text>
+<text x="32" y="1722" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1722" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Merchant Risk Score</text>
+<text x="460" y="1722" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[float]</text>
+<text x="560" y="1722" font-size="12" fill="#475569" font-style="italic">— Risk score of the merchant (0-1). Values above 0.7 are considered risky.</text>
+<text x="32" y="1744" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1744" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Spend Concentration</text>
+<text x="460" y="1744" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[float]</text>
+<text x="560" y="1744" font-size="12" fill="#475569" font-style="italic">— One-way spend concentration risk rate of a customer at merchants in last 30 d…</text>
+<text x="32" y="1766" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   ├── </text>
+<text x="96" y="1766" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">RNN Spend Score</text>
+<text x="460" y="1766" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[float]</text>
+<text x="560" y="1766" font-size="12" fill="#475569" font-style="italic">— RNN risk score for spend patterns. Values above 0.017 are considered risky.</text>
+<text x="32" y="1788" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">│   └── </text>
+<text x="96" y="1788" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Spend Divergence Index</text>
+<text x="460" y="1788" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[float]</text>
+<text x="560" y="1788" font-size="12" fill="#475569" font-style="italic">— Index for spend divergence from historical patterns. Values below 1.0 are con…</text>
+<text x="32" y="1810" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">└── </text>
+<text x="64" y="1810" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#1D4ED8" font-weight="700">wcc  (21 rows)</text>
+<text x="560" y="1810" font-size="12" fill="#475569" font-style="italic">— Customer-service / agent-call notes log. One row per logged interaction, with a free-text note attached to a…</text>
+<text x="32" y="1832" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">    ├── </text>
+<text x="96" y="1832" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Date</text>
+<text x="460" y="1832" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[date]</text>
+<text x="560" y="1832" font-size="12" fill="#475569" font-style="italic">— Date the agent note was logged. Stored on disk as ISO YYYY-MM-DD (e.g. &quot;2024-…</text>
+<text x="32" y="1854" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">    └── </text>
+<text x="96" y="1854" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#3B82F6" font-weight="500">Note</text>
+<text x="460" y="1854" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#0F766E" font-weight="600">[string]</text>
+<text x="560" y="1854" font-size="12" fill="#475569" font-style="italic">— Free-text note from the agent interaction (chat or call transcript). Often co…</text>
+<line x1="32" y1="1874" x2="1348" y2="1874" stroke="#E2E8F0" stroke-width="1"/>
+<text x="32" y="1888" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8">└── In catalog but not in this case (4):</text>
+<text x="64" y="1910" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8" font-style="italic">• cust_tenure</text>
+<text x="284" y="1910" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8" font-style="italic">• income_dti</text>
+<text x="504" y="1910" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8" font-style="italic">• txn_monthly</text>
+<text x="64" y="1930" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#94A3B8" font-style="italic">• xbu_summary</text>
+<text x="32" y="1992" font-size="10" fill="#94A3B8">generated 2026-05-04  ·  indigo=canonical table · blue=column · teal=dtype · gray italic=description · ↔ marks canonical ↔ real-CSV alias</text>
+</svg>

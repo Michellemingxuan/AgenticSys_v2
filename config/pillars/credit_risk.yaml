@@ -5,13 +5,6 @@ focus: "Delinquency risk, bureau scores, cross-BU exposure, internal model score
 # Data collection cut-off — "recent" is relative to this date
 cut_off_date: "2025-12-01"
 
-# Default observation / ramp-up window in months. When a question references
-# "the ramp-up window" / "ramp-up period" / "the observation window" without
-# naming a specific length, agents should interpret it as the most recent
-# `ramp_up_window_months` ending at `cut_off_date`. Override via explicit
-# phrasing in the question (e.g. "the last 6 months").
-ramp_up_window_months: 3
-
 # Pillar-wide vocabulary. Injected into orchestrator + every specialist.
 # Treats values as REFERENCE only — always verify via `get_table_schema`
 # / `query_table` what this case actually carries before filtering.
@@ -53,6 +46,26 @@ concept_glossary: |
   Account status / delinquency — `crossbu_cards.account_status`:
     'Current' = good standing. DPB buckets ('30 DPB', '60 DPB', '90 DPB',
     '120 DPB') = past-due (Days Past Billing). Other strings may exist.
+
+  Ramp-up period — DYNAMIC, NOT a fixed-length window:
+    The phase when an activity / volume / intensity metric rises from a low
+    baseline to a higher steady level. Examples: monthly spend climbing
+    from ~$X to ~$Y over several months and then plateauing; balance growing
+    until it stabilizes; payment volume building up. There is NO default
+    "ramp-up window" length; identify it FROM THE DATA.
+
+    Identification recipe (apply per the activity in question):
+      1. Pull the relevant time series — typically `txn_monthly.spend_total`
+         or `spends_data.Amount` aggregated by month for spend ramp-up;
+         `crossbu_cards.balance` over `Month` for exposure ramp-up;
+         `payments.Payment Amount` over `payment_date` for payment ramp-up.
+      2. Find the rise: where the metric starts increasing meaningfully
+         above its early baseline.
+      3. Find the plateau: where the metric stops rising and stabilizes
+         (or where the rise visibly ends — a peak, then flat or a turn).
+      4. Report the start and end as observed dates from the series.
+    "Start of ramp-up" = the rise begins. "End of ramp-up" = the metric
+    has reached its higher steady level (or its peak before any decline).
 
   Rule: when observed values disagree with this glossary, trust the data.
 

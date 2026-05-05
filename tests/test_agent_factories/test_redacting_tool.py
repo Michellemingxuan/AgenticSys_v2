@@ -110,7 +110,7 @@ async def test_redacting_tool_multi_turn_keeps_specialist_alive():
                 return base + [{"role": "assistant", "content": "answer"}]
         return _Result()
 
-    async def _fake_run(agent, run_input, context=None):
+    async def _fake_run(agent, run_input, context=None, **_kwargs):
         call_log.append(run_input)
         return _make_result(run_input)
 
@@ -173,7 +173,7 @@ async def test_redacting_tool_specialist_histories_isolated_per_specialist():
                 return base + [{"role": "assistant", "content": "answer"}]
         return _Result()
 
-    async def _fake_run(agent, run_input, context=None):
+    async def _fake_run(agent, run_input, context=None, **_kwargs):
         inputs_seen.append((agent.name, run_input))
         return _make_result(run_input)
 

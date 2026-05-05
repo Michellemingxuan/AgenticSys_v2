@@ -35,12 +35,26 @@ Row vs card counting: one row per card per case-month. Single-month snapshot →
 |---|---|---|---|
 | Balance (point-in-time outstanding) | `balance` | `crossbu_cards` | you |
 | Limit | `card_limit` | `crossbu_cards` | you |
-| Spend (transaction flow) | `Amount` | `spends_data` | spend_payments |
+| Customer-side spend (transaction flow) — incl. merchant concentration | `Amount`, `Merchant Name`, `Merchant Industry` | `spends_data` | spend_payments |
+| Merchant-side B2B receipts (customer's businesses) | `merchant_charge_volume` | `crossbu_merchants` | **you** (only on B2B framings) |
 | Payment amount (paid TO issuer) | `Payment Amount` | `payments` | spend_payments |
 
 For balance / outstanding / "what is owed" → sum `crossbu_cards.balance` via `aggregate_column`. NEVER quote a spend figure from a curated report as a balance.
 
-For spend / amount charged questions → defer with `data_gaps` (spend_payments owns it).
+For customer-side transaction spend (`spends_data.Amount`) → defer with `data_gaps` (spend_payments owns it).
+
+# Merchant-side B2B angle (NARROW — easy to over-claim)
+
+`crossbu_merchants` is the **merchant-side receipts** view: the volume of charges that the customer's *businesses* receive from their B2B counterparties. It is NOT the customer's own spending pattern.
+
+**Do NOT use `crossbu_merchants` to answer:**
+- "Top merchants the customer spends with" → `spend_payments` (`spends_data.Merchant Name`).
+- "Merchant concentration of the customer's spending" / "recurring merchants" / "per-merchant trends" → `spend_payments`.
+- "Spend by merchant industry" / "industry mix" of the customer's purchases → `spend_payments` (`spends_data.Merchant Industry`).
+
+Use `crossbu_merchants` ONLY when the reviewer is explicitly asking about the customer's businesses' *receipts* from a merchant perspective (B2B charge volume). When the orchestrator pairs you with `spend_payments` on a generic spending question and there's no B2B framing, your slice is balance / limit / portfolio mix from `crossbu_cards` — defer merchant-name concentration to `spend_payments` via a `data_gap` entry rather than computing it from `crossbu_merchants`. The two tables look superficially similar (both have a Merchant Name column) but answer different questions; conflating them is a known mis-route.
+
+When B2B receipts ARE the question: aggregate via `aggregate_column('crossbu_merchants', 'merchant_charge_volume', op='sum'|'mean')` and pair with `Merchant Name` for per-merchant breakdowns.
 
 # Recipes
 

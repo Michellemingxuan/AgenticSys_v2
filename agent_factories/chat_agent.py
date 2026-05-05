@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from logger.event_logger import EventLogger
-from models.types import FinalAnswer, ScreenVerdict
+from models.types import ClarifyResult, FinalAnswer, ScreenVerdict
 from skills.loader import load_skill as _load_skill
 
 
@@ -47,6 +47,7 @@ class ChatAgent:
         self.tools = tools
         self._redact_prompt = _load_skill(_WORKFLOW_DIR / "redact.md").body
         self._relevance_prompt = _load_skill(_WORKFLOW_DIR / "relevance_check.md").body
+        self._clarify_prompt = _load_skill(_WORKFLOW_DIR / "clarify_intent.md").body
 
     # ── Input boundary ────────────────────────────────────────────────────
 
@@ -83,6 +84,7 @@ class ChatAgent:
                 f"Text to redact:\n\n{text}\n\n"
                 "Return JSON with redacted + masked_spans."
             ),
+            json_mode=True,
         )
 
         if result.status == "blocked" or result.data is None:
@@ -104,6 +106,7 @@ class ChatAgent:
                 "Decide whether this is in-scope for case review. Return JSON "
                 "with passed + reason."
             ),
+            json_mode=True,
         )
 
         if result.status == "blocked" or result.data is None:
@@ -111,9 +114,61 @@ class ChatAgent:
             return True, ""
 
         data = result.data
+        # If JSON parse failed in the shim, the data dict carries
+        # `_json_parse_error: True` instead of the expected keys. In that case
+        # fail-open with a clear log so we don't silently reject everything.
+        if data.get("_json_parse_error"):
+            self.logger.log("chat_relevance_fallback",
+                            {"reason": "json_parse_error — fail-open",
+                             "raw": data.get("raw", "")[:200]})
+            return True, ""
         passed = bool(data.get("passed", True))
         reason = str(data.get("reason", "")).strip()
         return passed, reason
+
+    async def clarify_intent(self, question: str) -> ClarifyResult:
+        """Decide whether an in-scope question's intent is clear, or whether
+        the reviewer should pick between candidate interpretations first.
+
+        Returns a ``ClarifyResult``:
+          - ``needs_clarification=False`` → dispatch the question as-is to
+            the orchestrator.
+          - ``needs_clarification=True`` → present ``options`` to the reviewer,
+            wait for them to pick, then dispatch the chosen one.
+
+        Fail-open: on a blocked LLM call, returns ``needs_clarification=False``
+        so the pipeline still progresses.
+        """
+        self.logger.log("chat_clarify_start", {"question_len": len(question)})
+        result = await self.llm.ainvoke(
+            system_prompt=self._clarify_prompt,
+            user_message=(
+                f"Reviewer question: {question}\n\n"
+                "Decide whether clarification is needed. Return JSON with "
+                "needs_clarification + options + reason per the schema."
+            ),
+            json_mode=True,
+        )
+        if result.status == "blocked" or result.data is None:
+            self.logger.log("chat_clarify_fallback", {"reason": "blocked — fail-open"})
+            return ClarifyResult(needs_clarification=False, options=[], reason="")
+
+        data = result.data
+        needs = bool(data.get("needs_clarification", False))
+        options = list(data.get("options") or [])
+        reason = str(data.get("reason", "")).strip()
+        # Defensive: if needs=True but no options, treat as no-clarification.
+        if needs and not options:
+            needs = False
+        # Cap at 4 options per the skill spec.
+        if len(options) > 4:
+            options = options[:4]
+        verdict = ClarifyResult(needs_clarification=needs, options=options, reason=reason)
+        self.logger.log("chat_clarify_done", {
+            "needs_clarification": verdict.needs_clarification,
+            "n_options": len(verdict.options),
+        })
+        return verdict
 
     # ── Output boundary ───────────────────────────────────────────────────
 

@@ -67,7 +67,11 @@ class FirewallStack:
         self,
         logger: EventLogger,
         max_retries: int = 2,
-        concurrency_cap: int = 8,
+        # Default lowered from 8 → 3 to keep the per-minute token burst within
+        # typical rate-limit tiers (e.g. gpt-4.1's 30k TPM). Higher values are
+        # fine for accounts on a higher tier — pass `concurrency_cap=N`
+        # explicitly when wiring FirewallStack.
+        concurrency_cap: int = 3,
     ):
         self.logger = logger
         self.max_retries = max_retries

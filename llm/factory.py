@@ -63,7 +63,12 @@ def build_session_clients(
 
         client: Any = SafeChainAsyncOpenAI(model_name=model_name, firewall=firewall)
     elif backend == "openai":
-        base = base_client or AsyncOpenAI()
+        # `max_retries=8` lets the openai SDK back off and retry on 429
+        # rate-limit responses up to 8 times (it honors the `Retry-After`
+        # header). On a 30K-TPM tier the orchestrator pipeline frequently
+        # bumps the bucket; without this bump, transient rate-limit errors
+        # surface as run failures instead of being absorbed by the SDK.
+        base = base_client or AsyncOpenAI(max_retries=8)
         client = FirewalledAsyncOpenAI(base=base, firewall=firewall)
     else:
         raise ValueError(
@@ -95,22 +100,67 @@ class FirewalledChatShim:
         self._model = model_name or clients.model.model
         self.firewall = clients.firewalled_client._firewall  # legacy access
 
-    async def ainvoke(self, system_prompt, user_message, tools=None, output_type=None):
+    async def ainvoke(
+        self,
+        system_prompt,
+        user_message,
+        tools=None,
+        output_type=None,
+        json_mode: bool = False,
+    ):
+        """Run a single chat completion and parse the response.
+
+        ``json_mode=True`` instructs the model to return a JSON object via
+        OpenAI's ``response_format`` and parses the result into a dict, so
+        callers like ChatAgent's redact / relevance_check / clarify_intent
+        actually see the structured fields they expect (``passed``,
+        ``reason``, ``options``, etc.). Without this, the model's JSON-shaped
+        response was being stuffed into ``{"response": <raw text>}`` and
+        every ``data.get("passed", True)`` lookup defaulted to True — causing
+        out-of-scope questions to silently pass scope check.
+
+        ``output_type`` is the legacy Pydantic-validation path; behavior
+        unchanged. When neither is set, we still try to parse the content as
+        JSON best-effort, falling back to ``{"response": content}``.
+        """
+        import json as _json
         from models.types import LLMResult
-        resp = await self._clients.firewalled_client.chat.completions.create(
-            model=self._model,
-            messages=[
+
+        kwargs: dict = {
+            "model": self._model,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
             ],
-        )
+        }
+        if json_mode or output_type is not None:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        resp = await self._clients.firewalled_client.chat.completions.create(**kwargs)
         content = resp.choices[0].message.content
+
         if output_type is not None:
             try:
-                import json as _json
                 data = output_type(**_json.loads(content)).model_dump()
             except Exception:
                 data = {"raw": content}
+        elif json_mode:
+            # Force-parse: any non-JSON here is a model bug we want surfaced
+            # rather than silently swallowed via {"response": ...}.
+            try:
+                parsed = _json.loads(content)
+            except Exception:
+                # Fallback to a structured error shape so callers see SOMETHING
+                # but don't accidentally hit fail-open defaults.
+                parsed = {"raw": content, "_json_parse_error": True}
+            data = parsed if isinstance(parsed, dict) else {"response": parsed}
         else:
-            data = {"response": content}
+            # Legacy free-text path (used by ChatAgent.converse). Best-effort
+            # JSON parse — fall back to {"response": content} if not JSON.
+            try:
+                parsed = _json.loads(content)
+                data = parsed if isinstance(parsed, dict) else {"response": content}
+            except Exception:
+                data = {"response": content}
+
         return LLMResult(status="success", data=data)

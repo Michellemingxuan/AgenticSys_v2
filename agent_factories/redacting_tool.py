@@ -2,8 +2,16 @@
 from __future__ import annotations
 
 from agents import Agent, RunContextWrapper, Runner, function_tool
+from agents.exceptions import MaxTurnsExceeded
 
 from llm.firewall_stack import redact_payload, sanitize_message
+
+
+# Inner-specialist turn budget. SDK default is 10, which is too tight for
+# data-heavy questions ("spending pattern", "default journey") that require
+# schema probe + multiple month-by-month aggregates. 25 covers the normal
+# worst case while still bounding runaway loops.
+_SPECIALIST_MAX_TURNS = 25
 
 
 def redacting_tool(agent: Agent, name: str, description: str):
@@ -41,7 +49,29 @@ def redacting_tool(agent: Agent, name: str, description: str):
         else:
             run_input = redacted_in
 
-        result = await Runner.run(inner, run_input, context=app_ctx)
+        try:
+            result = await Runner.run(
+                inner, run_input, context=app_ctx,
+                max_turns=_SPECIALIST_MAX_TURNS,
+            )
+        except MaxTurnsExceeded as exc:
+            # Surface a structured signal back to the orchestrator instead of
+            # the SDK's generic "An error occurred while running the tool"
+            # paraphrase, which the orchestrator LLM tends to render as
+            # "Specialist (X) tool did not return". Also log it so we can
+            # spot turn-budget pressure.
+            logger = getattr(app_ctx, "logger", None)
+            if logger is not None:
+                logger.log("specialist_max_turns_exceeded",
+                           {"specialist": name,
+                            "max_turns": _SPECIALIST_MAX_TURNS,
+                            "message": str(exc)})
+            return (
+                f"[{name}] hit the {_SPECIALIST_MAX_TURNS}-turn budget for this "
+                f"sub-question. Partial findings were not returned. Consider "
+                f"asking a narrower follow-up (e.g. limit to a specific month "
+                f"or metric) so this specialist can finish within budget."
+            )
 
         # Persist the updated history so the next call to this specialist
         # in the same context picks up where we left off.

@@ -5,6 +5,7 @@
   "backend": "openai",
   "data_source": "real",
   "session_id": "question-suite",
+  "concurrency_cap": 12,
   "test_cases": [
     {
       "name": "out_of_scope_lunch",
@@ -38,12 +39,20 @@
       ]
     },
     {
-      "name": "tsr_no_reaction_ramp_up",
+      "name": "tsr_no_reaction_early",
       "question": "Why did TSR score not react at the early stage?"
     },
     {
       "name": "cdss_volatility",
       "question": "Why is the CDSS score volatile?"
+    },
+    {
+      "name": "obs_ramp_up_prior_debt",
+      "question": "Is there an observable ramp-up in spend or merchant concentration in the early window that precedes increases in external debt or payment stress?"
+    },
+    {
+      "name": "behaviour_ramp_up_diff_usual",
+      "question": "Was customer behaviour in ramp-up window different from usual behaviour?"
     }
   ]
 }

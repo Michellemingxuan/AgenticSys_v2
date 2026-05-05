@@ -203,14 +203,181 @@ def _coerce_pair(a: Any, b: Any) -> tuple[Any, Any]:
     return (str(a) if a is not None else ""), (str(b) if b is not None else "")
 
 
+def render_catalog_tree(
+    *,
+    gateway: DataGateway | None = None,
+    catalog: DataCatalog | None = None,
+    show_orphans: bool = True,
+    max_col_desc: int = 70,
+    max_cols_per_table: int | None = None,
+) -> str:
+    """Render the data catalog as a Unicode tree, grounded in the active case.
+
+    Each branch is one canonical table (with the real CSV name and row count
+    annotated). Sub-branches are columns with their dtype and a one-line
+    description. Tables in the case but not in the catalog appear under
+    "Real-only tables"; tables in the catalog but not in this case appear
+    under "In catalog but not in this case".
+
+    ``gateway`` and ``catalog`` default to the module-level state set by
+    ``init_tools(...)``. Pass them explicitly to bypass module state when
+    debugging from a notebook (e.g. after a fresh kernel).
+
+    Use from a notebook cell::
+
+        from tools.data_tools import render_catalog_tree
+        print(render_catalog_tree())                              # uses module state
+        print(render_catalog_tree(gateway=gw, catalog=catalog))   # explicit
+
+    Pass ``max_cols_per_table=10`` to truncate wide tables (model_scores has
+    50+ cols).
+    """
+    gw_use = gateway if gateway is not None else _gateway
+    cat_use = catalog if catalog is not None else _catalog
+
+    if gw_use is None or cat_use is None:
+        return (
+            "Data catalog not initialized.\n"
+            "Either call tools.data_tools.init_tools(gateway, catalog) first,\n"
+            "or pass them explicitly: render_catalog_tree(gateway=gw, catalog=catalog)."
+        )
+
+    case_id = gw_use.get_case_id()
+    if case_id is None:
+        avail = gw_use.list_case_ids()
+        avail_hint = (
+            f"Available case IDs: {avail[:5]}{'…' if len(avail) > 5 else ''}"
+            if avail else "(no cases loaded — check the data-source path)"
+        )
+        return (
+            "No case is active on the gateway — `gw.get_case_id()` returned None.\n"
+            "Run the case-selector cell (`gw.set_case(case_id)`) before calling "
+            "render_catalog_tree.\n"
+            f"{avail_hint}\n\n"
+            f"Catalog has {len(cat_use.list_tables())} canonical tables loaded: "
+            f"{', '.join(cat_use.list_tables())}"
+        )
+
+    real_tables = gw_use.list_tables()
+    catalog_tables = cat_use.list_tables()
+
+    # real CSV name → canonical name (via declared aliases or self-match).
+    real_to_canonical: dict[str, str] = {}
+    for ct in catalog_tables:
+        for alias in cat_use.table_aliases(ct):
+            real_to_canonical.setdefault(alias, ct)
+        real_to_canonical.setdefault(ct, ct)
+
+    # Group real tables by their canonical so multiple aliases (e.g. payments
+    # rbinds payments_success + payments_returns) cluster together.
+    by_canonical: dict[str, list[str]] = {}
+    real_only: list[str] = []
+    for real in sorted(real_tables):
+        canonical = real_to_canonical.get(real)
+        if canonical is None:
+            real_only.append(real)
+        else:
+            by_canonical.setdefault(canonical, []).append(real)
+
+    lines: list[str] = []
+    lines.append(f"data_catalog  (case {case_id})")
+
+    canonical_keys = sorted(by_canonical.keys())
+    for i, canonical in enumerate(canonical_keys):
+        is_last_table = (i == len(canonical_keys) - 1) and not real_only
+        t_branch = "└── " if is_last_table else "├── "
+        t_spacer = "    " if is_last_table else "│   "
+
+        reals = by_canonical[canonical]
+        # First line: canonical ↔ real(s) + total row count
+        total_rows = sum(len(gw_use.query(r) or []) for r in reals)
+        if len(reals) == 1 and reals[0] == canonical:
+            head = f"{canonical}  ({total_rows:,} rows)"
+        else:
+            head = f"{canonical}  ↔  {', '.join(reals)}  ({total_rows:,} rows)"
+        lines.append(f"{t_branch}{head}")
+
+        # Description (one line)
+        desc = (cat_use.get_description(canonical) or "").strip().split("\n")[0]
+        if desc:
+            lines.append(f"{t_spacer}    {desc[:120]}")
+
+        # Columns — taken from the first real table's first row (real headers)
+        # plus catalog specs (matched via canonical or declared alias).
+        sample_rows = []
+        for r in reals:
+            rs = gw_use.query(r) or []
+            if rs:
+                sample_rows = rs
+                break
+        cols = list(sample_rows[0].keys()) if sample_rows else []
+        if max_cols_per_table is not None and len(cols) > max_cols_per_table:
+            shown_cols = cols[:max_cols_per_table]
+            truncated = len(cols) - max_cols_per_table
+        else:
+            shown_cols = cols
+            truncated = 0
+
+        canonical_cols = ((cat_use._profiles.get(canonical) or {}).get("columns") or {})
+        for j, col in enumerate(shown_cols):
+            is_last_col = (j == len(shown_cols) - 1) and truncated == 0
+            c_branch = "└── " if is_last_col else "├── "
+            spec = canonical_cols.get(col)
+            if spec is None:
+                # alias / normalized fallback
+                for cname, cspec in canonical_cols.items():
+                    aliases = cspec.get("aliases") or []
+                    if col in aliases or _normalize(col) == _normalize(cname):
+                        spec = cspec
+                        break
+            if spec is not None:
+                dtype = spec.get("dtype", "?")
+                cdesc = (spec.get("description") or "").strip().split("\n")[0]
+                if cdesc and len(cdesc) > max_col_desc:
+                    cdesc = cdesc[:max_col_desc - 1].rstrip() + "…"
+                annot = f"[{dtype}]"
+                lines.append(
+                    f"{t_spacer}{c_branch}{col}  {annot}"
+                    + (f"  — {cdesc}" if cdesc else "")
+                )
+            else:
+                lines.append(f"{t_spacer}{c_branch}{col}  [not in catalog]")
+
+        if truncated > 0:
+            lines.append(f"{t_spacer}└── … and {truncated} more column(s)")
+
+    if real_only:
+        lines.append("├── Real-only tables (no canonical match):")
+        for r in real_only:
+            n = len(gw_use.query(r) or [])
+            lines.append(f"│   • {r}  ({n:,} rows)")
+
+    if show_orphans:
+        in_case = set(by_canonical.keys())
+        catalog_only = [ct for ct in catalog_tables if ct not in in_case]
+        if catalog_only:
+            lines.append("└── In catalog but not in this case: "
+                         + ", ".join(sorted(catalog_only)))
+
+    return "\n".join(lines)
+
+
 def _resolve_real_table(requested: str) -> str:
     """Resolve a requested table name to whatever the gateway actually carries.
 
     Specialists call query_table with canonical names from skill data_hints
     (e.g. ``crossbu_cards``) but real CSVs may use a slightly different name
-    (``crossbu_cards_data``). This walks: gateway exact → catalog table-level
-    aliases (canonical → real) → normalized fuzzy. Falls through unchanged
-    when nothing matches.
+    (``crossbu_cards_data``). Resolution order:
+
+      1. Gateway exact match.
+      2. Catalog table-level aliases (canonical → real).
+      3. ``<requested>_data`` convention — many real CSVs follow this without
+         needing an explicit alias declaration in the profile.
+      4. ``<requested>`` matches when stripping the trailing ``_data`` from
+         a real table name.
+      5. Normalized fuzzy match (case + punctuation only).
+
+    Falls through unchanged when nothing matches.
     """
     if _gateway is None or not requested:
         return requested
@@ -226,6 +393,20 @@ def _resolve_real_table(requested: str) -> str:
         for alias in aliases:
             if alias in real_tables:
                 return alias
+
+    # `<canonical>_data` convention (e.g. spends → spends_data, bureau →
+    # bureau_data). Cheap, generic; works for any profile without needing an
+    # alias declaration.
+    candidate = f"{requested}_data"
+    if candidate in real_tables:
+        return candidate
+
+    # Reverse direction — caller might pass the `_data` form when only the
+    # base canonical exists (rare but cheap to check).
+    if requested.endswith("_data"):
+        base = requested[:-len("_data")]
+        if base in real_tables:
+            return base
 
     # Normalized fuzzy fallback.
     target = _normalize(requested)
@@ -887,8 +1068,45 @@ def _aggregate_column_impl(
             skipped += 1
 
     if not values:
+        # Date-aware fallback for max / min: when a column is a date / period
+        # string (DD-MMM-YYYY, MonthName'YYYY, etc.) numeric coercion fails.
+        # Use _date_key to compare chronologically and return the actual cell
+        # string verbatim. This is the right path for "first / last <date col>"
+        # questions on payment_date, spend_date, trans_month, etc.
+        if op in ("max", "min"):
+            dated: list[tuple[tuple, str]] = []
+            for r in rows:
+                v = r.get(real_col)
+                if v is None or v == "":
+                    continue
+                key = _date_key(v)
+                if key is not None:
+                    dated.append((key, str(v)))
+            if dated:
+                if op == "max":
+                    _, value_str = max(dated, key=lambda x: x[0])
+                    descriptor = "latest date"
+                else:
+                    _, value_str = min(dated, key=lambda x: x[0])
+                    descriptor = "earliest date"
+                out = (
+                    f"{op}({real_col}){filter_descr} = {value_str!r} "
+                    f"({descriptor} among {len(dated):,} non-null value(s) in "
+                    f"{n_matching:,} matching row(s); {total_rows:,} total in {real_table})"
+                )
+                _log_result(
+                    "aggregate_column", result=out,
+                    extra={
+                        "op": op, "column": real_col, "value": value_str,
+                        "kind": "date",
+                        "n_matching": n_matching, "n_dated": len(dated),
+                        "total": total_rows,
+                    },
+                )
+                return out
+
         out = (
-            f"No numeric values for column {real_col!r} in "
+            f"No numeric or date values for column {real_col!r} in "
             f"{n_matching:,} matching row(s). Check column name + dtype."
         )
         _log_result("aggregate_column", result=out,
@@ -963,6 +1181,730 @@ def aggregate_column(
         table_name=table_name,
         column=column,
         op=op,
+        filter_column=filter_column,
+        filter_value=filter_value,
+        filter_op=filter_op,
+    )
+
+
+# ── summarize_trend ──────────────────────────────────────────────────────
+#
+# Pattern / trajectory tool. Collapses a typical "what is the spending
+# pattern / payment trajectory / score evolution" investigation — which
+# otherwise costs one tool call per period bucket — into a single call
+# that returns the per-period series plus summary statistics. Numeric
+# only: trend characterization (rising / spiky / etc.) is left to the
+# specialist's prompt, which knows the domain thresholds.
+
+_PERIOD_LABELS = ("day", "week", "month", "quarter", "year")
+
+
+def _bucket_key(date_tuple: tuple[int, int, int], period: str) -> tuple:
+    """Map a (year, month, day) tuple to a canonical bucket key for a period."""
+    y, m, d = date_tuple
+    if period == "day":
+        return (y, m, d)
+    if period == "week":
+        # ISO-week bucketing without importing datetime: approximate via
+        # (year, week_of_year). Use Python's stdlib for correctness.
+        from datetime import date
+        try:
+            iso = date(y, m, d).isocalendar()
+            return (iso[0], iso[1])  # (iso_year, iso_week)
+        except ValueError:
+            return (y, m, d)
+    if period == "month":
+        return (y, m)
+    if period == "quarter":
+        return (y, (m - 1) // 3 + 1)
+    if period == "year":
+        return (y,)
+    return (y, m)  # fallback: month
+
+
+def _bucket_label(key: tuple, period: str) -> str:
+    """Human-readable bucket label."""
+    if period == "day":
+        return f"{key[0]:04d}-{key[1]:02d}-{key[2]:02d}"
+    if period == "week":
+        return f"{key[0]:04d}-W{key[1]:02d}"
+    if period == "month":
+        return f"{key[0]:04d}-{key[1]:02d}"
+    if period == "quarter":
+        return f"{key[0]:04d}-Q{key[1]}"
+    if period == "year":
+        return f"{key[0]:04d}"
+    return str(key)
+
+
+def _enumerate_periods(start_key: tuple, end_key: tuple, period: str) -> list[tuple]:
+    """Enumerate all expected bucket keys between two endpoints (inclusive).
+
+    Used for gap detection. Returns [] when start > end or for unsupported
+    periods (we skip enumeration for 'day' / 'week' to avoid huge ranges).
+    """
+    if start_key > end_key:
+        return []
+    if period == "year":
+        return [(y,) for y in range(start_key[0], end_key[0] + 1)]
+    if period == "month":
+        out: list[tuple] = []
+        y, m = start_key
+        ey, em = end_key
+        while (y, m) <= (ey, em):
+            out.append((y, m))
+            m += 1
+            if m > 12:
+                m = 1
+                y += 1
+        return out
+    if period == "quarter":
+        out = []
+        y, q = start_key
+        ey, eq = end_key
+        while (y, q) <= (ey, eq):
+            out.append((y, q))
+            q += 1
+            if q > 4:
+                q = 1
+                y += 1
+        return out
+    # day / week: enumeration would be unwieldy for long ranges; report
+    # gaps as "n/a" via empty list. Caller must handle.
+    return []
+
+
+def _bucket_value(values: list[float], op: str) -> float:
+    if op == "sum":
+        return sum(values)
+    if op in ("mean", "avg"):
+        return sum(values) / len(values)
+    if op == "max":
+        return max(values)
+    if op == "min":
+        return min(values)
+    if op == "count":
+        return float(len(values))
+    return sum(values)
+
+
+def _slope(series: list[tuple[int, float]]) -> float | None:
+    """Ordinary least-squares slope of (index, value) — per-bucket change.
+
+    Returns None for fewer than 3 points or zero variance.
+    """
+    n = len(series)
+    if n < 3:
+        return None
+    xs = [p[0] for p in series]
+    ys = [p[1] for p in series]
+    mean_x = sum(xs) / n
+    mean_y = sum(ys) / n
+    num = sum((x - mean_x) * (y - mean_y) for x, y in series)
+    den = sum((x - mean_x) ** 2 for x in xs)
+    if den == 0:
+        return None
+    return num / den
+
+
+def _summarize_trend_impl(
+    table_name: str,
+    value_column: str,
+    time_column: str,
+    period: str = "month",
+    op: str = "sum",
+    filter_column: str = "",
+    filter_value: str = "",
+    filter_op: str = "eq",
+    start_date: str = "",
+    end_date: str = "",
+) -> str:
+    period = (period or "month").lower()
+    op = (op or "sum").lower()
+    _log_call("summarize_trend", {
+        "table_name": table_name,
+        "value_column": value_column,
+        "time_column": time_column,
+        "period": period,
+        "op": op,
+        "filter_column": filter_column,
+        "filter_value": filter_value,
+        "filter_op": filter_op if (filter_column and filter_value) else None,
+        "start_date": start_date or None,
+        "end_date": end_date or None,
+    })
+
+    if period not in _PERIOD_LABELS:
+        out = (
+            f"Unsupported period {period!r}. "
+            f"Use one of: {', '.join(_PERIOD_LABELS)}."
+        )
+        _log_result("summarize_trend", result=out, extra={"reason": "bad_period"})
+        return out
+    if op not in ("sum", "mean", "avg", "max", "min", "count"):
+        out = (
+            f"Unsupported op {op!r}. Use one of: sum, mean, max, min, count."
+        )
+        _log_result("summarize_trend", result=out, extra={"reason": "bad_op"})
+        return out
+
+    if _gateway is None:
+        out = (
+            "Data unavailable: data layer is not initialized for this session. "
+            "Infrastructure error, not a data finding."
+        )
+        _log_result("summarize_trend", result=out,
+                    extra={"reason": "no_gateway_bound"})
+        return out
+
+    real_table = _resolve_real_table(table_name)
+    rows = _gateway.query(real_table, filters=None)
+    if rows is None:
+        out = f"Data unavailable: table '{table_name}' not found for current case."
+        _log_result("summarize_trend", result=out,
+                    extra={"table_name": table_name, "found": False})
+        return out
+
+    total_rows = len(rows)
+
+    # Optional row filter (e.g. merchant_industry == 'Restaurant').
+    filter_descr = ""
+    if filter_column and filter_value:
+        resolved = _resolve_real_column(rows, filter_column, real_table)
+        rows = _apply_filter(rows, resolved, str(filter_value), filter_op)
+        filter_descr = (
+            f" filtered by {resolved} {filter_op} {filter_value!r}"
+            if resolved == filter_column
+            else f" filtered by {resolved} (resolved from '{filter_column}') "
+                 f"{filter_op} {filter_value!r}"
+        )
+
+    if not rows:
+        out = (
+            f"trend({op}({value_column}) by {period} on {time_column})"
+            f"{filter_descr} = (no rows match; {total_rows:,} total in {real_table})"
+        )
+        _log_result("summarize_trend", result=out,
+                    extra={"reason": "no_rows", "n_matching": 0})
+        return out
+
+    real_time = _resolve_real_column(rows, time_column, real_table)
+    real_value = _resolve_real_column(rows, value_column, real_table)
+
+    # Optional date-range narrowing on the time column.
+    start_key = _date_key(start_date) if start_date else None
+    end_key = _date_key(end_date) if end_date else None
+
+    # Bucket rows by period.
+    buckets: dict[tuple, list[float]] = {}
+    n_dated = 0
+    n_value_skipped = 0
+    n_in_range = 0
+    for r in rows:
+        t = r.get(real_time)
+        dk = _date_key(t)
+        if dk is None:
+            continue
+        n_dated += 1
+        if start_key is not None and dk < start_key:
+            continue
+        if end_key is not None and dk > end_key:
+            continue
+        n_in_range += 1
+        if op == "count":
+            v: float | None = 1.0
+        else:
+            raw = r.get(real_value)
+            if raw is None or raw == "":
+                n_value_skipped += 1
+                continue
+            try:
+                v = float(raw)
+            except (TypeError, ValueError):
+                n_value_skipped += 1
+                continue
+        bk = _bucket_key(dk, period)
+        buckets.setdefault(bk, []).append(v)
+
+    if not buckets:
+        out = (
+            f"trend({op}({value_column}) by {period} on {time_column})"
+            f"{filter_descr} = (no parseable {time_column} values"
+            + (f" in date range {start_date}..{end_date}" if start_key or end_key else "")
+            + f"; {total_rows:,} total in {real_table})"
+        )
+        _log_result("summarize_trend", result=out,
+                    extra={"reason": "no_buckets",
+                           "n_dated": n_dated, "n_in_range": n_in_range,
+                           "n_value_skipped": n_value_skipped})
+        return out
+
+    # Build the per-bucket series in chronological order.
+    keys_sorted = sorted(buckets.keys())
+    series: list[dict] = []
+    for k in keys_sorted:
+        vs = buckets[k]
+        bv = _bucket_value(vs, op)
+        series.append({
+            "period": _bucket_label(k, period),
+            "value": _format_aggregate(bv, value_column, op),
+            "raw_value": round(bv, 4) if isinstance(bv, float) else bv,
+            "n_records": len(vs),
+        })
+
+    # Summary block.
+    raw_values = [s["raw_value"] for s in series]
+    n_buckets = len(series)
+    total = sum(raw_values)
+    mean_v = total / n_buckets
+    max_idx = max(range(n_buckets), key=lambda i: raw_values[i])
+    min_idx = min(range(n_buckets), key=lambda i: raw_values[i])
+    first = series[0]
+    last = series[-1]
+    peak = series[max_idx]
+    trough = series[min_idx]
+
+    # Slope (per-bucket change). Useful as a directional signal for the LLM.
+    indexed = [(i, v) for i, v in enumerate(raw_values)]
+    slope_v = _slope(indexed)
+
+    # Volatility — coefficient of variation (std / |mean|).
+    if mean_v != 0 and n_buckets >= 2:
+        var = sum((v - mean_v) ** 2 for v in raw_values) / n_buckets
+        std = var ** 0.5
+        cv = std / abs(mean_v)
+    else:
+        cv = None
+
+    # Pct change first → last.
+    if first["raw_value"] != 0:
+        pct_change = (last["raw_value"] - first["raw_value"]) / abs(first["raw_value"])
+    else:
+        pct_change = None
+
+    # Gap detection — only meaningful for month / quarter / year.
+    expected = _enumerate_periods(keys_sorted[0], keys_sorted[-1], period)
+    if expected:
+        present = set(keys_sorted)
+        missing = [_bucket_label(k, period) for k in expected if k not in present]
+    else:
+        missing = []  # not enumerated for day / week
+
+    summary = {
+        "n_buckets": n_buckets,
+        "n_records": sum(s["n_records"] for s in series),
+        "first": {"period": first["period"], "value": first["value"]},
+        "last":  {"period": last["period"],  "value": last["value"]},
+        "peak":  {"period": peak["period"],  "value": peak["value"]},
+        "trough":{"period": trough["period"],"value": trough["value"]},
+        "total":  _format_aggregate(total, value_column, "sum"),
+        "mean_per_bucket": _format_aggregate(mean_v, value_column, "mean"),
+        "slope_per_bucket": (
+            _format_aggregate(slope_v, value_column, "mean")
+            if slope_v is not None else None
+        ),
+        "pct_change_first_to_last": (
+            f"{pct_change * 100:+.1f}%" if pct_change is not None else None
+        ),
+        "coefficient_of_variation": (
+            f"{cv:.2f}" if cv is not None else None
+        ),
+        "missing_periods": missing,  # empty for day/week or when fully covered
+    }
+
+    payload = {
+        "table": real_table,
+        "period": period,
+        "op": op,
+        "value_column": real_value,
+        "time_column": real_time,
+        "filter": filter_descr.strip() or None,
+        "rows_in_table": total_rows,
+        "rows_dated": n_dated,
+        "rows_in_range": n_in_range,
+        "rows_value_skipped": n_value_skipped,
+        "summary": summary,
+        "series": series,
+    }
+
+    out = json.dumps(payload, indent=2, default=str)
+    if len(out) > _MAX_CHARS:
+        # Trim the series tail rather than the summary block — summary is
+        # the load-bearing part for the LLM's narrative.
+        keep = max(1, n_buckets // 2)
+        payload["series"] = series[:keep] + [{"…": f"{n_buckets - keep} more periods truncated"}]
+        out = json.dumps(payload, indent=2, default=str)
+
+    _log_result(
+        "summarize_trend", result=out,
+        extra={
+            "table_name": real_table, "period": period, "op": op,
+            "n_buckets": n_buckets, "n_records": payload["summary"]["n_records"],
+            "first_period": first["period"], "last_period": last["period"],
+            "peak_period": peak["period"], "trough_period": trough["period"],
+            "missing_count": len(missing),
+        },
+    )
+    return out
+
+
+@function_tool
+def summarize_trend(
+    table_name: str,
+    value_column: str,
+    time_column: str,
+    period: str = "month",
+    op: str = "sum",
+    filter_column: str = "",
+    filter_value: str = "",
+    filter_op: str = "eq",
+    start_date: str = "",
+    end_date: str = "",
+) -> str:
+    """Summarize a value column over time as a single bucketed series + summary.
+
+    Pattern / trajectory tool — use this for ANY question phrased as
+    "what is the X pattern / trend / trajectory / over time / by month"
+    instead of looping ``aggregate_column`` per period (which burns the
+    specialist's per-call turn budget). One call returns the full
+    monthly (or weekly / quarterly / etc.) series plus headline stats:
+    first / last / peak / trough buckets, total, mean per bucket,
+    per-bucket slope, pct change first→last, coefficient of variation,
+    and any missing periods between the first and last observation.
+
+    Numeric only — no qualitative labels ("rising", "spiky"). The
+    specialist's prompt is responsible for narrating shape from these
+    numbers using its domain thresholds.
+
+    Args:
+        table_name: table to scan (canonical or real name).
+        value_column: numeric column to aggregate inside each bucket.
+            Ignored for op='count'.
+        time_column: date / period column used to bucket rows. Common
+            values across this codebase: 'Date', 'spend_date',
+            'payment_date', 'trans_month'.
+        period: bucket size. One of 'day', 'week', 'month', 'quarter',
+            'year'. Default 'month'.
+        op: per-bucket aggregation. One of 'sum', 'mean', 'max', 'min',
+            'count'. Default 'sum'.
+        filter_column / filter_value / filter_op: optional row filter
+            applied before bucketing (same semantics as query_table).
+        start_date / end_date: optional inclusive date narrowing on
+            ``time_column``. Accepts the same formats as cell values
+            (e.g. '2024-11-01', '01-Nov-2024', 'Nov-2024').
+
+    Returns:
+        JSON-formatted text with two top-level blocks: ``summary`` (load-
+        bearing headline stats) and ``series`` (the per-bucket entries
+        in chronological order). Series may be tail-truncated when the
+        full payload would exceed the per-tool size cap.
+    """
+    return _summarize_trend_impl(
+        table_name=table_name,
+        value_column=value_column,
+        time_column=time_column,
+        period=period,
+        op=op,
+        filter_column=filter_column,
+        filter_value=filter_value,
+        filter_op=filter_op,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+# ── summarize_by_group ──────────────────────────────────────────────────
+#
+# Concentration / ranking tool. Same role as summarize_trend but groups by
+# a categorical column (merchant name, industry, payment status, …) instead
+# of time. Collapses "top N merchants by spend" / "industry mix" / "payment-
+# return reasons" into one call with a concentration summary (HHI + top-N
+# shares) so the LLM doesn't have to do per-group math by hand.
+
+_VALID_SORT_BY = ("value", "count", "name")
+
+
+def _summarize_by_group_impl(
+    table_name: str,
+    value_column: str,
+    group_column: str,
+    op: str = "sum",
+    top_n: int = 10,
+    sort_by: str = "value",
+    filter_column: str = "",
+    filter_value: str = "",
+    filter_op: str = "eq",
+) -> str:
+    op = (op or "sum").lower()
+    sort_by = (sort_by or "value").lower()
+    try:
+        top_n_int = int(top_n) if top_n else 10
+    except (TypeError, ValueError):
+        top_n_int = 10
+    if top_n_int <= 0:
+        top_n_int = 10
+
+    _log_call("summarize_by_group", {
+        "table_name": table_name,
+        "value_column": value_column,
+        "group_column": group_column,
+        "op": op, "top_n": top_n_int, "sort_by": sort_by,
+        "filter_column": filter_column,
+        "filter_value": filter_value,
+        "filter_op": filter_op if (filter_column and filter_value) else None,
+    })
+
+    if op not in ("sum", "mean", "avg", "max", "min", "count"):
+        out = f"Unsupported op {op!r}. Use one of: sum, mean, max, min, count."
+        _log_result("summarize_by_group", result=out, extra={"reason": "bad_op"})
+        return out
+    if sort_by not in _VALID_SORT_BY:
+        out = (
+            f"Unsupported sort_by {sort_by!r}. "
+            f"Use one of: {', '.join(_VALID_SORT_BY)}."
+        )
+        _log_result("summarize_by_group", result=out, extra={"reason": "bad_sort_by"})
+        return out
+
+    if _gateway is None:
+        out = (
+            "Data unavailable: data layer is not initialized for this session. "
+            "Infrastructure error, not a data finding."
+        )
+        _log_result("summarize_by_group", result=out,
+                    extra={"reason": "no_gateway_bound"})
+        return out
+
+    real_table = _resolve_real_table(table_name)
+    rows = _gateway.query(real_table, filters=None)
+    if rows is None:
+        out = f"Data unavailable: table '{table_name}' not found for current case."
+        _log_result("summarize_by_group", result=out,
+                    extra={"table_name": table_name, "found": False})
+        return out
+
+    total_rows = len(rows)
+    filter_descr = ""
+    if filter_column and filter_value:
+        resolved = _resolve_real_column(rows, filter_column, real_table)
+        rows = _apply_filter(rows, resolved, str(filter_value), filter_op)
+        filter_descr = (
+            f" filtered by {resolved} {filter_op} {filter_value!r}"
+            if resolved == filter_column
+            else f" filtered by {resolved} (resolved from '{filter_column}') "
+                 f"{filter_op} {filter_value!r}"
+        )
+
+    if not rows:
+        out = (
+            f"top_groups({op}({value_column}) by {group_column})"
+            f"{filter_descr} = (no rows match; {total_rows:,} total in {real_table})"
+        )
+        _log_result("summarize_by_group", result=out,
+                    extra={"reason": "no_rows", "n_matching": 0})
+        return out
+
+    real_group = _resolve_real_column(rows, group_column, real_table)
+    real_value = _resolve_real_column(rows, value_column, real_table)
+
+    # Bucket rows by the categorical value.
+    groups: dict[str, list[float]] = {}
+    n_value_skipped = 0
+    n_group_null = 0
+    for r in rows:
+        g = r.get(real_group)
+        if g is None or (isinstance(g, str) and not g.strip()):
+            n_group_null += 1
+            continue
+        gkey = str(g)
+        if op == "count":
+            v: float | None = 1.0
+        else:
+            raw = r.get(real_value)
+            if raw is None or raw == "":
+                n_value_skipped += 1
+                continue
+            try:
+                v = float(raw)
+            except (TypeError, ValueError):
+                n_value_skipped += 1
+                continue
+        groups.setdefault(gkey, []).append(v)
+
+    if not groups:
+        out = (
+            f"top_groups({op}({value_column}) by {group_column}){filter_descr} = "
+            f"(no parseable values; {total_rows:,} total in {real_table})"
+        )
+        _log_result("summarize_by_group", result=out,
+                    extra={"reason": "no_groups",
+                           "n_value_skipped": n_value_skipped,
+                           "n_group_null": n_group_null})
+        return out
+
+    # Per-group stats.
+    raw_per_group: list[tuple[str, float, list[float]]] = []
+    for g, values in groups.items():
+        bv = _bucket_value(values, op)
+        raw_per_group.append((g, bv, values))
+
+    # Sort.
+    if sort_by == "name":
+        raw_per_group.sort(key=lambda x: x[0])
+    elif sort_by == "count":
+        raw_per_group.sort(key=lambda x: len(x[2]), reverse=True)
+    else:  # value (default)
+        raw_per_group.sort(key=lambda x: x[1], reverse=True)
+
+    n_groups_total = len(raw_per_group)
+    top = raw_per_group[:top_n_int]
+
+    # HHI / concentration summary uses sum-of-shares (op='sum' or count) for
+    # interpretability. For mean/max/min, share math is meaningless, so the
+    # concentration block only fires for additive ops.
+    additive = op in ("sum", "count")
+    total_value = sum(v for _, v, _ in raw_per_group) if additive else None
+    if additive and total_value and total_value > 0:
+        sorted_values = sorted((v for _, v, _ in raw_per_group), reverse=True)
+        shares = [v / total_value for v in sorted_values]
+        hhi = sum(s * s for s in shares)  # 0..1; higher = more concentrated
+        top1_share = shares[0]
+        top3_share = sum(shares[:3])
+        top5_share = sum(shares[:5])
+        concentration = {
+            "total_across_groups": _format_aggregate(total_value, value_column,
+                                                     "sum" if op == "sum" else "count"),
+            "top1_share": f"{top1_share * 100:.1f}%",
+            "top3_share": f"{top3_share * 100:.1f}%",
+            "top5_share": f"{top5_share * 100:.1f}%",
+            "hhi": f"{hhi:.3f}",  # rule of thumb: >0.25 = highly concentrated
+        }
+    else:
+        concentration = None
+
+    # Per-group payload.
+    series: list[dict] = []
+    for g, bv, values in top:
+        n = len(values)
+        sub = {
+            "group": g,
+            "value": _format_aggregate(bv, value_column, op),
+            "raw_value": round(bv, 4) if isinstance(bv, float) else bv,
+            "n_records": n,
+        }
+        # When the op already covers it, don't duplicate. Otherwise add a
+        # mini-stats block so the LLM can see shape per group in one shot.
+        if op in ("sum", "count"):
+            sub["mean"] = _format_aggregate(sum(values) / n, value_column, "mean")
+            if op != "max":
+                sub["max"] = _format_aggregate(max(values), value_column, "max")
+            if op != "min":
+                sub["min"] = _format_aggregate(min(values), value_column, "min")
+        series.append(sub)
+
+    payload = {
+        "table": real_table,
+        "group_column": real_group,
+        "value_column": real_value,
+        "op": op,
+        "top_n": top_n_int,
+        "sort_by": sort_by,
+        "filter": filter_descr.strip() or None,
+        "rows_in_table": total_rows,
+        "rows_used": sum(len(v) for v in groups.values()),
+        "rows_value_skipped": n_value_skipped,
+        "rows_group_null": n_group_null,
+        "n_groups_total": n_groups_total,
+        "n_groups_returned": len(series),
+        "concentration": concentration,
+        "groups": series,
+    }
+
+    out = json.dumps(payload, indent=2, default=str)
+    if len(out) > _MAX_CHARS:
+        # Drop per-group min/mean/max first (heavier than the headline).
+        for sub in payload["groups"]:
+            for k in ("mean", "max", "min"):
+                sub.pop(k, None)
+        out = json.dumps(payload, indent=2, default=str)
+        if len(out) > _MAX_CHARS:
+            keep = max(1, len(payload["groups"]) // 2)
+            payload["groups"] = payload["groups"][:keep] + [
+                {"…": f"{len(series) - keep} more groups truncated"}
+            ]
+            out = json.dumps(payload, indent=2, default=str)
+
+    _log_result(
+        "summarize_by_group", result=out,
+        extra={
+            "table_name": real_table,
+            "group_column": real_group, "value_column": real_value,
+            "op": op, "n_groups_total": n_groups_total,
+            "n_groups_returned": len(series),
+            "top1_share": (concentration or {}).get("top1_share"),
+            "hhi": (concentration or {}).get("hhi"),
+        },
+    )
+    return out
+
+
+@function_tool
+def summarize_by_group(
+    table_name: str,
+    value_column: str,
+    group_column: str,
+    op: str = "sum",
+    top_n: int = 10,
+    sort_by: str = "value",
+    filter_column: str = "",
+    filter_value: str = "",
+    filter_op: str = "eq",
+) -> str:
+    """Rank groups within a categorical column by an aggregate of a value column.
+
+    Concentration / "top-N" tool — use this for ANY question phrased as
+    "top merchants / which industries / most common return reasons /
+    spread by category" instead of looping ``aggregate_column`` per
+    filter value (which is wasteful and burns turn budget). One call
+    returns the top-N groups + a concentration summary (top1 / top3 /
+    top5 share of total + HHI) so the LLM doesn't have to do share
+    math by hand.
+
+    Numeric only — no qualitative labels ("highly concentrated", "spread
+    out"). The specialist's prompt narrates concentration shape from
+    these numbers using its domain thresholds (rule of thumb:
+    HHI > 0.25 = highly concentrated, top1_share > 0.30 = single-name
+    dominance).
+
+    Args:
+        table_name: table to scan (canonical or real name).
+        value_column: numeric column to aggregate within each group.
+            Ignored for op='count'.
+        group_column: categorical column to group by (e.g. 'Merchant
+            Name', 'Merchant Industry', 'card_portfolio',
+            'Return Flag', 'Return Reason').
+        op: per-group aggregation. One of 'sum', 'mean', 'max', 'min',
+            'count'. Default 'sum'.
+        top_n: how many top groups to return. Default 10.
+        sort_by: ordering. 'value' (default) ranks by the per-group
+            aggregate; 'count' by record count; 'name' alphabetical.
+        filter_column / filter_value / filter_op: optional row filter
+            applied BEFORE grouping (same semantics as query_table).
+
+    Returns:
+        JSON-formatted text with two top-level blocks: ``concentration``
+        (headline shares + HHI; only present for additive ops sum/count)
+        and ``groups`` (per-group entries with value + n_records + mini-
+        stats). Pair with ``summarize_trend`` filtered to a specific
+        group to get that group's time-series shape.
+    """
+    return _summarize_by_group_impl(
+        table_name=table_name,
+        value_column=value_column,
+        group_column=group_column,
+        op=op,
+        top_n=top_n,
+        sort_by=sort_by,
         filter_column=filter_column,
         filter_value=filter_value,
         filter_op=filter_op,

@@ -5,6 +5,8 @@ description: Credit bureau data — one row per external tradeline per case. Eac
   fields repeat across rows for the same case.
 rows_per_case: 4
 one_row_per_case: false
+aliases:
+- bureau_data
 columns:
   month:
     dtype: date

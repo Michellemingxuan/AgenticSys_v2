@@ -12,6 +12,8 @@ from tools.data_tools import (
     get_table_schema,
     list_available_tables,
     query_table,
+    summarize_by_group,
+    summarize_trend,
 )
 
 _WORKFLOW_DIR = Path(__file__).parent.parent / "skills" / "workflow"
@@ -37,17 +39,16 @@ def _compose_instructions(skill: DomainSkill, pillar: dict) -> str:
             parts.append(f"Pillar overlay: {pillar['overlay']}")
         if "cut_off_date" in pillar:
             cutoff = pillar["cut_off_date"]
-            ramp = pillar.get("ramp_up_window_months", 3)
             parts.append(
-                f"DATA CUT-OFF DATE: {cutoff}. RAMP-UP WINDOW: {ramp} months.\n"
+                f"DATA CUT-OFF DATE: {cutoff}.\n"
                 f"CRITICAL — Interpret ALL time-window language ('recent', 'current', "
                 f"'last N months', 'this year') relative to the cut-off, NEVER relative "
                 f"to today's calendar date. 'Recent N months' = the N months ending on "
                 f"{cutoff}. No data exists beyond {cutoff}.\n"
-                f"When the question references 'the ramp-up window' / 'ramp-up period' / "
-                f"'the observation window' without naming a length, use the {ramp}-month "
-                f"window ending on {cutoff}. Override only when the question names a "
-                f"different length explicitly."
+                f"For 'ramp-up' / 'ramp-up period', see the concept-glossary "
+                f"definition — it is a DATA-DERIVED rising-then-stabilizing phase, "
+                f"not a fixed-length window. Identify it from the relevant time "
+                f"series before answering."
             )
     return "\n\n".join(parts)
 
@@ -56,7 +57,8 @@ def build_specialist_agent(skill: DomainSkill, pillar: dict, model) -> Agent:
     return Agent(
         name=skill.name,
         instructions=_compose_instructions(skill, pillar),
-        tools=[list_available_tables, get_table_schema, query_table, aggregate_column],
+        tools=[list_available_tables, get_table_schema, query_table,
+               aggregate_column, summarize_trend, summarize_by_group],
         output_type=AgentOutputSchema(SpecialistOutput, strict_json_schema=False),
         model=model,
         # Force the specialist to actually query the data on each invocation.

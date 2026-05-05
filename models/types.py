@@ -252,3 +252,22 @@ class ScreenVerdict(BaseModel):
 # screening lived in a separate `GuardrailAgent`. Removed in a follow-up
 # after external consumers migrate.
 GuardrailVerdict = ScreenVerdict
+
+
+class ClarifyResult(BaseModel):
+    """Output of ChatAgent.clarify_intent() — decides whether the in-scope
+    question needs clarification before dispatch to the orchestrator.
+
+    Two-mode contract:
+      - ``needs_clarification=False`` — question is unambiguous; ``options``
+        is empty; the original question is dispatched to the orchestrator
+        unchanged.
+      - ``needs_clarification=True`` — surface ``options`` (2–4 reformulated
+        candidate questions, each unambiguous) for the reviewer to pick from
+        before the orchestrator is triggered. ``reason`` is a one-sentence
+        explanation of why clarification is needed.
+    """
+
+    needs_clarification: bool
+    options: list[str] = Field(default_factory=list)
+    reason: str = ""

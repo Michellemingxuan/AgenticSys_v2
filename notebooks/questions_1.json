@@ -5,6 +5,7 @@
   "backend": "openai",
   "data_source": "real",
   "session_id": "question-suite",
+  "concurrency_cap": 12,
   "test_cases": [
     {
       "name": "successful_payments_window_chain",

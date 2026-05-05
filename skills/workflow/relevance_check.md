@@ -38,7 +38,11 @@ Any of these fail:
 
 - A question that starts out-of-scope but pivots ("I was hungry earlier, anyway what's the bureau score?") → PASS. The intent is case-review.
 - A question that uses case-review vocabulary but has no grounded intent ("just curious, do FICO scores exist?") → REJECT as low-value; suggest the reviewer ask about the actual case.
-- Ambiguous questions → PASS by default. Better to let the downstream agent clarify than to block silently.
+- Ambiguous questions → PASS. The next step (`clarify_intent`) handles ambiguity by surfacing candidate interpretations.
+
+# Strictness on rejection
+
+Be strict on out-of-scope rejection. The system has a downstream `clarify_intent` step to handle in-scope ambiguity, so YOU don't need to "be safe" by passing borderline cases — those should be REJECTED if the topic is plainly outside credit-risk case review. The standard reviewer-facing wording is `"This is out of scope for case review."` followed by a one-sentence pointer to what IS in scope.
 
 # Output format
 

@@ -3,6 +3,8 @@ description: Transaction-level spend data — multiple rows per case. Each row i
   transaction (spend) with merchant details and risk scores.
 rows_per_case: 100
 one_row_per_case: false
+aliases:
+- spends_data
 columns:
   spend_date:
     dtype: date

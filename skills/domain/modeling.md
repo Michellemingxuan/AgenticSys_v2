@@ -40,6 +40,16 @@ Per-`trans_month` snapshot of feature names that contributed most to each ML sco
 
 To explain a score move, pair `score_drivers` rows with `model_scores` values, joined by `trans_month`.
 
+# Spend-pattern ML features (when team is consulted on spending)
+
+The orchestrator may pair you with `spend_payments` and `crossbu` on spending questions — your slice is the **ML-derived spend features** that feed the risk scores, not raw transactions. Notable columns on `model_scores` (probe schema for the case-specific subset):
+
+- `cust_enhnc_one_way_spend_concentration_30day_rt1*` — spend-concentration risk rate (values above ~2.4 are risky).
+- `out_of_pattern_spend*` — Out-of-Pattern Spend index vs exposure (values above ~28 are risky).
+- `time_wtd_*` and other timeseries spend variables surfaced alongside the score columns.
+
+Use these to characterise *how* the customer's spend looks to the models (concentrated? out-of-pattern? diverging?), and pair with `score_drivers` rows where a `top_<score>*` / `bottom_<score>*` feature names a spend variable to explain *why* a score moved.
+
 # Performance + time
 
 ALWAYS pass `columns=` to `query_table` — `model_scores` is wide (50+ cols). Always include `trans_month` for time-bounded questions.
