@@ -29,7 +29,7 @@ def _format_long_numerics(text: str) -> str:
 
     Examples:
         "limit 201800"       → "limit 201,800"
-        "balance 174897.36"  → "balance 174,897.36"
+        "balance 174897.36"  → "balance 174,807.36"
         "$1200700"           → "$1,200,700"
         "37675218257"        → "37,675,218,257"
 

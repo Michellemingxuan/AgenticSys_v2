@@ -505,7 +505,7 @@ def _extract_tool_calls_and_content(
     if isinstance(parsed, dict) and "tool_call" in parsed:
         tc = parsed["tool_call"]
         if isinstance(tc, dict):
-            return [_to_tool_call_dict(tc)], None, "tool_calls"
+            return _dedupe_tool_calls([_to_tool_call_dict(tc)]), None, "tool_calls"
 
     # 2) tool_calls array.
     if isinstance(parsed, dict) and "tool_calls" in parsed:
@@ -513,7 +513,7 @@ def _extract_tool_calls_and_content(
         if isinstance(arr, list) and arr:
             calls = [_to_tool_call_dict(tc) for tc in arr if isinstance(tc, dict)]
             if calls:
-                return calls, None, "tool_calls"
+                return _dedupe_tool_calls(calls), None, "tool_calls"
 
     # 3) Wrapped output.
     if isinstance(parsed, dict) and "output" in parsed:
@@ -523,10 +523,53 @@ def _extract_tool_calls_and_content(
     # 4) Multiple concatenated tool_call objects (defensive).
     multi = _parse_concatenated_tool_calls(text)
     if multi:
-        return multi, None, "tool_calls"
+        return _dedupe_tool_calls(multi), None, "tool_calls"
 
     # Plain content fallback.
     return None, text, "stop"
+
+
+def _dedupe_tool_calls(calls: list[dict]) -> list[dict]:
+    """Drop tool calls that duplicate an earlier one in the same response.
+
+    The orchestrator (especially without native function-calling) sometimes
+    emits the same tool call twice in one ``tool_calls`` array — same
+    specialist, same sub-question. The SDK then fans out parallel duplicates
+    against the same specialist, doubling cost and burning the turn budget
+    while the redacting-tool's per-AppContext dedup races (parallel calls
+    both miss an empty cache before either has finished).
+
+    Cutting duplicates here, BEFORE the SDK ever sees them, is the only
+    point in the pipeline where parallel duplicates can be eliminated
+    deterministically. Match key is ``(tool_name, normalized_arguments)``
+    so trivially-rephrased sub-questions ("Did the customer have any
+    payment returns?" vs "did the customer have any payment returns? ")
+    map to the same call. Each surviving call keeps its original ``id``
+    so the SDK's tool-result correlation isn't disturbed.
+    """
+    seen: set[tuple[str, str]] = set()
+    out: list[dict] = []
+    for tc in calls:
+        # Normalize the arguments JSON: parse + re-serialize sorted, lowercase
+        # the human-text fields. We only normalize string values (sub_question
+        # is the typical one); numeric / structured args round-trip unchanged.
+        try:
+            parsed_args = json.loads(tc.get("arguments", "{}") or "{}")
+        except (json.JSONDecodeError, ValueError):
+            parsed_args = {"_raw": str(tc.get("arguments", ""))}
+        if isinstance(parsed_args, dict):
+            norm = {
+                k: " ".join(str(v).strip().lower().split()) if isinstance(v, str) else v
+                for k, v in parsed_args.items()
+            }
+        else:
+            norm = parsed_args
+        key = (tc.get("name", ""), json.dumps(norm, sort_keys=True))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(tc)
+    return out
 
 
 def _to_tool_call_dict(tc: dict) -> dict:

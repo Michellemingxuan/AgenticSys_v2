@@ -31,7 +31,7 @@ Any of these pass:
 
 Any of these fail:
 
-- Personal-chat / small talk ("what should I eat for lunch?", "how's your day?")
+- Personal-chat / small talk ("how's your day?")
 - General knowledge questions unrelated to this case ("who won the Super Bowl?", "what's the capital of France?")
 - Code / programming help ("write me a Python script", "debug this SQL")
 - Policy / legal / compliance-advice questions that the reviewer should escalate elsewhere, not ask a case-review agent
@@ -51,23 +51,28 @@ Be strict on out-of-scope rejection. The system has a downstream `clarify_intent
 
 After deciding the question is in-scope, also compare it against `prior_questions` (earlier reviewer questions in the same session, most recent last). The goal is to spot **near-duplicates** so the system can replay the prior answer instead of re-running the orchestrator.
 
-Compare along three dimensions — **a near-duplicate must match on ALL THREE**:
+Compare along **four dimensions** — a near-duplicate must match on ALL FOUR:
 
-1. **Subject** — same entity, metric, or domain. "What's the FICO score?" and "What's the customer's bureau score?" are the same subject; "FICO score" vs. "DTI" are not. **Domain synonyms count as the same subject** — when the user_message contains a "Domain vocabulary" block, use those mappings. For credit-risk: `SBS` cards ≡ `commercial` cards; `CPS` cards ≡ `consumer` cards; `FICO` ≡ `bureau score`; `the model` / `internal score` ≡ specific named scores like `CDSS` / `TSR`. Two questions whose only difference is the synonym choice ARE the same subject.
-2. **Time range** — same window, or both unspecified. "Last 6 months" ≠ "since Jan-2024" ≠ "current". An unspecified window matches another unspecified window. A narrower window does NOT match a broader prior window (the prior answer would over-cover).
-3. **Scope** — same level of aggregation / same filter. "Top merchant" ≠ "top 5 merchants"; "all returned payments" ≠ "returned payments by industry".
+1. **Subject** — same entity / domain. "What's the FICO score?" and "What's the customer's bureau score?" are the same subject; "FICO score" vs. "DTI" are not. **Domain synonyms count as the same subject** — when the user_message contains a "Domain vocabulary" block, use those mappings. For credit-risk: `SBS` cards ≡ `commercial` cards; `CPS` cards ≡ `consumer` cards; `FICO` ≡ `bureau score`; `the model` / `internal score` ≡ specific named scores like `CDSS` / `TSR`. Two questions whose only difference is the synonym choice ARE the same subject.
+2. **Metric** — the kind of measurement being asked for. **count** ("how many", "the number of") ≠ **sum** ("total amount", "what's the total") ≠ **mean** ("average", "typical") ≠ **min/max** ("largest", "earliest") ≠ **shape** ("pattern", "trajectory", "trend"). Two questions about the same subject but different metrics are NOT duplicates — the answers are genuinely different. *"How many successful payments?"* (count) is NOT a duplicate of *"What is the total successful payment amount?"* (sum), even though both target the same successful-payments subject.
+3. **Time range** — same window, or both unspecified. "Last 6 months" ≠ "since Jan-2024" ≠ "current". An unspecified window matches another unspecified window. A narrower window does NOT match a broader prior window (the prior answer would over-cover).
+4. **Scope** — same level of aggregation / same filter. "Top merchant" ≠ "top 5 merchants"; "all returned payments" ≠ "returned payments by industry"; "this customer" ≠ "all customers".
 
-When all three match, set `near_duplicate_of` to the **verbatim text** of the matched prior question and explain in `near_duplicate_reason` (one sentence: which dimensions matched). When ANY dimension differs, leave `near_duplicate_of` as the empty string.
+When all four match, set `near_duplicate_of` to the **verbatim text** of the matched prior question and explain in `near_duplicate_reason` (one sentence naming which dimensions matched). When ANY dimension differs, leave `near_duplicate_of` as the empty string.
 
 Examples:
 
-- Prior: *"What is the customer's spending pattern?"* — New: *"Show me the customer's spending pattern."* → near-duplicate (same subject + scope + no time-narrowing).
+- Prior: *"What is the customer's spending pattern?"* — New: *"Show me the customer's spending pattern."* → **near-duplicate** (same subject + metric=shape + scope + no time-narrowing).
 - Prior: *"Did the customer have any payment returns?"* — New: *"Has this customer had any returned payments?"* → near-duplicate.
 - Prior: *"What is the customer's spending pattern?"* — New: *"What is the customer's spending pattern in 2025?"* → NOT a duplicate (time range narrowed).
 - Prior: *"What is the customer's spending pattern?"* — New: *"Top merchants by spend?"* → NOT a duplicate (different scope — pattern vs. top-N).
-- Prior: *"What's the FICO score?"* — New: *"What's the bureau score?"* → near-duplicate (subject is the same external bureau score; FICO ≡ bureau score per the glossary).
-- Prior: *"How many SBS cards does this customer have?"* — New: *"How many commercial cards does this customer have?"* → **near-duplicate** (SBS ≡ commercial per the credit-risk glossary; same subject, identical scope, no time-narrowing).
+- Prior: *"What's the FICO score?"* — New: *"What's the bureau score?"* → near-duplicate (subject is the same external bureau score; FICO ≡ bureau score per the glossary; same metric — point-in-time score lookup).
+- Prior: *"How many SBS cards does this customer have?"* — New: *"How many commercial cards does this customer have?"* → **near-duplicate** (SBS ≡ commercial per the credit-risk glossary; same subject + metric=count + scope + no time-narrowing).
 - Prior: *"How many CPS cards?"* — New: *"How many consumer cards?"* → near-duplicate (CPS ≡ consumer).
+- **Prior: *"How many successful payments?"* — New: *"What is the total amount of successful payments?"* → NOT a duplicate** (different metric: count vs. sum). The prior answer doesn't carry the total-amount figure.
+- **Prior: *"How many successful payments?"* — New: *"What is the average successful payment amount?"* → NOT a duplicate** (different metric: count vs. mean).
+- **Prior: *"How many successful payments?"* — New: *"How many commercial cards does this customer have?"* → NOT a duplicate** (completely different subject — payments vs. cards — even though metric=count matches).
+- Prior: *"What is the largest payment?"* — New: *"What is the maximum payment?"* → near-duplicate (largest ≡ max — same metric).
 
 Be conservative — when in doubt, treat as NOT a duplicate. A false positive replays a stale answer; a false negative just runs the orchestrator afresh (cost only, no correctness loss).
 
