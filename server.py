@@ -34,7 +34,7 @@ from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 
 from agents import Runner
-from agents.exceptions import AgentsException
+from agents.exceptions import AgentsException, ModelBehaviorError
 from agents.items import MessageOutputItem, ToolCallItem, ToolCallOutputItem
 
 from agent_factories.app_context import AppContext
@@ -127,6 +127,87 @@ _HELPER_TOOLS = build_helper_tools()
 
 ALL_CASES = _GATEWAY.list_case_ids()
 print(f"[server] {len(ALL_CASES)} cases available: {ALL_CASES[:5]}{'...' if len(ALL_CASES) > 5 else ''}")
+
+
+def _synthesize_fallback_answer(
+    tool_calls: list[dict],
+    error_kind: str,
+    error_message: str,
+) -> tuple[str, list[str]]:
+    """Build a best-effort answer from the specialist outputs we have when the
+    orchestrator's final synthesis fails (e.g. ModelBehaviorError on FinalAnswer
+    parsing — the model emitted truncated/malformed JSON).
+
+    Without this fallback, every specialist run is wasted because the SDK
+    raises before ``streamed.final_output`` is populated. We salvage the
+    individual SpecialistOutput payloads we already streamed and present them
+    as a bulleted "what each specialist found" block so the reviewer at least
+    sees the underlying findings.
+
+    Returns ``(answer_markdown, flags)``. The flags carry the structured
+    failure cause so it lands in the FinalAnswer audit trail too.
+    """
+    _AUX_TOOLS = {"report_agent", "general_specialist"}
+
+    def _excerpt(payload) -> str:
+        """Pull the most-readable field from a specialist payload, capped."""
+        if payload is None:
+            return "(no payload)"
+        # Specialists typically return SpecialistOutput {answer, findings,
+        # data_gap, ...}. After redact_payload + _safe_dump it's a dict; on
+        # failure paths it's a "[FAILED …]" string.
+        if isinstance(payload, str):
+            return payload[:600]
+        if isinstance(payload, dict):
+            for key in ("answer", "findings", "summary", "data_gap"):
+                v = payload.get(key)
+                if v:
+                    return (str(v) if not isinstance(v, str) else v)[:600]
+            # No known field — dump compactly.
+            try:
+                return json.dumps(payload, default=str)[:600]
+            except Exception:
+                return str(payload)[:600]
+        return str(payload)[:600]
+
+    successful = [c for c in tool_calls if "payload" in c]
+    domain_results = [c for c in successful if c["tool"] not in _AUX_TOOLS]
+    aux_results = [c for c in successful if c["tool"] in _AUX_TOOLS]
+
+    lines = [
+        "**The agent could not produce a synthesized answer for this turn.** "
+        "The orchestrator's final-output step failed before it could combine "
+        "the specialists' findings. Below is what each specialist returned "
+        "this run — review them directly.",
+        "",
+    ]
+    if domain_results:
+        lines.append("**Specialist findings**")
+        for c in domain_results:
+            lines.append(f"- **{c['tool']}** — {_excerpt(c.get('payload'))}")
+        lines.append("")
+    if aux_results:
+        lines.append("**Reports / cross-domain review**")
+        for c in aux_results:
+            lines.append(f"- **{c['tool']}** — {_excerpt(c.get('payload'))}")
+        lines.append("")
+    if not successful:
+        lines.append(
+            "_No specialists produced a result before the orchestrator failed._"
+        )
+
+    lines.extend([
+        "---",
+        f"_Error category: `{error_kind}`. Re-ask the question (often a "
+        f"transient model-output issue) or narrow the scope — e.g. ask about "
+        f"one domain at a time._",
+    ])
+
+    flags = [
+        f"orchestrator_failed: {error_kind}",
+        f"fallback_answer: synthesized from {len(domain_results)} specialist(s)",
+    ]
+    return "\n".join(lines), flags
 
 
 def _normalize_q(q: str) -> str:
@@ -396,6 +477,30 @@ async def _run_turn_streamed(sess: CaseSession, turn_id: str, question: str) -> 
     tool_calls: list[dict] = []
     started_at_by_call: dict[str, int] = {}
     team_plan_emitted = False
+    # Cursor over ctx._specialist_errors so we emit a typed `error` SSE event
+    # exactly once per failure, as soon as the redacting_tool wrapper records
+    # it. Without this, the reviewer would only see a vague `agent_completed`
+    # carrying a "[FAILED …]" string and have to read it to figure out what
+    # went wrong.
+    specialist_errors_emitted = 0
+
+    def _drain_specialist_errors() -> None:
+        nonlocal specialist_errors_emitted
+        errors = getattr(ctx, "_specialist_errors", None) or []
+        while specialist_errors_emitted < len(errors):
+            err = errors[specialist_errors_emitted]
+            sess.emit("error", {
+                "turn_id": turn_id,
+                "specialist": err.get("specialist"),
+                "error_type": err.get("error_type"),
+                "message": (
+                    f"{err.get('specialist')}: "
+                    f"{err.get('error_type')}: {err.get('error_message')}"
+                ),
+                "sub_question": err.get("sub_question"),
+                "recoverable": True,
+            })
+            specialist_errors_emitted += 1
 
     def _safe_dump(obj: Any) -> Any:
         if hasattr(obj, "model_dump"):
@@ -457,10 +562,22 @@ async def _run_turn_streamed(sess: CaseSession, turn_id: str, question: str) -> 
                 payload = _safe_dump(item.output)
                 started_ts = started_at_by_call.get(call_id, int(time.time() * 1000))
                 duration_ms = int(time.time() * 1000) - started_ts
+                # Stash the payload back onto `tool_calls` so a late-stage
+                # orchestrator failure (ModelBehaviorError on FinalAnswer
+                # parsing, etc.) can still synthesize a partial fallback
+                # answer from the specialists' outputs the reviewer paid for.
+                if call_id in call_index_by_id:
+                    tool_calls[call_index_by_id[call_id]]["payload"] = payload
+                    tool_calls[call_index_by_id[call_id]]["duration_ms"] = duration_ms
                 sess.emit("agent_completed", {
                     "turn_id": turn_id, "call_id": call_id, "tool": tool,
                     "payload": payload, "duration_ms": duration_ms,
                 })
+                # If the redacting_tool wrapper recorded a failure for any
+                # specialist this run, fan out typed `error` events now so
+                # the UI can show the real cause beside the vague `[FAILED …]`
+                # payload it just received.
+                _drain_specialist_errors()
 
             elif isinstance(item, MessageOutputItem):
                 pass  # handled by .final_output below
@@ -479,17 +596,100 @@ async def _run_turn_streamed(sess: CaseSession, turn_id: str, question: str) -> 
             pass  # SDK may not always support; degrade gracefully
 
     except AgentsException as exc:
-        sess.emit("error", {"turn_id": turn_id, "message": f"orchestrator: {exc}",
-                            "recoverable": False})
-        sess.emit("turn_done", {"turn_id": turn_id, "ended_at": int(time.time() * 1000),
-                                "duration_ms": int(time.time() * 1000) - started_at,
-                                "outcome": "orchestrator_error"})
+        # Drain any specialist-level failures recorded before the orchestrator
+        # itself died so the reviewer still sees what broke under the hood.
+        _drain_specialist_errors()
+
+        # Two failure modes converge here:
+        #   • ModelBehaviorError — the model emitted text the SDK couldn't
+        #     parse as FinalAnswer (truncated JSON, pseudo tool-call text,
+        #     output-schema mismatch). The specialists' work IS valid; only
+        #     the final synthesis is broken. Recoverable.
+        #   • Other AgentsException — UserError, guardrail tripwires, etc.
+        #     Generally not recoverable but we still surface what we have.
+        is_model_behavior = isinstance(exc, ModelBehaviorError)
+        kind = "model_behavior" if is_model_behavior else type(exc).__name__
+
+        # Human-readable error for the SSE `error` event — strip the noisy
+        # Pydantic v2 paragraph so the UI shows something a reviewer can act
+        # on, not a 600-char schema dump.
+        raw = str(exc)
+        if is_model_behavior:
+            short = (
+                "Orchestrator could not produce a valid final answer "
+                "(the model's output was malformed or truncated). "
+                "Returning a partial summary built from the specialists' "
+                "results that did succeed."
+            )
+        else:
+            short = f"Orchestrator failed: {type(exc).__name__}: {raw.splitlines()[0][:200]}"
+
+        sess.logger.log("orchestrator_exception", {
+            "turn_id": turn_id,
+            "exception_type": type(exc).__name__,
+            "message": raw[:1000],
+            "kind": kind,
+            "n_tool_calls_completed": sum(1 for c in tool_calls if "payload" in c),
+        })
+        sess.emit("error", {
+            "turn_id": turn_id,
+            "message": short,
+            "kind": kind,
+            "recoverable": is_model_behavior,
+        })
+
+        # Build a fallback FinalAnswer from whatever specialists DID return.
+        # Without this the reviewer would see "(no answer produced)" plus the
+        # raw exception, and the work the specialists did would be wasted.
+        answer_text, fallback_flags = _synthesize_fallback_answer(
+            tool_calls=tool_calls, error_kind=kind, error_message=raw,
+        )
+        flags = list(fallback_flags)
+
+        # Append per-specialist failures and any protocol violations to flags
+        # the same way the success path does, so the audit trail is uniform.
+        specialist_failures = getattr(ctx, "_specialist_errors", None) or []
+        for e in specialist_failures:
+            flags.append(
+                f"specialist '{e['specialist']}' failed: "
+                f"{e['error_type']}: {e['error_message']}"
+            )
+
+        ts = int(time.time() * 1000)
+        sess.emit("final", {
+            "turn_id": turn_id, "answer": answer_text, "flags": flags,
+            "timeline": [], "data_pull_request": None,
+        })
+        sess.emit("agent_message", {
+            "id": str(uuid.uuid4()), "role": "agent", "text": answer_text,
+            "timestamp": ts, "turn_id": turn_id,
+        })
+        sess.emit("turn_done", {
+            "turn_id": turn_id, "ended_at": ts,
+            "duration_ms": ts - started_at,
+            "outcome": "orchestrator_error_fallback" if is_model_behavior
+                       else "orchestrator_error",
+        })
         return
+
+    # Drain any errors that landed after the last tool call (e.g., a parallel
+    # specialist that recorded its failure between the final agent_completed
+    # and stream end).
+    _drain_specialist_errors()
 
     # ── 4. Emit final + chat agent message ────────────────────────────────
     if final_answer is None:
-        answer_text = "(no answer produced)"
-        flags: list[str] = []
+        # Orchestrator streamed cleanly but emitted no structured FinalAnswer
+        # (e.g., the model returned an empty / non-parseable message that the
+        # SDK swallowed). Use the same specialist-output salvage path as the
+        # exception branch so the reviewer never sees a bare "(no answer
+        # produced)" with the specialists' work thrown away.
+        answer_text, fallback_flags = _synthesize_fallback_answer(
+            tool_calls=tool_calls,
+            error_kind="empty_final_answer",
+            error_message="orchestrator produced no FinalAnswer",
+        )
+        flags: list[str] = list(fallback_flags)
         timeline: list = []
         data_pull = None
     elif hasattr(final_answer, "model_dump"):
@@ -503,6 +703,45 @@ async def _run_turn_streamed(sess: CaseSession, turn_id: str, question: str) -> 
         flags = getattr(final_answer, "flags", [])
         timeline = getattr(final_answer, "timeline", [])
         data_pull = getattr(final_answer, "data_pull_request", None)
+
+    # Specialist failure flags — make every wrapper-recorded failure visible
+    # in the FinalAnswer so the reviewer sees, e.g., "specialist 'wcc' failed:
+    # ModelBehaviorError: invalid JSON …" instead of the silent drop the SDK
+    # would otherwise produce.
+    specialist_failures = getattr(ctx, "_specialist_errors", None) or []
+    if specialist_failures:
+        failure_flags = [
+            f"specialist '{e['specialist']}' failed: "
+            f"{e['error_type']}: {e['error_message']}"
+            for e in specialist_failures
+        ]
+        flags = list(flags or []) + failure_flags
+
+    # Protocol check: when 2+ unique domain specialists were called, the
+    # orchestrator MUST also have called general_specialist (per the
+    # team_construction skill's "HARD GATE"). Surface a flag when it didn't —
+    # the answer still ships so the reviewer isn't stonewalled, but the
+    # violation is visible in the audit trail and the Flags section.
+    _AUX_TOOLS = {"report_agent", "general_specialist"}
+    unique_domain_specialists = {
+        c["tool"] for c in tool_calls if c["tool"] not in _AUX_TOOLS
+    }
+    general_specialist_called = any(
+        c["tool"] == "general_specialist" for c in tool_calls
+    )
+    if len(unique_domain_specialists) >= 2 and not general_specialist_called:
+        violation_flag = (
+            f"general_specialist not invoked (protocol violation: "
+            f"{len(unique_domain_specialists)} domain specialists ran without "
+            f"the required cross-domain review)"
+        )
+        flags = list(flags or []) + [violation_flag]
+        sess.logger.log("orchestrator_protocol_violation", {
+            "turn_id": turn_id,
+            "violation": "missing_general_specialist",
+            "n_domain_specialists": len(unique_domain_specialists),
+            "domain_specialists": sorted(unique_domain_specialists),
+        })
 
     ts = int(time.time() * 1000)
     sess.emit("final", {

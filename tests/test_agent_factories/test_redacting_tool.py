@@ -196,3 +196,154 @@ async def test_redacting_tool_specialist_histories_isolated_per_specialist():
     assert "for beta" in str(app_ctx._specialist_histories["beta"])
     # Beta's history doesn't carry alpha's prior content.
     assert "alpha" not in str(app_ctx._specialist_histories["beta"])
+
+
+# ── Failure-path tests ──────────────────────────────────────────────────────
+#
+# These cover the wrapper's job of catching every exception class the inner
+# Runner.run can raise (not just MaxTurnsExceeded), logging it, recording a
+# structured entry on the AppContext, and returning a [FAILED ...] payload so
+# the orchestrator LLM sees a clear failure signal instead of the SDK's
+# generic "An error occurred while running the tool".
+
+
+def _make_failure_ctx():
+    """Tiny stand-in for AppContext that exposes the two attrs the wrapper
+    writes to on failure: a logger and a `_specialist_errors` list."""
+    from types import SimpleNamespace
+
+    class _Logger:
+        def __init__(self):
+            self.events = []
+
+        def log(self, evt, payload):
+            self.events.append((evt, payload))
+
+    return SimpleNamespace(
+        logger=_Logger(),
+        _specialist_histories={},
+        _specialist_errors=[],
+    )
+
+
+@pytest.mark.asyncio
+async def test_redacting_tool_records_max_turns_exceeded():
+    """MaxTurnsExceeded must be caught, logged, and surface as a [FAILED ...]
+    payload (not propagate up to function_tool's generic error handler)."""
+    from agents import RunContextWrapper
+    from agents.exceptions import MaxTurnsExceeded
+
+    inner_agent = Agent(name="inner", instructions="x", tools=[])
+    ctx = _make_failure_ctx()
+
+    async def _raise(*_a, **_kw):
+        raise MaxTurnsExceeded("ran out of turns")
+
+    with patch("agent_factories.redacting_tool.Runner.run", new=_raise):
+        wrapped = redacting_tool(inner_agent, name="wcc", description="d")
+        out = await wrapped.on_invoke_tool(
+            RunContextWrapper(ctx), json.dumps({"sub_question": "anything"})
+        )
+
+    assert out.startswith("[FAILED wcc]")
+    assert "max_turns_exceeded" in out
+    assert len(ctx._specialist_errors) == 1
+    rec = ctx._specialist_errors[0]
+    assert rec["specialist"] == "wcc"
+    assert rec["error_type"] == "max_turns_exceeded"
+    assert any(e[0] == "specialist_call_failed" for e in ctx.logger.events)
+
+
+@pytest.mark.asyncio
+async def test_redacting_tool_records_model_behavior_error():
+    """ModelBehaviorError (malformed JSON / output-schema parse failure) must
+    be caught with its real class name surfaced, not swallowed."""
+    from agents import RunContextWrapper
+    from agents.exceptions import ModelBehaviorError
+
+    inner_agent = Agent(name="inner", instructions="x", tools=[])
+    ctx = _make_failure_ctx()
+
+    async def _raise(*_a, **_kw):
+        raise ModelBehaviorError("malformed JSON output")
+
+    with patch("agent_factories.redacting_tool.Runner.run", new=_raise):
+        wrapped = redacting_tool(inner_agent, name="domain_x", description="d")
+        out = await wrapped.on_invoke_tool(
+            RunContextWrapper(ctx), json.dumps({"sub_question": "anything"})
+        )
+
+    assert "[FAILED domain_x]" in out
+    assert "ModelBehaviorError" in out
+    assert ctx._specialist_errors[0]["error_type"] == "ModelBehaviorError"
+
+
+@pytest.mark.asyncio
+async def test_redacting_tool_records_generic_exception():
+    """Last-resort fence: a generic Exception (e.g., transport error) must
+    still be captured rather than escape to the SDK's default handler."""
+    from agents import RunContextWrapper
+
+    inner_agent = Agent(name="inner", instructions="x", tools=[])
+    ctx = _make_failure_ctx()
+
+    async def _raise(*_a, **_kw):
+        raise RuntimeError("connection reset")
+
+    with patch("agent_factories.redacting_tool.Runner.run", new=_raise):
+        wrapped = redacting_tool(inner_agent, name="domain_y", description="d")
+        out = await wrapped.on_invoke_tool(
+            RunContextWrapper(ctx), json.dumps({"sub_question": "anything"})
+        )
+
+    assert "[FAILED domain_y]" in out
+    assert "RuntimeError" in out
+    assert "connection reset" in out
+    assert ctx._specialist_errors[0]["error_type"] == "RuntimeError"
+
+
+@pytest.mark.asyncio
+async def test_redacting_tool_records_timeout():
+    """asyncio.wait_for raising TimeoutError must surface as a structured
+    failure rather than propagate up the stack."""
+    import asyncio as _asyncio
+    from agents import RunContextWrapper
+
+    inner_agent = Agent(name="inner", instructions="x", tools=[])
+    ctx = _make_failure_ctx()
+
+    async def _raise(*_a, **_kw):
+        raise _asyncio.TimeoutError()
+
+    # Patch wait_for itself so we don't have to actually wait the timeout.
+    with patch("agent_factories.redacting_tool.asyncio.wait_for", new=_raise):
+        wrapped = redacting_tool(inner_agent, name="domain_z", description="d")
+        out = await wrapped.on_invoke_tool(
+            RunContextWrapper(ctx), json.dumps({"sub_question": "anything"})
+        )
+
+    assert "[FAILED domain_z]" in out
+    assert "timeout" in out
+    assert ctx._specialist_errors[0]["error_type"] == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_redacting_tool_success_does_not_record_error():
+    """The happy path must leave `_specialist_errors` empty."""
+    from agents import RunContextWrapper
+
+    inner_agent = Agent(name="inner", instructions="x", tools=[])
+    ctx = _make_failure_ctx()
+    fake_result = type("R", (), {"final_output": "all good"})()
+
+    with patch(
+        "agent_factories.redacting_tool.Runner.run",
+        new=AsyncMock(return_value=fake_result),
+    ):
+        wrapped = redacting_tool(inner_agent, name="ok_tool", description="d")
+        out = await wrapped.on_invoke_tool(
+            RunContextWrapper(ctx), json.dumps({"sub_question": "hi"})
+        )
+
+    assert "[FAILED" not in out
+    assert ctx._specialist_errors == []

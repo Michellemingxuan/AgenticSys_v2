@@ -20,3 +20,10 @@ class AppContext:
     # `result.to_input_list()` back here. Reset is per-AppContext: re-running
     # the cell that constructs a fresh AppContext starts a fresh chain.
     _specialist_histories: dict[str, list] = field(default_factory=dict)
+    # Per-turn structured record of specialist invocations that failed inside
+    # the redacting_tool wrapper (timeouts, SDK exceptions, unexpected errors).
+    # Each entry: {specialist, error_type, error_message, sub_question}.
+    # Server-side stream loop drains this to emit typed `error` SSE events and
+    # to append failure flags to the FinalAnswer so the reviewer sees the
+    # actual cause instead of a silent "specialist did not return".
+    _specialist_errors: list[dict] = field(default_factory=list)

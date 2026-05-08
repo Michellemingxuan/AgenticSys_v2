@@ -74,32 +74,37 @@ def _compose_orchestrator_instructions(
             "FinalAnswer you MUST have called BOTH (1) report_agent and "
             "(2) at least one domain specialist tool. No loopholes — "
             "report_agent text alone is never sufficient grounding, even "
-            "with coverage='full'. If no specialist seems directly "
+            "with coverage='explicit'. If no specialist seems directly "
             "relevant, pick the closest one and let it return a data_gap. "
             "Every FinalAnswer claim must trace to a tool result this run "
             "produced; never answer from schema inference or general "
             "knowledge.\n\n"
             "PARALLEL EXECUTION: Emit report_agent + every domain "
             "specialist in a SINGLE response so they run in parallel.\n\n"
-            "GENERAL SPECIALIST — MANDATORY whenever MORE THAN 1 "
-            "domain specialist is on the team (i.e. 2+ specialists). "
-            "This is a hard gate, not a suggestion:\n"
-            "  • Count your domain specialists for this turn (excluding "
-            "report_agent and general_specialist itself).\n"
-            "  • If that count is ≥ 2, you MUST call `general_specialist` "
-            "AFTER all domain specialists return, BEFORE emitting "
-            "FinalAnswer. Pass it the specialists' findings as a single "
-            "sub-question; let it compare slices, surface contradictions, "
-            "and produce cross-domain insights.\n"
-            "  • If that count is exactly 1, skip general_specialist "
-            "(nothing to compare).\n"
-            "  • There is NO third option. Emitting a FinalAnswer with "
-            "2+ domain specialists and no general_specialist call is a "
-            "protocol violation — the cross-domain review is part of the "
-            "grounding for the answer.\n"
-            "Sequencing: domain specialists + report_agent fire in "
-            "parallel in the first round; general_specialist fires in "
-            "a SECOND round once their outputs are available."
+            "GENERAL SPECIALIST — HARD GATE on multi-specialist turns. "
+            "When MORE THAN 1 domain specialist is on the team (i.e. 2+ "
+            "specialists, excluding report_agent and general_specialist "
+            "itself), calling `general_specialist` is NOT optional and NOT "
+            "subject to your judgement.\n"
+            "Mandatory two-round protocol:\n"
+            "  • ROUND 1: domain specialists + report_agent fire in parallel "
+            "(see PARALLEL EXECUTION above).\n"
+            "  • ROUND 2: AFTER all domain specialists' results are in your "
+            "context, you MUST emit a single tool call to "
+            "`general_specialist` with the specialists' findings as the "
+            "sub-question. Wait for its review. Only THEN may you emit "
+            "the FinalAnswer.\n"
+            "  • If exactly 1 domain specialist was used, skip "
+            "general_specialist (nothing to compare).\n"
+            "Compliance check before emitting FinalAnswer: count the unique "
+            "domain specialists you've called this turn. If that count is "
+            "≥ 2, scan the conversation for a `general_specialist` tool "
+            "result. If absent, you have NOT yet completed the protocol — "
+            "call `general_specialist` BEFORE finalizing. Emitting "
+            "FinalAnswer without that call when it's required is a "
+            "protocol violation, will be flagged downstream, and may be "
+            "rejected. Treat the `general_specialist` call like report_agent: "
+            "ungroundedness without it."
         ),
     ]
     # Pillar-wide concept glossary (consumer/commercial, balance/spend, etc.)
@@ -177,5 +182,14 @@ def build_orchestrator_agent(
         # and produces ungrounded answers. ``reset_tool_choice=True`` is the
         # SDK default, so after the first tool call this auto-flips back to
         # ``"auto"`` and the agent can synthesize the FinalAnswer normally.
-        model_settings=ModelSettings(tool_choice="required"),
+        #
+        # ``max_tokens=8192``: the orchestrator's FinalAnswer carries the
+        # narrative answer + report_draft + team_draft + flags. The default
+        # output budget is generous on gpt-4.1 but the round-2 turn (after
+        # general_specialist) accumulates a lot of context, and we've seen
+        # the model truncate JSON output mid-emit (Pydantic raises
+        # ``ModelBehaviorError: Invalid JSON: EOF while parsing``). Setting an
+        # explicit cap keeps behavior predictable across models and is large
+        # enough that the truncation is virtually never schema-fatal.
+        model_settings=ModelSettings(tool_choice="required", max_tokens=8192),
     )
