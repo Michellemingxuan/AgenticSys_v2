@@ -299,6 +299,73 @@ def test_summarize_trend_no_rows():
     assert "no rows match" in raw
 
 
+# ── Date-format coverage (extends _date_key for private-env formats) ────────
+
+
+@pytest.mark.parametrize("date_fmt,expected_periods", [
+    # ISO datetime — private-env warehouses commonly export with timestamp.
+    (
+        ["2024-11-05 10:30:00", "2024-11-20 14:00:00", "2024-12-10T08:15:30Z"],
+        ["2024-11", "2024-12"],
+    ),
+    # ISO with slash separator.
+    (["2024/11/05", "2024/11/20", "2024/12/10"], ["2024-11", "2024-12"]),
+    # US-style MM/DD/YYYY.
+    (["11/05/2024", "11/20/2024", "12/10/2024"], ["2024-11", "2024-12"]),
+    # Numeric dash MM-DD-YYYY.
+    (["11-05-2024", "11-20-2024", "12-10-2024"], ["2024-11", "2024-12"]),
+    # Compact ISO basic YYYYMMDD.
+    (["20241105", "20241120", "20241210"], ["2024-11", "2024-12"]),
+])
+def test_summarize_trend_handles_extended_date_formats(date_fmt, expected_periods):
+    """Regression: private environment hits formats beyond the original
+    ISO/DD-MMM-YYYY set. Each form must bucket into the same months."""
+    case_data = {"CASE-X": {"spends_data": [
+        {"Date": d, "Amount": 100.0} for d in date_fmt
+    ]}}
+    gateway = LocalDataGateway(case_data=case_data)
+    gateway.set_case("CASE-X")
+    catalog = DataCatalog(profile_dir="config/data_profiles")
+    data_tools.init_tools(gateway, catalog)
+
+    raw = data_tools._summarize_trend_impl(
+        table_name="spends_data", value_column="Amount", time_column="Date",
+        period="month", op="sum",
+    )
+    payload = json.loads(raw)
+    assert [s["period"] for s in payload["series"]] == expected_periods
+
+
+def test_summarize_trend_surfaces_unparseable_samples():
+    """When _date_key fails for every row, the user-facing string must surface
+    actual sample values (not just "no parseable values") so the operator can
+    diagnose which format the parser doesn't recognize. Without this, the LLM
+    sees only the opaque message and the fix path is invisible."""
+    case_data = {"CASE-BAD": {"spends_data": [
+        # Pick formats _date_key intentionally rejects so we test the failure
+        # path (RFC 2822-ish, sentence form).
+        {"Date": "Wed, 16 Nov 2024 10:30:00", "Amount": 100.0},
+        {"Date": "November 16th, 2024", "Amount": 200.0},
+        {"Date": "November 16th, 2024", "Amount": 250.0},  # duplicate dropped
+    ]}}
+    gateway = LocalDataGateway(case_data=case_data)
+    gateway.set_case("CASE-BAD")
+    catalog = DataCatalog(profile_dir="config/data_profiles")
+    data_tools.init_tools(gateway, catalog)
+
+    raw = data_tools._summarize_trend_impl(
+        table_name="spends_data", value_column="Amount", time_column="Date",
+        period="month", op="sum",
+    )
+    assert "no parseable Date values" in raw
+    # The unrecognized samples must appear so the operator can extend the
+    # parser (or normalize at ingestion).
+    assert "Wed, 16 Nov 2024 10:30:00" in raw
+    assert "November 16th, 2024" in raw
+    # Counts must reflect every failing row, even the duplicate.
+    assert "3 row(s) had unrecognized Date format" in raw
+
+
 # ── summarize_by_group ───────────────────────────────────────────────────
 
 

@@ -132,6 +132,33 @@ _YEAR_RE = re.compile(r"^(\d{4})$")
 _MONTH_YEAR_RE = re.compile(r"^([A-Za-z]{3,})\s*[-'\s]\s*(\d{4})$")
 # DD-MMM-YYYY: "07-Jul-2024", "7-Jul-2024".
 _DAY_MONTH_YEAR_RE = re.compile(r"^(\d{1,2})-([A-Za-z]{3,})-(\d{4})$")
+# ISO datetime (with space or 'T' separator, optional Z / offset / fractional
+# seconds): "2024-11-16 10:30:00", "2024-11-16T10:30:00.123Z", "2024-11-16T10:30:00+00:00".
+# We only care about the date portion; everything after the first ten chars is dropped.
+_ISO_DATETIME_RE = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2})[ T][\d:.+\-Z]+$"
+)
+# ISO date with slash separator, sometimes seen in exports: "2024/11/16".
+_ISO_SLASH_RE = re.compile(r"^(\d{4})/(\d{1,2})/(\d{1,2})$")
+# US-style slash date: "11/16/2024", "1/7/2024", or 2-digit year "11/16/24".
+# We default to MM/DD/YYYY (American Express convention); when the first slot
+# is > 12 we re-interpret as DD/MM/YYYY (European fallback).
+_US_SLASH_RE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{2}|\d{4})$")
+# Numeric dash form "16-11-2024" / "1-7-2024" — same MM/DD vs DD/MM
+# disambiguation as the slash form. Distinct from DD-MMM-YYYY because the
+# middle group is digits, not letters.
+_NUMERIC_DASH_RE = re.compile(r"^(\d{1,2})-(\d{1,2})-(\d{2}|\d{4})$")
+# Compact ISO basic-format: "20241116" (occasionally produced by data-warehouse
+# exports). 8 digits, no separators.
+_COMPACT_DATE_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})$")
+
+
+def _expand_two_digit_year(yy: int) -> int:
+    """Expand a 2-digit year to 4 digits with a 50-year sliding window —
+    00..49 → 2000..2049, 50..99 → 1950..1999. Banking data spans both
+    eras, so a fixed pivot avoids "11/16/24" silently meaning 1924.
+    """
+    return 2000 + yy if yy < 50 else 1900 + yy
 
 
 def _date_key(value: Any) -> tuple[int, int, int] | None:
@@ -140,11 +167,24 @@ def _date_key(value: Any) -> tuple[int, int, int] | None:
 
     Handles formats produced across the data profiles:
       - ``2025-11-16``                                     → (2025, 11, 16)
+      - ``2025-11-16 10:30:00`` / ``2025-11-16T10:30:00Z`` → (2025, 11, 16)
+      - ``2025/11/16``                                     → (2025, 11, 16)
+      - ``11/16/2025`` / ``11/16/25`` (US, MM/DD/YYYY)     → (2025, 11, 16)
+      - ``16/11/2025`` (auto-detected DD/MM when DD > 12)  → (2025, 11, 16)
+      - ``11-16-2025`` (US numeric dash, same disambig)    → (2025, 11, 16)
+      - ``20251116`` (compact ISO basic)                   → (2025, 11, 16)
       - ``07-Jul-2024`` / ``7-Jul-2024``                   → (2024, 7, 7)
       - ``2025-11``                                        → (2025, 11, 1)
       - ``October'2024`` / ``October 2024`` / ``Oct'2024`` → (2024, 10, 1)
       - ``Jan-2024`` / ``Jan 2024`` / ``January-2024``     → (2024, 1, 1)
       - ``2025``                                           → (2025, 1, 1)
+
+    Slash / numeric-dash forms with all-digits in every slot are inherently
+    ambiguous between MM/DD/YYYY (US) and DD/MM/YYYY (EU). We pick MM/DD by
+    default (American Express convention) and only flip to DD/MM when the
+    first slot exceeds 12. Mixed corpora may still mis-bucket; if you see
+    that, consider normalizing upstream at ingestion.
+
     Tuple comparison matches chronological order for any of these.
     """
     if value is None:
@@ -157,6 +197,18 @@ def _date_key(value: Any) -> tuple[int, int, int] | None:
     if m:
         return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
 
+    # ISO datetime — drop the time portion. Comes before _ISO_MONTH_RE / etc.
+    # because the prefix "YYYY-MM-DD " starts the same as ISO date but won't
+    # match the bare-date regex above (which is anchored to end-of-string).
+    m = _ISO_DATETIME_RE.match(s)
+    if m:
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+    # ISO with slashes — same shape as ISO date but with `/`.
+    m = _ISO_SLASH_RE.match(s)
+    if m:
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
     # DD-MMM-YYYY (must come before _ISO_MONTH_RE since both contain hyphens
     # but this one starts with a 1-2 digit day).
     m = _DAY_MONTH_YEAR_RE.match(s)
@@ -164,6 +216,34 @@ def _date_key(value: Any) -> tuple[int, int, int] | None:
         month_idx = _MONTHS.get(m.group(2).lower())
         if month_idx is not None:
             return (int(m.group(3)), month_idx, int(m.group(1)))
+
+    # US-slash date with MM/DD vs DD/MM auto-disambiguation.
+    m = _US_SLASH_RE.match(s)
+    if m:
+        a, b, yr = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if len(m.group(3)) == 2:
+            yr = _expand_two_digit_year(yr)
+        if a > 12 and 1 <= b <= 12:
+            month, day = b, a   # DD/MM/YYYY — first slot was too big to be a month
+        elif 1 <= a <= 12 and 1 <= b <= 31:
+            month, day = a, b   # MM/DD/YYYY (default)
+        else:
+            return None
+        return (yr, month, day)
+
+    # Numeric-dash date (same disambiguation rules as US slash).
+    m = _NUMERIC_DASH_RE.match(s)
+    if m:
+        a, b, yr = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if len(m.group(3)) == 2:
+            yr = _expand_two_digit_year(yr)
+        if a > 12 and 1 <= b <= 12:
+            month, day = b, a
+        elif 1 <= a <= 12 and 1 <= b <= 31:
+            month, day = a, b
+        else:
+            return None
+        return (yr, month, day)
 
     m = _ISO_MONTH_RE.match(s)
     if m:
@@ -174,6 +254,17 @@ def _date_key(value: Any) -> tuple[int, int, int] | None:
         month_idx = _MONTHS.get(m.group(1).lower())
         if month_idx is not None:
             return (int(m.group(2)), month_idx, 1)
+
+    # Compact ISO "YYYYMMDD". Place AFTER _YEAR_RE would mis-route 4-digit
+    # input, so guard with a length check; before _YEAR_RE it would never be
+    # reached because that regex matches 4 digits exactly. We check length
+    # explicitly here.
+    if len(s) == 8 and s.isdigit():
+        m = _COMPACT_DATE_RE.match(s)
+        if m:
+            y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            if 1 <= mo <= 12 and 1 <= d <= 31:
+                return (y, mo, d)
 
     m = _YEAR_RE.match(s)
     if m:
@@ -1400,10 +1491,22 @@ def _summarize_trend_impl(
     n_dated = 0
     n_value_skipped = 0
     n_in_range = 0
+    # Track up to 5 distinct unparseable samples so the audit log can surface
+    # the actual format _date_key didn't recognize. Without this, the only
+    # signal back from a private-env date-format mismatch is the LLM's
+    # paraphrased "no parseable values" — useless for diagnosing which
+    # format to teach the parser.
+    unparseable_samples: list[str] = []
+    n_unparseable = 0
     for r in rows:
         t = r.get(real_time)
         dk = _date_key(t)
         if dk is None:
+            n_unparseable += 1
+            if t is not None and t != "":
+                sample = str(t)
+                if sample not in unparseable_samples and len(unparseable_samples) < 5:
+                    unparseable_samples.append(sample)
             continue
         n_dated += 1
         if start_key is not None and dk < start_key:
@@ -1427,16 +1530,36 @@ def _summarize_trend_impl(
         buckets.setdefault(bk, []).append(v)
 
     if not buckets:
+        # Surface the actual unrecognized values to the LLM (truncated) so a
+        # specialist can decide whether to (a) fall back to a different time
+        # column, (b) report a data_gap, or (c) point the reviewer at an
+        # ingestion-side fix. Previously the output said only "no parseable
+        # values" — opaque, and the LLM tended to hallucinate around it.
+        sample_clause = ""
+        if unparseable_samples:
+            shown = ", ".join(repr(s)[:40] for s in unparseable_samples[:3])
+            sample_clause = (
+                f"; example unrecognized values: {shown}"
+                f" (the parser supports ISO `YYYY-MM-DD`, ISO datetimes, "
+                f"`MM/DD/YYYY`, `DD-MMM-YYYY`, and similar — if these are "
+                f"valid dates, the format may need to be normalized at "
+                f"ingestion)"
+            )
         out = (
             f"trend({op}({value_column}) by {period} on {time_column})"
             f"{filter_descr} = (no parseable {time_column} values"
             + (f" in date range {start_date}..{end_date}" if start_key or end_key else "")
-            + f"; {total_rows:,} total in {real_table})"
+            + f"; {total_rows:,} total in {real_table}"
+            + f"; {n_unparseable:,} row(s) had unrecognized {time_column} format"
+            + sample_clause
+            + ")"
         )
         _log_result("summarize_trend", result=out,
                     extra={"reason": "no_buckets",
                            "n_dated": n_dated, "n_in_range": n_in_range,
-                           "n_value_skipped": n_value_skipped})
+                           "n_value_skipped": n_value_skipped,
+                           "n_unparseable": n_unparseable,
+                           "unparseable_samples": unparseable_samples})
         return out
 
     # Build the per-bucket series in chronological order.
