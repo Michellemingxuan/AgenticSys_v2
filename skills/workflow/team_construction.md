@@ -13,13 +13,15 @@ Pick specialist tool(s) to call and frame each one's sub-question. The team rost
 
 | Reviewer phrasing | Specialist |
 |---|---|
-| FICO, bureau score, tradelines, external delinquency, derog marks | `bureau` |
+| FICO, bureau score, tradelines, external delinquency tradelines, derog marks | `bureau` |
 | DTI, income, affordability, capacity, limit headroom | `capacity_afford` |
 | **cards (count/balance/limit), consumer/commercial card, cross-product exposure, portfolio mix** | **`crossbu`** |
 | **top merchants the customer spends with, merchant concentration, recurring merchants, per-merchant trend** | **`spend_payments`** (transaction-level on `spends_data`, NOT crossbu) |
 | tenure, customer relationship, product usage history | `customer_rel` |
-| internal model score, PD, GAM, model trajectory | `modeling` |
-| payments, payment returns, payment volume, delinquency timing | `spend_payments` |
+| internal model output scores (CDSS / TSR / credit-loss / GAM / PD), model trajectory, score drivers | `modeling` |
+| **embedded ML / third-party scores** (Paydex, SBFE, LexisNexis, RNN spend, payment-channel risk, etc.) | **`modeling`** — these live on `model_scores` as Layer-2 columns. They're themselves ML scores produced for narrower purposes (informative on their own), even though the output models also consume them as features. The modeling skill's body explains how to recognize them in the schema. |
+| payment volume, payment returns, success-vs-return ratio, settled-vs-cleared payments | `spend_payments` |
+| **DPD / days past due / internal delinquency index / payment-behavior trajectory / minimum-due-only history** | **`modeling`** — these live as Layer-3 indicator features on `model_scores` (concept group: *internal delinquency / payment behavior*; see modeling skill for vocabulary). The raw `payments` table CANNOT answer DPD / stage-of-delinquency — it only carries cleared/returned status. |
 | WCC, agent call notes, customer-service log, collections call | `wcc` |
 
 ## Cross-domain topics (multi-specialist)
@@ -29,8 +31,9 @@ Some concepts span more than one specialist's data. For these, build a **team of
 | Topic | Specialists to consider | Their slice |
 |---|---|---|
 | **spending / spend pattern / spend behavior / spend trajectory / spend volume / merchant concentration** | **MUST include BOTH `spend_payments` AND `modeling`** (+ `crossbu` only when the question is explicitly B2B) | `spend_payments`: transaction-level spend AND merchant-name / merchant-industry concentration of the customer's own spending — `spends_data.Amount`, `Merchant Name`, `Merchant Industry`. **All "top merchants / recurring merchants / per-merchant trends" routes here, not crossbu.** `modeling`: ML-derived spend features (`out_of_pattern_spend*`, `cust_enhnc_one_way_spend_concentration_30day_rt1*`, time-weighted spend variables) that feed the risk scores — these are pattern-level signals the raw transaction view can't surface alone. `crossbu` belongs ONLY when the reviewer asks about the *merchant side* of the customer's businesses (B2B charge volume those businesses receive, via `crossbu_merchants.merchant_charge_volume`) — a different concept than the customer's own purchasing behavior. **A spending-pattern answer with only `spend_payments` is incomplete** — it's missing the model's view of the spend shape. |
-| **default journey / DPD progression** | `bureau` + `modeling` | `bureau`: external default tradelines, derog marks. `modeling`: score evolution leading into default + driver rotation. |
-| **exposure / total customer risk** | `crossbu` + `bureau` + `capacity_afford` | `crossbu`: card balances and limits. `bureau`: external exposure. `capacity_afford`: vs income / capacity headroom. |
+| **default journey / DPD progression** | `bureau` + `modeling` | `bureau`: external default tradelines, derog marks. `modeling`: output-score evolution leading into default + driver rotation + the *internal delinquency / payment behavior* concept group on `model_scores` (DPD counts, delinquency indices, return indices — see modeling skill for the vocabulary). |
+| **delinquency / payment behavior / payment-deterioration trajectory** | `modeling` + `spend_payments` (+ `bureau` only when "external" is explicit) | `modeling`: the *internal delinquency / payment behavior* concept group on `model_scores` (DPD counts, internal delinquency indices, payment-return indices, min-due-only frequency; see modeling skill body). Trend over `trans_month`. `spend_payments`: cleared-vs-returned payment events from the `payments` table — captures the *settlement attempt* side (success/return counts, return amounts, return reasons). Indicators give the *stage* of delinquency, payments give the *settlement attempts*. **A delinquency answer with only `spend_payments` is incomplete** — it misses the indicator-level trajectory the model already computes. `bureau` adds the external-tradeline view when the question explicitly invokes "external". |
+| **exposure / total customer risk** | `crossbu` + `bureau` + `capacity_afford` (+ `modeling` when the question asks for a *rolled-up / ratio / leverage* view) | `crossbu`: card balances and limits. `bureau`: external exposure. `capacity_afford`: vs income / capacity headroom. `modeling`: model-rolled-up *exposure & leverage* and *capacity, income & paydown* concept groups on `model_scores` (exposure-to-remit, debt-servicing, paydown shares — see modeling skill body for vocabulary). Complementary to the raw views, not a substitute. |
 | **broad / "full review"** | all specialists | Only when the question is genuinely cross-domain or asks for a complete picture. |
 
 For everything else, single-specialist or 2-specialist teams are normal. Only widen to 3+ when the topic is genuinely cross-domain (per this table).
@@ -54,7 +57,7 @@ When a specialist appears as the grammatical subject of the question, route ther
 | "What is the customer's Y?" / "How many Y?" | (no subject) | route to Y owner |
 
 Examples:
-- "Does **the model** have info about external delinquency?" → `modeling`. ("the model" / "the models" in reviewer questions ALWAYS = internal ML risk-scoring models — never the agent system or a generic abstraction.)
+- "Does **the model** have info about spending?" → `modeling`. ("the model" / "the models" in reviewer questions ALWAYS = internal ML risk-scoring models — never the agent system or a generic abstraction.)
 - "Does **WCC** show complaints about cards?" → `wcc` (cards is the topic, WCC is the data source).
 - "What does **the bureau** say about payment history?" → `bureau` (NOT `spend_payments`).
 

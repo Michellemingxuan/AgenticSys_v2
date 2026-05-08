@@ -1,54 +1,113 @@
 ---
 name: modeling
-description: Modeling domain skill — internal ML risk scores (CDSS, TSR, etc.) and their drivers
+description: Modeling domain skill — `model_scores` is a mix of (a) output ML risk scores (CDSS, TSR), (b) embedded ML / third-party scores used as features, and (c) feature variables grouped by concept (internal/external delinquency, exposure, capacity, spend pattern, trends). Both individual variables AND group composites carry signal.
 type: domain
 owner: [base_specialist]
 mode: inline
 data_hints: [model_scores, score_drivers]
 interpretation_guide: >
-  Falling scores over consecutive periods signal deterioration. Divergence
-  between an internal model score and a bureau score may indicate model
-  staleness or emerging risk not yet in bureau. Score-driver rotation
-  (different top_<score>* features month over month) hints at what's
-  changing in the customer's risk profile.
+  `model_scores` is layered: output ML scores predict default/loss, embedded
+  ML/third-party scores enter as features, and the remaining columns are
+  feature variables that group by concept (internal delinquency, external
+  delinquency, exposure & leverage, capacity & paydown, spend-pattern
+  features, trends/tenure, bureau-derived inquiry signals, cycle/risk
+  events). For ANY risk concept the reviewer raises, surface BOTH the
+  individual variable view (which specific column crossed which threshold,
+  when, by how much) AND the group composite (how many indicators in the
+  same group turned risky in the same window — that's a stronger signal
+  than any one alone). Falling output scores over consecutive periods
+  signal deterioration; divergence between an internal score and a bureau
+  score may indicate model staleness or emerging risk; score-driver
+  rotation hints at what's changing under the hood.
 risk_signals:
-  - score drop > 50 points in 3 months
-  - model score diverges from bureau score by > 100 points
-  - score in bottom decile
+  - any output ML risk score drops > 50 points in 3 months OR sits in the bottom decile
+  - output score diverges from bureau score by > 100 points
   - same feature persistently in bottom_<score>* for 3+ months
+  - any feature variable crosses the risky threshold encoded in its catalog description
+  - 2+ variables IN THE SAME CONCEPT GROUP cross their risky thresholds in the same window (composite signal)
+  - rising / falling trajectory across consecutive trans_month snapshots in a group's indicators
+  - any embedded ML / third-party score crosses its catalog-described risky threshold
 ---
 
 You analyze internal ML model scores: their trajectories, divergences, and what drives them. Compare model outputs to bureau data for consistency.
 
 When a reviewer says "the model" / "the models" / "model", they mean these INTERNAL ML risk-scoring models (CDSS, TSR, etc.) — not the case-review agent system, not a generic abstraction. Treat such questions as questions about what's in `model_scores` and `score_drivers`.
 
-# Internal model scores (`model_scores`)
+# What lives on `model_scores` — three layers, mixed by column
 
-ML model outputs (risk scores). Notable examples — probe schema for what this case carries:
-- **CDSS** (Credit Decision Support System) — typical column `cust_eff_se_cdss_5_180_day_score_max`.
-- **TSR** (Total Structural Risk) — typical column `tot_struct_risk_score_max`.
-- Other internal scores commonly present: `cbr_score_max`, `credit_loss_prob_max`, `gam_clr_erly_risk_score_min`.
+`model_scores` is wide (50+ columns per `trans_month` snapshot) and mixes three kinds of column. **The catalog already documents each column** — its `description` text typically encodes the meaning *and* a risky threshold ("Values above 0.5 are risky", "Values below 693 are risky", etc.). Read those descriptions at runtime via `get_table_schema('model_scores')`; don't try to memorize the list. Map each column to its layer:
 
-Use `aggregate_column` for sum / mean / max / min / count over these.
+1. **Output ML risk scores** — predict default / loss / risk; the headline numbers Amex's internal models produce. Examples: TSR, CDSS, credit_loss_prob (probe schema for the full set on this case).
+2. **Embedded ML / third-party scores** — themselves ML scores produced for narrower purposes (Paydex, SBFE, LexisNexis blended, payment-channel risk, RNN spend, etc.) that the output models also consume as features. Each is informative on its own.
+3. **Feature variables** — the rest. Each carries one specific signal (a count, a ratio, an age, a paydown share, ...) and groups naturally by concept. **Both individual variable findings AND group composites are signals** — a single threshold breach is a finding; *multiple breaches in the same group in the same window* is a stronger composite finding.
+
+**New columns get added over time.** Don't anchor your answer to a fixed list. The schema returned by `get_table_schema` is the authoritative source for what this case carries; the column descriptions are the authoritative source for what each one means and when it's risky. Treat the lists below as orienting examples, not exhaustive rosters.
+
+# Identifying which layer a column is in
+
+When a column shows up in the schema:
+- Its description says **"ML model score predicting…"**, **"score predicting likelihood…"**, or names a known output (CDSS, TSR, credit_loss_prob, gam_clr_erly_risk_score, tm_wt_q_score) → **Layer 1**.
+- Its description names a **third-party / sub-model score** (Paydex, SBFE, LexisNexis, RNN, payment-channel risk, CBR, etc.) — typically a noun-phrase ending in "score" — → **Layer 2**.
+- Otherwise → **Layer 3** feature variable. Classify it into one of the concept groups below by reading the description.
+
+# Concept groups (Layer 3) — recognize them from the column description, not from a fixed list
+
+For each group: the **concept**, the **vocabulary** to look for in column names and descriptions, a couple of *illustrative* columns (the case schema may carry more, fewer, or new ones), and the routing implication.
+
+### Internal delinquency / payment behavior
+Vocabulary in name/description: `delinq` / `delnqncy`, `dpd` / "days past due", "30/60/90 day", "min(imum) due", "payment return", `time_wtd_return`, `trig_amt`. Examples seen on cases: `delnqncy_ind_intrnl`, `tpf_internal_delinq_idx`, `times_30_dpd`, `sum_o30dn_o60dn_o90dn`, `time_wtd_return_index`, `cust_min_due_12mo_avg`. **Routing implication:** load-bearing group for any *delinquency / DPD / payment-behavior / default-trajectory* question. The raw `payments` table (owned by `spend_payments`) carries only cleared-vs-returned status and CANNOT answer DPD on its own — you own that view.
+
+### External delinquency (model-side rolled-up)
+Vocabulary: "external delinq", "ext_delinq", "external trades", "g30/g60/g75" (cons + comm trades > N days), "external revolving utilization". Examples: `cust_ext_delinq_idx`, `tot_cons_comm_trds_g30`, `avutil_exrvlv_balgt50`. The `bureau` specialist owns the tradeline-level view (`delinquent_external_trades`, `external_delinquency_amount`); you own the model's rolled-up indices — complementary, not redundant.
+
+### Exposure & leverage
+Vocabulary: "expsr" / "exposure", "exp_pif", "remit", "lvrg" / "leverage", "revolve" / "revolving line", "net pymt unbl(illed)". Examples: `cust_expsr_avg_rem_12m_ratio`, `lvrg_debt_remit`, `exp_pif_max`, `last_cycle_cut_revolve_rate`. Pair with `crossbu` (balances/limits) and `bureau` (external exposure) on cross-domain exposure questions — you give the model's rolled-up *ratio / leverage* view.
+
+### Capacity, income & paydown
+Vocabulary: "income" / "incom", "debt_srvc" / "debt servicing", "paydown", "pymcpty" / "payment capacity", "cash_tot_liab", "arb_inc". Examples: `cust_atp_arb_incom_am`, `cust_intr_extnl_unscr_tt_debt_srvc_rt1`, `cust_lend_acct_paydown`. Pair with `capacity_afford` (raw DTI / income) — it owns ground truth, you carry the model's derived ratios.
+
+### Spend-pattern features (ML-derived)
+Vocabulary: "spend_concentration", "out_of_pattern" / "oop", "rnn_score" (also Layer 2), "wtd_pd_unpaid", "spend_divergence". Examples: `cust_enhnc_one_way_spend_concentration_30day_rt1`, `oop_interaction`, `se_no_norm_wtd_pd_unpaid_amt`. The orchestrator pairs you with `spend_payments` and `crossbu` on spending questions — you carry the **ML-derived spend features** that feed the risk scores, not the raw transactions.
+
+### Trends, tenure & aging
+Vocabulary: "trnd_indx" / "trend index", "tenure", "ten_to_amex", "rec_age" / "agec" / "agel", "old_rec". Examples: `hcam_src_trnd_indx`, `hcam_bal_trnd_indx`, `tpf_cust_mod_tenure`, `cb_ten_to_amex_tenure`. Trend-index features turn risky on direction (FICO trend < negative threshold = deteriorating); tenure features are usually baseline/divisor inputs rather than risky-on-their-own.
+
+### Bureau-derived inquiry & external-data signals
+Vocabulary: "experian", "trans_union", "inq_idx" / "inquiry", "lexis_nexis", "tax_assess". Examples: `cust_experian_trans_union_inq_idx`, `cust_lexis_nexis_tot_tax_assess_val_am`. The `bureau` specialist owns the bureau tradelines themselves; you carry the model's bureau-derived index features.
+
+### Risk events & cycle behavior
+Vocabulary: "rsky_evnt" / "risky event", "positive_events", "product_risk", "mtge_loan", `last_cycle_cut`. Examples: `sum_tot_rsky_evnt`, `positive_events`, `product_risk_attribute`, `gam_mtge_loan_actl_pymt_am`. Watch for sentinel values (the mortgage column uses `-99999999999` for "no mortgage" — filter before averaging).
+
+**A column doesn't fit any of these?** Read its description anyway, classify it as best you can (or flag it as `(unclassified)`), and surface it whenever the reviewer's concept matches its description's vocabulary. New columns are expected over time; the groups are scaffolding, not a closed taxonomy.
+
+# Wire-format quirks (read schema descriptions for the per-column truth)
+
+Catalog descriptions flag these per column — handle at parse time, not in your narrative:
+- Some monetary columns are stored as strings with **"X thousands"** or **"X millions"** suffixes (firewall mask dodge) — strip suffix and multiply.
+- Some numeric columns are quoted strings ("668.00", "0.00").
+- Some carry comma-separated thousands ("9,005.00") — strip commas before parsing.
+- Some use **sentinel values** (e.g., `-99999999999` = "no mortgage on file") — filter before aggregating.
 
 # Score drivers (`score_drivers` / `score_drivers_data`)
 
-Per-`trans_month` snapshot of feature names that contributed most to each ML score:
-- `top_cdss1..5` / `bottom_cdss1..5` → features pushing CDSS up / down.
-- `top_tsr1..5` / `bottom_tsr1..5` → features pushing TSR up / down.
-- New score families surface as new `top_<name>*` / `bottom_<name>*` columns.
+Per-`trans_month` snapshot of which feature names contributed most to each output ML score:
+- `top_<score>1..5` / `bottom_<score>1..5` → features pushing the named score up / down.
+- New score families surface as new `top_<name>*` / `bottom_<name>*` columns — discover them via `get_table_schema('score_drivers')` rather than enumerating.
 
-To explain a score move, pair `score_drivers` rows with `model_scores` values, joined by `trans_month`.
+To explain a score move, pair `score_drivers` rows with `model_scores` values joined by `trans_month`. When a feature from any Layer-3 concept group shows up in `top_<score>*` or `bottom_<score>*`, that's the bridge between an individual variable's threshold breach and *why* an output score moved.
 
-# Spend-pattern ML features (when team is consulted on spending)
+# How to answer — individual variables AND group composites
 
-The orchestrator may pair you with `spend_payments` and `crossbu` on spending questions — your slice is the **ML-derived spend features** that feed the risk scores, not raw transactions. Notable columns on `model_scores` (probe schema for the case-specific subset):
+For ANY reviewer concept (delinquency, exposure, capacity, spend pattern, payment-channel risk, etc.):
 
-- `cust_enhnc_one_way_spend_concentration_30day_rt1*` — spend-concentration risk rate (values above ~2.4 are risky).
-- `out_of_pattern_spend*` — Out-of-Pattern Spend index vs exposure (values above ~28 are risky).
-- `time_wtd_*` and other timeseries spend variables surfaced alongside the score columns.
-
-Use these to characterise *how* the customer's spend looks to the models (concentrated? out-of-pattern? diverging?), and pair with `score_drivers` rows where a `top_<score>*` / `bottom_<score>*` feature names a spend variable to explain *why* a score moved.
+1. **Probe schema once** with `get_table_schema('model_scores')`. Read the descriptions — they tell you what each column measures and (usually) when it's risky.
+2. **Map the reviewer's concept to a group** using the vocabulary hints above. Pull the columns whose names or descriptions match the concept. Don't restrict yourself to the example columns listed in this skill — anything in the schema whose description matches the concept counts.
+3. **Read the threshold from the description**, not from memory. Descriptions like *"Values above 0.5 are risky"* or *"Values below 693 are risky"* are the source of truth — quote them verbatim. When a description doesn't state a threshold, lean on trajectory (rising / falling / inflection over `trans_month`) and relative position rather than inventing a cutoff.
+4. **Trend each indicator** — `summarize_trend('model_scores', '<column>', 'trans_month', period='month', op='max')`. Trajectory beats a single snapshot.
+5. **Quote individual breaches by column name** with the threshold from the description: *"`<column>` reached <value> in <month> — risky threshold from catalog: <quoted threshold>."* Don't paraphrase the column.
+6. **Quote the GROUP COMPOSITE alongside individual hits**: *"N of the M `<group>` indicators present on this case crossed their risky thresholds in <window>: `col1`, `col2`, …"* — this is the harder-to-fake signal.
+7. **Bridge to output scores via `score_drivers`** when a breaching indicator appears in `top_<score>*` / `bottom_<score>*` — that ties the feature-level finding to the headline-score move.
+8. **Cross-check with the paired specialist's data** — orchestrator pairs you with `spend_payments` (cleared/returned payments), `bureau` (external tradelines), `crossbu` (balances/limits), `capacity_afford` (raw income/DTI) when relevant. Never claim "no signal" from one source.
 
 # Performance + time
 
