@@ -9,6 +9,7 @@ from agents.exceptions import AgentsException
 from agents.items import ToolCallOutputItem
 
 from agent_factories.app_context import AppContext
+from agent_factories.distiller_agent import build_distiller_agent
 from agent_factories.orchestrator_agent import build_orchestrator_agent
 from agent_factories.report_agent import build_report_agent
 from agent_factories.general_specialist import build_general_specialist
@@ -54,6 +55,10 @@ class Orchestrator:
             ]
             self.report_agent_obj = build_report_agent(model=clients.model)
             self.general_agent = build_general_specialist(model=clients.model)
+            # Second-pass extractor of reusable knowledge points after each
+            # specialist run. Stateless; one instance shared by every
+            # specialist's redacting_tool wrapper via AppContext._distiller.
+            self.distiller_agent = build_distiller_agent(model=clients.model)
             self.orchestrator_agent = build_orchestrator_agent(
                 specialists=specialists,
                 report_agent=self.report_agent_obj,
@@ -64,6 +69,7 @@ class Orchestrator:
             )
         else:
             self.orchestrator_agent = None
+            self.distiller_agent = None
 
     async def run(
         self,

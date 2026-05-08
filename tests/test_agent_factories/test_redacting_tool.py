@@ -347,3 +347,279 @@ async def test_redacting_tool_success_does_not_record_error():
 
     assert "[FAILED" not in out
     assert ctx._specialist_errors == []
+
+
+# ── Knowledge-base + distiller tests ────────────────────────────────────────
+#
+# These cover the cross-turn KB plumbing wired in Phase 1 of the memory
+# rework: redacting_tool reads a KB digest before each call, runs a distiller
+# agent on the SpecialistOutput after, and persists new KnowledgePoints to a
+# session-scoped dict that survives across turns.
+
+
+from agent_factories.redacting_tool import (
+    _active_kps,
+    _format_kb_digest,
+    _distill_and_persist,
+)
+
+
+def _make_kb_ctx(distiller=None, kb=None):
+    """AppContext-shaped stand-in carrying the KB + distiller fields."""
+    from types import SimpleNamespace
+
+    class _Logger:
+        def __init__(self):
+            self.events = []
+
+        def log(self, evt, payload):
+            self.events.append((evt, payload))
+
+    return SimpleNamespace(
+        logger=_Logger(),
+        _specialist_histories={},
+        _specialist_errors=[],
+        _specialist_kb=kb if kb is not None else {},
+        _distiller=distiller,
+        _turn_id="turn-test-1",
+    )
+
+
+def test_active_kps_keeps_latest_per_topic():
+    """Older KPs with the same topic are retained in the list (audit) but
+    `_active_kps` returns only the most recent per topic."""
+    kps = [
+        {"topic": "monthly_spend_trend", "claim": "v1", "captured_at_turn": "t1"},
+        {"topic": "top_merchants", "claim": "m1", "captured_at_turn": "t1"},
+        {"topic": "monthly_spend_trend", "claim": "v2-revised", "captured_at_turn": "t2"},
+    ]
+    active = _active_kps(kps)
+    by_topic = {k["topic"]: k["claim"] for k in active}
+    # Latest one wins per topic, older still present in the source list
+    # (audit log) but not returned by the active filter.
+    assert by_topic == {"monthly_spend_trend": "v2-revised", "top_merchants": "m1"}
+    assert len(kps) == 3  # source list untouched
+
+
+def test_format_kb_digest_empty_when_no_kps():
+    assert _format_kb_digest([]) == ""
+    assert _format_kb_digest(None) == ""
+
+
+def test_format_kb_digest_renders_active_set_only():
+    """The digest must reflect the active set (latest per topic), not the
+    raw audit log. Confidence levels appear as bracketed tags."""
+    kps = [
+        {"topic": "fico_trajectory", "claim": "FICO 720→680 over 6 months",
+         "confidence": "high", "source_call": "summarize_trend('bureau','fico_score',...)"},
+        {"topic": "fico_trajectory", "claim": "FICO 720→645 (revised)",
+         "confidence": "medium"},
+    ]
+    digest = _format_kb_digest(kps)
+    assert "fico_trajectory" in digest
+    assert "(revised)" in digest          # the active claim is the newer one
+    assert "FICO 720→680" not in digest   # the older claim is hidden
+    assert "[medium]" in digest
+
+
+@pytest.mark.asyncio
+async def test_redacting_tool_prepends_kb_digest_when_no_intra_turn_history():
+    """First call within a turn (no `_specialist_histories[name]`) must see
+    the cross-turn KB digest prepended to its sub-question."""
+    from agents import RunContextWrapper
+
+    inner_agent = Agent(name="inner", instructions="x", tools=[])
+    captured_inputs = []
+
+    async def _fake_run(agent, run_input, context=None, **_kw):
+        captured_inputs.append(run_input)
+        return type("R", (), {"final_output": "ok",
+                              "to_input_list": lambda self_: []})()
+
+    ctx = _make_kb_ctx(
+        distiller=None,  # no distiller wired → no second pass
+        kb={"modeling": [
+            {"topic": "delinquency_breaches",
+             "claim": "times_30_dpd reached 3 in 2024-Q4 (risky > 1).",
+             "confidence": "high"},
+        ]},
+    )
+
+    with patch("agent_factories.redacting_tool.Runner.run", new=_fake_run):
+        wrapped = redacting_tool(inner_agent, name="modeling", description="d")
+        await wrapped.on_invoke_tool(
+            RunContextWrapper(ctx),
+            json.dumps({"sub_question": "show me the delinquency trajectory"}),
+        )
+
+    assert len(captured_inputs) == 1
+    forwarded = captured_inputs[0]
+    assert isinstance(forwarded, str)
+    # The KB preface must be present along with the new question.
+    assert "YOUR KNOWLEDGE BASE" in forwarded
+    assert "delinquency_breaches" in forwarded
+    assert "show me the delinquency trajectory" in forwarded
+    # Section divider keeps the digest distinguishable from the question.
+    assert "--- New question ---" in forwarded
+
+
+@pytest.mark.asyncio
+async def test_redacting_tool_skips_kb_digest_on_intra_turn_followup():
+    """Second call within the same turn already has the digest in the
+    `_specialist_histories` transcript; re-prepending would double it."""
+    from agents import RunContextWrapper
+
+    inner_agent = Agent(name="inner", instructions="x", tools=[])
+    captured_inputs = []
+
+    async def _fake_run(agent, run_input, context=None, **_kw):
+        captured_inputs.append(run_input)
+        return type("R", (), {"final_output": "ok",
+                              "to_input_list":
+                              lambda self_: [{"role": "user", "content": "prior"},
+                                             {"role": "assistant", "content": "ans"}]})()
+
+    ctx = _make_kb_ctx(
+        distiller=None,
+        kb={"modeling": [{"topic": "x", "claim": "stale", "confidence": "high"}]},
+    )
+    # Simulate that this specialist was already called once this turn —
+    # the prior transcript already contains the digest from that first call.
+    ctx._specialist_histories["modeling"] = [
+        {"role": "user", "content": "prior call w/ digest"},
+        {"role": "assistant", "content": "prior answer"},
+    ]
+
+    with patch("agent_factories.redacting_tool.Runner.run", new=_fake_run):
+        wrapped = redacting_tool(inner_agent, name="modeling", description="d")
+        await wrapped.on_invoke_tool(
+            RunContextWrapper(ctx),
+            json.dumps({"sub_question": "follow-up question"}),
+        )
+
+    forwarded = captured_inputs[0]
+    # Now the input is a list (prior transcript + new user message).
+    assert isinstance(forwarded, list)
+    new_user_msg = forwarded[-1]["content"]
+    # The new user message must NOT carry the digest preface — that would
+    # duplicate context already in the prior transcript.
+    assert "YOUR KNOWLEDGE BASE" not in new_user_msg
+    assert "follow-up question" in new_user_msg
+
+
+@pytest.mark.asyncio
+async def test_distiller_persists_knowledge_points_to_session_kb():
+    """After a successful specialist run, the distiller's knowledge_points
+    must land in `_specialist_kb[name]` keyed by specialist."""
+    from agents import RunContextWrapper
+    from models.types import KnowledgePoint, DistillerOutput
+
+    # Stub distiller that returns two KPs.
+    distiller = Agent(name="distiller", instructions="x", tools=[])
+    new_kps = [
+        KnowledgePoint(
+            topic="monthly_spend_trend",
+            claim="Spend rose $300 → $1100 over Nov-2024..Mar-2025.",
+            numbers=[{"period": "2024-11", "value": 300},
+                     {"period": "2025-03", "value": 1100}],
+            viz={"kind": "trend", "x_field": "period", "y_field": "value"},
+            confidence="high",
+        ),
+        KnowledgePoint(topic="top_merchant", claim="S BERTRAM 38% of spend.",
+                       confidence="medium"),
+    ]
+    distiller_result = type("R", (), {
+        "final_output": DistillerOutput(knowledge_points=new_kps),
+    })()
+
+    inner_agent = Agent(name="inner", instructions="x", tools=[])
+    fake_specialist_result = type("R", (), {
+        "final_output": "specialist findings here",
+        "to_input_list": lambda self_: [],
+    })()
+
+    # Patch Runner.run to return the specialist result on the first call,
+    # the distiller result on the second.
+    call_count = {"n": 0}
+
+    async def _fake_run(agent, run_input, context=None, **_kw):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return fake_specialist_result
+        return distiller_result
+
+    ctx = _make_kb_ctx(distiller=distiller, kb={})
+
+    with patch("agent_factories.redacting_tool.Runner.run", new=_fake_run):
+        wrapped = redacting_tool(inner_agent, name="spend_payments", description="d")
+        out = await wrapped.on_invoke_tool(
+            RunContextWrapper(ctx),
+            json.dumps({"sub_question": "what's the spending pattern?"}),
+        )
+
+    # Specialist's payload still flows back to the orchestrator.
+    assert "[FAILED" not in out
+    # Both KPs persisted under the right specialist key.
+    assert "spend_payments" in ctx._specialist_kb
+    persisted = ctx._specialist_kb["spend_payments"]
+    assert len(persisted) == 2
+    topics = {kp["topic"] for kp in persisted}
+    assert topics == {"monthly_spend_trend", "top_merchant"}
+    # turn_id stamped onto the KP at distill time.
+    assert all(kp.get("captured_at_turn") == "turn-test-1" for kp in persisted)
+    # Distillation event logged.
+    assert any(e[0] == "distiller_kps_added" for e in ctx.logger.events)
+
+
+@pytest.mark.asyncio
+async def test_distiller_failure_does_not_break_specialist_response():
+    """When the distiller errors out, the specialist's payload still
+    returns to the orchestrator and the KB simply doesn't grow this turn."""
+    from agents import RunContextWrapper
+
+    distiller = Agent(name="distiller", instructions="x", tools=[])
+    inner_agent = Agent(name="inner", instructions="x", tools=[])
+    specialist_result = type("R", (), {
+        "final_output": "ok",
+        "to_input_list": lambda self_: [],
+    })()
+    call_count = {"n": 0}
+
+    async def _fake_run(agent, run_input, context=None, **_kw):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return specialist_result
+        # Distiller raises — must not affect the specialist's path.
+        raise RuntimeError("distiller blew up")
+
+    ctx = _make_kb_ctx(distiller=distiller, kb={})
+
+    with patch("agent_factories.redacting_tool.Runner.run", new=_fake_run):
+        wrapped = redacting_tool(inner_agent, name="bureau", description="d")
+        out = await wrapped.on_invoke_tool(
+            RunContextWrapper(ctx),
+            json.dumps({"sub_question": "any question"}),
+        )
+
+    # Specialist answer still flows.
+    assert "[FAILED" not in out
+    # KB didn't grow.
+    assert ctx._specialist_kb == {}
+    # Failure was logged.
+    assert any(e[0] == "distiller_failed" for e in ctx.logger.events)
+
+
+def test_distill_and_persist_noop_when_distiller_unwired():
+    """Tests / legacy paths without _distiller or _specialist_kb must behave
+    like the legacy single-turn flow — no errors, no KB updates."""
+    import asyncio as _asyncio
+    from types import SimpleNamespace
+
+    ctx_no_distiller = SimpleNamespace(
+        logger=None, _specialist_kb={}, _distiller=None, _turn_id=None,
+    )
+    n = _asyncio.get_event_loop().run_until_complete(
+        _distill_and_persist(ctx_no_distiller, "x", "q", "out")
+    )
+    assert n == 0
+    assert ctx_no_distiller._specialist_kb == {}

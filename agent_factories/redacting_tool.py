@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import traceback
+from pathlib import Path
 
 from agents import Agent, RunContextWrapper, Runner, function_tool
 from agents.exceptions import AgentsException, MaxTurnsExceeded
 
 from llm.firewall_stack import redact_payload, sanitize_message
+from tools.viz_renderer import kp_to_vega_spec, render_chart
 
 
 # Inner-specialist turn budget. SDK default is 10, which is too tight for
@@ -22,6 +25,158 @@ _SPECIALIST_MAX_TURNS = 25
 # "is this thing broken?" threshold so we surface the failure instead of
 # letting the SSE stream stall.
 _SPECIALIST_TIMEOUT_S = 240.0
+
+# Wall-clock budget for the second-pass distiller. Distillation is purely
+# text-extraction; should be fast. If it stalls, log + skip — the specialist
+# answer is already in flight to the orchestrator and we degrade gracefully
+# to "no KB update this turn."
+_DISTILLER_TIMEOUT_S = 30.0
+
+
+def _active_kps(kps: list[dict]) -> list[dict]:
+    """Latest knowledge point per topic. The underlying list is appended to
+    chronologically (never mutated), so iterating in order and keeping the
+    last-seen entry per topic gives us the active set. Older entries with
+    the same topic remain in the list for audit but are hidden from the
+    digest the specialist sees on its next call.
+    """
+    active: dict[str, dict] = {}
+    for kp in kps or []:
+        topic = kp.get("topic")
+        if topic:
+            active[topic] = kp
+    return list(active.values())
+
+
+def _format_kb_digest(kps: list[dict]) -> str:
+    """Render the active KP set as a preface the specialist reads before
+    answering. Empty string when there's nothing to surface.
+
+    The digest is intentionally short (one line per active KP) — its job is
+    to keep the specialist from re-running the same `summarize_trend` call
+    when the answer is already on file, NOT to replay every detail. The
+    specialist can still re-query when verification is needed.
+    """
+    active = _active_kps(kps)
+    if not active:
+        return ""
+    lines = [
+        "[YOUR KNOWLEDGE BASE — facts established earlier this session.",
+        "Refer to these BEFORE re-running queries; only re-query when the new",
+        "question goes beyond what's recorded here, or when a value needs",
+        "verification.]",
+        "",
+    ]
+    for kp in active:
+        confidence = kp.get("confidence") or "medium"
+        line = f"- **{kp['topic']}** [{confidence}]: {kp['claim']}"
+        src = kp.get("source_call")
+        if src:
+            line += f"  _via `{src}`_"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+async def _distill_and_persist(
+    app_ctx, name: str, sub_question: str, specialist_output,
+) -> int:
+    """Run the distiller agent on a successful SpecialistOutput, append any
+    extracted KnowledgePoints to the session KB. Returns count added.
+
+    Failures are logged and non-fatal: the specialist's answer is already
+    flowing to the orchestrator regardless. The session KB just doesn't get
+    a new entry this turn — the specialist will still answer the next
+    question, just without the new fact in its preface digest.
+    """
+    distiller = getattr(app_ctx, "_distiller", None)
+    kb = getattr(app_ctx, "_specialist_kb", None)
+    if distiller is None or kb is None:
+        return 0  # Not wired — tests / legacy paths skip distillation entirely.
+
+    logger = getattr(app_ctx, "logger", None)
+
+    # Pack a compact, JSON-serializable view of the specialist's output for
+    # the distiller's prompt. SpecialistOutput is a Pydantic model on the
+    # success path; on failures we'd be a "[FAILED ...]" string, but we
+    # only get here on success so that branch is paranoia.
+    try:
+        if hasattr(specialist_output, "model_dump"):
+            output_payload = json.dumps(specialist_output.model_dump(), default=str)
+        elif isinstance(specialist_output, str):
+            output_payload = specialist_output
+        else:
+            output_payload = json.dumps(specialist_output, default=str)
+    except Exception:
+        output_payload = str(specialist_output)
+
+    distiller_input = (
+        f"Specialist: {name}\n"
+        f"Sub-question: {sub_question}\n\n"
+        f"--- SpecialistOutput (JSON) ---\n{output_payload}"
+    )
+
+    try:
+        result = await asyncio.wait_for(
+            Runner.run(distiller, distiller_input, context=app_ctx, max_turns=2),
+            timeout=_DISTILLER_TIMEOUT_S,
+        )
+    except Exception as exc:  # noqa: BLE001 - distillation is best-effort
+        if logger is not None:
+            logger.log("distiller_failed", {
+                "specialist": name,
+                "error_type": type(exc).__name__,
+                "error_message": str(exc)[:500],
+            })
+        return 0
+
+    out = getattr(result, "final_output", None)
+    new_kps = getattr(out, "knowledge_points", None) or []
+    if not isinstance(new_kps, list):
+        return 0
+
+    turn_id = getattr(app_ctx, "_turn_id", None)
+    case_folder = getattr(app_ctx, "case_folder", None)
+    sess_list = kb.setdefault(name, [])
+    added_topics: list[str] = []
+    for kp in new_kps:
+        try:
+            kp_dict = kp.model_dump() if hasattr(kp, "model_dump") else dict(kp)
+        except Exception:
+            continue
+        if turn_id is not None and not kp_dict.get("captured_at_turn"):
+            kp_dict["captured_at_turn"] = turn_id
+
+        # Phase 2: render chart + Vega-Lite spec when the KP carries a viz
+        # spec with usable numbers. Failures are silent (renderer logs +
+        # returns None) so the KP still lands in the KB; the chart just
+        # doesn't appear in the agent's answer this turn.
+        if isinstance(kp_dict.get("viz"), dict) and kp_dict.get("numbers"):
+            spec = kp_to_vega_spec(kp_dict)
+            if spec is not None:
+                kp_dict["vega_spec"] = spec
+            if case_folder is not None:
+                charts_dir = Path(case_folder) / "charts"
+                img_path = render_chart(
+                    kp_dict, charts_dir,
+                    turn_id=turn_id, logger=logger,
+                )
+                if img_path is not None:
+                    kp_dict["image_path"] = img_path
+
+        sess_list.append(kp_dict)
+        if kp_dict.get("topic"):
+            added_topics.append(kp_dict["topic"])
+
+    if added_topics and logger is not None:
+        logger.log("distiller_kps_added", {
+            "specialist": name,
+            "n_added": len(added_topics),
+            "kb_size_now": len(sess_list),
+            "topics": added_topics,
+            "n_with_charts": sum(1 for k in sess_list[-len(added_topics):]
+                                 if k.get("image_path")),
+        })
+    return len(added_topics)
 
 
 def _record_failure(app_ctx, name: str, sub_question: str,
@@ -131,10 +286,25 @@ def redacting_tool(agent: Agent, name: str, description: str):
                             "sub_question_norm": cache_key[1]})
             return cached
 
+        # KB digest preface — the specialist's accumulated knowledge from
+        # earlier turns. Only prepend on the FIRST call within this turn (no
+        # intra-turn `prior` exists yet); on subsequent within-turn calls the
+        # `prior` transcript already carries the digest from the first call's
+        # input message, so re-prepending would duplicate it.
+        contextual_in = redacted_in
+        if not prior:
+            kb_obj = getattr(app_ctx, "_specialist_kb", None)
+            if isinstance(kb_obj, dict):
+                kb_digest = _format_kb_digest(kb_obj.get(name, []))
+                if kb_digest:
+                    contextual_in = (
+                        f"{kb_digest}\n\n--- New question ---\n{redacted_in}"
+                    )
+
         if prior:
-            run_input = prior + [{"role": "user", "content": redacted_in}]
+            run_input = prior + [{"role": "user", "content": contextual_in}]
         else:
-            run_input = redacted_in
+            run_input = contextual_in
 
         # Wall-clock + turn-budget + exception fence around the inner run.
         # Without these, a hung LLM / network layer or any non-MaxTurnsExceeded
@@ -205,6 +375,24 @@ def redacting_tool(agent: Agent, name: str, description: str):
                 f"output redaction failed: {exc}",
                 exc,
             )
+
+        # Second pass — distill knowledge points from the (un-redacted)
+        # SpecialistOutput. We pass the structured Pydantic object, not the
+        # redacted string payload, so the distiller sees full numeric content.
+        # Failures are logged + ignored (KB simply doesn't grow this turn).
+        try:
+            await _distill_and_persist(
+                app_ctx, name, redacted_in, result.final_output,
+            )
+        except Exception as exc:  # noqa: BLE001 - belt-and-suspenders
+            logger = getattr(app_ctx, "logger", None)
+            if logger is not None:
+                logger.log("distiller_outer_failure", {
+                    "specialist": name,
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc)[:500],
+                })
+
         if isinstance(seen, dict):
             seen[cache_key] = payload
         return payload

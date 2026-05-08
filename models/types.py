@@ -55,6 +55,45 @@ class SpecialistOutput(BaseModel):
     raw_data: dict = Field(default_factory=dict)
 
 
+class KnowledgePoint(BaseModel):
+    """One distilled, persistent unit of specialist knowledge that survives
+    across turns within a case session.
+
+    Produced by a second-pass `distiller` agent after each specialist run
+    (see `agent_factories/distiller_agent.py`). Stored in
+    `CaseSession.specialist_kb[<specialist_name>]`. Read back into the
+    specialist's sub-question on subsequent calls so the specialist can
+    answer follow-ups without re-running the same `summarize_trend` /
+    `aggregate_column` queries.
+
+    Supersession: when a new KP arrives with the same `topic`, the
+    `_active_kps` filter (in redacting_tool) keeps only the latest one.
+    Older entries are RETAINED in the KB list as an audit trail — never
+    mutated, never deleted — so the case logger can reconstruct what was
+    believed at any point in the session.
+
+    `numbers` and `viz` together let a renderer reproduce a plot
+    (matplotlib / Vega-Lite spec) without re-running the original tool
+    call. Keep `numbers` small — series-shaped data, not raw row dumps.
+    """
+
+    topic: str
+    claim: str
+    numbers: list[dict] = Field(default_factory=list)
+    viz: dict | None = None
+    source_call: str = ""
+    captured_at_turn: int | None = None
+    confidence: Literal["high", "medium", "low"] = "medium"
+
+
+class DistillerOutput(BaseModel):
+    """Wrapper schema the distiller agent returns. Only `knowledge_points`
+    is consumed; the wrapper exists so OpenAI's structured-output mode has
+    a top-level object to enforce."""
+
+    knowledge_points: list[KnowledgePoint] = Field(default_factory=list)
+
+
 class Resolution(BaseModel):
     pair: list[str]
     contradiction: str

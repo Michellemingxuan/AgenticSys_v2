@@ -27,3 +27,20 @@ class AppContext:
     # to append failure flags to the FinalAnswer so the reviewer sees the
     # actual cause instead of a silent "specialist did not return".
     _specialist_errors: list[dict] = field(default_factory=list)
+    # Per-specialist KNOWLEDGE BASE — survives across turns within a case
+    # session. Keyed by specialist name; each value is a chronological list of
+    # KnowledgePoint dicts (Pydantic-dumped). The list is owned by
+    # `CaseSession.specialist_kb` in the server; this attribute holds the
+    # SAME dict by reference, so writes the redacting_tool makes here persist
+    # to the next turn's AppContext automatically. None when not wired (e.g.
+    # tests that don't set up a session).
+    _specialist_kb: dict[str, list] | None = None
+    # Distiller agent (built once at orchestrator construction, shared across
+    # all specialists). The redacting_tool wrapper invokes it after each
+    # specialist run to extract KnowledgePoints. None disables distillation
+    # (graceful: the wrapper just skips the second pass and the specialist's
+    # answer still flows to the orchestrator).
+    _distiller: Any = None
+    # Current turn id, threaded so distilled KPs can be tagged with the
+    # turn that produced them — useful for audit + chronological supersession.
+    _turn_id: str | None = None

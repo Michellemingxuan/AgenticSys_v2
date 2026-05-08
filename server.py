@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, abort, jsonify, request, send_from_directory
 from flask_cors import CORS
 
 from agents import Runner
@@ -87,6 +87,14 @@ class CaseSession:
     # Per-session exact-match Q→A cache. Keyed by `_normalize_q(redacted_question)`;
     # value carries the cached FinalAnswer fields. Skips orchestrator on repeats.
     qa_cache: dict = field(default_factory=dict)
+    # Per-specialist KNOWLEDGE BASE — survives across turns within this session.
+    # Keyed by specialist name; each value is a chronological list of
+    # KnowledgePoint dicts produced by the distiller agent after each
+    # specialist run. Older entries are RETAINED for audit when a newer KP
+    # supersedes them; the active set is "latest per topic" (filter happens in
+    # redacting_tool._format_kb_digest). Cleared by /rewind alongside
+    # input_history and qa_cache so a session reset wipes everything.
+    specialist_kb: dict = field(default_factory=dict)
 
     def emit(self, event_name: str, payload: dict) -> None:
         """Fan out an SSE event to every subscriber of this case."""
@@ -210,6 +218,69 @@ def _synthesize_fallback_answer(
     return "\n".join(lines), flags
 
 
+# Keep this many of the most recent reviewer turns intact in input_history.
+# Older turns get their tool-result payloads (the heavy SpecialistOutput JSON)
+# replaced by a small stub. The orchestrator still sees that the call happened
+# (call_id + tool name preserved), it just can't replay the raw findings from
+# the elided turn — by design, since those findings now live in the
+# specialists' KB and surface there on demand.
+_INPUT_HISTORY_KEEP_RECENT_TURNS = 2
+
+# Stub used to replace elided tool-result payloads. Kept terse so the
+# orchestrator doesn't waste tokens parsing it; the specialist KB digest
+# (passed into each specialist call) is the authoritative replay path.
+_ELIDED_TOOL_OUTPUT = (
+    "(elided — earlier-turn specialist output; see the specialist's KB "
+    "digest, which is prepended to each new sub-question.)"
+)
+
+
+def _prune_input_history(history: list, keep_recent_turns: int) -> tuple[list, dict]:
+    """Replace tool-result content in old turns with a small stub. Returns
+    (pruned_history, stats).
+
+    A "turn" is bounded by user messages: each `{"role": "user", ...}` entry
+    starts a new turn. We keep the last ``keep_recent_turns`` turns intact;
+    in older turns, any item that looks like a function_call_output has its
+    output content replaced by ``_ELIDED_TOOL_OUTPUT``. Function-call items
+    themselves (the call records) are preserved so the orchestrator's view
+    of "what tools were invoked" stays accurate.
+
+    Defensive: unknown item shapes are passed through unchanged. Returning
+    the input list untouched on any structural surprise is safer than
+    accidentally dropping content.
+    """
+    stats = {"items_total": len(history), "items_elided": 0, "bytes_saved": 0}
+    if not isinstance(history, list) or not history:
+        return history, stats
+
+    # Find user-message indices to identify turn boundaries.
+    user_idxs = [
+        i for i, item in enumerate(history)
+        if isinstance(item, dict) and item.get("role") == "user"
+    ]
+    if len(user_idxs) <= keep_recent_turns:
+        return history, stats  # All turns are recent — nothing to prune.
+
+    cutoff_idx = user_idxs[-keep_recent_turns]
+    pruned: list = []
+    for i, item in enumerate(history):
+        if i >= cutoff_idx:
+            pruned.append(item)
+            continue
+        if isinstance(item, dict) and item.get("type") == "function_call_output":
+            old_output = item.get("output", "")
+            if isinstance(old_output, str) and old_output != _ELIDED_TOOL_OUTPUT:
+                stub = dict(item)
+                stub["output"] = _ELIDED_TOOL_OUTPUT
+                pruned.append(stub)
+                stats["items_elided"] += 1
+                stats["bytes_saved"] += max(0, len(old_output) - len(_ELIDED_TOOL_OUTPUT))
+                continue
+        pruned.append(item)
+    return pruned, stats
+
+
 def _normalize_q(q: str) -> str:
     """Normalize a question for the per-session exact-match QA cache.
 
@@ -219,6 +290,79 @@ def _normalize_q(q: str) -> str:
     job (team_construction.md), not the cache's.
     """
     return " ".join((q or "").strip().lower().split())
+
+
+# ── Phase 2 / 3 helpers — viz embedding + KB warmth ────────────────────────
+
+
+def _format_kb_warmth_hint(specialist_kb: dict) -> str:
+    """Build the one-line `[KB-warmth: …]` preface the orchestrator sees on
+    every turn after the first one.
+
+    Lists each specialist with non-empty KB and how many KPs it carries —
+    the orchestrator uses this as a routing signal under `team_construction`'s
+    follow-up rule (reuse warm specialists for in-domain follow-ups).
+
+    Returns "" when no specialist has any KPs (e.g. first turn). The
+    orchestrator never sees an empty hint — keeps prompts uncluttered when
+    there's nothing to convey.
+    """
+    if not isinstance(specialist_kb, dict) or not specialist_kb:
+        return ""
+    warm = [(name, len(kps)) for name, kps in specialist_kb.items() if kps]
+    if not warm:
+        return ""
+    warm.sort(key=lambda x: -x[1])
+    parts = ", ".join(f"{name} ({n} KP{'s' if n != 1 else ''})" for name, n in warm)
+    return (
+        f"[KB-warmth: {parts}. "
+        f"Strongly consider reusing warm specialists for in-domain follow-ups.]"
+    )
+
+
+def _collect_turn_charts(specialist_kb: dict, turn_id: str, case_id: str) -> list[dict]:
+    """Find every KP captured in this turn that has a rendered chart.
+
+    Returns a list of `{topic, url, specialist}` ready for embedding in
+    the agent_message markdown. The URL points at the Flask route
+    `/api/cases/<case_id>/charts/<filename>` so the frontend's existing
+    markdown renderer fetches the PNG via a normal HTTP GET.
+    """
+    out: list[dict] = []
+    if not isinstance(specialist_kb, dict):
+        return out
+    for spec_name, kps in specialist_kb.items():
+        if not isinstance(kps, list):
+            continue
+        for kp in kps:
+            if not isinstance(kp, dict):
+                continue
+            if kp.get("captured_at_turn") != turn_id:
+                continue
+            img_path = kp.get("image_path")
+            if not img_path:
+                continue
+            # Convert absolute on-disk path to the Flask-served URL.
+            filename = Path(img_path).name
+            url = f"/api/cases/{case_id}/charts/{filename}"
+            out.append({
+                "topic": kp.get("topic", "chart"),
+                "url": url,
+                "specialist": spec_name,
+            })
+    return out
+
+
+def _append_charts_to_answer(answer_text: str, charts: list[dict]) -> str:
+    """Append a `**Supporting charts**` section to the agent's answer text.
+    No-op when ``charts`` is empty (no empty header)."""
+    if not charts:
+        return answer_text or ""
+    body = (answer_text or "").rstrip()
+    section = ["", "---", "", "**Supporting charts**", ""]
+    for c in charts:
+        section.append(f"![{c['topic']}]({c['url']})")
+    return body + "\n" + "\n".join(section)
 
 
 def _split_cases(case_ids: list[str]) -> dict[str, list[str]]:
@@ -462,13 +606,46 @@ async def _run_turn_streamed(sess: CaseSession, turn_id: str, question: str) -> 
         clients=sess.clients,
     )
     case_folder = _REPORTS_DIR / sess.case_id
-    ctx = AppContext(gateway=sess.gateway, case_folder=case_folder, logger=sess.logger)
+    # AppContext is per-turn, but two of its attributes (`_specialist_kb` and
+    # `_distiller`) need to outlive a single turn. We pass:
+    #   • specialist_kb: a SHARED REFERENCE to the session's KB dict — mutating
+    #     it from inside redacting_tool persists to the next turn automatically.
+    #   • distiller: the orchestrator's distiller_agent (stateless), used by
+    #     redacting_tool for second-pass KP extraction.
+    #   • turn_id: stamped onto each KP at distill time for audit / chronology.
+    ctx = AppContext(
+        gateway=sess.gateway,
+        case_folder=case_folder,
+        logger=sess.logger,
+        _specialist_kb=sess.specialist_kb,
+        _distiller=getattr(orchestrator, "distiller_agent", None),
+        _turn_id=turn_id,
+    )
+
+    # Phase 3 — KB-warmth signal. When specialists have accumulated KPs from
+    # earlier turns, prepend a one-line hint to the user question so the
+    # orchestrator's team_construction step has a runtime signal that nudges
+    # toward reusing warm specialists on in-domain follow-ups. The hint is
+    # informational only — the orchestrator retains LLM judgment.
+    warmth_hint = _format_kb_warmth_hint(sess.specialist_kb)
+    if warmth_hint:
+        sess.logger.log("kb_warmth_hint_emitted", {
+            "turn_id": turn_id,
+            "warm_specialists": [
+                {"name": n, "n_kps": len(kps)}
+                for n, kps in sess.specialist_kb.items() if kps
+            ],
+            "hint_length": len(warmth_hint),
+        })
+        framed_question = f"{warmth_hint}\n\n{verdict.redacted_question}"
+    else:
+        framed_question = verdict.redacted_question
 
     # Multi-turn memory: prepend prior input list, append this turn's question.
     if sess.input_history:
-        run_input = sess.input_history + [{"role": "user", "content": verdict.redacted_question}]
+        run_input = sess.input_history + [{"role": "user", "content": framed_question}]
     else:
-        run_input = verdict.redacted_question
+        run_input = framed_question
 
     # ── 3. Stream the orchestrator run ────────────────────────────────────
     streamed = Runner.run_streamed(orchestrator.orchestrator_agent, run_input, context=ctx)
@@ -589,9 +766,25 @@ async def _run_turn_streamed(sess: CaseSession, turn_id: str, question: str) -> 
         except Exception:
             final_answer = final_raw
 
-        # Persist conversation memory for the next turn.
+        # Persist conversation memory for the next turn. Prune older turns'
+        # tool-result payloads to keep input_history bounded — without this,
+        # each turn's full SpecialistOutput JSON accumulates and feeds back
+        # into every subsequent orchestrator call, dominating latency by
+        # turn 5+. The specialists' KB (populated by the distiller) is the
+        # replay path for elided content.
         try:
-            sess.input_history = streamed.to_input_list()
+            raw_history = streamed.to_input_list()
+            pruned, prune_stats = _prune_input_history(
+                raw_history, keep_recent_turns=_INPUT_HISTORY_KEEP_RECENT_TURNS,
+            )
+            sess.input_history = pruned
+            if prune_stats["items_elided"]:
+                sess.logger.log("input_history_pruned", {
+                    "turn_id": turn_id,
+                    **prune_stats,
+                    "kept_recent_turns": _INPUT_HISTORY_KEEP_RECENT_TURNS,
+                    "history_len_after": len(pruned),
+                })
         except Exception:
             pass  # SDK may not always support; degrade gracefully
 
@@ -743,6 +936,20 @@ async def _run_turn_streamed(sess: CaseSession, turn_id: str, question: str) -> 
             "domain_specialists": sorted(unique_domain_specialists),
         })
 
+    # Phase 2 — append rendered charts to the agent_message. We collect every
+    # KP captured in this turn that has an `image_path`, and append them as
+    # a `**Supporting charts**` markdown section. The cached-replay path
+    # (qa_cache hit) sees this material baked into `answer_text` already, so
+    # replays carry the same charts without re-running the renderer.
+    turn_charts = _collect_turn_charts(sess.specialist_kb, turn_id, sess.case_id)
+    if turn_charts:
+        answer_text = _append_charts_to_answer(answer_text, turn_charts)
+        sess.logger.log("agent_message_charts_appended", {
+            "turn_id": turn_id,
+            "n_charts": len(turn_charts),
+            "topics": [c["topic"] for c in turn_charts],
+        })
+
     ts = int(time.time() * 1000)
     sess.emit("final", {
         "turn_id": turn_id, "answer": answer_text, "flags": flags,
@@ -839,11 +1046,36 @@ def post_rewind(case_id: str):
     sess.input_history = []
     n_cached = len(sess.qa_cache)
     sess.qa_cache.clear()
+    n_kb_specialists = len(sess.specialist_kb)
+    n_kb_total = sum(len(v) for v in sess.specialist_kb.values())
+    sess.specialist_kb.clear()
     sess.logger.log("rewind", {
         "message_id": msg_id, "case_id": case_id,
         "qa_cache_entries_cleared": n_cached,
+        "kb_specialists_cleared": n_kb_specialists,
+        "kb_kps_cleared": n_kb_total,
     })
     return ("", 204)
+
+
+@app.get("/api/cases/<case_id>/charts/<path:filename>")
+def get_chart(case_id: str, filename: str):
+    """Serve a rendered chart PNG from `reports/<case_id>/charts/`.
+
+    The agent_message markdown emitted by the run loop contains image
+    references like `![topic](/api/cases/<case_id>/charts/<file>)`; the
+    React app's existing markdown renderer then GETs this route.
+
+    Path-traversal guard: ``send_from_directory`` already rejects paths
+    that escape the directory, but we additionally pre-screen `..` and
+    backslashes so a malformed request fails fast with a 404 (not a 500).
+    """
+    if ".." in filename or filename.startswith("/") or "\\" in filename:
+        abort(404)
+    charts_dir = (_REPORTS_DIR / case_id / "charts").resolve()
+    if not charts_dir.exists():
+        abort(404)
+    return send_from_directory(charts_dir, filename, mimetype="image/png")
 
 
 @app.get("/api/cases/<case_id>/stream")
