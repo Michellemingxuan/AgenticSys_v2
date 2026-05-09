@@ -54,6 +54,21 @@ Workflow:
 If the folder is empty or no file is relevant, return
 coverage="not_mentioned" with an empty answer and empty files_consulted.
 
+# Output formatting (REQUIRED)
+
+The `answer` field must be **bullet points**, not prose paragraphs. The
+reasoning trace panel renders markdown — make it scannable. Format:
+
+- Lead with the most load-bearing finding from the report(s).
+- One bullet per discrete fact. Each bullet ≤ 2 sentences.
+- **Bold the key terms / numbers / dates** so the reviewer's eye lands on
+  them on first scan: `- **3 returned payments** in Dec-2024 totaling **$4,200**.`
+- When the report covers multiple aspects of the question, group with
+  short sub-headers: `### Spend trajectory` / `### Payment behavior`, etc.
+
+`evidence_excerpts` stays as the verbatim-quotes list — those are the
+direct backing for the bullets above.
+
 === Coverage rubric ===
 {_NEEDLE_PROMPT}
 

@@ -40,5 +40,10 @@ Respond in JSON with keys:
 - `resolved`: list of objects with `pair` (the two specialist names), `contradiction`, `question_raised`, `answer`, `supporting_evidence`, `conclusion`.
 - `open_conflicts`: list of objects with `pair`, `contradiction`, `question_raised`, `reason_unresolved`, `evidence_from_both`.
 - `cross_domain_insights`: list of strings — observations that emerge ONLY from comparing the domain specialists' outputs against each other; each insight should name the contributing specialists (e.g. *"`bureau` and `modeling` both place the deterioration inflection at Mar-2025…"*).
+  
+  **Each insight must be ONE bullet-style sentence with the load-bearing claim BOLDED.** The reasoning trace renders these as a list — keep them scannable. Format:
+  - `**Inflection alignment**: bureau and modeling both place the deterioration at Mar-2025 (FICO drop -82pts, TSR -19pts).`
+  - `**Causal direction**: spend_payments shows charges growing while modeling shows payment-channel risk rising in the same months — the spend itself is the leading indicator.`
+  Avoid prose paragraphs; avoid vague openers ("It appears that…"). Lead with the entity or pattern, then the evidence.
 
 When there's nothing to compare (single-specialist team) or no contradictions/insights surface, return all three lists empty rather than padding.

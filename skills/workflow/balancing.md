@@ -77,8 +77,24 @@ Fields: `needed: bool`, `reason: str` (one sentence), `would_pull: [str]` (kinds
 
 ```json
 {
-  "answer": "1–3 paragraphs. On factual points, lead with specialist data; use the report for narrative context.",
+  "answer": "<see formatting rules below>",
   "flags": ["..."],
   "data_pull_request": { "needed": true, "reason": "...", "would_pull": ["..."], "severity": "..." }
 }
 ```
+
+### `answer` formatting (REQUIRED — concise + scannable)
+
+The reasoning-trace UI renders the answer as markdown. Make it dense with information but easy to scan in 5 seconds:
+
+- **Lead with a 1-2 sentence direct answer** to the reviewer's question. This is the headline; everything below supports it.
+- **Bold the load-bearing facts** — the specific numbers, dates, named entities, threshold breaches that the reviewer would write down. Don't bold whole sentences; bold just the key term: *"`times_30_dpd` reached **3 in 2024-Q4** (risky threshold > 1)"*.
+- **Use bullet points** for any list of 2+ findings, evidence items, or recommendations. Sub-bullet only when sub-items genuinely subordinate (a specific value under a parent claim).
+- **Tables for parallel data** — period-by-period numbers, top-N rankings, threshold-breach summaries. The reasoning trace renders markdown tables natively.
+- **Short paragraphs (≤ 3 sentences each)**. Long paragraphs hide the answer.
+- **Don't repeat the question** in the answer. The UI shows the question separately.
+- **Don't pad with hedges** ("It appears that…", "Based on the analysis…"). Lead with the claim; the evidence section that follows IS the basis.
+
+Length target: a typical answer is **6-12 lines of markdown** (one or two paragraphs + a short bullet list, possibly a small table). Longer is fine when warranted by the question; padding is not.
+
+When the team produced charts, **reference them by topic in the prose** — e.g. *"as the `monthly_spend_trend` chart shows, …"*. The chart appears in the reasoning trace next to the originating specialist; calling it out in the answer helps the reviewer find the visual.
