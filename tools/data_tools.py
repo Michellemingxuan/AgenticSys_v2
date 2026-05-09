@@ -33,6 +33,19 @@ try:
 except NameError:
     _logger: Any = None  # logger.event_logger.EventLogger when wired; None = silent
 
+# Per-(case_id, table_name) schema cache. The output of ``get_table_schema``
+# is deterministic per case — gateway data + catalog profile + sync-applied
+# patches don't change after first-open — so memoizing the full result string
+# avoids redundant catalog walks when multiple specialists probe the same
+# table within a turn (or across turns within the same case session).
+# Module-global so it spans turns; key includes ``case_id`` so cross-case
+# contamination is impossible. Cleared explicitly via ``init_tools`` /
+# ``clear_schema_cache`` so test fixtures with mutating state stay correct.
+try:
+    _schema_cache  # type: ignore[used-before-def]  # noqa: F821
+except NameError:
+    _schema_cache: dict[tuple[str | None, str], str] = {}
+
 _MAX_CHARS = 3000
 _LOG_PREVIEW_CHARS = 500  # how much of tool output to snapshot in tool_result events
 
@@ -599,11 +612,25 @@ def init_tools(gateway: DataGateway, catalog: DataCatalog, logger: Any = None) -
     every tool invocation emits a ``tool_call`` event (with args) and a
     ``tool_result`` event (with row count + preview of the returned string)
     so the data pipeline is visible in the session log.
+
+    Resets the schema cache too — a re-init typically means a different
+    gateway / catalog, so cached schemas from the previous wiring are
+    no longer valid.
     """
     global _gateway, _catalog, _logger
     _gateway = gateway
     _catalog = catalog
     _logger = logger
+    _schema_cache.clear()
+
+
+def clear_schema_cache() -> None:
+    """Drop all memoized ``get_table_schema`` results. Call this whenever
+    the catalog or a case's gateway state changes mid-session (e.g. after a
+    ``datalayer.adapter.apply_diff_in_memory`` mutation that adds new
+    columns / aliases). Idempotent.
+    """
+    _schema_cache.clear()
 
 
 def set_logger(logger: Any) -> None:
@@ -703,22 +730,42 @@ def _get_table_schema_impl(table_name: str) -> str:
     Columns present in the CSV but absent from the canonical are emitted
     with ``type: unknown`` and a "(not in catalog)" description so the
     LLM still sees they exist.
+
+    Memoized per ``(case_id, table_name)`` in ``_schema_cache``. Multiple
+    specialists probing the same table within a turn — or repeat probes
+    across turns within the same case session — hit the cache instead of
+    walking the catalog + gateway again. The result is deterministic per
+    case (catalog + gateway state are stable post-first-open), so the
+    cache never goes stale within a session. ``init_tools`` resets it.
     """
     _log_call("get_table_schema", {"table_name": table_name})
-    if _catalog is None:
-        out = "Data unavailable"
-        _log_result("get_table_schema", result=out)
+    case_id = _gateway.get_case_id() if _gateway is not None else None
+    cache_key = (case_id, table_name)
+    if cache_key in _schema_cache:
+        out = _schema_cache[cache_key]
+        _log_result("get_table_schema", result=out,
+                    extra={"table_name": table_name, "cache_hit": True,
+                           "case_id_present": case_id is not None})
         return out
+
+    def _store(out_str: str, extra: dict | None = None) -> str:
+        _schema_cache[cache_key] = out_str
+        _log_result("get_table_schema", result=out_str,
+                    extra={**(extra or {}), "cache_hit": False})
+        return out_str
+
+    if _catalog is None:
+        return _store("Data unavailable")
 
     if _gateway is not None and _gateway.get_case_id() is not None:
         # Resolve canonical → real table name (specialists may pass either).
         real_table = _resolve_real_table(table_name)
         rows = _gateway.query(real_table) or []
         if not rows:
-            out = f"Data unavailable: table '{table_name}' not found for current case."
-            _log_result("get_table_schema", result=out,
-                        extra={"table_name": table_name, "found": False})
-            return out
+            return _store(
+                f"Data unavailable: table '{table_name}' not found for current case.",
+                extra={"table_name": table_name, "found": False},
+            )
         if real_table != table_name:
             table_name = real_table
 
@@ -780,25 +827,25 @@ def _get_table_schema_impl(table_name: str) -> str:
         if table_aliases:
             schema["__table_aliases__"] = table_aliases
 
-        out = json.dumps(schema, indent=2)
-        _log_result("get_table_schema", result=out,
-                    extra={"table_name": table_name, "found": True,
-                           "canonical": canonical_tables[0] if canonical_tables else None,
-                           "canonical_chain": canonical_tables,
-                           "column_count": len(schema)})
-        return out
+        return _store(
+            json.dumps(schema, indent=2),
+            extra={"table_name": table_name, "found": True,
+                   "canonical": canonical_tables[0] if canonical_tables else None,
+                   "canonical_chain": canonical_tables,
+                   "column_count": len(schema)},
+        )
 
     schema = _catalog.get_schema(table_name)
     if schema is None:
-        out = "Data unavailable"
-        _log_result("get_table_schema", result=out,
-                    extra={"table_name": table_name, "found": False})
-        return out
-    out = json.dumps(schema, indent=2)
-    _log_result("get_table_schema", result=out,
-                extra={"table_name": table_name, "found": True,
-                       "column_count": len(schema)})
-    return out
+        return _store(
+            "Data unavailable",
+            extra={"table_name": table_name, "found": False},
+        )
+    return _store(
+        json.dumps(schema, indent=2),
+        extra={"table_name": table_name, "found": True,
+               "column_count": len(schema)},
+    )
 
 
 @function_tool

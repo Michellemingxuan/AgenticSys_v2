@@ -101,6 +101,63 @@ def test_get_schema_missing():
     assert "unavailable" in result.lower()
 
 
+# ── Schema cache ────────────────────────────────────────────────────────────
+
+
+def test_get_schema_cache_returns_identical_result_on_repeat_calls():
+    """Two back-to-back calls for the same table on the same case must
+    return byte-identical strings — the cache hit path can't change the
+    result. This is the correctness side of the perf optimization."""
+    a = data_tools._get_table_schema_impl("bureau_full")
+    b = data_tools._get_table_schema_impl("bureau_full")
+    assert a == b
+    # Same key in the cache, single entry per table.
+    keys = {k for k in data_tools._schema_cache.keys() if k[1] == "bureau_full"}
+    assert len(keys) == 1
+
+
+def test_get_schema_cache_is_per_case():
+    """Switching cases must NOT serve a stale schema from a different case
+    — the cache key includes ``case_id`` so cross-case contamination is
+    impossible by construction."""
+    # Initial call on CASE-00001 → cached.
+    out1 = data_tools._get_table_schema_impl("bureau_full")
+    case1 = data_tools._gateway.get_case_id()
+
+    # Switch to CASE-00002 (the fixture also has bureau_full there).
+    data_tools._gateway.set_case("CASE-00002")
+    out2 = data_tools._get_table_schema_impl("bureau_full")
+    case2 = data_tools._gateway.get_case_id()
+
+    assert case1 != case2
+    # Both runs cached under their own key.
+    assert (case1, "bureau_full") in data_tools._schema_cache
+    assert (case2, "bureau_full") in data_tools._schema_cache
+    # CASE-00002 has only one row (per the fixture), so its schema may
+    # differ structurally from CASE-00001's two-row table — at the very
+    # least the inputs are different cases. Either way the cache keys
+    # don't collide.
+    _ = (out1, out2)  # silence unused-var; we only assert key separation here
+
+
+def test_init_tools_clears_schema_cache():
+    """Re-initializing the module wires fresh state — the previous cache
+    must be flushed so a different gateway/catalog can't return stale
+    results memoized under the old wiring."""
+    data_tools._get_table_schema_impl("bureau_full")
+    assert len(data_tools._schema_cache) > 0
+    # Re-init with the same gateway / catalog (idempotent, but should clear).
+    data_tools.init_tools(data_tools._gateway, data_tools._catalog)
+    assert data_tools._schema_cache == {}
+
+
+def test_clear_schema_cache_drops_all_entries():
+    data_tools._get_table_schema_impl("bureau_full")
+    assert len(data_tools._schema_cache) > 0
+    data_tools.clear_schema_cache()
+    assert data_tools._schema_cache == {}
+
+
 def test_query_all():
     result = data_tools._query_table_impl("bureau_full")
     assert "720" in result

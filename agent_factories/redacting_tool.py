@@ -377,13 +377,21 @@ def redacting_tool(agent: Agent, name: str, description: str):
             )
 
         # Second pass — distill knowledge points from the (un-redacted)
-        # SpecialistOutput. We pass the structured Pydantic object, not the
-        # redacted string payload, so the distiller sees full numeric content.
-        # Failures are logged + ignored (KB simply doesn't grow this turn).
+        # SpecialistOutput. We FIRE AND FORGET so the orchestrator receives
+        # the specialist's payload immediately (no distiller round-trip on
+        # the critical path). Server.py awaits all pending distillers at
+        # end-of-turn so the KB is fully populated before the next turn's
+        # warmth digest is built.
+        pending = getattr(app_ctx, "_pending_distillers", None)
         try:
-            await _distill_and_persist(
-                app_ctx, name, redacted_in, result.final_output,
+            task = asyncio.create_task(
+                _distill_and_persist(
+                    app_ctx, name, redacted_in, result.final_output,
+                ),
+                name=f"distill-{name}",
             )
+            if isinstance(pending, list):
+                pending.append(task)
         except Exception as exc:  # noqa: BLE001 - belt-and-suspenders
             logger = getattr(app_ctx, "logger", None)
             if logger is not None:

@@ -382,6 +382,9 @@ def _make_kb_ctx(distiller=None, kb=None):
         _specialist_kb=kb if kb is not None else {},
         _distiller=distiller,
         _turn_id="turn-test-1",
+        # Distillation now fires fire-and-forget; tests that assert on the
+        # KB must await the tasks collected here before inspecting it.
+        _pending_distillers=[],
     )
 
 
@@ -550,12 +553,19 @@ async def test_distiller_persists_knowledge_points_to_session_kb():
 
     ctx = _make_kb_ctx(distiller=distiller, kb={})
 
+    import asyncio as _asyncio
     with patch("agent_factories.redacting_tool.Runner.run", new=_fake_run):
         wrapped = redacting_tool(inner_agent, name="spend_payments", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx),
             json.dumps({"sub_question": "what's the spending pattern?"}),
         )
+        # Distillation now fires fire-and-forget; drain pending tasks
+        # WITHIN the patch block so the background distiller call still
+        # hits our stubbed Runner.run. (server.py does this draining at
+        # end-of-turn; tests reproduce that boundary explicitly.)
+        if ctx._pending_distillers:
+            await _asyncio.gather(*ctx._pending_distillers, return_exceptions=True)
 
     # Specialist's payload still flows back to the orchestrator.
     assert "[FAILED" not in out
@@ -594,12 +604,17 @@ async def test_distiller_failure_does_not_break_specialist_response():
 
     ctx = _make_kb_ctx(distiller=distiller, kb={})
 
+    import asyncio as _asyncio
     with patch("agent_factories.redacting_tool.Runner.run", new=_fake_run):
         wrapped = redacting_tool(inner_agent, name="bureau", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx),
             json.dumps({"sub_question": "any question"}),
         )
+        # Drain the fire-and-forget distiller within the patch block so
+        # its (failing) Runner.run still hits the stub.
+        if ctx._pending_distillers:
+            await _asyncio.gather(*ctx._pending_distillers, return_exceptions=True)
 
     # Specialist answer still flows.
     assert "[FAILED" not in out

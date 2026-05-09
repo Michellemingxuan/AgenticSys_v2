@@ -54,7 +54,11 @@ already stated.
   for audit).
 
 - `claim`: ONE sentence that includes the specific numbers, named entities,
-  and time window. Examples:
+  and time window. **The time window in the claim MUST match the first and
+  last x-values in `numbers`** (don't say "Nov 2024 to Jul 2025" if the
+  series only has Dec-Mar entries — say "Dec 2024 to Mar 2025"). When you
+  cite specific values in the claim, those values must appear in `numbers`.
+  Examples:
   - "Spend rose from $300 (2024-11) to $1,100 (2025-03), a 3.7× increase peaking in 2025-Q1."
   - "`times_30_dpd` reached 3 in 2024-Q4 (risky threshold > 1) — first breach in the window."
   - "S BERTRAM accounts for 38% of recurring spend ($642K of $1.69M total)."
@@ -66,10 +70,19 @@ already stated.
   - threshold breaches: `[{"period": "2024-Q4", "value": 3, "threshold": 1}]`
   Empty list when the claim is a single scalar or has no underlying series.
 
-- `viz`: optional `{"kind": "trend"|"bar"|"share", "x_field": "...", "y_field": "..."}`
-  spec. Include ONLY when `numbers` has 2+ entries AND a chart helps
-  interpretation. Server-side renderer maps `kind` → matplotlib chart type.
-  Field names must match the keys actually present in `numbers`.
+- `viz`: optional `{"kind": "trend"|"bar"|"share", "x_field": "...", "y_fields": ["..."]}`
+  spec. **Charts surface in the reviewer's reasoning trace, not inline in
+  the chat answer. Be selective:** include `viz` only when ALL hold:
+  (a) `numbers` has ≥ 4 entries — short series read fine as prose;
+  (b) the shape itself (slope, peak, gap, divergence) is what makes the
+      claim land — not just the values;
+  (c) the same shape isn't already covered by an earlier KP this turn.
+  When 2+ related metrics appear in the same window (e.g. spend AND
+  payment both per month, or internal AND external delinquency indices
+  over time), prefer ONE multi-series chart with `y_fields` listing each
+  metric, NOT separate single-line charts. Field names must match the keys
+  actually present in `numbers`. `share` (horizontal-bar breakdown) is
+  single-series only.
 
 - `source_call`: the tool invocation that produced the data, when the
   specialist mentioned it. Example: `"summarize_trend('spends','Amount','Date',period='month',op='sum')"`.
@@ -97,10 +110,12 @@ def build_distiller_agent(model) -> Agent:
     """Construct the distiller. Stateless — one instance is shared across
     all specialists' wrappers in a session.
 
-    `tool_choice="none"` is intentional: the distiller has no tools to call
-    and emits structured output directly. We disable strict_json_schema
-    because `numbers` and `viz` are open-ended dicts (the specialist's
-    actual data shape varies) — strict mode rejects free-form dict fields.
+    No tools and no ``tool_choice``: the distiller emits structured output
+    directly. OpenAI's API rejects ``tool_choice`` when ``tools`` is empty
+    ("'tool_choice' is only allowed when 'tools' are specified"), so we
+    leave both unset. We disable strict_json_schema because ``numbers`` and
+    ``viz`` are open-ended dicts (the specialist's actual data shape
+    varies) — strict mode rejects free-form dict fields.
     """
     return Agent(
         name="distiller",
@@ -108,5 +123,5 @@ def build_distiller_agent(model) -> Agent:
         tools=[],
         output_type=AgentOutputSchema(DistillerOutput, strict_json_schema=False),
         model=model,
-        model_settings=ModelSettings(tool_choice="none", max_tokens=4096),
+        model_settings=ModelSettings(max_tokens=4096),
     )

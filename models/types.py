@@ -82,7 +82,10 @@ class KnowledgePoint(BaseModel):
     numbers: list[dict] = Field(default_factory=list)
     viz: dict | None = None
     source_call: str = ""
-    captured_at_turn: int | None = None
+    # Turn ids are short hex strings (e.g. ``uuid.uuid4().hex[:12]``) — NOT
+    # ints. Typing as ``str | None`` avoids Pydantic coercion / validation
+    # surprises when KPs round-trip through ``model_dump`` / ``model_validate``.
+    captured_at_turn: str | None = None
     confidence: Literal["high", "medium", "low"] = "medium"
 
 

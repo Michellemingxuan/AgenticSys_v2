@@ -44,3 +44,10 @@ class AppContext:
     # Current turn id, threaded so distilled KPs can be tagged with the
     # turn that produced them — useful for audit + chronological supersession.
     _turn_id: str | None = None
+    # Fire-and-forget distiller tasks. Each redacting_tool wrapper schedules
+    # distillation as an asyncio.Task here BEFORE returning the specialist's
+    # payload to the orchestrator — so the orchestrator gets the answer
+    # without waiting on the distiller round-trip. Server.py awaits all
+    # pending tasks at end of turn so the KB is fully populated before the
+    # NEXT turn starts (and its KB-warmth digest reflects this turn's KPs).
+    _pending_distillers: list = field(default_factory=list)

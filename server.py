@@ -327,10 +327,16 @@ def _collect_turn_charts(specialist_kb: dict, turn_id: str, case_id: str) -> lis
     the agent_message markdown. The URL points at the Flask route
     `/api/cases/<case_id>/charts/<filename>` so the frontend's existing
     markdown renderer fetches the PNG via a normal HTTP GET.
+
+    Deduped by ``(specialist, topic)`` — when both the `make_chart` tool
+    and the auto-distiller produce a chart for the same topic in one turn
+    (the specialist explicitly charts a finding the distiller would have
+    auto-charted anyway), only the latest one renders. Latest wins so the
+    distiller's revision can correct an earlier explicit chart if needed.
     """
-    out: list[dict] = []
     if not isinstance(specialist_kb, dict):
-        return out
+        return []
+    by_key: dict[tuple[str, str], dict] = {}
     for spec_name, kps in specialist_kb.items():
         if not isinstance(kps, list):
             continue
@@ -342,20 +348,25 @@ def _collect_turn_charts(specialist_kb: dict, turn_id: str, case_id: str) -> lis
             img_path = kp.get("image_path")
             if not img_path:
                 continue
-            # Convert absolute on-disk path to the Flask-served URL.
+            topic = kp.get("topic", "chart")
             filename = Path(img_path).name
             url = f"/api/cases/{case_id}/charts/{filename}"
-            out.append({
-                "topic": kp.get("topic", "chart"),
+            # Latest wins per (specialist, topic). Iteration order over
+            # the KB's chronological list means the last appended entry
+            # naturally overwrites the earlier one for the same key.
+            by_key[(spec_name, topic)] = {
+                "topic": topic,
                 "url": url,
                 "specialist": spec_name,
-            })
-    return out
+            }
+    return list(by_key.values())
 
 
 def _append_charts_to_answer(answer_text: str, charts: list[dict]) -> str:
-    """Append a `**Supporting charts**` section to the agent's answer text.
-    No-op when ``charts`` is empty (no empty header)."""
+    """DEPRECATED — superseded by the typed ``chart`` SSE event surfaced in
+    the reasoning-trace panel. Retained for backward compat with any
+    external caller; new code should NOT inline charts in the chat answer.
+    """
     if not charts:
         return answer_text or ""
     body = (answer_text or "").rstrip()
@@ -363,6 +374,26 @@ def _append_charts_to_answer(answer_text: str, charts: list[dict]) -> str:
     for c in charts:
         section.append(f"![{c['topic']}]({c['url']})")
     return body + "\n" + "\n".join(section)
+
+
+def _find_kp(specialist_kb: dict, specialist: str, topic: str,
+             turn_id: str) -> dict | None:
+    """Return the latest KP for (specialist, topic) captured in this turn,
+    or None when not present. Used to enrich the chart SSE event with the
+    KP's claim / source_call / vega_spec."""
+    if not isinstance(specialist_kb, dict):
+        return None
+    kps = specialist_kb.get(specialist) or []
+    found: dict | None = None
+    for kp in kps:
+        if not isinstance(kp, dict):
+            continue
+        if kp.get("captured_at_turn") != turn_id:
+            continue
+        if kp.get("topic") != topic:
+            continue
+        found = kp  # latest-wins (chronological iteration)
+    return found
 
 
 def _split_cases(case_ids: list[str]) -> dict[str, list[str]]:
@@ -470,28 +501,26 @@ def _get_or_create_session(case_id: str) -> CaseSession:
 
 # ── Async streaming worker ──────────────────────────────────────────────────
 
-async def _run_turn_streamed(sess: CaseSession, turn_id: str, question: str) -> None:
+async def _run_turn_streamed(
+    sess: CaseSession, turn_id: str, question: str,
+    started_at: int | None = None,
+) -> None:
     """Run a single reviewer turn, emitting SSE events as the run progresses.
 
     Maps Agents-SDK RunItems to typed events the frontend understands:
       ToolCallItem        → team_plan (collected) + agent_started
       ToolCallOutputItem  → agent_completed
       MessageOutputItem   → ignored (final structured output is the answer)
-    """
-    started_at = int(time.time() * 1000)
 
-    sess.emit("reviewer_message", {
-        "id": str(uuid.uuid4()),
-        "role": "reviewer",
-        "text": question,
-        "timestamp": started_at,
-        "turn_id": turn_id,
-    })
-    sess.emit("turn_started", {
-        "turn_id": turn_id,
-        "question": question,
-        "started_at": started_at,
-    })
+    ``started_at`` is the ms-since-epoch timestamp from when the turn was
+    received. ``_spawn_turn`` already emits the visible "new turn" events
+    (reviewer_message, turn_started, empty team_plan) BEFORE acquiring the
+    per-case turn lock so the frontend resets immediately even on lock
+    contention; this function picks up after those have fired and uses
+    ``started_at`` for duration math.
+    """
+    if started_at is None:
+        started_at = int(time.time() * 1000)
 
     # ── 1. Question check (screen + relevance) ─────────────────────────────
     # Build the list of prior reviewer questions in this session so the
@@ -500,6 +529,7 @@ async def _run_turn_streamed(sess: CaseSession, turn_id: str, question: str) -> 
     # as values' "origin_question"; we surface those here.
     prior_questions = [v.get("origin_question", "") for v in sess.qa_cache.values()]
     prior_questions = [q for q in prior_questions if q]
+    screen_t0 = time.time()
     try:
         verdict = await sess.chat_agent.screen(question, prior_questions=prior_questions)
     except Exception as exc:
@@ -508,6 +538,13 @@ async def _run_turn_streamed(sess: CaseSession, turn_id: str, question: str) -> 
                                 "duration_ms": int(time.time() * 1000) - started_at,
                                 "outcome": "orchestrator_error"})
         return
+
+    screen_duration_ms = int((time.time() - screen_t0) * 1000)
+    sess.logger.log("turn_phase_screen_done", {
+        "turn_id": turn_id,
+        "duration_ms": screen_duration_ms,
+        "passed": verdict.passed,
+    })
 
     in_scope = verdict.passed
     outcome_after_screen = "ok" if in_scope else "screen_rejected"
@@ -580,6 +617,13 @@ async def _run_turn_streamed(sess: CaseSession, turn_id: str, question: str) -> 
                 "(no fresh data pull).*"
             )
         replayed_text = cached_text + note
+        # Re-emit any charts the original turn produced, scoped to THIS
+        # turn's id so the reasoning-trace panel shows them on the replay.
+        # Without this, the cached-answer replay would render with no charts
+        # — a regression vs the previous "charts inlined in answer_text"
+        # behavior, since charts now live as separate SSE events.
+        for c in cached.get("charts") or []:
+            sess.emit("chart", {**c, "turn_id": turn_id})
         ts = int(time.time() * 1000)
         sess.emit("final", {
             "turn_id": turn_id, "answer": replayed_text,
@@ -648,12 +692,27 @@ async def _run_turn_streamed(sess: CaseSession, turn_id: str, question: str) -> 
         run_input = framed_question
 
     # ── 3. Stream the orchestrator run ────────────────────────────────────
+    # Mark when we hand off to the orchestrator so we can measure the gap
+    # to the first tool call. That gap = the orchestrator's first LLM call
+    # (the team-construction decision); when the user reports "slow to
+    # arrive at team construction", THIS is the number to look at.
+    orch_t0 = time.time()
+    sess.logger.log("turn_phase_orchestrator_starting", {
+        "turn_id": turn_id,
+        "input_history_len": len(sess.input_history),
+        "input_history_chars": sum(
+            len(json.dumps(item, default=str)) for item in sess.input_history
+        ) if sess.input_history else 0,
+        "warmth_hint_present": bool(warmth_hint),
+        "n_specialists_warm": sum(1 for kps in sess.specialist_kb.values() if kps),
+    })
     streamed = Runner.run_streamed(orchestrator.orchestrator_agent, run_input, context=ctx)
 
     call_index_by_id: dict[str, int] = {}  # call_id → index in tool_calls list
     tool_calls: list[dict] = []
     started_at_by_call: dict[str, int] = {}
     team_plan_emitted = False
+    first_tool_call_logged = False
     # Cursor over ctx._specialist_errors so we emit a typed `error` SSE event
     # exactly once per failure, as soon as the redacting_tool wrapper records
     # it. Without this, the reviewer would only see a vague `agent_completed`
@@ -721,6 +780,17 @@ async def _run_turn_streamed(sess: CaseSession, turn_id: str, question: str) -> 
                 call_index_by_id[call_id] = len(tool_calls)
                 tool_calls.append({"call_id": call_id, "tool": name, "sub_question": sub_q})
                 started_at_by_call[call_id] = int(time.time() * 1000)
+
+                # The first tool call IS team construction — this is the
+                # gap the user reports as "time to team construction stage".
+                if not first_tool_call_logged:
+                    sess.logger.log("turn_phase_first_tool_call", {
+                        "turn_id": turn_id,
+                        "duration_ms_since_orch_start":
+                            int((time.time() - orch_t0) * 1000),
+                        "first_tool": name,
+                    })
+                    first_tool_call_logged = True
 
                 # First tool call → emit team_plan once (the orchestrator may add more
                 # later; we send team_plan again on subsequent calls for incremental UX).
@@ -936,18 +1006,53 @@ async def _run_turn_streamed(sess: CaseSession, turn_id: str, question: str) -> 
             "domain_specialists": sorted(unique_domain_specialists),
         })
 
-    # Phase 2 — append rendered charts to the agent_message. We collect every
-    # KP captured in this turn that has an `image_path`, and append them as
-    # a `**Supporting charts**` markdown section. The cached-replay path
-    # (qa_cache hit) sees this material baked into `answer_text` already, so
-    # replays carry the same charts without re-running the renderer.
+    # Drain any in-flight distiller tasks before reading the KB for chart
+    # collection / next-turn warmth. The redacting_tool fires distillation
+    # as fire-and-forget so specialists return to the orchestrator without
+    # the distiller round-trip on the critical path; here at end-of-turn
+    # we wait for them so the KB / charts reflect the full set.
+    pending = getattr(ctx, "_pending_distillers", None) or []
+    if pending:
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*pending, return_exceptions=True),
+                timeout=60.0,
+            )
+        except asyncio.TimeoutError:
+            sess.logger.log("distiller_drain_timeout", {
+                "turn_id": turn_id,
+                "n_pending": sum(1 for t in pending if not t.done()),
+            })
+
+    # Phase 2 (revised) — surface charts in the reasoning-trace panel, NOT
+    # inline in the chat. Each chart this turn is emitted as a typed `chart`
+    # SSE event the frontend stores per-turn and renders alongside the
+    # specialist's findings. Keeps the chat clean (text answer only) while
+    # the trace gives reviewers click-to-open access to plots tied to the
+    # specific finding that produced them.
     turn_charts = _collect_turn_charts(sess.specialist_kb, turn_id, sess.case_id)
+    chart_payloads: list[dict] = []  # turn_id-less, reusable on cached replay
     if turn_charts:
-        answer_text = _append_charts_to_answer(answer_text, turn_charts)
-        sess.logger.log("agent_message_charts_appended", {
+        # Match each chart back to its KP for richer payload (claim,
+        # source_call, vega_spec). The KB has the full record; we already
+        # collected the chart URL/topic/specialist in `_collect_turn_charts`.
+        for c in turn_charts:
+            kp = _find_kp(sess.specialist_kb, c["specialist"], c["topic"], turn_id)
+            chart_payloads.append({
+                "specialist": c["specialist"],
+                "topic": c["topic"],
+                "url": c["url"],
+                "claim": (kp or {}).get("claim", ""),
+                "source_call": (kp or {}).get("source_call", ""),
+                "kind": ((kp or {}).get("viz") or {}).get("kind", ""),
+                "vega_spec": (kp or {}).get("vega_spec"),
+            })
+        for p in chart_payloads:
+            sess.emit("chart", {**p, "turn_id": turn_id})
+        sess.logger.log("turn_charts_emitted", {
             "turn_id": turn_id,
-            "n_charts": len(turn_charts),
-            "topics": [c["topic"] for c in turn_charts],
+            "n_charts": len(chart_payloads),
+            "topics": [p["topic"] for p in chart_payloads],
         })
 
     ts = int(time.time() * 1000)
@@ -977,6 +1082,11 @@ async def _run_turn_streamed(sess: CaseSession, turn_id: str, question: str) -> 
             # Verbatim question text used by the relevance_check skill on
             # subsequent turns to spot near-duplicates of this one.
             "origin_question": verdict.redacted_question,
+            # Chart payloads (turn_id-less) so cached-answer replays can
+            # re-emit them under the new turn_id. PNG files persist under
+            # reports/<case>/charts/ and serve fine on replay since the URL
+            # is unchanged.
+            "charts": chart_payloads,
         }
         sess.logger.log("qa_cache_store",
                         {"turn_id": turn_id, "norm_q": cache_key,
@@ -984,11 +1094,56 @@ async def _run_turn_streamed(sess: CaseSession, turn_id: str, question: str) -> 
 
 
 def _spawn_turn(sess: CaseSession, turn_id: str, question: str) -> None:
-    """Run a turn in a background thread (Flask handlers must return promptly)."""
+    """Run a turn in a background thread (Flask handlers must return promptly).
+
+    Frontend-visible "this new turn started" SSE events fire BEFORE the
+    per-case turn lock is acquired. Otherwise, when a previous turn is
+    still running (or hung), the new turn's thread blocks on the lock and
+    NO events for the new turn ever reach the frontend — the reasoning
+    panel sticks on the previous turn's content because nothing scopes a
+    new turn_id. Pre-lock emits guarantee the user sees their question
+    appear and the reasoning panel reset, even if execution is queued.
+    """
+    started_at = int(time.time() * 1000)
+
+    sess.emit("reviewer_message", {
+        "id": str(uuid.uuid4()),
+        "role": "reviewer",
+        "text": question,
+        "timestamp": started_at,
+        "turn_id": turn_id,
+    })
+    sess.emit("turn_started", {
+        "turn_id": turn_id,
+        "question": question,
+        "started_at": started_at,
+    })
+    # Empty team_plan resets the reasoning-panel scope to the new turn_id
+    # immediately. Real tool calls re-emit team_plan with the actual list.
+    sess.emit("team_plan", {"turn_id": turn_id, "tool_calls": []})
+
     def _runner():
-        # Serialize turns per case so the orchestrator state stays coherent.
-        with sess.turn_lock:
-            asyncio.run(_run_turn_streamed(sess, turn_id, question))
+        # Try to acquire the per-case turn lock; if a previous turn is
+        # still in flight, log the contention but do NOT emit an SSE
+        # `error` event. The frontend's error handler currently marks any
+        # `error` event as a turn-fatal state, so a "queued" message would
+        # paint this brand-new turn as failed before it runs. Just log;
+        # the user has already seen `turn_started` for this turn and will
+        # see real events flow once the lock releases.
+        if not sess.turn_lock.acquire(timeout=2.0):
+            sess.logger.log("turn_queued_waiting_lock", {"turn_id": turn_id})
+            sess.turn_lock.acquire()  # block until available
+        try:
+            # `_run_turn_streamed` is structured to skip the early visible
+            # emits when called from this path — see the `started_at`
+            # parameter; the inner function uses that to drive duration
+            # math without re-emitting reviewer_message / turn_started /
+            # team_plan that we already fired above.
+            asyncio.run(_run_turn_streamed(
+                sess, turn_id, question, started_at=started_at,
+            ))
+        finally:
+            sess.turn_lock.release()
     threading.Thread(target=_runner, daemon=True, name=f"turn-{turn_id[:8]}").start()
 
 

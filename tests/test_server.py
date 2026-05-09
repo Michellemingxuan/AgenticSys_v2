@@ -200,6 +200,49 @@ def test_collect_turn_charts_filters_by_turn_and_image_path():
         assert c["url"].endswith(".png")
 
 
+def test_collect_turn_charts_dedupes_same_topic_per_specialist():
+    """When both `make_chart` and the auto-distiller produce a chart for
+    the same (specialist, topic) in one turn, only the latest entry
+    surfaces — so the reviewer sees one chart per topic, not two."""
+    kb = {
+        "spend_payments": [
+            # Earlier (e.g. make_chart explicit): same topic, same turn
+            {"topic": "monthly_trend", "captured_at_turn": "t-now",
+             "image_path": "/abs/case/charts/t-now-monthly_trend.png"},
+            # Later (e.g. distiller): same topic, same turn — should win
+            {"topic": "monthly_trend", "captured_at_turn": "t-now",
+             "image_path": "/abs/case/charts/t-now-monthly_trend-v2.png"},
+            # Different topic, same turn — independent, both included
+            {"topic": "merchants", "captured_at_turn": "t-now",
+             "image_path": "/abs/case/charts/t-now-merchants.png"},
+        ],
+    }
+    charts = server._collect_turn_charts(kb, "t-now", "C1")
+    topics = sorted(c["topic"] for c in charts)
+    assert topics == ["merchants", "monthly_trend"]
+    # The dedup target carries the LATEST image_path (the v2 one).
+    monthly = next(c for c in charts if c["topic"] == "monthly_trend")
+    assert monthly["url"].endswith("t-now-monthly_trend-v2.png")
+
+
+def test_collect_turn_charts_does_not_dedupe_across_specialists():
+    """Two specialists charting the same topic in the same turn → both
+    appear (different `(specialist, topic)` keys)."""
+    kb = {
+        "spend_payments": [
+            {"topic": "x", "captured_at_turn": "t",
+             "image_path": "/abs/case/charts/t-x-sp.png"},
+        ],
+        "modeling": [
+            {"topic": "x", "captured_at_turn": "t",
+             "image_path": "/abs/case/charts/t-x-mod.png"},
+        ],
+    }
+    charts = server._collect_turn_charts(kb, "t", "C")
+    specialists = sorted(c["specialist"] for c in charts)
+    assert specialists == ["modeling", "spend_payments"]
+
+
 def test_collect_turn_charts_handles_empty_or_invalid_kb():
     assert server._collect_turn_charts({}, "t1", "C") == []
     assert server._collect_turn_charts(None, "t1", "C") == []
