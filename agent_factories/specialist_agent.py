@@ -15,6 +15,7 @@ from tools.data_tools import (
     summarize_by_group,
     summarize_trend,
 )
+from tools.data_viz_tools import build_make_chart_tool
 
 _WORKFLOW_DIR = Path(__file__).parent.parent / "skills" / "workflow"
 _BASE_INSTRUCTIONS = _load_skill(_WORKFLOW_DIR / "data_query.md").body
@@ -54,11 +55,17 @@ def _compose_instructions(skill: DomainSkill, pillar: dict) -> str:
 
 
 def build_specialist_agent(skill: DomainSkill, pillar: dict, model) -> Agent:
+    # Per-specialist make_chart binding so the chart-creation tool knows
+    # which KB list to append into when invoked. Charts created via this
+    # tool are stored on the same KB the auto-distiller writes to and are
+    # surfaced via the same `_collect_turn_charts` path in server.py.
+    make_chart = build_make_chart_tool(skill.name)
     return Agent(
         name=skill.name,
         instructions=_compose_instructions(skill, pillar),
         tools=[list_available_tables, get_table_schema, query_table,
-               aggregate_column, summarize_trend, summarize_by_group],
+               aggregate_column, summarize_trend, summarize_by_group,
+               make_chart],
         output_type=AgentOutputSchema(SpecialistOutput, strict_json_schema=False),
         model=model,
         # Force the specialist to actually query the data on each invocation.

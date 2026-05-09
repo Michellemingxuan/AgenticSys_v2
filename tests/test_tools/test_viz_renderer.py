@@ -20,17 +20,32 @@ def test_slugify_strips_punctuation_and_caps_length():
 
 
 def test_resolve_axes_uses_explicit_when_present():
+    """`y_field` (singular, back-compat) wraps to a single-element y_fields list."""
     numbers = [{"period": "2024-11", "value": 100, "extra": "ignored"}]
-    assert _resolve_axes({"x_field": "period", "y_field": "value"}, numbers) == ("period", "value")
+    assert _resolve_axes({"x_field": "period", "y_field": "value"}, numbers) == \
+        ("period", ["value"])
+
+
+def test_resolve_axes_handles_multi_series_y_fields():
+    """`y_fields` (plural, new): every named field present in numbers becomes
+    a series; missing fields are dropped."""
+    numbers = [{"period": "2024-11", "spend": 300, "payment": 280}]
+    assert _resolve_axes(
+        {"x_field": "period", "y_fields": ["spend", "payment"]}, numbers
+    ) == ("period", ["spend", "payment"])
+    # Missing field gets dropped.
+    assert _resolve_axes(
+        {"x_field": "period", "y_fields": ["spend", "missing"]}, numbers
+    ) == ("period", ["spend"])
 
 
 def test_resolve_axes_falls_back_to_conventions():
-    """When viz omits x_field/y_field, the renderer should pick `period`/`value`
+    """When viz omits x_field/y_field(s), the renderer should pick `period`/`value`
     or `group`/`value` based on what's actually in the numbers dict."""
     trend_numbers = [{"period": "2024-11", "value": 100}]
-    assert _resolve_axes({"kind": "trend"}, trend_numbers) == ("period", "value")
+    assert _resolve_axes({"kind": "trend"}, trend_numbers) == ("period", ["value"])
     breakdown_numbers = [{"group": "S BERTRAM", "value": 642000}]
-    assert _resolve_axes({"kind": "share"}, breakdown_numbers) == ("group", "value")
+    assert _resolve_axes({"kind": "share"}, breakdown_numbers) == ("group", ["value"])
 
 
 def test_resolve_axes_returns_none_when_fields_missing():

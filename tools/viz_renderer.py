@@ -35,6 +35,47 @@ _SUPPORTED_KINDS = {"trend", "bar", "share"}
 # underscores; everything else collapses to a single underscore.
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9_]+")
 
+# Color palette — Amex-leaning blues + analyst-friendly accent colors. Used
+# in series order so the first line/bar is the primary signal, the second a
+# contrast, etc. Keep this short and meaningful; if we ever need more than 6
+# series in one chart, the chart is probably the wrong tool.
+_PALETTE = [
+    "#006FCF",  # Amex blue (primary)
+    "#E03C31",  # accent red
+    "#00A287",  # accent teal
+    "#F2A900",  # accent gold
+    "#7A5195",  # accent purple
+    "#666666",  # neutral gray
+]
+
+
+def _apply_style(ax, fig) -> None:
+    """Apply the project's chart style to an Axes/Figure pair.
+
+    Minimal-decoration look: no top/right spines, light gridlines, larger
+    tick labels, generous figure margins. Centralized here so every chart
+    in the system stays consistent without each render path repeating
+    cosmetic configuration.
+    """
+    # Top + right spines off; left + bottom kept but desaturated.
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        ax.spines[side].set_color("#9aa0a6")
+        ax.spines[side].set_linewidth(0.8)
+    ax.tick_params(colors="#3c4043", labelsize=10, length=4, width=0.8)
+    # Soft horizontal gridlines on by default; the axis-specific render
+    # paths below override (e.g. `bar` uses y-only).
+    ax.grid(True, linestyle=":", linewidth=0.8, color="#dadce0", alpha=0.9)
+    ax.set_axisbelow(True)
+    ax.xaxis.label.set_color("#5f6368")
+    ax.yaxis.label.set_color("#5f6368")
+    ax.xaxis.label.set_fontsize(10)
+    ax.yaxis.label.set_fontsize(10)
+    # Slightly off-white background to hint at "report" rather than "raw plot".
+    fig.patch.set_facecolor("#ffffff")
+    ax.set_facecolor("#fbfcfd")
+
 
 def _slugify(text: str, max_len: int = 60) -> str:
     """Filesystem-safe slug from a topic name. Keeps the result short enough
@@ -55,42 +96,54 @@ def _coerce_numbers(numbers: Any) -> list[dict] | None:
     return numbers
 
 
-def _resolve_axes(kp_viz: dict, numbers: list[dict]) -> tuple[str, str] | None:
-    """Pick the x/y field names for the chart from the viz spec, falling back
-    to common conventions when the spec omits them.
+def _resolve_axes(kp_viz: dict, numbers: list[dict]) -> tuple[str, list[str]] | None:
+    """Resolve x_field + a LIST of y_fields. Multi-series charts (e.g.
+    spend vs payment over time) plot one line per y_field on the same axes.
 
-    For ``trend`` and ``bar`` we expect ``viz.x_field`` + ``viz.y_field``.
-    For ``share`` (breakdowns) the convention from the distiller prompt is
-    ``group`` / ``value``, but x_field/y_field can override.
+    Reads ``viz.x_field`` and either ``viz.y_fields`` (list, preferred) or
+    ``viz.y_field`` (string, back-compat — wrapped to a single-element list).
+    Falls back to convention names (``period`` / ``value``, ``group`` /
+    ``value``) when the spec omits them.
 
     Returns None when neither the explicit fields nor the conventional
     fallbacks are present in the data.
     """
     x_field = kp_viz.get("x_field")
-    y_field = kp_viz.get("y_field")
+    y_fields_raw = kp_viz.get("y_fields")
+    if y_fields_raw is None:
+        # Back-compat: singular y_field still accepted; wrap.
+        y_field = kp_viz.get("y_field")
+        y_fields = [y_field] if y_field else []
+    elif isinstance(y_fields_raw, list):
+        y_fields = [f for f in y_fields_raw if isinstance(f, str)]
+    elif isinstance(y_fields_raw, str):
+        y_fields = [y_fields_raw]
+    else:
+        y_fields = []
 
     sample = numbers[0]
-    if x_field and y_field and x_field in sample and y_field in sample:
-        return x_field, y_field
 
-    # Fallbacks by convention (matches the distiller prompt examples).
-    fallbacks_for_x = ("period", "group", "x")
-    fallbacks_for_y = ("value", "y")
-
+    # Fallbacks by convention.
     if not x_field:
-        x_field = next((f for f in fallbacks_for_x if f in sample), None)
-    if not y_field:
-        y_field = next((f for f in fallbacks_for_y if f in sample), None)
+        x_field = next((f for f in ("period", "group", "x") if f in sample), None)
+    if not y_fields:
+        fallback = next((f for f in ("value", "y") if f in sample), None)
+        if fallback:
+            y_fields = [fallback]
 
-    if x_field and y_field and x_field in sample and y_field in sample:
-        return x_field, y_field
-    return None
+    if not x_field or x_field not in sample:
+        return None
+    y_fields = [f for f in y_fields if f in sample]
+    if not y_fields:
+        return None
+    return x_field, y_fields
 
 
 def _extract_xy(numbers: list[dict], x_field: str, y_field: str
                 ) -> tuple[list, list[float]] | None:
-    """Build parallel x / y arrays. Drops entries with missing or
-    non-numeric y values; returns None when nothing usable remains."""
+    """Build parallel x / y arrays for a single y series. Drops entries with
+    missing or non-numeric y values; returns None when nothing usable
+    remains."""
     xs: list = []
     ys: list[float] = []
     for n in numbers:
@@ -106,6 +159,20 @@ def _extract_xy(numbers: list[dict], x_field: str, y_field: str
     if not xs:
         return None
     return xs, ys
+
+
+def _format_axis_value(v: float) -> str:
+    """Compact human-readable label for tick values. $12,500 → '$12.5K',
+    1.2e6 → '1.2M', etc. Used on y-axis tick labels for trend/bar so big
+    money values don't blow out the chart margins."""
+    av = abs(v)
+    if av >= 1_000_000:
+        return f"{v / 1_000_000:.1f}M"
+    if av >= 1_000:
+        return f"{v / 1_000:.1f}K"
+    if av == int(av):
+        return f"{int(v)}"
+    return f"{v:.2f}"
 
 
 def render_chart(
@@ -146,12 +213,17 @@ def render_chart(
                         "viz": viz,
                         "sample_keys": list(numbers[0].keys())})
         return None
-    x_field, y_field = axes
+    x_field, y_fields = axes
 
-    extracted = _extract_xy(numbers, x_field, y_field)
-    if extracted is None:
+    # One (xs, ys) pair per y_field — supports multi-series trend/bar.
+    extracted = []
+    for yf in y_fields:
+        out = _extract_xy(numbers, x_field, yf)
+        if out is None:
+            continue
+        extracted.append((yf, out))
+    if not extracted:
         return None
-    xs, ys = extracted
 
     # Filename: <turn>-<topic>.png. When turn_id is missing, fall back to
     # the captured_at_turn already on the KP, then to a random short id so
@@ -173,43 +245,104 @@ def render_chart(
         return None
 
     out_path = out_dir / filename
+    is_multi = len(extracted) > 1
+    # No title baked into the PNG — the surrounding UI (chart-button label
+    # + lightbox header) already shows the topic, so a chart title would be
+    # redundant ("double titles" the user flagged). Keep the chart visually
+    # clean and let the UI provide the framing.
+    y_label = ", ".join(yf for yf, _ in extracted) if is_multi else extracted[0][0]
 
     try:
-        fig, ax = plt.subplots(figsize=(7.5, 4.0), dpi=120)
+        fig, ax = plt.subplots(figsize=(8.5, 4.5), dpi=140)
+
         if kind == "trend":
-            ax.plot(xs, ys, marker="o", linewidth=2)
+            xs_first = extracted[0][1][0]
+            # Pin every data point as an x-tick so the rendered axis shows
+            # the full range from the first to the last entry — fixes the
+            # "claim says 2024-11..2025-07 but axis shows fewer months"
+            # mismatch the reviewer hits when matplotlib auto-thins ticks.
+            indices = list(range(len(xs_first)))
+            for i, (yf, (_, ys)) in enumerate(extracted):
+                color = _PALETTE[i % len(_PALETTE)]
+                ax.plot(indices, ys, marker="o", linewidth=2.0, markersize=5.5,
+                        color=color, label=yf if is_multi else None)
+            ax.set_xticks(indices)
+            # Thin to ~10 visible labels max so dense series stay readable
+            # without dropping the first / last (those are anchor points).
+            n = len(xs_first)
+            stride = max(1, n // 10)
+            visible = [str(xs_first[i]) if (i % stride == 0 or i == n - 1) else ""
+                       for i in indices]
+            ax.set_xticklabels(visible, rotation=30, ha="right", fontsize=9)
             ax.set_xlabel(x_field)
-            ax.set_ylabel(y_field)
-            ax.grid(True, linestyle="--", alpha=0.4)
-            # Tilt long x-tick labels (date strings) so they don't overlap.
-            if any(isinstance(x, str) and len(x) > 4 for x in xs):
-                fig.autofmt_xdate(rotation=30)
+            ax.set_ylabel(y_label)
+            if is_multi:
+                ax.legend(loc="best", frameon=False, fontsize=9)
+            ax.yaxis.set_major_formatter(
+                plt.FuncFormatter(lambda v, _p: _format_axis_value(v))
+            )
+
         elif kind == "bar":
-            ax.bar(range(len(xs)), ys)
-            ax.set_xticks(range(len(xs)))
-            ax.set_xticklabels([str(x) for x in xs], rotation=30, ha="right")
+            xs_first = extracted[0][1][0]
+            n_groups = len(xs_first)
+            n_series = len(extracted)
+            indices = list(range(n_groups))
+            if n_series == 1:
+                yf, (_, ys) = extracted[0]
+                ax.bar(indices, ys, color=_PALETTE[0], width=0.6)
+            else:
+                # Grouped bars side-by-side per x value.
+                bar_w = 0.8 / n_series
+                for i, (yf, (_, ys)) in enumerate(extracted):
+                    offsets = [x + (i - (n_series - 1) / 2) * bar_w for x in indices]
+                    ax.bar(offsets, ys, width=bar_w * 0.95,
+                           color=_PALETTE[i % len(_PALETTE)], label=yf)
+                ax.legend(loc="best", frameon=False, fontsize=9)
+            ax.set_xticks(indices)
+            ax.set_xticklabels([str(x) for x in xs_first], rotation=30,
+                               ha="right", fontsize=9)
             ax.set_xlabel(x_field)
-            ax.set_ylabel(y_field)
-            ax.grid(True, axis="y", linestyle="--", alpha=0.4)
-        else:  # "share"
-            # Horizontal bar — stable for 4-20 groups; pie charts get
-            # unreadable past ~5 slices, so we standardize on hbar here.
+            ax.set_ylabel(y_label)
+            ax.grid(True, axis="y", linestyle=":", linewidth=0.8,
+                    color="#dadce0", alpha=0.9)
+            ax.grid(False, axis="x")
+            ax.yaxis.set_major_formatter(
+                plt.FuncFormatter(lambda v, _p: _format_axis_value(v))
+            )
+
+        else:  # "share" — horizontal bar, single series only
+            yf, (xs, ys) = extracted[0]
             order = sorted(range(len(xs)), key=lambda i: ys[i], reverse=True)
             xs_sorted = [xs[i] for i in order]
             ys_sorted = [ys[i] for i in order]
-            ax.barh(range(len(xs_sorted)), ys_sorted)
+            bars = ax.barh(range(len(xs_sorted)), ys_sorted,
+                           color=_PALETTE[0], height=0.65)
+            # Inline value labels at the end of each bar — much easier to
+            # read than squinting at the x-axis on dense breakdowns.
+            max_y = max(ys_sorted) if ys_sorted else 1
+            for bar, v in zip(bars, ys_sorted):
+                ax.text(bar.get_width() + max_y * 0.01,
+                        bar.get_y() + bar.get_height() / 2,
+                        _format_axis_value(v),
+                        va="center", ha="left", fontsize=9, color="#3c4043")
             ax.set_yticks(range(len(xs_sorted)))
-            ax.set_yticklabels([str(x) for x in xs_sorted])
-            ax.invert_yaxis()  # largest at top
-            ax.set_xlabel(y_field)
-            ax.set_ylabel(x_field)
-            ax.grid(True, axis="x", linestyle="--", alpha=0.4)
+            ax.set_yticklabels([str(x) for x in xs_sorted], fontsize=9)
+            ax.invert_yaxis()
+            ax.set_xlabel(yf)
+            ax.set_ylabel("")
+            ax.grid(True, axis="x", linestyle=":", linewidth=0.8,
+                    color="#dadce0", alpha=0.9)
+            ax.grid(False, axis="y")
+            ax.xaxis.set_major_formatter(
+                plt.FuncFormatter(lambda v, _p: _format_axis_value(v))
+            )
+            # Pad right margin for the value labels.
+            ax.set_xlim(right=max_y * 1.18)
 
-        title = str(kp.get("topic") or "").replace("_", " ").strip()
-        if title:
-            ax.set_title(title)
+        _apply_style(ax, fig)
         fig.tight_layout()
-        fig.savefig(out_path, format="png", bbox_inches="tight")
+        fig.savefig(out_path, format="png", bbox_inches="tight",
+                    facecolor=fig.get_facecolor())
     except Exception as exc:  # noqa: BLE001
         if logger is not None:
             logger.log("viz_render_failed",
@@ -232,7 +365,9 @@ def render_chart(
     if logger is not None:
         logger.log("viz_rendered",
                    {"topic": kp.get("topic"), "kind": kind,
-                    "n_points": len(xs), "path": str(out_path)})
+                    "n_series": len(extracted),
+                    "n_points": len(extracted[0][1][0]),
+                    "path": str(out_path)})
     return str(out_path)
 
 
@@ -241,6 +376,11 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
     not chart-able. The spec inlines ``numbers`` as ``data.values`` so
     a downstream renderer can produce the chart without going back to the
     original tool call.
+
+    For multi-series KPs (``viz.y_fields`` with 2+ entries), the spec uses
+    Vega-Lite's ``transform: [{fold: y_fields}]`` to long-form the data and
+    color-encodes by the resulting ``key`` channel — same numbers, but the
+    chart shows N lines / grouped bars instead of one.
     """
     viz = kp.get("viz") if isinstance(kp, dict) else None
     if not isinstance(viz, dict):
@@ -254,37 +394,49 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
     axes = _resolve_axes(viz, numbers)
     if axes is None:
         return None
-    x_field, y_field = axes
+    x_field, y_fields = axes
+    is_multi = len(y_fields) > 1
+    primary_y = y_fields[0]
 
-    # Map our `kind` vocabulary to Vega-Lite marks. `share` → bar with the
-    # axes flipped (matches the matplotlib horizontal-bar choice above).
-    if kind == "trend":
-        mark = "line"
-        encoding = {
-            "x": {"field": x_field, "type": "ordinal"},
-            "y": {"field": y_field, "type": "quantitative"},
-        }
-    elif kind == "bar":
-        mark = "bar"
-        encoding = {
-            "x": {"field": x_field, "type": "ordinal"},
-            "y": {"field": y_field, "type": "quantitative"},
-        }
-    else:  # share
-        mark = "bar"
-        encoding = {
-            "y": {"field": x_field, "type": "ordinal",
-                  "sort": {"field": y_field, "order": "descending"}},
-            "x": {"field": y_field, "type": "quantitative"},
-        }
-
-    title = str(kp.get("topic") or "").replace("_", " ").strip()
     spec: dict = {
         "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
         "data": {"values": numbers},
-        "mark": mark,
-        "encoding": encoding,
     }
+
+    # Map our `kind` vocabulary to Vega-Lite marks. `share` → horizontal
+    # bar (same as the matplotlib path); always single-series.
+    if kind == "trend":
+        spec["mark"] = "line"
+        encoding: dict = {
+            "x": {"field": x_field, "type": "ordinal"},
+            "y": {"field": "value" if is_multi else primary_y,
+                  "type": "quantitative"},
+        }
+        if is_multi:
+            spec["transform"] = [{"fold": y_fields, "as": ["series", "value"]}]
+            encoding["color"] = {"field": "series", "type": "nominal"}
+        spec["encoding"] = encoding
+    elif kind == "bar":
+        spec["mark"] = "bar"
+        encoding = {
+            "x": {"field": x_field, "type": "ordinal"},
+            "y": {"field": "value" if is_multi else primary_y,
+                  "type": "quantitative"},
+        }
+        if is_multi:
+            spec["transform"] = [{"fold": y_fields, "as": ["series", "value"]}]
+            encoding["color"] = {"field": "series", "type": "nominal"}
+            encoding["xOffset"] = {"field": "series", "type": "nominal"}
+        spec["encoding"] = encoding
+    else:  # share — horizontal, single-series only
+        spec["mark"] = "bar"
+        spec["encoding"] = {
+            "y": {"field": x_field, "type": "ordinal",
+                  "sort": {"field": primary_y, "order": "descending"}},
+            "x": {"field": primary_y, "type": "quantitative"},
+        }
+
+    title = str(kp.get("topic") or "").replace("_", " ").strip()
     if title:
         spec["title"] = title
     return spec
