@@ -236,7 +236,251 @@ Charts surface in the reasoning-trace SSE panel (not inline in the chat answer) 
 
 ---
 
-## 6. Design trade-offs (the "why" behind the shape)
+## 6. Worked example — three reviewer turns on one case
+
+This walks through what happens in `CaseSession` state across three back-to-back turns on case `C-00042`, showing where each memory layer kicks in.
+
+### Turn 1 — cold start
+
+**Reviewer asks:** *"What's the customer's spending pattern over the past 6 months?"*
+
+**Pre-run state:**
+
+```python
+sess.input_history     == []
+sess.specialist_kb     == {}
+sess.qa_cache          == {}
+```
+
+**Framed question** (no warmth hint — KB is empty):
+
+```
+What's the customer's spending pattern over the past 6 months?
+```
+
+**Orchestrator routes** → calls `spend_payments`.
+
+**Specialist sees** (no KB digest, no prior history — bare sub-question):
+
+```
+What is the customer's spending pattern over the past 6 months?
+```
+
+**Specialist runs** `summarize_trend('spends', 'Amount', 'Date', period='month', op='sum')` and `aggregate_column('spends', 'Merchant', 'Amount', op='sum')`, then returns a `SpecialistOutput`.
+
+**Fire-and-forget distiller** kicks off after the redacted payload is returned to the orchestrator. It extracts:
+
+```json
+[
+  {
+    "topic": "monthly_spend_trend",
+    "claim": "Spend rose from $300 (2024-11) to $1,100 (2025-03), a 3.7× increase peaking in 2025-Q1.",
+    "numbers": [
+      {"period": "2024-11", "value": 300},
+      {"period": "2024-12", "value": 250},
+      {"period": "2025-01", "value": 480},
+      {"period": "2025-02", "value": 920},
+      {"period": "2025-03", "value": 1100},
+      {"period": "2025-04", "value": 760}
+    ],
+    "viz": {"kind": "trend", "x_field": "period", "y_fields": ["value"]},
+    "source_call": "summarize_trend('spends','Amount','Date',period='month',op='sum')",
+    "captured_at_turn": "a3f7c1e9d2b4",
+    "confidence": "high"
+  },
+  {
+    "topic": "top_merchants_by_sum",
+    "claim": "S BERTRAM accounts for 38% of recurring spend ($642K of $1.69M total).",
+    "numbers": [
+      {"group": "S BERTRAM", "value": 642000},
+      {"group": "Other",     "value": 1052000}
+    ],
+    "viz": null,
+    "source_call": "aggregate_column('spends','Merchant','Amount',op='sum')",
+    "captured_at_turn": "a3f7c1e9d2b4",
+    "confidence": "medium"
+  }
+]
+```
+
+The first KP has `viz.kind=trend` with 6 numbers → renderer writes
+`reports/C-00042/charts/a3f7c1e9d2b4-monthly_spend_trend.png` and attaches the Vega-Lite spec.
+
+**End-of-turn drain** awaits the distiller task. Post-turn state:
+
+```python
+sess.specialist_kb == {
+    "spend_payments": [
+        { … monthly_spend_trend KP, with image_path + vega_spec … },
+        { … top_merchants_by_sum KP … },
+    ]
+}
+sess.input_history == [<6 items: user msg + tool calls + outputs + final answer>]
+sess.qa_cache      == {"what's the customer's spending pattern over the past 6 months":
+                       <FinalAnswer payload>}
+```
+
+A `chart` SSE event is emitted for the trend chart; reviewer sees it in the reasoning-trace panel.
+
+---
+
+### Turn 2 — warm follow-up, same domain
+
+**Reviewer asks:** *"Did the spending peak coincide with any payment returns?"*
+
+**Pre-run state:** KB has 2 KPs under `spend_payments`; the QA cache holds turn 1.
+
+**Warmth hint built by `_format_kb_warmth_hint`:**
+
+```
+[KB-warmth: spend_payments (2 KPs). Strongly consider reusing warm specialists for in-domain follow-ups.]
+```
+
+**Framed question** (warmth hint prepended):
+
+```
+[KB-warmth: spend_payments (2 KPs). Strongly consider reusing warm specialists for in-domain follow-ups.]
+
+Did the spending peak coincide with any payment returns?
+```
+
+**Orchestrator** reads the warmth hint, applies the `team_construction` rule, and reuses `spend_payments` rather than building a fresh team.
+
+**Specialist sees on its first call this turn** (KB digest preface — `_active_kps` returns latest-per-topic):
+
+```
+[YOUR KNOWLEDGE BASE — facts established earlier this session.
+ Refer to these BEFORE re-running queries; only re-query when the new
+ question goes beyond what's recorded here, or when a value needs verification.]
+
+- **monthly_spend_trend** [high]: Spend rose from $300 (2024-11) to $1,100 (2025-03), a 3.7× increase peaking in 2025-Q1.  _via `summarize_trend('spends','Amount','Date',period='month',op='sum')`_
+- **top_merchants_by_sum** [medium]: S BERTRAM accounts for 38% of recurring spend ($642K of $1.69M total).  _via `aggregate_column('spends','Merchant','Amount',op='sum')`_
+
+--- New question ---
+Did the spending peak coincide with any payment returns?
+```
+
+**The specialist now knows the peak is 2025-Q1 without re-running `summarize_trend('spends')`.** It runs only the *new* call:
+
+```python
+filter_rows('payments', where='status == "returned"', group_by='month')
+```
+
+It returns a SpecialistOutput referencing the existing peak and the new returns timeline.
+
+**Distiller** adds one new KP:
+
+```json
+{
+  "topic": "payment_returns_timeline",
+  "claim": "Payment returns spiked from 0 (2024-Q4) to 4 (2025-Q1) coinciding with the spend peak.",
+  "numbers": [
+    {"period": "2024-Q4", "value": 0},
+    {"period": "2025-Q1", "value": 4},
+    {"period": "2025-Q2", "value": 1}
+  ],
+  "viz": null,
+  "source_call": "filter_rows('payments', where='status == \"returned\"', group_by='month')",
+  "captured_at_turn": "b7e2d4f8a1c6",
+  "confidence": "high"
+}
+```
+
+(`numbers` has only 3 entries — distiller's rule says `viz` only when ≥ 4, so no chart this turn.)
+
+**Post-turn state:**
+
+```python
+sess.specialist_kb == {
+    "spend_payments": [
+        monthly_spend_trend         # turn 1
+        top_merchants_by_sum,       # turn 1
+        payment_returns_timeline,   # turn 2 ← new
+    ]
+}
+```
+
+`input_history` now has both turns; pruning hasn't triggered yet (`keep_recent_turns=2`).
+
+---
+
+### Turn 3 — cross-domain question, supersession, history pruning
+
+**Reviewer asks:** *"How does that align with their FICO trajectory? Also, what does spending look like if we extend to 12 months?"*
+
+**Warmth hint:**
+
+```
+[KB-warmth: spend_payments (3 KPs). Strongly consider reusing warm specialists for in-domain follow-ups.]
+```
+
+**Orchestrator** decides this needs `bureau` (cold) for FICO + `spend_payments` (warm) for the extended trend. Because two domain specialists run, `general_specialist` is also invoked (cross-domain review protocol).
+
+**`bureau` specialist** is called first. No KB digest (its KB is empty). It runs FICO history queries and returns. Distiller extracts:
+
+```json
+{
+  "topic": "fico_trajectory",
+  "claim": "FICO declined from 712 (2024-10) to 648 (2025-04), a 64-point drop steepest in 2025-Q1.",
+  "numbers": [
+    {"period": "2024-10", "value": 712}, {"period": "2024-11", "value": 708},
+    {"period": "2024-12", "value": 695}, {"period": "2025-01", "value": 671},
+    {"period": "2025-02", "value": 658}, {"period": "2025-03", "value": 651},
+    {"period": "2025-04", "value": 648}
+  ],
+  "viz": {"kind": "trend", "x_field": "period", "y_fields": ["value"]},
+  "source_call": "summarize_trend('bureau','FicoScore','Date',period='month',op='last')",
+  "captured_at_turn": "c8a3f2e5d917",
+  "confidence": "high"
+}
+```
+
+`numbers` has 7 entries + `viz` is set → renderer writes the chart PNG.
+
+**`spend_payments` specialist** is called for the 12-month extension. It sees the digest (now 3 KPs) and recognizes that `monthly_spend_trend` only covered 6 months. It re-queries with a wider window and returns a new SpecialistOutput.
+
+**Distiller extracts a NEW `monthly_spend_trend` KP** (same `topic`, wider window). The KB list grows to 4 entries under `spend_payments` — but `_active_kps` will hide the older 6-month version on the next call:
+
+```python
+# After this turn's distillation:
+sess.specialist_kb["spend_payments"] == [
+    monthly_spend_trend_v1,    # turn 1 — kept for audit, hidden from digest
+    top_merchants_by_sum,      # turn 1
+    payment_returns_timeline,  # turn 2
+    monthly_spend_trend_v2,    # turn 3 — supersedes v1 in the active view
+]
+# _active_kps(...) returns [top_merchants_by_sum, payment_returns_timeline, monthly_spend_trend_v2]
+```
+
+**`input_history` pruning** (this is now the third reviewer turn → turn 1 ages out of the "keep recent" window):
+
+- All `function_call_output.output` strings from turn 1 are replaced with the elision stub:
+  > `"(elided — earlier-turn specialist output; see the specialist's KB digest, which is prepended to each new sub-question.)"`
+- Function-call records themselves stay (orchestrator still sees what tools ran).
+- Net effect: maybe 40 KB of raw SpecialistOutput JSON replaced by ~120 bytes of stub × N calls.
+
+`input_history_pruned` event fires with `bytes_saved` reported.
+
+**Two charts** are emitted as SSE events this turn (fico_trajectory + monthly_spend_trend_v2); the reviewer sees both in the reasoning-trace panel.
+
+---
+
+### What the example demonstrates
+
+| layer                        | shown by                                                                                                       |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| KB digest preface            | Turn 2: specialist knew the peak was Q1 without re-querying.                                                   |
+| Supersession                 | Turn 3: `monthly_spend_trend_v2` shadows v1 in the active digest; v1 stays in the list for audit.              |
+| Warmth hint as routing input | Turn 2: orchestrator reused the warm specialist; Turn 3: still considered both, picked correctly per question. |
+| Fire-and-forget distiller    | Specialist payloads returned to orchestrator immediately; KB updates landed at end-of-turn drain.              |
+| Chart rendering side-effect  | Turns 1 + 3 wrote chart PNGs + Vega-Lite specs; Turn 2 didn't (only 3-point series).                           |
+| `input_history` pruning      | Turn 3: turn 1's heavy tool outputs replaced by stubs.                                                         |
+| QA cache                     | If the reviewer re-asks the Turn 1 question verbatim, the orchestrator is skipped entirely.                    |
+| Dedup cache                  | Would kick in if the orchestrator emitted two near-identical sub-questions to `spend_payments` in one turn.    |
+
+---
+
+## 7. Design trade-offs (the "why" behind the shape)
 
 | decision                                              | rationale                                                                                                                                                                |
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -252,7 +496,7 @@ Charts surface in the reasoning-trace SSE panel (not inline in the chat answer) 
 
 ---
 
-## 7. Observability hooks
+## 8. Observability hooks
 
 The EventLogger emits the following memory-related events:
 
@@ -270,7 +514,7 @@ The EventLogger emits the following memory-related events:
 
 ---
 
-## 8. Known limits / explicit non-goals
+## 9. Known limits / explicit non-goals
 
 - **No interactive client-side charts** — Phase 2 ships static PNG + Vega-Lite spec; interactive UI is future work.
 - **No hard-skip routing** — Phase 3 deliberately keeps team construction as an LLM decision.
@@ -281,7 +525,7 @@ The EventLogger emits the following memory-related events:
 
 ---
 
-## 9. Files of interest
+## 10. Files of interest
 
 | concern                          | file                                              |
 | -------------------------------- | ------------------------------------------------- |
