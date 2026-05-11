@@ -7,69 +7,59 @@ mode: inline
 replaces: [SELECT_TEAM_PROMPT, SPLIT_SUBQUESTIONS_PROMPT]
 ---
 
-Pick specialist tool(s) to call and frame each one's sub-question. The team roster is wired as tools; team selection = which tools to call. No JSON output for this step — the output is the tool calls you emit next.
+Pick specialist tool(s) to call and frame each one's sub-question. The team roster is wired as tools; team selection = which tools to call. Output is the tool calls you emit next, not JSON.
 
-## Concept → specialist
+## Concept → specialist (single-domain routing)
 
 | Reviewer phrasing | Specialist |
 |---|---|
-| FICO, bureau score, tradelines, external delinquency tradelines, derog marks | `bureau` |
+| FICO, bureau score, tradelines, external delinquency, derog marks | `bureau` |
 | DTI, income, affordability, capacity, limit headroom | `capacity_afford` |
-| **cards (count/balance/limit), consumer/commercial card, cross-product exposure, portfolio mix** | **`crossbu`** |
-| **top merchants the customer spends with, merchant concentration, recurring merchants, per-merchant trend** | **`spend_payments`** (transaction-level on `spends_data`, NOT crossbu) |
+| **cards (count/balance/limit), consumer/commercial card, cross-product exposure, portfolio mix** | `crossbu` |
+| **top merchants the customer spends with, merchant concentration, recurring merchants, per-merchant trend** | `spend_payments` (transaction-level on `spends_data`, NOT `crossbu`) |
 | tenure, customer relationship, product usage history | `customer_rel` |
 | internal model output scores (CDSS / TSR / credit-loss / GAM / PD), model trajectory, score drivers | `modeling` |
-| **embedded ML / third-party scores** (Paydex, SBFE, LexisNexis, RNN spend, payment-channel risk, etc.) | **`modeling`** — these live on `model_scores` as Layer-2 columns. They're themselves ML scores produced for narrower purposes (informative on their own), even though the output models also consume them as features. The modeling skill's body explains how to recognize them in the schema. |
+| embedded ML / third-party scores (Paydex, SBFE, LexisNexis, RNN, payment-channel risk) | `modeling` (Layer-2 columns on `model_scores` — see modeling skill) |
 | payment volume, payment returns, success-vs-return ratio, settled-vs-cleared payments | `spend_payments` |
-| **DPD / days past due / internal delinquency index / payment-behavior trajectory / minimum-due-only history** | **`modeling`** — these live as Layer-3 indicator features on `model_scores` (concept group: *internal delinquency / payment behavior*; see modeling skill for vocabulary). The raw `payments` table CANNOT answer DPD / stage-of-delinquency — it only carries cleared/returned status. |
+| **DPD / days past due / internal delinquency index / payment-behavior trajectory / minimum-due-only history** | `modeling` (Layer-3 indicator features). The raw `payments` table CANNOT answer DPD. |
 | WCC, agent call notes, customer-service log, collections call | `wcc` |
 
-## Cross-domain topics (multi-specialist)
+## Cross-domain topics (multi-specialist — DON'T single-route)
 
-Some concepts span more than one specialist's data. For these, build a **team of 2–3** specialists, each answering a complementary slice. Don't single-route.
-
-| Topic | Specialists to consider | Their slice |
+| Topic | Team | Each specialist's slice |
 |---|---|---|
-| **spending / spend pattern / spend behavior / spend trajectory / spend volume / merchant concentration** | **MUST include BOTH `spend_payments` AND `modeling`** (+ `crossbu` only when the question is explicitly B2B) | `spend_payments`: transaction-level spend AND merchant-name / merchant-industry concentration of the customer's own spending — `spends_data.Amount`, `Merchant Name`, `Merchant Industry`. **All "top merchants / recurring merchants / per-merchant trends" routes here, not crossbu.** `modeling`: ML-derived spend features (`out_of_pattern_spend*`, `cust_enhnc_one_way_spend_concentration_30day_rt1*`, time-weighted spend variables) that feed the risk scores — these are pattern-level signals the raw transaction view can't surface alone. `crossbu` belongs ONLY when the reviewer asks about the *merchant side* of the customer's businesses (B2B charge volume those businesses receive, via `crossbu_merchants.merchant_charge_volume`) — a different concept than the customer's own purchasing behavior. **A spending-pattern answer with only `spend_payments` is incomplete** — it's missing the model's view of the spend shape. |
-| **default journey / DPD progression** | `bureau` + `modeling` | `bureau`: external default tradelines, derog marks. `modeling`: output-score evolution leading into default + driver rotation + the *internal delinquency / payment behavior* concept group on `model_scores` (DPD counts, delinquency indices, return indices — see modeling skill for the vocabulary). |
-| **delinquency / payment behavior / payment-deterioration trajectory** | `modeling` + `spend_payments` (+ `bureau` only when "external" is explicit) | `modeling`: the *internal delinquency / payment behavior* concept group on `model_scores` (DPD counts, internal delinquency indices, payment-return indices, min-due-only frequency; see modeling skill body). Trend over `trans_month`. `spend_payments`: cleared-vs-returned payment events from the `payments` table — captures the *settlement attempt* side (success/return counts, return amounts, return reasons). Indicators give the *stage* of delinquency, payments give the *settlement attempts*. **A delinquency answer with only `spend_payments` is incomplete** — it misses the indicator-level trajectory the model already computes. `bureau` adds the external-tradeline view when the question explicitly invokes "external". |
-| **exposure / total customer risk** | `crossbu` + `bureau` + `capacity_afford` (+ `modeling` when the question asks for a *rolled-up / ratio / leverage* view) | `crossbu`: card balances and limits. `bureau`: external exposure. `capacity_afford`: vs income / capacity headroom. `modeling`: model-rolled-up *exposure & leverage* and *capacity, income & paydown* concept groups on `model_scores` (exposure-to-remit, debt-servicing, paydown shares — see modeling skill body for vocabulary). Complementary to the raw views, not a substitute. |
-| **broad / "full review"** | all specialists | Only when the question is genuinely cross-domain or asks for a complete picture. |
+| **spending / spend pattern / merchant concentration** | `spend_payments` + `modeling` (+ `crossbu` only if explicitly B2B) | `spend_payments` = transaction-level + merchant concentration. `modeling` = ML-derived spend features (out-of-pattern, concentration risk-rate, time-weighted spend). A spending answer with only `spend_payments` is incomplete — it misses the model's view of the spend shape. |
+| **default journey / DPD progression** | `bureau` + `modeling` | `bureau` = external default tradelines + derogs. `modeling` = score evolution + driver rotation + internal delinquency indicators. |
+| **delinquency / payment-deterioration trajectory** | `modeling` + `spend_payments` (+ `bureau` only if "external" is explicit) | `modeling` = stage-of-delinquency indicators (DPD counts, internal indices, return indices, min-due-only). `spend_payments` = settlement-attempt side (success/return counts + reasons). Indicators give the *stage*; payments give the *attempts*. |
+| **exposure / total customer risk** | `crossbu` + `bureau` + `capacity_afford` (+ `modeling` for rolled-up ratio / leverage view) | `crossbu` = card balances/limits. `bureau` = external exposure. `capacity_afford` = vs income/headroom. `modeling` = model-rolled-up exposure & leverage ratios. |
+| **broad / "full review"** | all specialists | Only when genuinely cross-domain. |
 
-For everything else, single-specialist or 2-specialist teams are normal. Only widen to 3+ when the topic is genuinely cross-domain (per this table).
+For everything else, single- or 2-specialist teams. Widen to 3+ only when the table above says so.
 
-Other edge cases:
-- **balance vs spend:** balance is `crossbu_cards.balance` (point-in-time outstanding); spend is a flow quantity. Different concepts — don't substitute one for another even when both can come back from `crossbu`.
-- **"how many cards":** `crossbu` (NOT `customer_rel`, despite the name — it owns only the tenure table).
-- **merchant concentration of customer's spending:** `spend_payments` (via `spends_data.Merchant Name` / `Merchant Industry`). NOT `crossbu`. The `crossbu_merchants` table is the *merchant-side* receipts angle for the customer's businesses (B2B), a different concept entirely; routing customer-side merchant-concentration questions to crossbu is a known mis-route.
+**Edge cases:**
+- balance vs spend: balance is `crossbu_cards.balance` (point-in-time); spend is a flow. Don't substitute.
+- "how many cards" → `crossbu` (NOT `customer_rel` — that owns only tenure).
+- merchant concentration of customer's spending → `spend_payments`. The `crossbu_merchants` table is B2B charge volume those businesses *receive* — different concept; routing customer-side merchant questions to `crossbu` is a known mis-route.
 
 If phrasing doesn't match the table, fall through to the auto-generated TEAM ROSTER (`owns: <table>` lines) and route by which table carries the answer.
 
 ## Subject vs object — route to the SUBJECT
 
-When a specialist appears as the grammatical subject of the question, route there regardless of what concept appears in the predicate.
+When a specialist appears as the grammatical subject, route there regardless of the predicate.
 
-| Shape | Subject = | Object = |
-|---|---|---|
-| "Does **X** have information about Y?" | X | Y |
-| "What does **X** say about Y?" / "Does **X** cover / track Y?" | X | Y |
-| "Show me **X**'s view of Y" | X | Y |
-| "What is the customer's Y?" / "How many Y?" | (no subject) | route to Y owner |
+- "Does **X** have info about Y?" / "What does **X** say about Y?" → X
+- "What is the customer's Y?" / "How many Y?" (no subject) → route to Y owner
 
-Examples:
-- "Does **the model** have info about spending?" → `modeling`. ("the model" / "the models" in reviewer questions ALWAYS = internal ML risk-scoring models — never the agent system or a generic abstraction.)
-- "Does **WCC** show complaints about cards?" → `wcc` (cards is the topic, WCC is the data source).
-- "What does **the bureau** say about payment history?" → `bureau` (NOT `spend_payments`).
+Examples: "Does **the model** have info about spending?" → `modeling`. "Does **WCC** show complaints about cards?" → `wcc`. "What does **the bureau** say about payment history?" → `bureau` (NOT `spend_payments`). ("the model" / "the models" ALWAYS = internal ML risk-scoring models, never the agent system.)
 
 ## Selection rules
 
-1. Minimum set, BUT cross-domain topics are NOT minimum. 1 specialist is normal for a single-domain question; 2-3 when the question matches a row in the "Cross-domain topics" table above (those rows are the authoritative team size — don't shrink them); 3+ also when the question explicitly spans multiple domains. Read the cross-domain table BEFORE applying the "1 is normal" default — if a cross-domain row matches, use the team size it specifies, not the smaller single-routing default.
-2. Every pick must carry weight — no "for context", no "in case relevant".
+1. **Minimum set** — but the Cross-domain table above is the authoritative team size for matching topics; don't shrink those.
+2. Every pick carries weight — no "for context" / "in case relevant".
 3. Match data, not name (`customer_rel` ≠ "questions about the customer").
-4. **Follow-ups & near-duplicates — REUSE THE PRIOR TEAM.** Read the conversation context. When the new question is in the same domain as the previous turn (e.g. another spending question after a spending question, another bureau question after a bureau question), or is a near-paraphrase of an earlier question, reuse the EXACT SAME team — same specialists, same roles. Each specialist carries a **session-scoped knowledge base** (`CaseSession.specialist_kb`, populated by a distiller agent after each run) that is prepended as a digest to every new sub-question routed to that specialist — so a reused specialist sees what it has already found ("Spend rose $300 → $1,100 over Nov 2024–Mar 2025", "times_30_dpd reached 3 in 2024-Q4", etc.) and can answer follow-ups without re-running the same `summarize_trend` / `aggregate_column` queries. **Do not** reshuffle the team for a follow-up that's effectively the same question with a small variation; only widen / narrow the team when the topic genuinely shifts. Same team + new sub-question = the cheapest, most coherent follow-up — the specialist's KB makes it cheaper still.
-5. **Always pair with `report_agent`** on the same turn (TOOL-USE DISCIPLINE rule below). They run in parallel.
-
-6. **Read the `[KB-warmth: …]` hint when present.** The user's message may begin with a one-line preface like `[KB-warmth: spend_payments (5 KPs), modeling (3 KPs). Strongly consider reusing warm specialists for in-domain follow-ups.]`. This is a runtime routing signal — it tells you which specialists already carry distilled findings from earlier turns of THIS session. Treat it as the primary signal for follow-up routing: when the new question is in-domain for one of the listed warm specialists, prefer that specialist over building a fresh team. The hint is informational — your judgement still applies when the new question's topic has clearly shifted away from the warm specialists' domains. The hint is NEVER part of the question itself; route as if it weren't in the user's text.
+4. **Follow-ups REUSE THE PRIOR TEAM.** When the new question is in the same domain as the previous turn (or a near-paraphrase), reuse the exact same team. Each specialist carries a session-scoped knowledge base (`CaseSession.specialist_kb`) prepended as a digest to every new sub-question — so reusing them lets each specialist build on what they already found, instead of restarting. Don't reshuffle for follow-ups that are the same question with small variations.
+5. **Always pair with `report_agent`** on the same turn (see TOOL-USE DISCIPLINE). They run in parallel.
+6. **Read `[KB-warmth: …]` hint when present.** The user message may begin with `[KB-warmth: spend_payments (5 KPs), modeling (3 KPs). …]`. This is the primary follow-up routing signal — prefer warm specialists for in-domain follow-ups. The hint is informational and is NEVER part of the question itself; route as if it weren't in the user's text.
 
 ## Sub-question framing
 
@@ -77,4 +67,4 @@ Examples:
 - Stays in the specialist's domain.
 - Uses the specialist's data vocabulary (name the column/table when you know it).
 - Orthogonal across specialists — no duplicates.
-- One specialist selected → sub-question may equal the root question verbatim.
+- One specialist → sub-question may equal the root question verbatim.

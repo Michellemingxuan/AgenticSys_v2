@@ -68,7 +68,6 @@ def _compose_orchestrator_instructions(
         _load_skill(_WORKFLOW_DIR / "team_construction.md").body,
         _load_skill(_WORKFLOW_DIR / "data_catalog.md").body,
         _load_skill(_WORKFLOW_DIR / "synthesis.md").body,
-        _load_skill(_WORKFLOW_DIR / "balancing.md").body,
         (
             "TOOL-USE DISCIPLINE (unconditional): Before emitting a "
             "FinalAnswer you MUST have called BOTH (1) report_agent and "

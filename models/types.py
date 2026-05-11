@@ -256,10 +256,10 @@ class FinalAnswer(BaseModel):
     `Orchestrator.run` as a cheap forward-looking hook. Each entry is a dict
     with keys `{stage, started_at (ISO8601), ended_at (ISO8601),
     duration_ms (float)}`. Stages are `report_agent`, `team_workflow`, and
-    `balance`. The first two run in parallel via `asyncio.gather`, so their
-    time ranges overlap; `balance` starts after both branches complete.
+    `synthesis`. The first two run in parallel via `asyncio.gather`, so their
+    time ranges overlap; `synthesis` starts after both branches complete.
 
-    `data_pull_request` is set when the balancing step judges the combined
+    `data_pull_request` is set when the synthesis step judges the combined
     drafts insufficient to answer with confidence. Advisory only — no live
     pull backend is wired today.
     """

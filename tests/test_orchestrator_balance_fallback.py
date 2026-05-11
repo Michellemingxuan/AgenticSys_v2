@@ -63,7 +63,7 @@ async def test_balance_fallback_recovers_partial_drafts(tmp_path):
     # Should contain content from BOTH the report draft AND the specialist
     assert "Prior report says X" in result.answer
     assert "Risk score is elevated" in result.answer
-    assert any("balancing fallback" in f for f in result.flags)
+    assert any("synthesis fallback" in f for f in result.flags)
 
 
 @pytest.mark.asyncio

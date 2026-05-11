@@ -161,5 +161,5 @@ class Orchestrator:
 
         return FinalAnswer(
             answer="\n\n".join(parts),
-            flags=["balancing fallback: orchestrator blocked"],
+            flags=["synthesis fallback: orchestrator blocked"],
         )
