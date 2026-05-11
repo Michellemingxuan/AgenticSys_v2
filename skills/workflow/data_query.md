@@ -77,9 +77,23 @@ Also add a `data_gaps` entry: `"requested window <X> exceeds available data <Y> 
 
 **Charting (`make_chart`) — sparingly.** Each chart is a separate LLM round-trip; only call when the visual conveys what numbers can't. Chart only when ALL hold: ≥ 4 data points, the shape itself (slope / peak / gap / divergence) is the load-bearing signal, AND prose alone wouldn't make the shape obvious.
 
-When you DO chart, **combine related series into ONE multi-series chart**, not N single-line ones — `y_fields=["spend", "payment"]` for spend-vs-payment per month is one chart, not two. `points` carries every metric per dict: `[{"period": "2024-11", "spend": 300, "payment": 280}, ...]`. Returns `[chart created] …` or `[make_chart error] …` with what to fix.
+When you DO chart, **combine related series into ONE multi-series chart**, not N single-line ones — `y_fields=["spend", "payment"]` for spend-vs-payment per month is one chart, not two.
 
-The auto-distiller post-processes your `findings` for chartable claims you missed — don't double-render. Skip charting for single scalars, qualitative findings, and data_gap reports.
+**You can — and often should — merge data from MULTIPLE tables / tool calls into one chart.** A two-line spend-vs-payment chart usually comes from:
+
+1. `summarize_trend('spends', 'Amount', 'Date', period='month', op='sum')` → spend series.
+2. `summarize_trend('payments', 'Payment Amount', 'Date', period='month', op='sum', filter_column='payment_status', filter_value='success')` → cleared-payment series.
+3. Merge the two series by month into one points list, then ONE `make_chart` call:
+
+```
+points = [{"period": "2024-11", "spend": 300, "payment": 280},
+          {"period": "2024-12", "spend": 500, "payment": 420}, ...]
+make_chart(..., y_fields=["spend", "payment"], ...)
+```
+
+Same pattern for: cleared vs returned payments, internal vs external delinquency index over time, top-3 merchants' trends merged by period. The shared `x_field` (typically `period` or `group`) is what makes the merge possible. One informative multi-line chart beats three single-line charts that the reviewer has to mentally align.
+
+Returns `[chart created] …` or `[make_chart error] …` with what to fix. The auto-distiller post-processes your `findings` for chartable claims you missed — don't double-render. Skip charting for single scalars, qualitative findings, and data_gap reports.
 
 ## Anti-hallucination
 
