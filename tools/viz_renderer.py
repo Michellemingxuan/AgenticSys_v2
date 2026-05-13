@@ -536,6 +536,43 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
             encoding["color"] = {"field": "series", "type": "nominal"}
             encoding["xOffset"] = {"field": "series", "type": "nominal"}
         spec["encoding"] = encoding
+    elif kind == "trend_dual":
+        # Layered spec — two line marks, each bound to its own y_field,
+        # with independent y scales so the two series don't have to share
+        # a numeric range.
+        y_left, y_right = y_fields[0], y_fields[1]
+        spec["layer"] = [
+            {
+                "mark": "line",
+                "encoding": {
+                    "x": {"field": x_field, "type": "ordinal"},
+                    "y": {"field": y_left, "type": "quantitative"},
+                    "color": {"datum": y_left, "type": "nominal"},
+                },
+            },
+            {
+                "mark": "line",
+                "encoding": {
+                    "x": {"field": x_field, "type": "ordinal"},
+                    "y": {"field": y_right, "type": "quantitative"},
+                    "color": {"datum": y_right, "type": "nominal"},
+                },
+            },
+        ]
+        spec["resolve"] = {"scale": {"y": "independent"}}
+    elif kind == "trend_grid":
+        # Stacked single-series line charts sharing the x-axis. Each
+        # sub-spec is independent so each y-scale auto-fits its series.
+        spec["vconcat"] = [
+            {
+                "mark": "line",
+                "encoding": {
+                    "x": {"field": x_field, "type": "ordinal"},
+                    "y": {"field": yf, "type": "quantitative"},
+                },
+            }
+            for yf in y_fields
+        ]
     else:  # share — horizontal, single-series only
         spec["mark"] = "bar"
         spec["encoding"] = {

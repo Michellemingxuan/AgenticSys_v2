@@ -298,3 +298,61 @@ def test_render_chart_trend_grid_drops_unparseable_series_silently(tmp_path):
     }
     out = render_chart(kp, tmp_path / "charts", turn_id="t1")
     assert out is not None  # score series rendered in its own panel
+
+
+def test_kp_to_vega_spec_emits_layered_independent_y_for_trend_dual():
+    """trend_dual → Vega-Lite `layer` of two line marks with independent
+    y scales so each series uses its own y range."""
+    kp = {
+        "topic": "score_vs_dpd",
+        "viz": {
+            "kind": "trend_dual",
+            "x_field": "period",
+            "y_fields": ["score", "dpd"],
+        },
+        "numbers": [
+            {"period": "2024-11", "score": 720, "dpd": 0},
+            {"period": "2024-12", "score": 705, "dpd": 15},
+        ],
+    }
+    spec = kp_to_vega_spec(kp)
+    assert spec is not None
+    assert spec["$schema"].endswith("v5.json")
+    assert spec["data"]["values"] == kp["numbers"]
+    # Two layers — one per series — each with its own y encoding.
+    assert isinstance(spec.get("layer"), list)
+    assert len(spec["layer"]) == 2
+    assert spec["layer"][0]["mark"] == "line"
+    assert spec["layer"][0]["encoding"]["y"]["field"] == "score"
+    assert spec["layer"][1]["encoding"]["y"]["field"] == "dpd"
+    # Independent y scales — this is what makes the layout dual-axis.
+    assert spec["resolve"]["scale"]["y"] == "independent"
+    # JSON-roundtrippable.
+    assert json.loads(json.dumps(spec)) == spec
+
+
+def test_kp_to_vega_spec_emits_vconcat_for_trend_grid():
+    """trend_grid → Vega-Lite `vconcat` of N single-series line specs."""
+    kp = {
+        "topic": "credit_panel",
+        "viz": {
+            "kind": "trend_grid",
+            "x_field": "period",
+            "y_fields": ["tsr", "cdss", "txn_count"],
+        },
+        "numbers": [
+            {"period": "2024-11", "tsr": 720, "cdss": 680, "txn_count": 42},
+            {"period": "2024-12", "tsr": 705, "cdss": 665, "txn_count": 38},
+        ],
+    }
+    spec = kp_to_vega_spec(kp)
+    assert spec is not None
+    assert isinstance(spec.get("vconcat"), list)
+    assert len(spec["vconcat"]) == 3
+    # Each sub-spec is a line chart of one y_field against the shared x.
+    fields = [sub["encoding"]["y"]["field"] for sub in spec["vconcat"]]
+    assert fields == ["tsr", "cdss", "txn_count"]
+    for sub in spec["vconcat"]:
+        assert sub["mark"] == "line"
+        assert sub["encoding"]["x"]["field"] == "period"
+    assert json.loads(json.dumps(spec)) == spec
