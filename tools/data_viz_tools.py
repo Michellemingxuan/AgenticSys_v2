@@ -26,7 +26,7 @@ from agents import RunContextWrapper, function_tool
 from tools.viz_renderer import kp_to_vega_spec, render_chart
 
 
-_VALID_KINDS = ("trend", "bar", "share")
+_VALID_KINDS = ("trend", "bar", "share", "trend_dual", "trend_grid")
 
 
 def build_make_chart_tool(specialist_name: str):
@@ -97,6 +97,21 @@ def build_make_chart_tool(specialist_name: str):
                 "[make_chart error] `share` (horizontal bar) is single-"
                 "series only. Use `kind='bar'` if you need to plot multiple "
                 "metrics across the same x categories."
+            )
+        if kind == "trend_dual" and len(y_fields) != 2:
+            return (
+                f"[make_chart error] `trend_dual` (twin y-axis) requires "
+                f"exactly 2 entries in `y_fields`; got {len(y_fields)}. "
+                f"Use `kind='trend'` for a single shared y-axis with 1 or "
+                f"more series on the same scale, or `kind='trend_grid'` "
+                f"for 2-6 series on different scales."
+            )
+        if kind == "trend_grid" and not (2 <= len(y_fields) <= 6):
+            return (
+                f"[make_chart error] `trend_grid` (stacked faceted panels) "
+                f"requires between 2 and 6 entries in `y_fields`; got "
+                f"{len(y_fields)}. Use `kind='trend'` for a single series, "
+                f"or drop the lowest-signal series if you have 7+."
             )
 
         app_ctx: Any = ctx.context if ctx else None

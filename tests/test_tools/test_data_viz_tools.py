@@ -254,3 +254,79 @@ async def test_make_chart_factory_isolates_specialist_kbs(tmp_path):
     assert set(ctx._specialist_kb.keys()) == {"alpha", "beta"}
     assert len(ctx._specialist_kb["alpha"]) == 1
     assert len(ctx._specialist_kb["beta"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_trend_dual_requires_exactly_two_y_fields(tmp_path):
+    """trend_dual is twin-y — exactly 2 series. 1 series → tell the
+    model to use plain `trend`; 3+ → tell it to use `trend_grid`."""
+    tool = build_make_chart_tool("modeling")
+    ctx = _make_ctx(tmp_path)
+
+    # 1 y_field is too few.
+    out_one = await tool.on_invoke_tool(
+        RunContextWrapper(ctx),
+        json.dumps({
+            "topic": "x", "kind": "trend_dual", "claim": "c",
+            "points": _good_points(),
+            "x_field": "period", "y_fields": ["value"], "source_call": "",
+        }),
+    )
+    assert "[make_chart error]" in out_one
+    assert "exactly 2" in out_one
+    assert "kind='trend'" in out_one  # specifically steers to plain trend
+
+    # 3 y_fields is too many.
+    points_three = [
+        {"period": "2024-11", "a": 1, "b": 2, "c": 3},
+        {"period": "2024-12", "a": 2, "b": 3, "c": 4},
+    ]
+    out_three = await tool.on_invoke_tool(
+        RunContextWrapper(ctx),
+        json.dumps({
+            "topic": "x", "kind": "trend_dual", "claim": "c",
+            "points": points_three,
+            "x_field": "period", "y_fields": ["a", "b", "c"], "source_call": "",
+        }),
+    )
+    assert "[make_chart error]" in out_three
+    assert "trend_grid" in out_three  # points the model at the right alternative
+    assert ctx._specialist_kb == {}
+
+
+@pytest.mark.asyncio
+async def test_trend_grid_requires_two_to_six_y_fields(tmp_path):
+    """trend_grid stacks N panels — 1 series is just a `trend`, 7+ stops
+    being readable."""
+    tool = build_make_chart_tool("modeling")
+    ctx = _make_ctx(tmp_path)
+
+    # 1 y_field — error pointing back to trend.
+    out_one = await tool.on_invoke_tool(
+        RunContextWrapper(ctx),
+        json.dumps({
+            "topic": "x", "kind": "trend_grid", "claim": "c",
+            "points": _good_points(),
+            "x_field": "period", "y_fields": ["value"], "source_call": "",
+        }),
+    )
+    assert "[make_chart error]" in out_one
+    assert "between 2 and 6" in out_one  # mentions the actual bounds
+
+    # 7 y_fields — error citing the upper bound.
+    keys = ["a", "b", "c", "d", "e", "f", "g"]
+    points_seven = [
+        {"period": "2024-11", **{k: i for i, k in enumerate(keys)}},
+        {"period": "2024-12", **{k: i + 1 for i, k in enumerate(keys)}},
+    ]
+    out_seven = await tool.on_invoke_tool(
+        RunContextWrapper(ctx),
+        json.dumps({
+            "topic": "x", "kind": "trend_grid", "claim": "c",
+            "points": points_seven,
+            "x_field": "period", "y_fields": keys, "source_call": "",
+        }),
+    )
+    assert "[make_chart error]" in out_seven
+    assert "between 2 and 6" in out_seven  # mentions the actual bounds
+    assert ctx._specialist_kb == {}
