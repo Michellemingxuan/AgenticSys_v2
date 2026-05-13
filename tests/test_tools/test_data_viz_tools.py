@@ -330,3 +330,78 @@ async def test_trend_grid_requires_two_to_six_y_fields(tmp_path):
     assert "[make_chart error]" in out_seven
     assert "between 2 and 6" in out_seven  # mentions the actual bounds
     assert ctx._specialist_kb == {}
+
+
+@pytest.mark.asyncio
+async def test_make_chart_trend_dual_end_to_end(tmp_path):
+    """Specialist call: kind=trend_dual with 2 y_fields → single PNG,
+    KP persisted with viz spec carrying y_fields verbatim and vega_spec
+    using `resolve.scale.y == 'independent'`."""
+    tool = build_make_chart_tool("modeling")
+    ctx = _make_ctx(tmp_path)
+    points = [
+        {"period": "2024-11", "score": 720, "dpd": 0},
+        {"period": "2024-12", "score": 705, "dpd": 15},
+        {"period": "2025-01", "score": 690, "dpd": 30},
+        {"period": "2025-02", "score": 680, "dpd": 45},
+    ]
+    out = await tool.on_invoke_tool(
+        RunContextWrapper(ctx),
+        json.dumps({
+            "topic": "score_vs_dpd",
+            "kind": "trend_dual",
+            "claim": "Score declined as DPD climbed over Nov-Feb.",
+            "points": points,
+            "x_field": "period",
+            "y_fields": ["score", "dpd"],
+            "source_call": "summarize_trend(...) x 2 merged",
+        }),
+    )
+    assert "[chart created]" in out
+    assert "× 2 series" in out
+
+    kp = ctx._specialist_kb["modeling"][0]
+    assert kp["viz"] == {
+        "kind": "trend_dual", "x_field": "period",
+        "y_fields": ["score", "dpd"],
+    }
+    img = Path(kp["image_path"])
+    assert img.exists() and img.stat().st_size > 0
+    # Vega spec uses independent y resolve.
+    assert kp["vega_spec"]["resolve"]["scale"]["y"] == "independent"
+
+
+@pytest.mark.asyncio
+async def test_make_chart_trend_grid_end_to_end(tmp_path):
+    """Specialist call: kind=trend_grid with 3 y_fields → single PNG (one
+    file, not three), KP persisted with vconcat-shaped vega_spec."""
+    tool = build_make_chart_tool("modeling")
+    ctx = _make_ctx(tmp_path)
+    points = [
+        {"period": "2024-11", "tsr": 720, "cdss": 680, "txn_count": 42},
+        {"period": "2024-12", "tsr": 705, "cdss": 665, "txn_count": 38},
+        {"period": "2025-01", "tsr": 690, "cdss": 650, "txn_count": 35},
+        {"period": "2025-02", "tsr": 680, "cdss": 640, "txn_count": 31},
+    ]
+    out = await tool.on_invoke_tool(
+        RunContextWrapper(ctx),
+        json.dumps({
+            "topic": "credit_risk_panel",
+            "kind": "trend_grid",
+            "claim": "All three risk indicators deteriorated together.",
+            "points": points,
+            "x_field": "period",
+            "y_fields": ["tsr", "cdss", "txn_count"],
+            "source_call": "summarize_trend(...) x 3 merged",
+        }),
+    )
+    assert "[chart created]" in out
+    assert "× 3 series" in out
+
+    kp = ctx._specialist_kb["modeling"][0]
+    assert kp["viz"]["kind"] == "trend_grid"
+    assert kp["viz"]["y_fields"] == ["tsr", "cdss", "txn_count"]
+    img = Path(kp["image_path"])
+    assert img.exists() and img.stat().st_size > 0
+    # Vega spec is vconcat of 3 line panels.
+    assert len(kp["vega_spec"]["vconcat"]) == 3
