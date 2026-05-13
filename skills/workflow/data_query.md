@@ -77,7 +77,13 @@ Also add a `data_gaps` entry: `"requested window <X> exceeds available data <Y> 
 
 **Charting (`make_chart`) — sparingly.** Each chart is a separate LLM round-trip; only call when the visual conveys what numbers can't. Chart only when ALL hold: ≥ 4 data points, the shape itself (slope / peak / gap / divergence) is the load-bearing signal, AND prose alone wouldn't make the shape obvious.
 
-When you DO chart, **combine related series into ONE multi-series chart**, not N single-line ones — `y_fields=["spend", "payment"]` for spend-vs-payment per month is one chart, not two.
+When multiple variables share the same x-axis (typically time), they belong on ONE chart, not N. Pick the kind by scale:
+
+- **Same scale and unit** (all percentages, all dollar amounts, all score bands): `kind="trend"` with `y_fields=[var1, var2, ...]` — single shared y-axis, one line per variable.
+- **Exactly 2 variables on different but related scales** (e.g., a score 0–1000 + DPD 0–90, or a count + a rate): `kind="trend_dual"` with `y_fields=[primary, secondary]` — twin y-axes, primary on the left, secondary on the right.
+- **3+ variables of different scales** (TSR + CDSS + counts + dollars, etc.): `kind="trend_grid"` with `y_fields=[var1, var2, var3, ...]` — N stacked panels sharing the time axis, each with its own y-scale (cap at 6).
+
+Never emit N separate `kind="trend"` calls for variables on the same x-axis. One merged points list, one make_chart call. Tell same-scale from different-scale by checking the source columns' units via `get_table_schema` before choosing.
 
 **You can — and often should — merge data from MULTIPLE tables / tool calls into one chart.** A two-line spend-vs-payment chart usually comes from:
 
