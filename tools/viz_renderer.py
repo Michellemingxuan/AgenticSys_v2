@@ -29,7 +29,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 
-_SUPPORTED_KINDS = {"trend", "bar", "share"}
+_SUPPORTED_KINDS = {"trend", "bar", "share", "trend_dual"}
 
 # Used to slugify topic names for filesystem safety. We keep alphanumerics +
 # underscores; everything else collapses to a single underscore.
@@ -309,6 +309,67 @@ def render_chart(
             ax.yaxis.set_major_formatter(
                 plt.FuncFormatter(lambda v, _p: _format_axis_value(v))
             )
+
+        elif kind == "trend_dual":
+            # Two series on twin y-axes. trend_dual ENFORCES that both
+            # extracted series exist and align on the same x — if one is
+            # missing or all-unparseable, _extract_xy returned None and the
+            # extracted list is shorter than 2; bail to None so we don't
+            # silently mislabel a 1-line chart as `trend_dual`.
+            if len(extracted) != 2:
+                if logger is not None:
+                    logger.log("viz_render_skipped",
+                               {"reason": "trend_dual_needs_two_series",
+                                "topic": kp.get("topic"),
+                                "n_resolved": len(extracted)})
+                try:
+                    plt.close(fig)
+                except Exception:
+                    pass
+                return None
+
+            (yf1, (xs_first, ys1)) = extracted[0]
+            (yf2, (_, ys2)) = extracted[1]
+            indices = list(range(len(xs_first)))
+
+            primary_color = _PALETTE[0]
+            secondary_color = _PALETTE[1]
+
+            line1, = ax.plot(indices, ys1, marker="o", linewidth=2.0,
+                             markersize=5.5, color=primary_color, label=yf1)
+            ax2 = ax.twinx()
+            line2, = ax2.plot(indices, ys2, marker="s", linewidth=2.0,
+                              markersize=5.5, color=secondary_color, label=yf2)
+
+            ax.set_xticks(indices)
+            n = len(xs_first)
+            stride = max(1, n // 10)
+            visible = [str(xs_first[i]) if (i % stride == 0 or i == n - 1) else ""
+                       for i in indices]
+            ax.set_xticklabels(visible, rotation=30, ha="right", fontsize=9)
+            ax.set_xlabel(x_field)
+
+            # Label each y-axis with its field name, color-matched to the
+            # corresponding line so the reader maps line→axis at a glance.
+            ax.set_ylabel(yf1, color=primary_color)
+            ax2.set_ylabel(yf2, color=secondary_color)
+            ax.tick_params(axis="y", colors=primary_color)
+            ax2.tick_params(axis="y", colors=secondary_color)
+
+            # Compact value formatting on both axes.
+            ax.yaxis.set_major_formatter(
+                plt.FuncFormatter(lambda v, _p: _format_axis_value(v)))
+            ax2.yaxis.set_major_formatter(
+                plt.FuncFormatter(lambda v, _p: _format_axis_value(v)))
+
+            # Combined legend — both lines named in one box.
+            ax.legend(handles=[line1, line2], loc="best",
+                      frameon=False, fontsize=9)
+
+            # Hide the twin axis's top/right spines for a clean look.
+            ax2.spines["top"].set_visible(False)
+            ax2.spines["right"].set_color("#9aa0a6")
+            ax2.spines["right"].set_linewidth(0.8)
 
         else:  # "share" — horizontal bar, single series only
             yf, (xs, ys) = extracted[0]

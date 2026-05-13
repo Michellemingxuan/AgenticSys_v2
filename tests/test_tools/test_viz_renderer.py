@@ -203,3 +203,50 @@ def test_kp_to_vega_spec_returns_none_when_unviz_able():
     assert kp_to_vega_spec({"topic": "x"}) is None
     assert kp_to_vega_spec({"topic": "x", "viz": {"kind": "scatter"}}) is None
     assert kp_to_vega_spec({"topic": "x", "viz": {"kind": "trend"}, "numbers": []}) is None
+
+
+def test_render_chart_writes_png_for_trend_dual(tmp_path):
+    """trend_dual renders 2 series with mismatched scales on twin y-axes,
+    same x-axis, single PNG output."""
+    kp = {
+        "topic": "score_vs_dpd",
+        "viz": {
+            "kind": "trend_dual",
+            "x_field": "period",
+            "y_fields": ["score", "dpd"],
+        },
+        "numbers": [
+            {"period": "2024-11", "score": 720, "dpd": 0},
+            {"period": "2024-12", "score": 705, "dpd": 15},
+            {"period": "2025-01", "score": 690, "dpd": 30},
+            {"period": "2025-02", "score": 680, "dpd": 45},
+        ],
+        "captured_at_turn": "t_dual",
+    }
+    out = render_chart(kp, tmp_path / "charts", turn_id="t_dual")
+    assert out is not None
+    p = Path(out)
+    assert p.exists()
+    assert p.suffix == ".png"
+    assert p.stat().st_size > 0
+    assert p.name.startswith("t_dual-")
+    assert "score_vs_dpd" in p.name
+
+
+def test_render_chart_trend_dual_returns_none_when_only_one_resolvable_series(tmp_path):
+    """If one of the two y_fields is absent or all non-numeric, the dual
+    layout collapses — bail rather than silently render a misleading
+    single-line chart labelled `trend_dual`."""
+    kp = {
+        "topic": "broken_dual",
+        "viz": {
+            "kind": "trend_dual",
+            "x_field": "period",
+            "y_fields": ["score", "missing"],
+        },
+        "numbers": [
+            {"period": "2024-11", "score": 720},
+            {"period": "2024-12", "score": 705},
+        ],
+    }
+    assert render_chart(kp, tmp_path / "charts", turn_id="t1") is None
