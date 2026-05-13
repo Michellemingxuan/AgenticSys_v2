@@ -250,3 +250,51 @@ def test_render_chart_trend_dual_returns_none_when_only_one_resolvable_series(tm
         ],
     }
     assert render_chart(kp, tmp_path / "charts", turn_id="t1") is None
+
+
+def test_render_chart_writes_png_for_trend_grid(tmp_path):
+    """trend_grid stacks one panel per y_field with a shared x-axis.
+    Mismatched scales (score 0-1000 vs dpd 0-90 vs count 0-50) render
+    correctly because each panel has its own y-scale."""
+    kp = {
+        "topic": "credit_risk_panel",
+        "viz": {
+            "kind": "trend_grid",
+            "x_field": "period",
+            "y_fields": ["tsr", "cdss", "transaction_count"],
+        },
+        "numbers": [
+            {"period": "2024-11", "tsr": 720, "cdss": 680, "transaction_count": 42},
+            {"period": "2024-12", "tsr": 705, "cdss": 665, "transaction_count": 38},
+            {"period": "2025-01", "tsr": 690, "cdss": 650, "transaction_count": 35},
+            {"period": "2025-02", "tsr": 680, "cdss": 640, "transaction_count": 31},
+        ],
+        "captured_at_turn": "t_grid",
+    }
+    out = render_chart(kp, tmp_path / "charts", turn_id="t_grid")
+    assert out is not None
+    p = Path(out)
+    assert p.exists()
+    assert p.suffix == ".png"
+    assert p.stat().st_size > 0
+    assert "credit_risk_panel" in p.name
+
+
+def test_render_chart_trend_grid_drops_unparseable_series_silently(tmp_path):
+    """If some series have only non-numeric values, those panels should
+    drop out but the chart still renders for the panels that DID parse —
+    same convention as multi-series `trend`."""
+    kp = {
+        "topic": "partial_grid",
+        "viz": {
+            "kind": "trend_grid",
+            "x_field": "period",
+            "y_fields": ["score", "broken"],
+        },
+        "numbers": [
+            {"period": "2024-11", "score": 720, "broken": "n/a"},
+            {"period": "2024-12", "score": 705, "broken": None},
+        ],
+    }
+    out = render_chart(kp, tmp_path / "charts", turn_id="t1")
+    assert out is not None  # score series rendered in its own panel

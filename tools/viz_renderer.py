@@ -29,7 +29,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 
-_SUPPORTED_KINDS = {"trend", "bar", "share", "trend_dual"}
+_SUPPORTED_KINDS = {"trend", "bar", "share", "trend_dual", "trend_grid"}
 
 # Used to slugify topic names for filesystem safety. We keep alphanumerics +
 # underscores; everything else collapses to a single underscore.
@@ -253,157 +253,204 @@ def render_chart(
     y_label = ", ".join(yf for yf, _ in extracted) if is_multi else extracted[0][0]
 
     try:
-        fig, ax = plt.subplots(figsize=(8.5, 4.5), dpi=140)
+        if kind == "trend_grid":
+            # One panel per resolved series, vertical stack, shared x-axis.
+            n_panels = len(extracted)
+            fig, axes = plt.subplots(
+                n_panels, 1, sharex=True,
+                figsize=(8.5, 2.2 * n_panels), dpi=140,
+            )
+            # plt.subplots returns a single Axes when n_panels == 1; wrap
+            # to a list so the per-panel loop below is uniform.
+            if n_panels == 1:
+                axes = [axes]
 
-        if kind == "trend":
             xs_first = extracted[0][1][0]
-            # Pin every data point as an x-tick so the rendered axis shows
-            # the full range from the first to the last entry — fixes the
-            # "claim says 2024-11..2025-07 but axis shows fewer months"
-            # mismatch the reviewer hits when matplotlib auto-thins ticks.
             indices = list(range(len(xs_first)))
+            n = len(xs_first)
+            stride = max(1, n // 10)
+            visible_xticklabels = [
+                str(xs_first[i]) if (i % stride == 0 or i == n - 1) else ""
+                for i in indices
+            ]
+
             for i, (yf, (_, ys)) in enumerate(extracted):
+                panel_ax = axes[i]
                 color = _PALETTE[i % len(_PALETTE)]
-                ax.plot(indices, ys, marker="o", linewidth=2.0, markersize=5.5,
-                        color=color, label=yf if is_multi else None)
-            ax.set_xticks(indices)
-            # Thin to ~10 visible labels max so dense series stay readable
-            # without dropping the first / last (those are anchor points).
-            n = len(xs_first)
-            stride = max(1, n // 10)
-            visible = [str(xs_first[i]) if (i % stride == 0 or i == n - 1) else ""
-                       for i in indices]
-            ax.set_xticklabels(visible, rotation=30, ha="right", fontsize=9)
-            ax.set_xlabel(x_field)
-            ax.set_ylabel(y_label)
-            if is_multi:
-                ax.legend(loc="best", frameon=False, fontsize=9)
-            ax.yaxis.set_major_formatter(
-                plt.FuncFormatter(lambda v, _p: _format_axis_value(v))
-            )
+                panel_ax.plot(indices, ys, marker="o", linewidth=2.0,
+                              markersize=5.0, color=color)
+                panel_ax.set_ylabel(yf)
+                panel_ax.yaxis.set_major_formatter(
+                    plt.FuncFormatter(lambda v, _p: _format_axis_value(v)))
+                _apply_style(panel_ax, fig)
+                # Hide x-tick labels on every panel except the bottom one
+                # so the shared x is only labelled once at the foot.
+                if i < n_panels - 1:
+                    panel_ax.tick_params(labelbottom=False)
 
-        elif kind == "bar":
-            xs_first = extracted[0][1][0]
-            n_groups = len(xs_first)
-            n_series = len(extracted)
-            indices = list(range(n_groups))
-            if n_series == 1:
-                yf, (_, ys) = extracted[0]
-                ax.bar(indices, ys, color=_PALETTE[0], width=0.6)
-            else:
-                # Grouped bars side-by-side per x value.
-                bar_w = 0.8 / n_series
+            # Bottom panel gets the rotated x-tick labels + axis label.
+            bottom_ax = axes[-1]
+            bottom_ax.set_xticks(indices)
+            bottom_ax.set_xticklabels(visible_xticklabels, rotation=30,
+                                      ha="right", fontsize=9)
+            bottom_ax.set_xlabel(x_field)
+
+            # Keep panels visually distinct but tight.
+            fig.tight_layout(h_pad=0.6)
+            fig.savefig(out_path, format="png", bbox_inches="tight",
+                        facecolor=fig.get_facecolor())
+        else:
+            fig, ax = plt.subplots(figsize=(8.5, 4.5), dpi=140)
+
+            if kind == "trend":
+                xs_first = extracted[0][1][0]
+                # Pin every data point as an x-tick so the rendered axis shows
+                # the full range from the first to the last entry — fixes the
+                # "claim says 2024-11..2025-07 but axis shows fewer months"
+                # mismatch the reviewer hits when matplotlib auto-thins ticks.
+                indices = list(range(len(xs_first)))
                 for i, (yf, (_, ys)) in enumerate(extracted):
-                    offsets = [x + (i - (n_series - 1) / 2) * bar_w for x in indices]
-                    ax.bar(offsets, ys, width=bar_w * 0.95,
-                           color=_PALETTE[i % len(_PALETTE)], label=yf)
-                ax.legend(loc="best", frameon=False, fontsize=9)
-            ax.set_xticks(indices)
-            ax.set_xticklabels([str(x) for x in xs_first], rotation=30,
-                               ha="right", fontsize=9)
-            ax.set_xlabel(x_field)
-            ax.set_ylabel(y_label)
-            ax.grid(True, axis="y", linestyle=":", linewidth=0.8,
-                    color="#dadce0", alpha=0.9)
-            ax.grid(False, axis="x")
-            ax.yaxis.set_major_formatter(
-                plt.FuncFormatter(lambda v, _p: _format_axis_value(v))
-            )
+                    color = _PALETTE[i % len(_PALETTE)]
+                    ax.plot(indices, ys, marker="o", linewidth=2.0, markersize=5.5,
+                            color=color, label=yf if is_multi else None)
+                ax.set_xticks(indices)
+                # Thin to ~10 visible labels max so dense series stay readable
+                # without dropping the first / last (those are anchor points).
+                n = len(xs_first)
+                stride = max(1, n // 10)
+                visible = [str(xs_first[i]) if (i % stride == 0 or i == n - 1) else ""
+                           for i in indices]
+                ax.set_xticklabels(visible, rotation=30, ha="right", fontsize=9)
+                ax.set_xlabel(x_field)
+                ax.set_ylabel(y_label)
+                if is_multi:
+                    ax.legend(loc="best", frameon=False, fontsize=9)
+                ax.yaxis.set_major_formatter(
+                    plt.FuncFormatter(lambda v, _p: _format_axis_value(v))
+                )
 
-        elif kind == "trend_dual":
-            # Two series on twin y-axes. trend_dual ENFORCES that both
-            # extracted series exist and align on the same x — if one is
-            # missing or all-unparseable, _extract_xy returned None and the
-            # extracted list is shorter than 2; bail to None so we don't
-            # silently mislabel a 1-line chart as `trend_dual`.
-            if len(extracted) != 2:
-                if logger is not None:
-                    logger.log("viz_render_skipped",
-                               {"reason": "trend_dual_needs_two_series",
-                                "topic": kp.get("topic"),
-                                "n_resolved": len(extracted)})
-                try:
-                    plt.close(fig)
-                except Exception:
-                    pass
-                return None
+            elif kind == "bar":
+                xs_first = extracted[0][1][0]
+                n_groups = len(xs_first)
+                n_series = len(extracted)
+                indices = list(range(n_groups))
+                if n_series == 1:
+                    yf, (_, ys) = extracted[0]
+                    ax.bar(indices, ys, color=_PALETTE[0], width=0.6)
+                else:
+                    # Grouped bars side-by-side per x value.
+                    bar_w = 0.8 / n_series
+                    for i, (yf, (_, ys)) in enumerate(extracted):
+                        offsets = [x + (i - (n_series - 1) / 2) * bar_w for x in indices]
+                        ax.bar(offsets, ys, width=bar_w * 0.95,
+                               color=_PALETTE[i % len(_PALETTE)], label=yf)
+                    ax.legend(loc="best", frameon=False, fontsize=9)
+                ax.set_xticks(indices)
+                ax.set_xticklabels([str(x) for x in xs_first], rotation=30,
+                                   ha="right", fontsize=9)
+                ax.set_xlabel(x_field)
+                ax.set_ylabel(y_label)
+                ax.grid(True, axis="y", linestyle=":", linewidth=0.8,
+                        color="#dadce0", alpha=0.9)
+                ax.grid(False, axis="x")
+                ax.yaxis.set_major_formatter(
+                    plt.FuncFormatter(lambda v, _p: _format_axis_value(v))
+                )
 
-            (yf1, (xs_first, ys1)) = extracted[0]
-            (yf2, (_, ys2)) = extracted[1]
-            indices = list(range(len(xs_first)))
+            elif kind == "trend_dual":
+                # Two series on twin y-axes. trend_dual ENFORCES that both
+                # extracted series exist and align on the same x — if one is
+                # missing or all-unparseable, _extract_xy returned None and the
+                # extracted list is shorter than 2; bail to None so we don't
+                # silently mislabel a 1-line chart as `trend_dual`.
+                if len(extracted) != 2:
+                    if logger is not None:
+                        logger.log("viz_render_skipped",
+                                   {"reason": "trend_dual_needs_two_series",
+                                    "topic": kp.get("topic"),
+                                    "n_resolved": len(extracted)})
+                    try:
+                        plt.close(fig)
+                    except Exception:
+                        pass
+                    return None
 
-            primary_color = _PALETTE[0]
-            secondary_color = _PALETTE[1]
+                (yf1, (xs_first, ys1)) = extracted[0]
+                (yf2, (_, ys2)) = extracted[1]
+                indices = list(range(len(xs_first)))
 
-            line1, = ax.plot(indices, ys1, marker="o", linewidth=2.0,
-                             markersize=5.5, color=primary_color, label=yf1)
-            ax2 = ax.twinx()
-            line2, = ax2.plot(indices, ys2, marker="s", linewidth=2.0,
-                              markersize=5.5, color=secondary_color, label=yf2)
+                primary_color = _PALETTE[0]
+                secondary_color = _PALETTE[1]
 
-            ax.set_xticks(indices)
-            n = len(xs_first)
-            stride = max(1, n // 10)
-            visible = [str(xs_first[i]) if (i % stride == 0 or i == n - 1) else ""
-                       for i in indices]
-            ax.set_xticklabels(visible, rotation=30, ha="right", fontsize=9)
-            ax.set_xlabel(x_field)
+                line1, = ax.plot(indices, ys1, marker="o", linewidth=2.0,
+                                 markersize=5.5, color=primary_color, label=yf1)
+                ax2 = ax.twinx()
+                line2, = ax2.plot(indices, ys2, marker="s", linewidth=2.0,
+                                  markersize=5.5, color=secondary_color, label=yf2)
 
-            # Label each y-axis with its field name, color-matched to the
-            # corresponding line so the reader maps line→axis at a glance.
-            ax.set_ylabel(yf1, color=primary_color)
-            ax2.set_ylabel(yf2, color=secondary_color)
-            ax.tick_params(axis="y", colors=primary_color)
-            ax2.tick_params(axis="y", colors=secondary_color)
+                ax.set_xticks(indices)
+                n = len(xs_first)
+                stride = max(1, n // 10)
+                visible = [str(xs_first[i]) if (i % stride == 0 or i == n - 1) else ""
+                           for i in indices]
+                ax.set_xticklabels(visible, rotation=30, ha="right", fontsize=9)
+                ax.set_xlabel(x_field)
 
-            # Compact value formatting on both axes.
-            ax.yaxis.set_major_formatter(
-                plt.FuncFormatter(lambda v, _p: _format_axis_value(v)))
-            ax2.yaxis.set_major_formatter(
-                plt.FuncFormatter(lambda v, _p: _format_axis_value(v)))
+                # Label each y-axis with its field name, color-matched to the
+                # corresponding line so the reader maps line→axis at a glance.
+                ax.set_ylabel(yf1, color=primary_color)
+                ax2.set_ylabel(yf2, color=secondary_color)
+                ax.tick_params(axis="y", colors=primary_color)
+                ax2.tick_params(axis="y", colors=secondary_color)
 
-            # Combined legend — both lines named in one box.
-            ax.legend(handles=[line1, line2], loc="best",
-                      frameon=False, fontsize=9)
+                # Compact value formatting on both axes.
+                ax.yaxis.set_major_formatter(
+                    plt.FuncFormatter(lambda v, _p: _format_axis_value(v)))
+                ax2.yaxis.set_major_formatter(
+                    plt.FuncFormatter(lambda v, _p: _format_axis_value(v)))
 
-            # Hide the twin axis's top/right spines for a clean look.
-            ax2.spines["top"].set_visible(False)
-            ax2.spines["right"].set_color("#9aa0a6")
-            ax2.spines["right"].set_linewidth(0.8)
+                # Combined legend — both lines named in one box.
+                ax.legend(handles=[line1, line2], loc="best",
+                          frameon=False, fontsize=9)
 
-        else:  # "share" — horizontal bar, single series only
-            yf, (xs, ys) = extracted[0]
-            order = sorted(range(len(xs)), key=lambda i: ys[i], reverse=True)
-            xs_sorted = [xs[i] for i in order]
-            ys_sorted = [ys[i] for i in order]
-            bars = ax.barh(range(len(xs_sorted)), ys_sorted,
-                           color=_PALETTE[0], height=0.65)
-            # Inline value labels at the end of each bar — much easier to
-            # read than squinting at the x-axis on dense breakdowns.
-            max_y = max(ys_sorted) if ys_sorted else 1
-            for bar, v in zip(bars, ys_sorted):
-                ax.text(bar.get_width() + max_y * 0.01,
-                        bar.get_y() + bar.get_height() / 2,
-                        _format_axis_value(v),
-                        va="center", ha="left", fontsize=9, color="#3c4043")
-            ax.set_yticks(range(len(xs_sorted)))
-            ax.set_yticklabels([str(x) for x in xs_sorted], fontsize=9)
-            ax.invert_yaxis()
-            ax.set_xlabel(yf)
-            ax.set_ylabel("")
-            ax.grid(True, axis="x", linestyle=":", linewidth=0.8,
-                    color="#dadce0", alpha=0.9)
-            ax.grid(False, axis="y")
-            ax.xaxis.set_major_formatter(
-                plt.FuncFormatter(lambda v, _p: _format_axis_value(v))
-            )
-            # Pad right margin for the value labels.
-            ax.set_xlim(right=max_y * 1.18)
+                # Hide the twin axis's top/right spines for a clean look.
+                ax2.spines["top"].set_visible(False)
+                ax2.spines["right"].set_color("#9aa0a6")
+                ax2.spines["right"].set_linewidth(0.8)
 
-        _apply_style(ax, fig)
-        fig.tight_layout()
-        fig.savefig(out_path, format="png", bbox_inches="tight",
-                    facecolor=fig.get_facecolor())
+            else:  # "share" — horizontal bar, single series only
+                yf, (xs, ys) = extracted[0]
+                order = sorted(range(len(xs)), key=lambda i: ys[i], reverse=True)
+                xs_sorted = [xs[i] for i in order]
+                ys_sorted = [ys[i] for i in order]
+                bars = ax.barh(range(len(xs_sorted)), ys_sorted,
+                               color=_PALETTE[0], height=0.65)
+                # Inline value labels at the end of each bar — much easier to
+                # read than squinting at the x-axis on dense breakdowns.
+                max_y = max(ys_sorted) if ys_sorted else 1
+                for bar, v in zip(bars, ys_sorted):
+                    ax.text(bar.get_width() + max_y * 0.01,
+                            bar.get_y() + bar.get_height() / 2,
+                            _format_axis_value(v),
+                            va="center", ha="left", fontsize=9, color="#3c4043")
+                ax.set_yticks(range(len(xs_sorted)))
+                ax.set_yticklabels([str(x) for x in xs_sorted], fontsize=9)
+                ax.invert_yaxis()
+                ax.set_xlabel(yf)
+                ax.set_ylabel("")
+                ax.grid(True, axis="x", linestyle=":", linewidth=0.8,
+                        color="#dadce0", alpha=0.9)
+                ax.grid(False, axis="y")
+                ax.xaxis.set_major_formatter(
+                    plt.FuncFormatter(lambda v, _p: _format_axis_value(v))
+                )
+                # Pad right margin for the value labels.
+                ax.set_xlim(right=max_y * 1.18)
+
+            _apply_style(ax, fig)
+            fig.tight_layout()
+            fig.savefig(out_path, format="png", bbox_inches="tight",
+                        facecolor=fig.get_facecolor())
     except Exception as exc:  # noqa: BLE001
         if logger is not None:
             logger.log("viz_render_failed",
