@@ -43,10 +43,13 @@ def build_make_chart_tool(specialist_name: str):
             "reasoning trace (NOT inline in the chat answer). Use AFTER a "
             "data tool (summarize_trend / summarize_by_group / "
             "aggregate_column) produced the numbers; pass that series via "
-            "`points`. Multi-series charts (e.g. spend vs payment over "
-            "time): pass each metric as a key in every points dict, then "
-            "list them all in `y_fields`. Be selective — only chart when "
-            "the visual conveys what numbers alone can't."
+            "`points`. Multiple variables on the same x-axis (typically "
+            "time) belong on ONE chart — pick the kind by scale: `trend` "
+            "for same-scale series on a shared y-axis; `trend_dual` for "
+            "exactly 2 series on different but related scales (twin y); "
+            "`trend_grid` for 3+ series on different scales (N stacked "
+            "panels). Be selective — only chart when the visual conveys "
+            "what numbers alone can't."
         ),
     )
     async def make_chart(
