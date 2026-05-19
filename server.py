@@ -162,6 +162,18 @@ class CaseSession:
     # NEXT turn's runner once it acquires the lock — so the signal
     # only ever applies to "whoever is currently mid-flight".
     cancel_in_flight: threading.Event = field(default_factory=threading.Event)
+    # (event_loop, task) tuple for the currently-running turn, or None.
+    # Set by `_spawn_turn._runner` after building the per-turn asyncio
+    # loop+task; cleared in the same runner's `finally`. `post_rewind`
+    # reads this and uses `loop.call_soon_threadsafe(task.cancel)` to
+    # propagate a CancelledError INTO the task — which interrupts the
+    # in-flight LLM call directly at the underlying `httpx` await,
+    # not just at the next Python-level checkpoint. Pair with the
+    # cooperative `cancel_in_flight` signal: aggressive task.cancel()
+    # handles the await-mid-LLM case; the event handles purely-sync
+    # code paths that don't yield to the loop. Race-safe by design
+    # — calling `task.cancel()` on a completed task is a no-op.
+    current_inflight: Any = None
     # SSE subscribers — each one owns a queue.Queue of (event_name, payload).
     subscribers: list[queue.Queue] = field(default_factory=list)
     subscribers_lock: threading.Lock = field(default_factory=threading.Lock)
@@ -1741,54 +1753,97 @@ def _spawn_turn(sess: CaseSession, turn_id: str, question: str) -> None:
             # a clear error to the user, and fall through to the
             # `finally` clause that releases the lock so the NEXT
             # question can proceed.
+            # Use an explicit event loop instead of `asyncio.run` so
+            # `post_rewind` can `loop.call_soon_threadsafe(task.cancel)`
+            # to interrupt the in-flight LLM call mid-await. Without
+            # this, cooperative cancellation only fires at Python-level
+            # checkpoints — but the typical "stuck after rewind" case
+            # has the turn parked inside an `httpx` await, which a
+            # checkpoint can't interrupt. Direct task.cancel() does.
+            loop = asyncio.new_event_loop()
             try:
-                asyncio.run(asyncio.wait_for(
+                asyncio.set_event_loop(loop)
+                task = loop.create_task(asyncio.wait_for(
                     _run_turn_streamed(
                         sess, turn_id, question, started_at=started_at,
                     ),
                     timeout=_TURN_WALL_CLOCK_S,
                 ))
-            except asyncio.TimeoutError:
-                sess.logger.log("turn_wall_clock_timeout", {
-                    "turn_id": turn_id,
-                    "limit_s": _TURN_WALL_CLOCK_S,
-                    "note": ("turn exceeded the per-turn budget — most "
-                             "likely a hung orchestrator LLM call. "
-                             "Lock released; next question can run."),
-                })
-                ts = int(time.time() * 1000)
-                sess.emit("error", {
-                    "turn_id": turn_id,
-                    "message": (
-                        f"Turn exceeded the {_TURN_WALL_CLOCK_S:.0f}s budget "
-                        f"— most likely a hung LLM call. The lock has been "
-                        f"released so your next question can proceed."
-                    ),
-                    "recoverable": False,
-                })
-                sess.emit("turn_done", {
-                    "turn_id": turn_id,
-                    "ended_at": ts,
-                    "duration_ms": ts - started_at,
-                    "outcome": "timeout",
-                })
-            except _TurnAborted as exc:
-                # Cooperative cancellation fired at a phase-boundary
-                # checkpoint inside `_run_turn_streamed` (typically
-                # triggered by `post_rewind`). Emit a clean turn_done so
-                # the frontend closes this turn's row; the lock release
-                # in the outer finally unblocks the queued new turn.
-                sess.logger.log("turn_aborted", {
-                    "turn_id": turn_id,
-                    "reason": str(exc),
-                })
-                ts = int(time.time() * 1000)
-                sess.emit("turn_done", {
-                    "turn_id": turn_id,
-                    "ended_at": ts,
-                    "duration_ms": ts - started_at,
-                    "outcome": "aborted",
-                })
+                # Publish (loop, task) so post_rewind can cancel from
+                # another thread. Race-safe — cancelling a completed
+                # task is a no-op.
+                sess.current_inflight = (loop, task)
+                try:
+                    loop.run_until_complete(task)
+                except asyncio.TimeoutError:
+                    sess.logger.log("turn_wall_clock_timeout", {
+                        "turn_id": turn_id,
+                        "limit_s": _TURN_WALL_CLOCK_S,
+                        "note": ("turn exceeded the per-turn budget — most "
+                                 "likely a hung orchestrator LLM call. "
+                                 "Lock released; next question can run."),
+                    })
+                    ts = int(time.time() * 1000)
+                    sess.emit("error", {
+                        "turn_id": turn_id,
+                        "message": (
+                            f"Turn exceeded the {_TURN_WALL_CLOCK_S:.0f}s "
+                            f"budget — most likely a hung LLM call. The "
+                            f"lock has been released so your next question "
+                            f"can proceed."
+                        ),
+                        "recoverable": False,
+                    })
+                    sess.emit("turn_done", {
+                        "turn_id": turn_id,
+                        "ended_at": ts,
+                        "duration_ms": ts - started_at,
+                        "outcome": "timeout",
+                    })
+                except (asyncio.CancelledError, _TurnAborted) as exc:
+                    # Either: aggressive task.cancel() from post_rewind
+                    # propagated as CancelledError, or a phase-boundary
+                    # checkpoint raised _TurnAborted (cooperative path).
+                    # Treat both the same — emit a clean turn_done so the
+                    # frontend closes this turn's row; the lock release
+                    # in the outer finally unblocks the queued new turn.
+                    reason = "task_cancelled" if isinstance(exc, asyncio.CancelledError) else str(exc)
+                    sess.logger.log("turn_aborted", {
+                        "turn_id": turn_id,
+                        "reason": reason,
+                    })
+                    ts = int(time.time() * 1000)
+                    sess.emit("turn_done", {
+                        "turn_id": turn_id,
+                        "ended_at": ts,
+                        "duration_ms": ts - started_at,
+                        "outcome": "aborted",
+                    })
+            finally:
+                # Drain leftover loop state: cancel any background tasks
+                # still pending (e.g. fire-and-forget distillers that
+                # didn't complete before cancellation), shut down async
+                # generators, then close the loop. Same hygiene
+                # `asyncio.run` does, exposed here because we manage the
+                # loop manually.
+                try:
+                    pending = [
+                        t for t in asyncio.all_tasks(loop) if not t.done()
+                    ]
+                    for t in pending:
+                        t.cancel()
+                    if pending:
+                        loop.run_until_complete(asyncio.gather(
+                            *pending, return_exceptions=True,
+                        ))
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+                except Exception:
+                    pass
+                try:
+                    loop.close()
+                except Exception:
+                    pass
+                sess.current_inflight = None
         finally:
             sess.turn_lock.release()
     threading.Thread(target=_runner, daemon=True, name=f"turn-{turn_id[:8]}").start()
@@ -1851,17 +1906,37 @@ def post_rewind(case_id: str):
     n_kb_specialists = len(sess.specialist_kb)
     n_kb_total = sum(len(v) for v in sess.specialist_kb.values())
     sess.specialist_kb.clear()
-    # If a turn is in flight when the user rewinds, signal it to abort
-    # at its next phase-boundary checkpoint. Without this, the queued
-    # new question waits for the abandoned turn's fences to fire (up to
-    # 360s) before getting any chance to run — observable user symptom:
-    # "I rewound and asked a new question, but it stayed stuck at
-    # question screening forever." `Lock.locked()` is the safe
-    # cross-thread check (no acquire required); the runner clears the
-    # event after acquiring the lock so this only affects whoever is
-    # currently mid-flight.
+    # If a turn is in flight when the user rewinds, abort it on two
+    # tracks (defense in depth):
+    #   1. Aggressive: `loop.call_soon_threadsafe(task.cancel)`
+    #      propagates CancelledError INTO the asyncio task, which
+    #      interrupts the current `httpx`/LLM await directly. This
+    #      handles the typical "mid-LLM-call hang" case where a
+    #      Python-level checkpoint can't fire because the task is
+    #      parked inside a network read.
+    #   2. Cooperative: setting `cancel_in_flight` so the next
+    #      Python-level checkpoint inside `_run_turn_streamed`
+    #      short-circuits. Handles the rare case where the task is
+    #      inside synchronous code that doesn't yield to the loop
+    #      (so direct cancel can't deliver until the next await).
+    # Without either, the queued new question would wait up to the
+    # 360s turn fence — visible user symptom: "I rewound and asked
+    # again, but it's still stuck at screening."
     aborted_in_flight = sess.turn_lock.locked()
+    cancelled_task = False
     if aborted_in_flight:
+        inflight = sess.current_inflight
+        if isinstance(inflight, tuple) and len(inflight) == 2:
+            loop, task = inflight
+            try:
+                loop.call_soon_threadsafe(task.cancel)
+                cancelled_task = True
+            except Exception:
+                # Loop already closed / task already done — fall back
+                # to cooperative-only. The runner's `finally` clears
+                # `current_inflight` so a stale handle is the only
+                # plausible cause.
+                pass
         sess.cancel_in_flight.set()
     sess.logger.log("rewind", {
         "message_id": msg_id, "case_id": case_id,
@@ -1869,6 +1944,7 @@ def post_rewind(case_id: str):
         "kb_specialists_cleared": n_kb_specialists,
         "kb_kps_cleared": n_kb_total,
         "aborted_in_flight_turn": aborted_in_flight,
+        "task_cancel_dispatched": cancelled_task,
     })
     return ("", 204)
 

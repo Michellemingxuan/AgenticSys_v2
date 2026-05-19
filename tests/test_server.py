@@ -210,6 +210,48 @@ def test_case_session_emit_drops_oldest_when_subscriber_queue_full():
     assert sub_q.get_nowait() == ("new", {"n": 2})
 
 
+def test_case_session_exposes_inflight_cancellation_fields():
+    """`post_rewind` reaches into the session to abort the in-flight
+    turn. Two pieces must exist on every CaseSession or rewind silently
+    falls back to lock-wait-and-pray:
+
+      - `cancel_in_flight: threading.Event` — cooperative signal that
+        `_run_turn_streamed` checkpoints honor between awaits.
+      - `current_inflight` — `(loop, task)` tuple set by the runner so
+        `post_rewind` can `loop.call_soon_threadsafe(task.cancel)` and
+        interrupt the active LLM await directly. Default `None` when
+        no turn is in flight.
+
+    Regression test: ensure these aren't removed when the dataclass
+    is reorganized."""
+    import threading
+
+    sess = server.CaseSession(
+        case_id="C",
+        gateway=None,
+        catalog=None,
+        clients=None,
+        pillar_yaml={},
+        chat_agent=None,
+        logger=None,
+    )
+    assert isinstance(sess.cancel_in_flight, threading.Event)
+    assert sess.cancel_in_flight.is_set() is False
+    assert sess.current_inflight is None
+
+
+def test_turn_aborted_class_is_a_distinct_exception():
+    """`_TurnAborted` is the signal raised from cooperative checkpoints
+    inside `_run_turn_streamed`. It must be a subclass of Exception
+    (so the runner's catch reaches it) but distinct from
+    `asyncio.CancelledError` (which is also caught, but logged with
+    a different reason) and from `_TurnAborted` getting swept up by
+    a bare `except Exception` somewhere upstream."""
+    import asyncio
+    assert issubclass(server._TurnAborted, Exception)
+    assert not issubclass(server._TurnAborted, asyncio.CancelledError)
+
+
 # ── Phase 2 — turn-chart collection + answer-text appending ──────────────────
 
 
