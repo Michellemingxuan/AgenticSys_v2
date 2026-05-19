@@ -808,107 +808,127 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
     # interactive SVG read consistently.
     _LABEL_FMT = ".3~s"
 
-    # Map our `kind` vocabulary to Vega-Lite marks. Every chart kind
-    # layers a `text` mark over the primary mark so the exact value
-    # appears next to each datapoint / bar — matches the matplotlib
-    # path's `_annotate_points` / `_annotate_bars` / inline `share`
-    # labels so the interactive chart never reads as less informative
-    # than the static PNG.
+    # Mark policy: single-series kinds keep inline `text` value labels
+    # (low collision risk, reads at a glance). Multi-series kinds drop
+    # the static text labels and use `tooltip` encoding so the reviewer
+    # sees the exact number on HOVER — avoids the overlapping-labels
+    # mess that real cases produced when two lines + their value
+    # annotations crowded the same x positions (case-aefd66 turn
+    # `5b8f94089581` cdss_tsr_trajectory chart). Legend placement on
+    # multi-series goes `top` so the chart body uses the full width
+    # instead of giving 20% of horizontal real estate to a sidebar.
     if kind == "trend":
         y_value_field = "value" if is_multi else primary_y
         line_enc: dict = {
             "x": {"field": x_field, "type": "ordinal"},
             "y": {"field": y_value_field, "type": "quantitative"},
-        }
-        text_enc: dict = {
-            "x": {"field": x_field, "type": "ordinal"},
-            "y": {"field": y_value_field, "type": "quantitative"},
-            "text": {"field": y_value_field, "type": "quantitative",
-                     "format": _LABEL_FMT},
+            "tooltip": [
+                {"field": x_field, "type": "ordinal"},
+                {"field": y_value_field, "type": "quantitative",
+                 "format": _LABEL_FMT},
+            ],
         }
         if is_multi:
             spec["transform"] = [{"fold": y_fields, "as": ["series", "value"]}]
-            line_enc["color"] = {"field": "series", "type": "nominal"}
-            text_enc["color"] = {"field": "series", "type": "nominal"}
-        spec["layer"] = [
-            {"mark": {"type": "line", "point": True}, "encoding": line_enc},
-            {"mark": {"type": "text", "dy": -10, "fontSize": 10,
-                      "fontWeight": 600}, "encoding": text_enc},
-        ]
+            line_enc["color"] = {"field": "series", "type": "nominal",
+                                 "legend": {"orient": "top"}}
+            # In multi-series, the tooltip also names which series the
+            # hovered point belongs to.
+            line_enc["tooltip"].insert(0, {"field": "series", "type": "nominal"})
+            spec["layer"] = [
+                {"mark": {"type": "line", "point": True}, "encoding": line_enc},
+            ]
+        else:
+            # Single-series: keep the inline value labels — no overlap.
+            text_enc: dict = {
+                "x": {"field": x_field, "type": "ordinal"},
+                "y": {"field": y_value_field, "type": "quantitative"},
+                "text": {"field": y_value_field, "type": "quantitative",
+                         "format": _LABEL_FMT},
+            }
+            spec["layer"] = [
+                {"mark": {"type": "line", "point": True}, "encoding": line_enc},
+                {"mark": {"type": "text", "dy": -10, "fontSize": 10,
+                          "fontWeight": 600}, "encoding": text_enc},
+            ]
     elif kind == "bar":
         y_value_field = "value" if is_multi else primary_y
         bar_enc: dict = {
             "x": {"field": x_field, "type": "ordinal"},
             "y": {"field": y_value_field, "type": "quantitative"},
-        }
-        text_enc = {
-            "x": {"field": x_field, "type": "ordinal"},
-            "y": {"field": y_value_field, "type": "quantitative"},
-            "text": {"field": y_value_field, "type": "quantitative",
-                     "format": _LABEL_FMT},
+            "tooltip": [
+                {"field": x_field, "type": "ordinal"},
+                {"field": y_value_field, "type": "quantitative",
+                 "format": _LABEL_FMT},
+            ],
         }
         if is_multi:
             spec["transform"] = [{"fold": y_fields, "as": ["series", "value"]}]
-            bar_enc["color"] = {"field": "series", "type": "nominal"}
+            bar_enc["color"] = {"field": "series", "type": "nominal",
+                                "legend": {"orient": "top"}}
             bar_enc["xOffset"] = {"field": "series", "type": "nominal"}
-            text_enc["color"] = {"field": "series", "type": "nominal"}
-            text_enc["xOffset"] = {"field": "series", "type": "nominal"}
-        spec["layer"] = [
-            {"mark": "bar", "encoding": bar_enc},
-            {"mark": {"type": "text", "dy": -6, "fontSize": 10,
-                      "fontWeight": 600}, "encoding": text_enc},
-        ]
+            bar_enc["tooltip"].insert(0, {"field": "series", "type": "nominal"})
+            spec["layer"] = [{"mark": "bar", "encoding": bar_enc}]
+        else:
+            # Single-series bar: keep inline value labels (no overlap).
+            text_enc = {
+                "x": {"field": x_field, "type": "ordinal"},
+                "y": {"field": y_value_field, "type": "quantitative"},
+                "text": {"field": y_value_field, "type": "quantitative",
+                         "format": _LABEL_FMT},
+            }
+            spec["layer"] = [
+                {"mark": "bar", "encoding": bar_enc},
+                {"mark": {"type": "text", "dy": -6, "fontSize": 10,
+                          "fontWeight": 600}, "encoding": text_enc},
+            ]
     elif kind == "trend_dual":
-        # Layered spec — two line marks, each bound to its own y_field,
-        # with independent y scales so the two series don't have to share
-        # a numeric range. Each line also gets a text overlay with the
-        # exact value next to every point.
+        # Two line marks, each bound to its own y_field, with independent
+        # y scales (`resolve.scale.y = independent`). The SECOND axis is
+        # explicitly `orient='right'` so the two y-axes show one on each
+        # side of the chart — pre-fix they both rendered on the left,
+        # overlapping each other's title (case-aefd66 chart). Tooltip on
+        # hover replaces the static text labels which used to overlap
+        # between the two lines.
         y_left, y_right = y_fields[0], y_fields[1]
         spec["layer"] = [
             {
                 "mark": {"type": "line", "point": True},
                 "encoding": {
                     "x": {"field": x_field, "type": "ordinal"},
-                    "y": {"field": y_left, "type": "quantitative"},
-                    "color": {"datum": y_left, "type": "nominal"},
-                },
-            },
-            {
-                "mark": {"type": "text", "dy": -10, "fontSize": 10,
-                         "fontWeight": 600},
-                "encoding": {
-                    "x": {"field": x_field, "type": "ordinal"},
-                    "y": {"field": y_left, "type": "quantitative"},
-                    "color": {"datum": y_left, "type": "nominal"},
-                    "text": {"field": y_left, "type": "quantitative",
-                             "format": _LABEL_FMT},
+                    "y": {"field": y_left, "type": "quantitative",
+                          "axis": {"orient": "left", "title": y_left}},
+                    "color": {"datum": y_left, "type": "nominal",
+                              "legend": {"orient": "top", "title": None}},
+                    "tooltip": [
+                        {"field": x_field, "type": "ordinal"},
+                        {"field": y_left, "type": "quantitative",
+                         "format": _LABEL_FMT, "title": y_left},
+                    ],
                 },
             },
             {
                 "mark": {"type": "line", "point": True},
                 "encoding": {
                     "x": {"field": x_field, "type": "ordinal"},
-                    "y": {"field": y_right, "type": "quantitative"},
-                    "color": {"datum": y_right, "type": "nominal"},
-                },
-            },
-            {
-                "mark": {"type": "text", "dy": -10, "fontSize": 10,
-                         "fontWeight": 600},
-                "encoding": {
-                    "x": {"field": x_field, "type": "ordinal"},
-                    "y": {"field": y_right, "type": "quantitative"},
-                    "color": {"datum": y_right, "type": "nominal"},
-                    "text": {"field": y_right, "type": "quantitative",
-                             "format": _LABEL_FMT},
+                    "y": {"field": y_right, "type": "quantitative",
+                          "axis": {"orient": "right", "title": y_right}},
+                    "color": {"datum": y_right, "type": "nominal",
+                              "legend": {"orient": "top", "title": None}},
+                    "tooltip": [
+                        {"field": x_field, "type": "ordinal"},
+                        {"field": y_right, "type": "quantitative",
+                         "format": _LABEL_FMT, "title": y_right},
+                    ],
                 },
             },
         ]
         spec["resolve"] = {"scale": {"y": "independent"}}
     elif kind == "trend_grid":
-        # Stacked single-series line charts sharing the x-axis. Each
-        # sub-spec is independent (own y-scale) and layers a text mark
-        # for the per-point value.
+        # Stacked single-series line charts sharing the x-axis. One
+        # series per panel — no legend needed (the y-axis title IS the
+        # series name). Inline value labels are kept because each panel
+        # has only one line; no within-panel overlap.
         spec["vconcat"] = [
             {
                 "layer": [
@@ -917,6 +937,11 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
                         "encoding": {
                             "x": {"field": x_field, "type": "ordinal"},
                             "y": {"field": yf, "type": "quantitative"},
+                            "tooltip": [
+                                {"field": x_field, "type": "ordinal"},
+                                {"field": yf, "type": "quantitative",
+                                 "format": _LABEL_FMT, "title": yf},
+                            ],
                         },
                     },
                     {
@@ -941,6 +966,11 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
                     "y": {"field": x_field, "type": "ordinal",
                           "sort": {"field": primary_y, "order": "descending"}},
                     "x": {"field": primary_y, "type": "quantitative"},
+                    "tooltip": [
+                        {"field": x_field, "type": "ordinal"},
+                        {"field": primary_y, "type": "quantitative",
+                         "format": _LABEL_FMT},
+                    ],
                 },
             },
             {

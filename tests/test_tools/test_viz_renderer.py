@@ -404,9 +404,11 @@ def test_render_chart_trend_grid_drops_unparseable_series_silently(tmp_path):
 
 
 def test_kp_to_vega_spec_emits_layered_independent_y_for_trend_dual():
-    """trend_dual → Vega-Lite `layer` of two line+text mark PAIRS with
-    independent y scales. Each series gets its own line and its own
-    text-value overlay so the reviewer sees exact numbers."""
+    """trend_dual → Vega-Lite `layer` of TWO line marks (no static text
+    overlays — they overlapped between series in real charts and made the
+    chart unreadable; tooltips on hover replace them). One y-axis on
+    each side of the plot via `axis.orient`. Legend on top, not in the
+    right sidebar (frees up width)."""
     kp = {
         "topic": "score_vs_dpd",
         "viz": {
@@ -423,21 +425,43 @@ def test_kp_to_vega_spec_emits_layered_independent_y_for_trend_dual():
     assert spec is not None
     assert spec["$schema"].endswith("v5.json")
     assert spec["data"]["values"] == kp["numbers"]
-    # Four layers: [score line, score text, dpd line, dpd text].
+
+    # Two layers, both line marks. No text marks.
     assert isinstance(spec.get("layer"), list)
-    assert len(spec["layer"]) == 4
+    assert len(spec["layer"]) == 2
     line_marks = [
         L for L in spec["layer"]
         if isinstance(L["mark"], dict) and L["mark"]["type"] == "line"
     ]
+    assert len(line_marks) == 2
     text_marks = [
         L for L in spec["layer"]
         if isinstance(L["mark"], dict) and L["mark"]["type"] == "text"
     ]
-    assert len(line_marks) == 2
-    assert len(text_marks) == 2
-    assert {L["encoding"]["y"]["field"] for L in line_marks} == {"score", "dpd"}
-    assert {L["encoding"]["text"]["field"] for L in text_marks} == {"score", "dpd"}
+    assert len(text_marks) == 0, "trend_dual must NOT use static text labels"
+
+    # One y-field per line, on opposite sides of the chart.
+    axes_orient = {
+        L["encoding"]["y"]["field"]: L["encoding"]["y"]["axis"]["orient"]
+        for L in line_marks
+    }
+    assert axes_orient == {"score": "left", "dpd": "right"}
+
+    # Hover tooltip on each line carries x + y so the value reads on
+    # mouseover (replaces the static text labels).
+    for L in line_marks:
+        tooltip = L["encoding"].get("tooltip")
+        assert isinstance(tooltip, list) and len(tooltip) >= 2
+        # The y-field's tooltip entry mentions the field name.
+        y_field = L["encoding"]["y"]["field"]
+        assert any(t.get("field") == y_field for t in tooltip)
+
+    # Legend on top, not in the right sidebar.
+    for L in line_marks:
+        legend = L["encoding"]["color"].get("legend")
+        assert legend is not None
+        assert legend.get("orient") == "top"
+
     # Independent y scales — this is what makes the layout dual-axis.
     assert spec["resolve"]["scale"]["y"] == "independent"
     # JSON-roundtrippable.
