@@ -111,6 +111,29 @@ _PRIOR_QUESTIONS_FOR_SCREEN = int(
     os.environ.get("PRIOR_QUESTIONS_FOR_SCREEN", "12")
 )
 
+# Cap on how long a queued new turn waits for the prior turn's
+# `turn_lock` to release. Previously the queued runner did an
+# unbounded `lock.acquire()` after a 2s contention log — so a new
+# question after a hung prior turn could wait 30s (screen fence) /
+# 240s (specialist fence) / 360s (turn fence) before getting any
+# chance to run. With cooperative cancellation (via
+# `sess.cancel_in_flight`) the prior turn aborts at its next
+# phase-boundary so the typical wait is much shorter, but this cap
+# is the belt-and-suspenders: if cancellation doesn't reach a
+# checkpoint within 90s, surface a clear error to the user instead
+# of holding their browser frozen.
+_QUEUED_TURN_MAX_WAIT_S = float(
+    os.environ.get("QUEUED_TURN_MAX_WAIT_S", "90")
+)
+
+
+class _TurnAborted(Exception):
+    """Raised from `_run_turn_streamed` checkpoints when the session's
+    `cancel_in_flight` event is set (typically by `post_rewind`). The
+    `_spawn_turn._runner` outer wrapper catches it, logs the abort,
+    emits a `turn_done` with `outcome="aborted"`, and releases the
+    lock so the next queued turn can proceed."""
+
 
 # ── Per-case session state ──────────────────────────────────────────────────
 
@@ -131,6 +154,14 @@ class CaseSession:
     # Current turn lock — serialize turns per case. The frontend disables the
     # composer while a turn is in flight.
     turn_lock: threading.Lock = field(default_factory=threading.Lock)
+    # Cooperative-cancellation signal for the in-flight turn. Set by
+    # `post_rewind` when the user rewinds while a turn is still running,
+    # so the in-flight `_run_turn_streamed` can abort at its next
+    # phase-boundary checkpoint rather than letting the new (queued)
+    # turn wait for the dead turn's fences to fire. Cleared by the
+    # NEXT turn's runner once it acquires the lock — so the signal
+    # only ever applies to "whoever is currently mid-flight".
+    cancel_in_flight: threading.Event = field(default_factory=threading.Event)
     # SSE subscribers — each one owns a queue.Queue of (event_name, payload).
     subscribers: list[queue.Queue] = field(default_factory=list)
     subscribers_lock: threading.Lock = field(default_factory=threading.Lock)
@@ -766,6 +797,13 @@ async def _run_turn_streamed(
     })
     turn_timer.record("screen", screen_duration_ms, passed=verdict.passed)
 
+    # Cooperative-cancellation checkpoint #1 (post-screen). If the user
+    # rewound during the screen LLM call, the cancel_in_flight event was
+    # set; abort cleanly here rather than continuing into the (often
+    # much longer) orchestrator phase. See `_TurnAborted` docstring.
+    if sess.cancel_in_flight.is_set():
+        raise _TurnAborted("rewind during screen phase")
+
     in_scope = verdict.passed
     outcome_after_screen = "ok" if in_scope else "screen_rejected"
     sess.emit("question_check", {
@@ -971,6 +1009,13 @@ async def _run_turn_streamed(
         input_history_len=len(sess.input_history),
         warmth_hint_present=bool(warmth_hint),
     )
+
+    # Cooperative-cancellation checkpoint #2 (pre-orchestrator). Catches
+    # the case where the user rewound between screen-done and
+    # orchestrator-start — abort before kicking off the (potentially
+    # 4-minute) orchestrator run.
+    if sess.cancel_in_flight.is_set():
+        raise _TurnAborted("rewind before orchestrator start")
 
     # ── 3. Stream the orchestrator run ────────────────────────────────────
     # Mark when we hand off to the orchestrator so we can measure the gap
@@ -1649,7 +1694,37 @@ def _spawn_turn(sess: CaseSession, turn_id: str, question: str) -> None:
         # see real events flow once the lock releases.
         if not sess.turn_lock.acquire(timeout=2.0):
             sess.logger.log("turn_queued_waiting_lock", {"turn_id": turn_id})
-            sess.turn_lock.acquire()  # block until available
+            # Bounded wait: previously this was `lock.acquire()` with no
+            # timeout, so a hung prior turn (waiting on its own 360s
+            # fence) could block this queued turn for minutes. With
+            # cooperative cancellation from rewind, the typical wait is
+            # short, but the cap guarantees the user gets a clear error
+            # in finite time rather than a frozen browser.
+            if not sess.turn_lock.acquire(timeout=_QUEUED_TURN_MAX_WAIT_S):
+                sess.logger.log("turn_queue_wait_timeout", {
+                    "turn_id": turn_id,
+                    "limit_s": _QUEUED_TURN_MAX_WAIT_S,
+                })
+                ts = int(time.time() * 1000)
+                sess.emit("error", {
+                    "turn_id": turn_id,
+                    "message": (
+                        f"Prior turn on this case hasn't released after "
+                        f"{_QUEUED_TURN_MAX_WAIT_S:.0f}s — try again, or "
+                        f"clear history (rewind) to abort the prior turn."
+                    ),
+                    "recoverable": False,
+                })
+                sess.emit("turn_done", {
+                    "turn_id": turn_id, "ended_at": ts,
+                    "duration_ms": ts - started_at,
+                    "outcome": "queue_timeout",
+                })
+                return
+        # We hold the lock now — clear any leftover cancellation signal
+        # from a prior turn so the new turn proceeds. The signal is
+        # per-mid-flight, not per-session.
+        sess.cancel_in_flight.clear()
         try:
             # `_run_turn_streamed` is structured to skip the early visible
             # emits when called from this path — see the `started_at`
@@ -1696,6 +1771,23 @@ def _spawn_turn(sess: CaseSession, turn_id: str, question: str) -> None:
                     "ended_at": ts,
                     "duration_ms": ts - started_at,
                     "outcome": "timeout",
+                })
+            except _TurnAborted as exc:
+                # Cooperative cancellation fired at a phase-boundary
+                # checkpoint inside `_run_turn_streamed` (typically
+                # triggered by `post_rewind`). Emit a clean turn_done so
+                # the frontend closes this turn's row; the lock release
+                # in the outer finally unblocks the queued new turn.
+                sess.logger.log("turn_aborted", {
+                    "turn_id": turn_id,
+                    "reason": str(exc),
+                })
+                ts = int(time.time() * 1000)
+                sess.emit("turn_done", {
+                    "turn_id": turn_id,
+                    "ended_at": ts,
+                    "duration_ms": ts - started_at,
+                    "outcome": "aborted",
                 })
         finally:
             sess.turn_lock.release()
@@ -1759,11 +1851,24 @@ def post_rewind(case_id: str):
     n_kb_specialists = len(sess.specialist_kb)
     n_kb_total = sum(len(v) for v in sess.specialist_kb.values())
     sess.specialist_kb.clear()
+    # If a turn is in flight when the user rewinds, signal it to abort
+    # at its next phase-boundary checkpoint. Without this, the queued
+    # new question waits for the abandoned turn's fences to fire (up to
+    # 360s) before getting any chance to run — observable user symptom:
+    # "I rewound and asked a new question, but it stayed stuck at
+    # question screening forever." `Lock.locked()` is the safe
+    # cross-thread check (no acquire required); the runner clears the
+    # event after acquiring the lock so this only affects whoever is
+    # currently mid-flight.
+    aborted_in_flight = sess.turn_lock.locked()
+    if aborted_in_flight:
+        sess.cancel_in_flight.set()
     sess.logger.log("rewind", {
         "message_id": msg_id, "case_id": case_id,
         "qa_cache_entries_cleared": n_cached,
         "kb_specialists_cleared": n_kb_specialists,
         "kb_kps_cleared": n_kb_total,
+        "aborted_in_flight_turn": aborted_in_flight,
     })
     return ("", 204)
 
