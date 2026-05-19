@@ -294,10 +294,10 @@
     <rect x="1284" y="454" width="148" height="22" rx="11" fill="#EAF1F8" stroke="#BFD3E8"/><text x="1358" y="469" text-anchor="middle">spend_payments</text>
 
     <rect x="1132" y="480" width="148" height="22" rx="11" fill="#EAF1F8" stroke="#BFD3E8"/><text x="1206" y="495" text-anchor="middle">wcc</text>
-    <rect x="1284" y="480" width="148" height="22" rx="11" fill="#EAF1F8" stroke="#3D6BA8" stroke-width="1.4"/><text x="1358" y="495" text-anchor="middle" font-weight="700" fill="#1F3A5F">strategy</text>
+    <rect x="1284" y="480" width="148" height="22" rx="11" fill="#EAF1F8" stroke="#BFD3E8"/><text x="1358" y="495" text-anchor="middle">strategy</text>
   </g>
   <text x="1136" y="520" font-size="9" fill="#7A8794" font-style="italic">pillar-specific analytical guidance · loaded into BaseSpecialistAgent</text>
-  <text x="1136" y="534" font-size="9" fill="#7A8794" font-style="italic">via skills.domain.loader · strategy (NEW)</text>
+  <text x="1136" y="534" font-size="9" fill="#7A8794" font-style="italic">via skills.domain.loader</text>
   <text x="1136" y="554" font-size="9" fill="#7A8794" font-style="italic">orchestrated by 3 pillar configs: cbo · credit_risk · escalation</text>
 
   <!-- helper/ -->
