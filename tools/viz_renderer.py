@@ -272,14 +272,37 @@ def _consistent_threshold(numbers: list[dict]) -> float | None:
     reference line on the chart. Per-row varying thresholds (rare) skip
     rendering to avoid a misleading step-function overlay.
     """
+    return _read_consistent_key(numbers, "threshold")
+
+
+def _per_field_threshold(numbers: list[dict], y_field: str) -> float | None:
+    """Per-axis threshold lookup for multi-y / dual charts.
+
+    Reads `threshold_<y_field>` (e.g. `threshold_credit_loss_prob`) so
+    each y-axis can carry its own catalog-defined risky cutoff — `CDSS`
+    at 0.5 on a 0-1 probability axis, `TSR` at 20 on a 0-100 score axis.
+    The distiller emits these per-field keys when the source schema's
+    descriptions named them. Same consistency rule as
+    `_consistent_threshold` — returns None if rows disagree or any row
+    lacks the key.
+    """
+    return _read_consistent_key(numbers, f"threshold_{y_field}")
+
+
+def _read_consistent_key(numbers: list[dict], key: str) -> float | None:
+    """Shared helper: return the single shared finite numeric value of
+    ``key`` across all rows, or None if any row is missing it / disagrees
+    / non-numeric. Used by both ``_consistent_threshold`` and
+    ``_per_field_threshold``.
+    """
     import math
     seen: float | None = None
     for n in numbers:
         if not isinstance(n, dict):
             continue
-        t = n.get("threshold")
+        t = n.get(key)
         if t is None:
-            return None  # at least one row lacks a threshold → bail
+            return None
         try:
             ft = float(t)
         except (TypeError, ValueError):
@@ -289,7 +312,7 @@ def _consistent_threshold(numbers: list[dict]) -> float | None:
         if seen is None:
             seen = ft
         elif seen != ft:
-            return None  # rows disagree on threshold → bail
+            return None
     return seen
 
 
@@ -761,6 +784,34 @@ def render_chart(
                 ax2.spines["right"].set_color("#9aa0a6")
                 ax2.spines["right"].set_linewidth(0.8)
 
+                # Per-axis threshold reference lines. Read
+                # `threshold_<y_field>` from each row (e.g.
+                # `threshold_credit_loss_prob` for the left line,
+                # `threshold_tot_struct_risk_score` for the right). Each
+                # axis has its own scale, so the lines are drawn on the
+                # axis that matches their series' y-field. Skipped per-
+                # series when the data lacks a consistent threshold.
+                t_left = _per_field_threshold(numbers, yf1)
+                if t_left is not None:
+                    ax.axhline(t_left, color=primary_color, linestyle="--",
+                               linewidth=1.0, alpha=0.7, zorder=0)
+                    ax.text(
+                        len(indices) - 1, t_left,
+                        f"  {_format_axis_value(t_left)}",
+                        va="center", ha="left", fontsize=8,
+                        color=primary_color, fontweight="600",
+                    )
+                t_right = _per_field_threshold(numbers, yf2)
+                if t_right is not None:
+                    ax2.axhline(t_right, color=secondary_color, linestyle="--",
+                                linewidth=1.0, alpha=0.7, zorder=0)
+                    ax2.text(
+                        0, t_right,
+                        f"{_format_axis_value(t_right)}  ",
+                        va="center", ha="right", fontsize=8,
+                        color=secondary_color, fontweight="600",
+                    )
+
             else:  # "share" — horizontal bar, single series only
                 yf, (xs, ys) = extracted[0]
                 order = sorted(range(len(xs)), key=lambda i: ys[i], reverse=True)
@@ -968,37 +1019,67 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
         # hover replaces the static text labels which used to overlap
         # between the two lines.
         y_left, y_right = y_fields[0], y_fields[1]
+
+        def _dual_axis_group(
+            y_field: str, axis_orient: str, threshold: float | None,
+        ) -> dict:
+            """Build one nested-layer group: a line + its optional
+            threshold rule. The inner layers default to shared y-scale,
+            so the rule's `y.datum` is interpreted in the same scale as
+            the line's `y.field` — crucial when the outer composition
+            uses `resolve.scale.y = independent` (rule with datum would
+            otherwise get its own micro-scale and render at the wrong
+            position). Color and legend stay on the outer line mark."""
+            inner: list[dict] = [
+                {
+                    "mark": {"type": "line", "point": True},
+                    "encoding": {
+                        "x": {"field": x_field, "type": "ordinal"},
+                        "y": {"field": y_field, "type": "quantitative",
+                              "axis": {"orient": axis_orient,
+                                       "title": y_field}},
+                        "color": {"datum": y_field, "type": "nominal",
+                                  "legend": {"orient": "top",
+                                             "title": None}},
+                        "tooltip": [
+                            {"field": x_field, "type": "ordinal"},
+                            {"field": y_field, "type": "quantitative",
+                             "format": _LABEL_FMT, "title": y_field},
+                        ],
+                    },
+                },
+            ]
+            if threshold is not None:
+                # Rule + label on the SAME nested-layer scale as the
+                # line. Color matches the series so the reviewer ties
+                # the threshold to the right axis at a glance.
+                inner.append({
+                    "mark": {"type": "rule", "strokeDash": [4, 3],
+                             "opacity": 0.75},
+                    "encoding": {
+                        "y": {"datum": threshold, "type": "quantitative"},
+                        "color": {"datum": y_field, "type": "nominal"},
+                    },
+                })
+                inner.append({
+                    "mark": {"type": "text",
+                             "align": "right" if axis_orient == "right" else "left",
+                             "baseline": "bottom",
+                             "dx": -4 if axis_orient == "right" else 4,
+                             "dy": -2, "fontSize": 9, "fontWeight": 600},
+                    "encoding": {
+                        "y": {"datum": threshold, "type": "quantitative"},
+                        "text": {"value": f"{y_field}: {threshold}"},
+                        "color": {"datum": y_field, "type": "nominal"},
+                    },
+                })
+            return {"layer": inner}
+
+        t_left = _per_field_threshold(numbers, y_left)
+        t_right = _per_field_threshold(numbers, y_right)
         spec["layer"] = [
-            {
-                "mark": {"type": "line", "point": True},
-                "encoding": {
-                    "x": {"field": x_field, "type": "ordinal"},
-                    "y": {"field": y_left, "type": "quantitative",
-                          "axis": {"orient": "left", "title": y_left}},
-                    "color": {"datum": y_left, "type": "nominal",
-                              "legend": {"orient": "top", "title": None}},
-                    "tooltip": [
-                        {"field": x_field, "type": "ordinal"},
-                        {"field": y_left, "type": "quantitative",
-                         "format": _LABEL_FMT, "title": y_left},
-                    ],
-                },
-            },
-            {
-                "mark": {"type": "line", "point": True},
-                "encoding": {
-                    "x": {"field": x_field, "type": "ordinal"},
-                    "y": {"field": y_right, "type": "quantitative",
-                          "axis": {"orient": "right", "title": y_right}},
-                    "color": {"datum": y_right, "type": "nominal",
-                              "legend": {"orient": "top", "title": None}},
-                    "tooltip": [
-                        {"field": x_field, "type": "ordinal"},
-                        {"field": y_right, "type": "quantitative",
-                         "format": _LABEL_FMT, "title": y_right},
-                    ],
-                },
-            },
+            _dual_axis_group(y_left, "left", t_left),
+            _dual_axis_group(y_right, "right", t_right),
         ]
         spec["resolve"] = {"scale": {"y": "independent"}}
     elif kind == "trend_grid":

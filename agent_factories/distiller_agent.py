@@ -94,13 +94,28 @@ already stated.
   - threshold breaches: `[{"period": "2024-Q4", "value": 3, "threshold": 1}]`
   Empty list when the claim is a single scalar or has no underlying series.
 
-  **Carry `threshold` on EVERY row of a trend when the source catalog
-  stated one** (e.g. `get_table_schema` description said *"Values above
-  0.5 are risky"* → `threshold = 0.5` on every row). The renderer draws
-  a horizontal dashed reference line on the chart so the reviewer sees
-  at a glance which periods breach. If the threshold varies per row or
-  isn't documented, omit the key — a partial / inconsistent threshold
-  skips the line rather than misleading.
+  **Carry thresholds on EVERY row of a trend when the source catalog
+  stated them** (e.g. `get_table_schema` description said *"Values above
+  0.5 are risky"* → include the threshold on every row). The renderer
+  draws a horizontal dashed reference line so the reviewer sees at a
+  glance which periods breach. Two key shapes by chart kind:
+
+  - **Single-series trend** (one y_field): use the bare `threshold` key,
+    e.g. `[{"period": "2024-Q4", "value": 3, "threshold": 1}]`.
+  - **Multi-series same-scale trend / trend_dual / trend_grid**
+    (different y_field per series, each with its own catalog cutoff):
+    use **per-axis** keys named `threshold_<y_field>` so each axis can
+    draw its own reference line. Example for the CDSS+TSR case:
+    ```
+    [{"period": "2024-11", "credit_loss_prob": 0.12,
+      "tot_struct_risk_score": 22.0,
+      "threshold_credit_loss_prob": 0.5,
+      "threshold_tot_struct_risk_score": 20},
+     ...]
+    ```
+
+  If a threshold varies per row or isn't documented, omit the key —
+  partial / inconsistent thresholds skip rendering rather than mislead.
 
   **INCLUDE EVERY POINT FROM THE SOURCE SERIES — do NOT abridge.** If the
   specialist's `summarize_trend` or `summarize_by_group` returned N rows,

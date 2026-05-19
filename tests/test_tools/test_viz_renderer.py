@@ -489,11 +489,16 @@ def test_render_chart_trend_grid_drops_unparseable_series_silently(tmp_path):
 
 
 def test_kp_to_vega_spec_emits_layered_independent_y_for_trend_dual():
-    """trend_dual → Vega-Lite `layer` of TWO line marks (no static text
-    overlays — they overlapped between series in real charts and made the
-    chart unreadable; tooltips on hover replace them). One y-axis on
-    each side of the plot via `axis.orient`. Legend on top, not in the
-    right sidebar (frees up width)."""
+    """trend_dual → outer `layer` with TWO nested-layer groups, one per
+    series. Each inner group wraps a line mark (+ optional threshold
+    rule, when the rows carry `threshold_<y_field>`). Outer `resolve`
+    keeps y-scales independent so the two axes appear on opposite sides;
+    inner groups share their y-scale so a rule's `y.datum` lands on the
+    correct line's axis.
+
+    Without thresholds (this test): each inner group contains exactly
+    ONE line mark, no text or rule. Tooltips on hover replace the
+    overlap-prone static value labels."""
     kp = {
         "topic": "score_vs_dpd",
         "viz": {
@@ -511,19 +516,28 @@ def test_kp_to_vega_spec_emits_layered_independent_y_for_trend_dual():
     assert spec["$schema"].endswith("v5.json")
     assert spec["data"]["values"] == kp["numbers"]
 
-    # Two layers, both line marks. No text marks.
+    # Outer: 2 nested-layer groups (one per series).
     assert isinstance(spec.get("layer"), list)
     assert len(spec["layer"]) == 2
-    line_marks = [
-        L for L in spec["layer"]
-        if isinstance(L["mark"], dict) and L["mark"]["type"] == "line"
-    ]
+    line_marks: list[dict] = []
+    text_marks: list[dict] = []
+    rule_marks: list[dict] = []
+    for outer in spec["layer"]:
+        # Each outer entry must be a nested layer group.
+        assert "layer" in outer, f"outer entry missing nested 'layer': {outer}"
+        for inner in outer["layer"]:
+            m = inner.get("mark")
+            t = m["type"] if isinstance(m, dict) else m
+            if t == "line":
+                line_marks.append(inner)
+            elif t == "text":
+                text_marks.append(inner)
+            elif t == "rule":
+                rule_marks.append(inner)
     assert len(line_marks) == 2
-    text_marks = [
-        L for L in spec["layer"]
-        if isinstance(L["mark"], dict) and L["mark"]["type"] == "text"
-    ]
-    assert len(text_marks) == 0, "trend_dual must NOT use static text labels"
+    # No thresholds in this fixture, so no rule / text decoration.
+    assert len(text_marks) == 0
+    assert len(rule_marks) == 0
 
     # One y-field per line, on opposite sides of the chart.
     axes_orient = {
@@ -537,7 +551,6 @@ def test_kp_to_vega_spec_emits_layered_independent_y_for_trend_dual():
     for L in line_marks:
         tooltip = L["encoding"].get("tooltip")
         assert isinstance(tooltip, list) and len(tooltip) >= 2
-        # The y-field's tooltip entry mentions the field name.
         y_field = L["encoding"]["y"]["field"]
         assert any(t.get("field") == y_field for t in tooltip)
 
@@ -547,10 +560,59 @@ def test_kp_to_vega_spec_emits_layered_independent_y_for_trend_dual():
         assert legend is not None
         assert legend.get("orient") == "top"
 
-    # Independent y scales — this is what makes the layout dual-axis.
+    # Outer composition keeps independent y-scales.
     assert spec["resolve"]["scale"]["y"] == "independent"
     # JSON-roundtrippable.
     assert json.loads(json.dumps(spec)) == spec
+
+
+def test_kp_to_vega_spec_trend_dual_emits_per_axis_threshold_rules():
+    """When rows carry per-axis `threshold_<y_field>` keys, each inner
+    nested-layer group gains a `rule` mark at that threshold value, with
+    color matching the series. The rule's y-scale is shared with the
+    line in the same inner group (default `resolve.scale.y = "shared"`
+    inside the group), so the rule lands at the correct y position even
+    though the OUTER composition uses independent scales."""
+    kp = {
+        "topic": "cdss_tsr_with_thresholds",
+        "viz": {
+            "kind": "trend_dual",
+            "x_field": "period",
+            "y_fields": ["credit_loss_prob", "tot_struct_risk_score"],
+        },
+        "numbers": [
+            {"period": "2024-11", "credit_loss_prob": 0.12,
+             "tot_struct_risk_score": 22.0,
+             "threshold_credit_loss_prob": 0.5,
+             "threshold_tot_struct_risk_score": 20},
+            {"period": "2024-12", "credit_loss_prob": 0.55,
+             "tot_struct_risk_score": 35.0,
+             "threshold_credit_loss_prob": 0.5,
+             "threshold_tot_struct_risk_score": 20},
+        ],
+    }
+    spec = kp_to_vega_spec(kp)
+    assert spec is not None
+
+    rules_by_y_field: dict[str, float] = {}
+    for outer in spec["layer"]:
+        line = next(
+            inner for inner in outer["layer"]
+            if isinstance(inner["mark"], dict) and inner["mark"]["type"] == "line"
+        )
+        y_field = line["encoding"]["y"]["field"]
+        rule = next(
+            (inner for inner in outer["layer"]
+             if isinstance(inner["mark"], dict) and inner["mark"]["type"] == "rule"),
+            None,
+        )
+        assert rule is not None, f"no rule in inner group for {y_field}"
+        rules_by_y_field[y_field] = rule["encoding"]["y"]["datum"]
+
+    assert rules_by_y_field == {
+        "credit_loss_prob": 0.5,
+        "tot_struct_risk_score": 20,
+    }
 
 
 def test_kp_to_vega_spec_emits_vconcat_for_trend_grid():
