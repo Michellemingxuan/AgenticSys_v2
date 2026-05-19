@@ -60,7 +60,13 @@ MODEL = os.environ.get("MODEL", "gpt-4.1")
 DATA_SOURCE = os.environ.get("DATA_SOURCE", "auto")
 PORT = int(os.environ.get("PORT", 3001))
 HOST = os.environ.get("HOST", "127.0.0.1")
-PING_INTERVAL_S = 15.0
+PING_INTERVAL_S = 5.0  # was 15.0 — tighter pings reduce silent SSE disconnects
+# from idle-aware intermediaries (browser tab throttle, corporate proxies,
+# dev-server proxies with default 60s idle-close). Real failure case: user
+# came back to a session after ~1h idle, asked a new question; the EventSource
+# had silently died during the idle window, so the new turn's events landed in
+# a dead subscriber queue and the UI looked frozen. 5s is well within every
+# common proxy timeout. Cost is trivial — 12 noop frames/min/client.
 _QA_CACHE_MAX_ENTRIES = int(os.environ.get("QA_CACHE_MAX_ENTRIES", "64"))
 _SSE_QUEUE_MAXSIZE = int(os.environ.get("SSE_QUEUE_MAXSIZE", "256"))
 
@@ -1506,6 +1512,33 @@ def _spawn_turn(sess: CaseSession, turn_id: str, question: str) -> None:
     appear and the reasoning panel reset, even if execution is queued.
     """
     started_at = int(time.time() * 1000)
+
+    # Log subscriber count at turn start so the "server dropped" symptom
+    # is diagnosable from the JSONL alone. When the count is 0, the
+    # frontend's SSE stream isn't attached — the events this turn emits
+    # will be enqueued but never delivered until the EventSource
+    # reconnects. The frontend SHOULD auto-reconnect on transport error
+    # (the load-bearing fix); this log just makes the failure visible
+    # server-side.
+    with sess.subscribers_lock:
+        n_subs = len(sess.subscribers)
+    if n_subs == 0:
+        sess.logger.log("turn_no_subscribers", {
+            "turn_id": turn_id,
+            "case_id": sess.case_id,
+            "note": ("turn dispatched with no attached SSE client — events "
+                     "will be enqueued but undeliverable until reconnect. "
+                     "Most likely the EventSource died during an idle "
+                     "window (proxy idle-close, browser-tab throttle, "
+                     "network blip)."),
+        })
+        print(f"[SSE] turn {turn_id} dispatched with 0 subscribers "
+              f"(case={sess.case_id})")
+    else:
+        sess.logger.log("turn_subscribers_at_start", {
+            "turn_id": turn_id,
+            "n_subscribers": n_subs,
+        })
 
     sess.emit("reviewer_message", {
         "id": str(uuid.uuid4()),
