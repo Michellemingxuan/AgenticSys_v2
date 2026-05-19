@@ -138,7 +138,7 @@ class SafeChainAsyncOpenAI:
     def _refresh_llm(self) -> None:
         """(Re)load the safechain model. Used on first call and on 401 retry."""
         try:
-            from safechain.lcel import model as safechain_model  # type: ignore[import-not-found]
+            from safechain.core.model import model as safechain_model  # type: ignore[import-not-found]
         except ImportError as e:
             raise NotImplementedError(
                 "safechain is not installed in this environment. "

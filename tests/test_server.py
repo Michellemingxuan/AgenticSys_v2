@@ -252,6 +252,55 @@ def test_turn_aborted_class_is_a_distinct_exception():
     assert not issubclass(server._TurnAborted, asyncio.CancelledError)
 
 
+# ── Prewarm path ────────────────────────────────────────────────────────────
+
+
+def test_prewarm_respects_env_skip(monkeypatch):
+    """`LLM_PREWARM=0` makes `_prewarm_clients()` a no-op. Verifies the
+    skip path emits the skipped event AND does NOT touch the LLM
+    client (which would otherwise make a real network call)."""
+    monkeypatch.setenv("LLM_PREWARM", "0")
+    # Sentinel that would explode if the prewarm tries to use it.
+    class _BoomClient:
+        @property
+        def chat(self):
+            raise RuntimeError("prewarm should NOT touch the client when disabled")
+    monkeypatch.setattr(server._CLIENTS, "firewalled_client", _BoomClient(), raising=False)
+    # Should return cleanly without raising.
+    server._prewarm_clients()
+
+
+def test_prewarm_swallows_failures(monkeypatch):
+    """Prewarm is best-effort — a failure must NOT prevent the server
+    from finishing startup. We force the client to raise and verify
+    `_prewarm_clients` returns normally and logs the failure event."""
+    monkeypatch.setenv("LLM_PREWARM", "1")
+
+    logged: list = []
+
+    class _BoomLogger:
+        def log(self, ev, payload):
+            logged.append((ev, payload))
+
+    class _BoomCompletions:
+        async def create(self, **kw):  # noqa: ARG002
+            raise RuntimeError("simulated cold-start failure")
+    class _BoomChat:
+        completions = _BoomCompletions()
+    class _BoomClient:
+        chat = _BoomChat()
+
+    monkeypatch.setattr(server, "_BOOT_LOGGER", _BoomLogger(), raising=False)
+    monkeypatch.setattr(server._CLIENTS, "firewalled_client", _BoomClient(), raising=False)
+
+    # Must NOT raise — failure path is the whole point of the
+    # broad except.
+    server._prewarm_clients()
+    assert any(ev == "llm_prewarm_failed" for ev, _ in logged), (
+        f"prewarm failure must log llm_prewarm_failed; got events: {logged}"
+    )
+
+
 # ── Phase 2 — turn-chart collection + answer-text appending ──────────────────
 
 

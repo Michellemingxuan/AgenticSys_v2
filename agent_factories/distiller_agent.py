@@ -105,14 +105,23 @@ already stated.
   - **Multi-series same-scale trend / trend_dual / trend_grid**
     (different y_field per series, each with its own catalog cutoff):
     use **per-axis** keys named `threshold_<y_field>` so each axis can
-    draw its own reference line. Example for the CDSS+TSR case:
+    draw its own reference line. Real example for the CDSS+TSR case
+    (numbers MUST come from the column's `get_table_schema`
+    description for THIS case — don't hardcode):
     ```
-    [{"period": "2024-11", "credit_loss_prob": 0.12,
+    [{"period": "2024-11", "credit_loss_prob": 12,
       "tot_struct_risk_score": 22.0,
-      "threshold_credit_loss_prob": 0.5,
+      "threshold_credit_loss_prob": 10,
       "threshold_tot_struct_risk_score": 20},
      ...]
     ```
+    These numbers come from the descriptions *"Scores from **10**-100
+    are considered risky"* on `credit_loss_prob` and *"Scores from
+    **20**-100 are considered risky"* on `tot_struct_risk_score`. The
+    upper bound (100) is the scale max, NOT the threshold — extract the
+    LOWER number of the "from X-Y" range. Both CDSS and TSR are 0-100
+    scores (despite `credit_loss_prob`'s misleading `_prob` suffix);
+    they are NOT 0-1 probabilities.
 
   If a threshold varies per row or isn't documented, omit the key —
   partial / inconsistent thresholds skip rendering rather than mislead.
@@ -135,7 +144,44 @@ already stated.
   (a) `numbers` has ≥ 4 entries — short series read fine as prose;
   (b) the shape itself (slope, peak, gap, divergence) is what makes the
       claim land — not just the values;
-  (c) the same shape isn't already covered by an earlier KP this turn.
+  (c) **no earlier KP this turn already has the SAME `x_field` + `y_field`
+      combination** (i.e. truly redundant chart).
+
+  **Rule (c) only collapses TRUE duplicates.** A temporal trend
+  (`x_field='period'`) and a categorical breakdown (`x_field='group'`
+  or `'merchant'`) are DIFFERENT axes covering DIFFERENT questions — they
+  are NOT redundant. When the specialist's findings cover both a
+  time-series dimension AND a categorical-breakdown dimension of the
+  same activity (the canonical "spending pattern" shape, but the rule is
+  general), emit **TWO chart KPs**, one per dimension. Skipping the
+  categorical breakdown because "I already emitted a trend chart" is the
+  wrong reading of rule (c).
+
+  **Worked example — "what's the spending pattern?"** Specialist
+  surfaced both a monthly trend AND a top-merchants breakdown.
+  Emit TWO chart KPs (NOT one):
+
+  ```
+  # KP 1: temporal trend over months
+  {topic: "monthly_spend_trend",
+   claim: "Spend rose from $300 (2024-11) to $1,100 (2025-03)…",
+   numbers: [{"period": "2024-11", "value": 300}, …],
+   viz: {kind: "trend", x_field: "period", y_fields: ["value"]}}
+
+  # KP 2: top-merchants concentration breakdown (DIFFERENT shape)
+  {topic: "top_merchants_by_spend",
+   claim: "S BERTRAM accounts for 38% of recurring spend…",
+   numbers: [{"merchant": "S BERTRAM", "value": 642000}, …],
+   viz: {kind: "bar", x_field: "merchant", y_fields: ["value"]}}
+  ```
+
+  The same principle applies to other dual-dimension findings:
+  delinquency trend + tradeline mix, payment trajectory + return-reason
+  share, score trajectory + driver rotation — when the specialist's
+  evidence carries two clearly-distinct dimensions, emit one chart KP
+  per dimension. This is NOT a hard-coded "always emit N charts" rule
+  — it just makes rule (c) honor the underlying axes rather than
+  collapsing on chart count.
 
   **MULTI-METRIC RULE (load-bearing — read carefully).** When the
   specialist's findings cover 2+ related metrics on the SAME x-axis
@@ -171,8 +217,18 @@ already stated.
   side-by-side", not "show me two unrelated charts."
 
   Field names in `y_fields` must match the keys actually present in
-  EVERY entry of `numbers`. `share` (horizontal-bar breakdown) is
-  single-series only.
+  EVERY entry of `numbers`.
+
+  **CATEGORICAL BREAKDOWNS — default to `kind="bar"` (vertical).** For
+  top-N merchants / industries / branches / specialists / any
+  categorical ranking: use `kind="bar"`, regardless of how many
+  categories there are. The renderer auto-sorts by value descending
+  and rotates x-tick labels when they'd overlap. **Do NOT pick
+  `kind="share"` (horizontal) just because there are 5+ categories**
+  — count alone is not a reason. Reserve `share` for the rare case
+  where labels are multi-word strings AND there are 8+ of them AND
+  vertical rotated labels truly can't fit. This is a stated user
+  preference (`feedback-plots-preference` memory), not a heuristic.
 
 - `source_call`: the tool invocation that produced the data, when the
   specialist mentioned it. Example: `"summarize_trend('spends','Amount','Date',period='month',op='sum')"`.

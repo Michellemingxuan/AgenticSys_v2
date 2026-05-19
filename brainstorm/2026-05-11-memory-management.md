@@ -538,3 +538,224 @@ The EventLogger emits the following memory-related events:
 | Chart rendering                  | `tools/viz_renderer.py`                           |
 | Routing skill (consumes warmth)  | `skills/workflow/team_construction.md`            |
 | Original PRD                     | `tasks/prd-memory-management.md`                  |
+
+---
+
+## Appendix A — Specialist knowledge distillation, worked examples
+
+Each example shows the same end-to-end shape: the **`SpecialistOutput`** the distiller is handed (left), the **`KnowledgePoint` list** it emits (right), and a short note on which prompt rules drove the transformation. The examples are synthesized to be self-contained — real payloads contain more boilerplate, but the distillation logic is identical.
+
+### A.1 Canonical case — single-series monthly trend
+
+**Specialist:** `spend_payments`
+**Sub-question:** *"What's the customer's spending pattern over the past 6 months?"*
+
+**SpecialistOutput (input to distiller):**
+
+```json
+{
+  "answer": "Spend rose sharply across the window. Monthly total grew from $300 in 2024-11 to a peak of $1,100 in 2025-03, then softened to $760 by 2025-04. The increase is 3.7× peak-to-trough, driven almost entirely by the 2025-Q1 jump.",
+  "findings": [
+    "summarize_trend('spends','Amount','Date',period='month',op='sum') → 2024-11: 300, 2024-12: 250, 2025-01: 480, 2025-02: 920, 2025-03: 1100, 2025-04: 760",
+    "The peak month (2025-03) is the highest in the available 6-month window."
+  ],
+  "data_gaps": [],
+  "confidence": "high"
+}
+```
+
+**KnowledgePoint emitted (1):**
+
+```json
+{
+  "topic": "monthly_spend_trend",
+  "claim": "Spend rose from $300 (2024-11) to $1,100 (2025-03), a 3.7× increase peaking in 2025-Q1.",
+  "numbers": [
+    {"period": "2024-11", "value": 300},
+    {"period": "2024-12", "value": 250},
+    {"period": "2025-01", "value": 480},
+    {"period": "2025-02", "value": 920},
+    {"period": "2025-03", "value": 1100},
+    {"period": "2025-04", "value": 760}
+  ],
+  "viz": {"kind": "trend", "x_field": "period", "y_fields": ["value"]},
+  "source_call": "summarize_trend('spends','Amount','Date',period='month',op='sum')",
+  "captured_at_turn": "a3f7c1e9d2b4",
+  "confidence": "high"
+}
+```
+
+**Rules applied:**
+
+- *Atomic*: a 6-month series becomes **one** KP, with the series in `numbers`, not six separate KPs.
+- *Time window in claim matches first/last `numbers`*: claim says "2024-11 … 2025-03"; series begins at 2024-11 and the cited peak month is 2025-03.
+- *Quantitative bias*: only the magnitudes and the 3.7× multiplier are surfaced; the qualitative "softened" tail isn't promoted to a separate KP.
+- *`viz` set* because `numbers` has ≥ 4 points and they share a periodic x-axis → renderer writes `reports/<case>/charts/a3f7c1e9d2b4-monthly_spend_trend.png`.
+
+---
+
+### A.2 Two same-scale scores — the load-bearing per-metric topic rule
+
+**Specialist:** `modeling`
+**Sub-question:** *"How have the internal model scores moved over the past year?"*
+
+**SpecialistOutput (input):**
+
+```json
+{
+  "answer": "Both internal scores deteriorated through the window. CDSS (credit_loss_prob) climbed from 0.12 (2024-11) to 0.61 (2025-04), crossing the 0.5 risky threshold in 2025-03. TSR (tot_struct_risk_score) tracked the same shape, rising from 22.0 to 28.5, breaching its catalog-documented 20 threshold from 2024-12 onward.",
+  "findings": [
+    "summarize_trend('modelling_data','credit_loss_prob','trans_month',period='month',op='last') → 2024-11: 0.12, 2024-12: 0.18, 2025-01: 0.31, 2025-02: 0.44, 2025-03: 0.55, 2025-04: 0.61",
+    "summarize_trend('modelling_data','tot_struct_risk_score','trans_month',period='month',op='last') → 2024-11: 22.0, 2024-12: 23.4, 2025-01: 24.8, 2025-02: 26.1, 2025-03: 27.3, 2025-04: 28.5",
+    "Catalog thresholds: credit_loss_prob risky > 0.5; tot_struct_risk_score risky > 20."
+  ],
+  "data_gaps": [],
+  "confidence": "high"
+}
+```
+
+**Preferred shape — ONE multi-series KP:**
+
+```json
+{
+  "topic": "internal_model_scores_trend",
+  "claim": "CDSS rose from 0.12 to 0.61 (crossing the 0.5 risky threshold in 2025-03); TSR rose from 22.0 to 28.5, breaching its 20 threshold from 2024-12 onward.",
+  "numbers": [
+    {"period": "2024-11", "credit_loss_prob": 0.12, "tot_struct_risk_score": 22.0,
+     "threshold_credit_loss_prob": 0.5, "threshold_tot_struct_risk_score": 20},
+    {"period": "2024-12", "credit_loss_prob": 0.18, "tot_struct_risk_score": 23.4,
+     "threshold_credit_loss_prob": 0.5, "threshold_tot_struct_risk_score": 20},
+    {"period": "2025-01", "credit_loss_prob": 0.31, "tot_struct_risk_score": 24.8,
+     "threshold_credit_loss_prob": 0.5, "threshold_tot_struct_risk_score": 20},
+    {"period": "2025-02", "credit_loss_prob": 0.44, "tot_struct_risk_score": 26.1,
+     "threshold_credit_loss_prob": 0.5, "threshold_tot_struct_risk_score": 20},
+    {"period": "2025-03", "credit_loss_prob": 0.55, "tot_struct_risk_score": 27.3,
+     "threshold_credit_loss_prob": 0.5, "threshold_tot_struct_risk_score": 20},
+    {"period": "2025-04", "credit_loss_prob": 0.61, "tot_struct_risk_score": 28.5,
+     "threshold_credit_loss_prob": 0.5, "threshold_tot_struct_risk_score": 20}
+  ],
+  "viz": {"kind": "trend_dual", "x_field": "period",
+          "y_fields": ["credit_loss_prob", "tot_struct_risk_score"]},
+  "source_call": "summarize_trend('modelling_data', ...) × 2",
+  "captured_at_turn": "c8a3f2e5d917",
+  "confidence": "high"
+}
+```
+
+**Acceptable fallback — TWO single-series KPs with per-metric topics:**
+
+```json
+[
+  {"topic": "cdss_score_trend",
+   "claim": "CDSS (credit_loss_prob) rose from 0.12 (2024-11) to 0.61 (2025-04), crossing the 0.5 risky threshold in 2025-03.",
+   "numbers": [
+     {"period": "2024-11", "value": 0.12, "threshold": 0.5},
+     ... (six rows, each with threshold=0.5) ...
+   ],
+   "viz": {"kind": "trend", "x_field": "period", "y_fields": ["value"]},
+   "source_call": "summarize_trend('modelling_data','credit_loss_prob',...)",
+   ...},
+  {"topic": "tsr_score_trend",
+   "claim": "TSR (tot_struct_risk_score) rose from 22.0 (2024-11) to 28.5 (2025-04), breaching the documented 20 threshold from 2024-12 onward.",
+   "numbers": [
+     {"period": "2024-11", "value": 22.0, "threshold": 20},
+     ... (six rows, each with threshold=20) ...
+   ],
+   "viz": {"kind": "trend", "x_field": "period", "y_fields": ["value"]},
+   "source_call": "summarize_trend('modelling_data','tot_struct_risk_score',...)",
+   ...}
+]
+```
+
+**Rules applied — and the trap to avoid:**
+
+- *Per-metric topic slugs.* Using a generic family slug like `model_scores_trend` for **both** would collide: the second KP's chart would silently overwrite the first's PNG (chart collection dedupes by `topic`). The required forms are either one multi-series KP with a single topic, or two KPs with metric-specific topics (`cdss_score_trend`, `tsr_score_trend`).
+- *Thresholds on every row.* `get_table_schema` documented "risky > 0.5" and "risky > 20", so each `numbers` row carries the threshold. The renderer draws a dashed reference line per axis. In the multi-series case the keys are `threshold_<y_field>` so each y-axis gets its own line.
+- *Claim faithfully cites the breach turns* — both crossover periods named, both end-points cited.
+
+---
+
+### A.3 Concentration / breakdown — `numbers` carries `group`, no chart
+
+**Specialist:** `spend_payments`
+**Sub-question:** *"Which merchants drive recurring spend?"*
+
+**SpecialistOutput (input):**
+
+```json
+{
+  "answer": "S BERTRAM is the dominant recurring merchant, taking 38% of total recurring spend ($642K of $1.69M). The next three merchants combined account for ~25%; the long tail (45+ merchants) makes up the remaining ~37%.",
+  "findings": [
+    "aggregate_column('spends','Merchant','Amount',op='sum') filtered to recurring transactions → S BERTRAM: 642000, MERCHANT_B: 198000, MERCHANT_C: 142000, MERCHANT_D: 86000, OTHER (45 merchants): 622000"
+  ],
+  "data_gaps": [],
+  "confidence": "medium"
+}
+```
+
+**KnowledgePoint emitted (1):**
+
+```json
+{
+  "topic": "top_merchants_by_sum",
+  "claim": "S BERTRAM accounts for 38% of recurring spend ($642K of $1.69M total); next three merchants add ~25%.",
+  "numbers": [
+    {"group": "S BERTRAM",     "value": 642000},
+    {"group": "MERCHANT_B",    "value": 198000},
+    {"group": "MERCHANT_C",    "value": 142000},
+    {"group": "MERCHANT_D",    "value": 86000},
+    {"group": "OTHER (n=45)",  "value": 622000}
+  ],
+  "viz": null,
+  "source_call": "aggregate_column('spends','Merchant','Amount',op='sum')",
+  "captured_at_turn": "a3f7c1e9d2b4",
+  "confidence": "medium"
+}
+```
+
+**Rules applied:**
+
+- *Breakdown shape*: `numbers` uses `{group, value}` rather than `{period, value}` — the renderer adapts when `viz` is supplied, but here we leave it `null` because the share-of-total framing is better read as the prose claim than as a small bar chart.
+- *Confidence carried through* from the specialist ("medium" because the source merchant strings can drift across months).
+- *Named entity in `claim`* (`S BERTRAM`, the dominant merchant) is what makes this point reusable on follow-up turns — future questions like "is S BERTRAM still the top driver?" can be answered from the KB without re-aggregating.
+
+---
+
+### A.4 What the distiller **drops** on the floor
+
+For the same `spend_payments` turn, suppose the answer text also contains:
+
+> *"There is no payment-returns data prior to 2024-11, so we can't compare against 2024-Q3. Spending appears volatile, which may indicate seasonal influence — though without more history it's hard to tell."*
+
+Nothing in the above promotes to a KP:
+
+| sentence                                                            | dropped because                                                                        |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| *"no payment-returns data prior to 2024-11 … can't compare"*        | Data-absence. Already lives in `SpecialistOutput.data_gaps`; the rule says "skip absence-of-data". |
+| *"Spending appears volatile, which may indicate seasonal influence"* | Pure narrative — no numbers, no named entity, no comparison the next turn could fact-check. |
+| *"though without more history it's hard to tell"*                   | Hedge-only, not a quantitative claim.                                                  |
+
+This is why distillation reliably produces a **small** KB even when the specialist's prose is long: the rules privilege re-usable, fact-checkable numerics.
+
+---
+
+### A.5 How the KPs feed back into the next turn
+
+Two turns later, the reviewer asks *"Has the spending peak persisted?"* and the orchestrator (cued by the warmth hint) re-routes to `spend_payments`. The first call within the new turn includes the KB digest:
+
+```
+[YOUR KNOWLEDGE BASE — facts established earlier this session.
+ Refer to these BEFORE re-running queries; only re-query when the new
+ question goes beyond what's recorded here, or when a value needs verification.]
+
+- **monthly_spend_trend** [high]: Spend rose from $300 (2024-11) to $1,100 (2025-03), a 3.7× increase peaking in 2025-Q1.  _via `summarize_trend('spends','Amount','Date',period='month',op='sum')`_
+- **top_merchants_by_sum** [medium]: S BERTRAM accounts for 38% of recurring spend ($642K of $1.69M total); next three merchants add ~25%.  _via `aggregate_column('spends','Merchant','Amount',op='sum')`_
+- **internal_model_scores_trend** [high]: CDSS rose from 0.12 to 0.61 (crossing 0.5 in 2025-03); TSR rose from 22.0 to 28.5, breaching 20 from 2024-12 onward.  _via `summarize_trend('modelling_data', ...) × 2`_
+
+--- New question ---
+Has the spending peak persisted?
+```
+
+The specialist now knows — without an extra tool call — that the peak it should be testing for persistence is **2025-03 at $1,100**. Its only new query is the one that extends or refutes that claim. If the new data does refute the prior trend (say the peak has shifted), the distiller's next pass emits a fresh `monthly_spend_trend` KP and the older one is shadowed in the active view but kept in the append-only list for audit.
+
+This is the loop the whole subsystem exists to make tight: **distill once, reuse cheaply, never silently lose what was believed.**

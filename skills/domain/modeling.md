@@ -150,7 +150,14 @@ For ANY reviewer concept (delinquency, exposure, capacity, spend pattern, paymen
 
 1. **Probe schema once** with `get_table_schema('model_scores')`. Read the descriptions — they tell you what each column measures and (usually) when it's risky.
 2. **Map the reviewer's concept to a group** using the vocabulary hints above. Pull the columns whose names or descriptions match the concept. Don't restrict yourself to the example columns listed in this skill — anything in the schema whose description matches the concept counts.
-3. **Read the threshold from the description**, not from memory. Descriptions like *"Values above 0.5 are risky"* or *"Values below 693 are risky"* are the source of truth — quote them verbatim. When a description doesn't state a threshold, lean on trajectory (rising / falling / inflection over `trans_month`) and relative position rather than inventing a cutoff.
+3. **Read the threshold from the description**, not from memory. Descriptions encode thresholds in a few standard shapes:
+   - *"Scores from **X**-100 are considered risky"* → threshold = **X** (the LOWER bound; the upper is the scale max). E.g. `credit_loss_prob` says *"Scores from 10-100 are considered risky"* → threshold = 10. `tot_struct_risk_score` says *"Scores from 20-100 are considered risky"* → threshold = 20.
+   - *"Values above 0.5 are risky"* → threshold = 0.5 (typical for probability-scale columns).
+   - *"Values below 693 are risky"* → threshold = 693 (FICO-style; risky is the LOWER tail).
+
+   Quote the description text verbatim in `evidence`. **Critical**: don't be fooled by suffixes — `credit_loss_prob` is a 0-100 SCORE (despite the `_prob` suffix), not a 0-1 probability. The min/max in the schema confirm the scale.
+
+   When a description doesn't state a threshold, lean on trajectory (rising / falling / inflection over `trans_month`) and relative position rather than inventing a cutoff.
 4. **Trend each indicator IN ONE BATCH** — once you've picked the relevant columns in step 3, dispatch them via `batch_summarize_trend` (up to 6 per call). Example: `batch_summarize_trend('[{"table_name":"model_scores","value_column":"times_30_dpd","time_column":"trans_month","period":"month","op":"max"}, {"table_name":"model_scores","value_column":"tpf_internal_delinq_idx","time_column":"trans_month","period":"month","op":"max"}, ...]')`. This collapses N round-trips (~3-6s each) into one. Trajectory beats a single snapshot; a per-indicator loop burns the turn budget.
 5. **Quote individual breaches by column name** with the threshold from the description: *"`<column>` reached <value> in <month> — risky threshold from catalog: <quoted threshold>."* Don't paraphrase the column.
 6. **Quote the GROUP COMPOSITE alongside individual hits**: *"N of the M `<group>` indicators present on this case crossed their risky thresholds in <window>: `col1`, `col2`, …"* — this is the harder-to-fake signal.

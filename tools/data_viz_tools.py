@@ -49,9 +49,12 @@ def build_make_chart_tool(specialist_name: str):
             "`kind` ∈ {trend, bar, share, trend_dual, trend_grid, table}: "
             "trend = same-scale lines; trend_dual = 2 series, different "
             "scales (twin y); trend_grid = 3+ series, different scales "
-            "(stacked panels); bar/share = categorical; table = 1-3 rows "
-            "(no image). Plots need ≥ 4 points; `points` MUST include every "
-            "row from the source aggregate, not just the cited ones. "
+            "(stacked panels); **bar = DEFAULT for categorical breakdowns "
+            "(vertical, auto-sorted by value desc — top-N merchants etc.)**; "
+            "share = horizontal escape valve, ONLY when labels truly can't "
+            "fit vertical (multi-word names AND 8+ categories); table = 1-3 "
+            "rows (no image). Plots need ≥ 4 points; `points` MUST include "
+            "every row from the source aggregate, not just the cited ones. "
             "Call sparingly — the auto-distiller already charts findings."
         ),
     )
@@ -71,8 +74,10 @@ def build_make_chart_tool(specialist_name: str):
             return (
                 f"[make_chart error] `kind` must be one of "
                 f"{list(_VALID_KINDS)}; got {kind!r}. Use 'trend' for line "
-                f"charts over time, 'bar' for vertical bars, 'share' for "
-                f"horizontal-bar breakdowns sorted by value."
+                f"charts over time, 'bar' (DEFAULT) for categorical "
+                f"breakdowns — vertical, auto-sorted by value descending. "
+                f"Only use 'share' (horizontal bar) as an escape valve when "
+                f"labels truly can't fit vertical."
             )
         if not isinstance(points, list) or len(points) < 1:
             n = len(points) if isinstance(points, list) else "n/a"

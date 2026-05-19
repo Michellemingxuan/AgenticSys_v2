@@ -233,9 +233,84 @@ _CATALOG = DataCatalog()
 _BOOT_LOGGER = EventLogger(session_id=f"server-{uuid.uuid4().hex[:8]}")
 init_tools(_GATEWAY, _CATALOG, logger=_BOOT_LOGGER)
 
-_FIREWALL = FirewallStack(logger=_BOOT_LOGGER)
+_FIREWALL = FirewallStack(
+    logger=_BOOT_LOGGER,
+      specialist_concurrency=12,
+      orchestrator_concurrency=2
+      )
 _CLIENTS = build_session_clients(_FIREWALL, model_name=MODEL, backend=None)
 _CHAT_LLM = FirewalledChatShim(_CLIENTS)
+
+
+def _prewarm_clients() -> None:
+    """Fire one cheap LLM call at server bootstrap to pay safechain's
+    cold-start cost BEFORE the first user request.
+
+    Without this, the first question after `python server.py` makes the
+    user pay the safechain init bill (~10-30s for `_refresh_llm()` +
+    HTTP-pool warmup + auth token acquisition) inline — frequently
+    enough that the `_SCREEN_TIMEOUT_S=30` fence trips on cold-start
+    even on a healthy server. Pre-warming moves that cost to startup
+    where slow is acceptable. User-facing screens stay ~2-5s.
+
+    Default: ON for safechain backend (`LLM_BACKEND=safechain`), OFF
+    for OpenAI (sub-second cold-start there, prewarm is wasted work).
+    Override either way via `LLM_PREWARM=1` / `LLM_PREWARM=0`.
+
+    Failure is non-fatal: a failed prewarm logs the error but the
+    server keeps starting. The first user request will then pay the
+    cold-start cost as before — strictly no worse than not pre-warming.
+    """
+    backend = getattr(_CLIENTS, "backend", None) or os.environ.get("LLM_BACKEND", "openai")
+    default_on = backend == "safechain"
+    env_val = os.environ.get("LLM_PREWARM")
+    if env_val is not None:
+        enabled = env_val.lower() in ("1", "true", "yes", "on")
+    else:
+        enabled = default_on
+    if not enabled:
+        _BOOT_LOGGER.log("llm_prewarm_skipped", {"backend": backend})
+        print(f"[server] LLM prewarm skipped (backend={backend})")
+        return
+
+    print(f"[server] pre-warming LLM client (backend={backend}) …")
+    _BOOT_LOGGER.log("llm_prewarm_start", {"backend": backend})
+    t0 = time.time()
+
+    async def _warmup_call() -> None:
+        # Minimal prompt that exercises: token acquisition + HTTP pool
+        # warmup + safechain LCEL model load (for safechain) or
+        # AsyncOpenAI httpx pool init (for OpenAI). The reply is
+        # discarded — we only care about the side effect of touching
+        # every layer once.
+        await _CLIENTS.firewalled_client.chat.completions.create(
+            model=MODEL,
+            messages=[{"role": "user", "content": "ping"}],
+        )
+
+    try:
+        asyncio.run(asyncio.wait_for(_warmup_call(), timeout=60.0))
+        elapsed_ms = int((time.time() - t0) * 1000)
+        _BOOT_LOGGER.log("llm_prewarm_done", {
+            "backend": backend, "duration_ms": elapsed_ms,
+        })
+        print(f"[server] LLM prewarm done in {elapsed_ms}ms")
+    except Exception as exc:  # noqa: BLE001 — prewarm is best-effort
+        elapsed_ms = int((time.time() - t0) * 1000)
+        _BOOT_LOGGER.log("llm_prewarm_failed", {
+            "backend": backend,
+            "duration_ms": elapsed_ms,
+            "error_type": type(exc).__name__,
+            "error": str(exc)[:300],
+        })
+        print(f"[server] LLM prewarm failed after {elapsed_ms}ms: "
+              f"{type(exc).__name__}: {str(exc)[:200]}")
+        print("[server] continuing startup — first user question will "
+              "pay the cold-start cost.")
+
+
+_prewarm_clients()
+
 
 _PILLAR_YAML = PillarLoader().load(PILLAR) or {}
 _HELPER_TOOLS = build_helper_tools()
