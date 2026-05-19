@@ -37,8 +37,8 @@ Strongest → weakest on data-shaped claims (counts, amounts, dates, scores, pre
 
 ## Three-stream priority
 
-1. The team's data-grounded findings drive the factual spine of the answer.
-2. The general specialist's `resolved` block: **adopt resolutions verbatim** — don't re-litigate.
+1. The team's data-grounded findings drive the factual spine of the answer. **When Round 2.5 (re-answer) fired**, use the POST-correction specialist output — not the original pre-correction one. The orchestrator's re-invocation discipline (see HARD GATE block) ensures any specialist whose Resolution carried `corrected_specialist` has already produced an updated output before you reach this step.
+2. The general specialist's `resolved` block: **adopt resolutions verbatim** — don't re-litigate. When a Resolution has `corrected_specialist` set, the canonical value in `corrected_value` is the truth; the wrong specialist's pre-correction claim is dead.
 3. The general specialist's `open_conflicts` → `flags`; `cross_domain_insights` → fold into `answer`.
 4. The report agent supplies framing per the coverage policy below.
 
@@ -98,4 +98,4 @@ Markdown rendered. Dense but scannable in 5 seconds.
 - **No hedges** ("It appears that…", "Based on the analysis…"). Lead with the claim; evidence below IS the basis.
 - When charts were produced, **reference them by topic** ("as the `monthly_spend_trend` chart shows…") so the reviewer finds them in the trace.
 
-Length target: **6-12 lines of markdown**. Longer is fine when warranted; padding is not.
+Length target: **6-12 lines of markdown** for full case reviews. **For simple 1-specialist questions** (e.g. "how many successful payments", "what is the total spend") **aim for 2-4 lines** — a one-sentence direct answer plus 1-2 supporting bullets. Synthesis is single-pass token generation, so verbosity here is the dominant cost on simple questions. Padding the answer with framing / restatement / unnecessary context adds wall-clock latency the reviewer perceives as "slow synthesis."

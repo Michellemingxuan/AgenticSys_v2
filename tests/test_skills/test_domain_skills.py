@@ -15,7 +15,10 @@ def test_load_bureau_skill():
 
 def test_load_all_domain_skills():
     names = list_domain_skills()
-    assert len(names) == 7
+    # Currently 8: bureau, capacity_afford, crossbu, customer_rel, modeling,
+    # spend_payments, strategy, wcc. Bump this count when a new
+    # `skills/domain/*.md` skill lands.
+    assert len(names) == 8
     for name in names:
         skill = load_domain_skill(name)
         assert skill is not None, f"Failed to load skill: {name}"

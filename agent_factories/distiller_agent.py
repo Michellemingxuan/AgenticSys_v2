@@ -70,6 +70,18 @@ already stated.
   - threshold breaches: `[{"period": "2024-Q4", "value": 3, "threshold": 1}]`
   Empty list when the claim is a single scalar or has no underlying series.
 
+  **INCLUDE EVERY POINT FROM THE SOURCE SERIES — do NOT abridge.** If the
+  specialist's `summarize_trend` or `summarize_by_group` returned N rows,
+  `numbers` MUST contain all N entries, even when the `claim` text
+  summarizes interior periods as "steady" / "flat" / "remained around X"
+  or only names the anchor / peak / trough periods. The renderer plots
+  `numbers` exactly as you provide; dropping intermediate rows produces a
+  chart with gaps that misrepresents the data and contradicts the claim's
+  time window. Example: a 9-month spend trend whose claim reads "starts
+  at $224K (2024-11), remains steady through 2025-03, then drops to $19K
+  (2025-07)" → `numbers` MUST list all 9 months (2024-11, 2024-12, 2025-01,
+  …, 2025-07), NOT just the 3 anchor periods named in the claim.
+
 - `viz`: optional `{"kind": "trend"|"bar"|"share", "x_field": "...", "y_fields": ["..."]}`
   spec. **Charts surface in the reviewer's reasoning trace, not inline in
   the chat answer. Be selective:** include `viz` only when ALL hold:

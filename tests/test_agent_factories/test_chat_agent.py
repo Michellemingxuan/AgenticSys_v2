@@ -31,12 +31,14 @@ def mock_llm():
 # ── screen() — composite: redact + relevance_check ─────────────────────────
 
 async def test_screen_passes_in_scope_question(mock_llm, logger):
+    # Question contains digits ("366132845011" looks like a case id) so it
+    # bypasses the fast-path and BOTH redact + relevance_check run.
     mock_llm.ainvoke = AsyncMock(side_effect=[
         LLMResult(status="success", data={"redacted": "redacted q", "masked_spans": []}),
         LLMResult(status="success", data={"passed": True, "reason": ""}),
     ])
     agent = ChatAgent(mock_llm, logger)
-    verdict = await agent.screen("What's the bureau score for this case?")
+    verdict = await agent.screen("What's the bureau score for case 366132845011?")
     assert isinstance(verdict, ScreenVerdict)
     assert verdict.passed is True
     assert verdict.reason == ""
@@ -44,14 +46,51 @@ async def test_screen_passes_in_scope_question(mock_llm, logger):
 
 
 async def test_screen_rejects_off_topic(mock_llm, logger):
+    # "what should I eat" is short + no digits → fast-path skips redact;
+    # only the relevance_check LLM call fires.
     mock_llm.ainvoke = AsyncMock(side_effect=[
-        LLMResult(status="success", data={"redacted": "what should I eat", "masked_spans": []}),
         LLMResult(status="success", data={"passed": False, "reason": "Off-topic — case review only."}),
     ])
     agent = ChatAgent(mock_llm, logger)
     verdict = await agent.screen("What should I eat for lunch?")
     assert verdict.passed is False
     assert "case review" in verdict.reason.lower()
+    # Redact was skipped → redacted_question is the input verbatim.
+    assert verdict.redacted_question == "What should I eat for lunch?"
+
+
+async def test_screen_fast_path_skips_redact_for_trivial_question(mock_llm, logger):
+    """Short, plainly-non-sensitive questions skip the redact LLM call —
+    saves ~1-2s of latency on trivial out-of-scope inputs like "what to
+    eat" / "hi". Only the relevance_check call should fire."""
+    mock_llm.ainvoke = AsyncMock(side_effect=[
+        LLMResult(status="success", data={"passed": False, "reason": "Out of scope."}),
+    ])
+    agent = ChatAgent(mock_llm, logger)
+    verdict = await agent.screen("what to eat")
+    assert verdict.passed is False
+    # Exactly ONE LLM call (relevance), not two (redact + relevance).
+    assert mock_llm.ainvoke.call_count == 1
+
+
+async def test_screen_redact_runs_when_text_could_carry_pii(mock_llm, logger):
+    """Anything that LOOKS like it might carry a case ID / SSN / phone /
+    email still goes through redact — even if short."""
+    # Has a digit run of 3+ → triggers redact.
+    mock_llm.ainvoke = AsyncMock(side_effect=[
+        LLMResult(status="success", data={"redacted": "case <ID>", "masked_spans": []}),
+        LLMResult(status="success", data={"passed": True, "reason": ""}),
+    ])
+    agent = ChatAgent(mock_llm, logger)
+    await agent.screen("case 366132845011")
+    assert mock_llm.ainvoke.call_count == 2  # redact + relevance
+
+    mock_llm.ainvoke = AsyncMock(side_effect=[
+        LLMResult(status="success", data={"redacted": "user@<EMAIL>", "masked_spans": []}),
+        LLMResult(status="success", data={"passed": True, "reason": ""}),
+    ])
+    await agent.screen("user@example.com is angry")
+    assert mock_llm.ainvoke.call_count == 2
 
 
 async def test_screen_redact_blocked_falls_through(mock_llm, logger):

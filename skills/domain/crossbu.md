@@ -43,6 +43,18 @@ For balance / outstanding / "what is owed" → sum `crossbu_cards.balance` via `
 
 For customer-side transaction spend (`spends_data.Amount`) → defer with `data_gaps` (spend_payments owns it).
 
+## What `balance` actually represents (READ before quoting)
+
+`balance` is the **most recent balance recorded before the pillar's `cut_off_date`** (a snapshot, not a running figure). When `account_status` on the same row indicates **default** (any `*DPB` value — `30 DPB`, `60 DPB`, `90 DPB`, `120 DPB`), that snapshot balance IS the **default amount** for the card.
+
+Practical rules:
+
+- Always read `account_status` alongside `balance`. A balance of $14,200 on a `120 DPB` card is the default amount on a defaulted card — that's a far stronger signal than the same balance on a `Current` card.
+- When reporting "default amount" / "outstanding at default" / "exposure at default" for a single card: `query_table('crossbu_cards', filter_column='account_status', filter_value='<DPB-status>', columns='card_name,card_portfolio,balance,account_status')` and quote the `balance` per card. Label it explicitly: *"Default amount on the SBS card (status `90 DPB`): **$14,200**."*
+- For a portfolio-level "default amount" / "exposure at default" sum: aggregate balance over only the DPB rows — `aggregate_column('crossbu_cards', 'balance', op='sum', filter_column='account_status', filter_value='<status>')`. Repeat per DPB tier if the case has cards in multiple stages.
+- When all cards are `Current`, `balance` is just the outstanding — **don't call it "default amount"**.
+- The `account_status` categorical typically has: `Current`, `30 DPB`, `60 DPB`, `90 DPB`, `120 DPB`. Probe `query_table('crossbu_cards', columns='account_status')` first if the case carries codes you haven't seen.
+
 # Merchant-side B2B angle (NARROW — easy to over-claim)
 
 `crossbu_merchants` is the **merchant-side receipts** view: the volume of charges that the customer's *businesses* receive from their B2B counterparties. It is NOT the customer's own spending pattern.

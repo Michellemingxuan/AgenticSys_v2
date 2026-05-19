@@ -9,6 +9,8 @@ from models.types import DomainSkill, SpecialistOutput
 from skills.loader import load_skill as _load_skill
 from tools.data_tools import (
     aggregate_column,
+    batch_aggregate,
+    batch_summarize_trend,
     get_table_schema,
     list_available_tables,
     query_table,
@@ -64,7 +66,8 @@ def build_specialist_agent(skill: DomainSkill, pillar: dict, model) -> Agent:
         name=skill.name,
         instructions=_compose_instructions(skill, pillar),
         tools=[list_available_tables, get_table_schema, query_table,
-               aggregate_column, summarize_trend, summarize_by_group,
+               aggregate_column, batch_aggregate,
+               summarize_trend, batch_summarize_trend, summarize_by_group,
                make_chart],
         output_type=AgentOutputSchema(SpecialistOutput, strict_json_schema=False),
         model=model,
@@ -74,5 +77,9 @@ def build_specialist_agent(skill: DomainSkill, pillar: dict, model) -> Agent:
         # query_table. ``reset_tool_choice=True`` (Agent default) auto-flips
         # this back to "auto" after the first tool call so the agent can
         # synthesize the SpecialistOutput.
-        model_settings=ModelSettings(tool_choice="required"),
+        model_settings=ModelSettings(
+            tool_choice="required",
+            parallel_tool_calls=True,
+            max_tokens=4096,
+        ),
     )

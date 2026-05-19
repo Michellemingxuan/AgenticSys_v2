@@ -3,7 +3,7 @@ description: "Internal model scoring features — one row per scoring run per ca
   \ Holds\nboth the ML MODEL OUTPUT scores (risk scores produced by Amex's internal\n\
   machine-learning models) and the FEATURES those models consume.\n\nNotable model-output\
   \ score columns (examples; other scores may also exist\non this table — probe the\
-  \ schema):\n  - CDSS (Credit Decision Support System): e.g. `cust_eff_se_cdss_5_180_day_score_max`.\n\
+  \ schema):\n  - CDSS (Credit Decision Support System): e.g. `creidt_loss_prob_max`.\n\
   \  - TSR (Total Structural Risk): e.g. `tot_struct_risk_score_max`.\n  - Other risk\
   \ scores commonly present: `cbr_score_max`,\n    `credit_loss_prob_max`, `gam_clr_erly_risk_score_min`,\
   \ `cust_pymt_chan_risk_score_max`.\n\nThe remaining columns are model-input features\
@@ -330,7 +330,7 @@ columns:
     std: 1.5
     min: -10.0
     max: 5.0
-    description: Merchant Risk Score. Values above 2 are risky.
+    description: A metric that summarizes the customer's CDSS risk scores over a historical window (from 5 to 180 days ago). Values above 2 are risky.
     aliases:
     - cust_eff_se_cdss_5_180_day_score_max
   cust_expr_to_arb_inc_ratio:

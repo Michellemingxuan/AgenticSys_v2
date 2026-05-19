@@ -104,6 +104,27 @@ class Resolution(BaseModel):
     answer: str
     supporting_evidence: list[str] = Field(default_factory=list)
     conclusion: str
+    # Re-answer mechanism: when general_specialist verifies a contradiction
+    # and finds ONE specialist was wrong (canonical value matches the other,
+    # or matches an authoritative aggregate the general specialist ran),
+    # this field names the wrong specialist. The orchestrator's
+    # post-general-specialist round reads this and re-invokes the named
+    # specialist with the correction as part of the sub-question. Empty
+    # / None when both specialists agreed or when the resolution doesn't
+    # require a re-answer (e.g., paraphrasing differences).
+    corrected_specialist: str | None = None
+    # The canonical value general_specialist established (the date, count,
+    # name, etc.) that the wrong specialist should adopt. Surfaced verbatim
+    # in the re-invocation sub-question so the specialist can revise.
+    # Nullable for parity with ``corrected_specialist``: when there's no
+    # correction (the resolution is "complementary perspectives, no
+    # contradiction"), the LLM naturally returns null for BOTH fields and
+    # the schema must accept that. Previously this was a required ``str``
+    # which raised ``Invalid JSON when parsing ... 1 validation error for
+    # ReviewReport — resolved.0.corrected_value Input should be a valid
+    # string`` and aborted the whole FinalAnswer, masking otherwise valid
+    # specialist outputs.
+    corrected_value: str | None = None
 
 
 class Conflict(BaseModel):

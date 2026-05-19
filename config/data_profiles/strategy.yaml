@@ -1,0 +1,91 @@
+table: strategy
+description: >
+  Internal credit-strategy action log — discrete decisions the firm
+  took on the customer's account (global-limit changes, RLA / Risk
+  Line Action events, portfolio actions). Each row is one deliberate
+  intervention; the set tells the firm's historical risk view of
+  this account. Sourced from the strategy-action management system
+  (real, not simulated).
+columns:
+  Product Type:
+    dtype: categorical
+    description: Card product family the action applies to. Known values
+      include "OPEN" (Open / charge); other product families may appear as
+      the dataset grows.
+    description_pending: false
+    aliases:
+    - Product Type
+    - product_type
+  Date:
+    dtype: date
+    parse_hint: '%m/%d/%y %H:%M'
+    description: Timestamp the strategy action was recorded. Format on disk
+      is M/D/YY H:MM (e.g. "5/28/24 3:03") — note this is 2-digit year and
+      24-hour clock. Specialist filters MUST match this format via
+      get_table_schema before passing a filter_value.
+    description_pending: false
+    aliases:
+    - Date
+    - action_date
+    - date
+  Strategy Action:
+    dtype: categorical
+    description: Action code. Known values include "GL_REDUCTION" (global
+      limit reduced). Other codes (GL_INCREASE, closures, etc.) may appear
+      as the dataset grows — probe `query_table` to enumerate values for
+      this case.
+    description_pending: false
+    aliases:
+    - Strategy Action
+    - action
+    - strategy_action
+  Portfolio:
+    dtype: categorical
+    description: Portfolio classification the action falls under. Known
+      values include "CHARGE" (charge-card portfolio).
+    description_pending: false
+    aliases:
+    - Portfolio
+    - portfolio
+  RLA Type:
+    dtype: categorical
+    description: Risk Line Action type — which risk-management framework
+      governed this action. Known values include "Credit RLA".
+    description_pending: false
+    aliases:
+    - RLA Type
+    - rla_type
+  Current Global Limit:
+    dtype: float
+    description: Account's global limit BEFORE this action (in dollars).
+      The "current" snapshot at action time, not the live current state.
+    description_pending: false
+    aliases:
+    - Current Global Limit
+    - current_global_limit
+  New Global Limit:
+    dtype: float
+    description: Account's global limit AFTER this action (in dollars).
+      For GL_REDUCTION, this is the post-cut value; the delta
+      (Current − New) is the magnitude of the cut.
+    description_pending: false
+    aliases:
+    - New Global Limit
+    - new_global_limit
+  Current Line Amount:
+    dtype: float
+    description: Per-line amount (sub-limit on a specific card line within
+      the global limit) before the action. 0 when the action targets only
+      the global limit, not a specific line.
+    description_pending: false
+    aliases:
+    - Current Line Amount
+    - current_line_amount
+  New Line Amount:
+    dtype: float
+    description: Per-line amount after the action. 0 when not adjusted by
+      this action.
+    description_pending: false
+    aliases:
+    - New Line Amount
+    - new_line_amount

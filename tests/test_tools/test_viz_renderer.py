@@ -7,6 +7,7 @@ import pytest
 from tools.viz_renderer import (
     _resolve_axes,
     _slugify,
+    _sort_points,
     kp_to_vega_spec,
     render_chart,
 )
@@ -174,16 +175,28 @@ def test_kp_to_vega_spec_emits_minimal_lite_v5_for_trend():
     spec = kp_to_vega_spec(kp)
     assert spec is not None
     assert spec["$schema"].endswith("v5.json")
-    assert spec["mark"] == "line"
     assert spec["data"]["values"] == kp["numbers"]
-    assert spec["encoding"]["x"]["field"] == "period"
-    assert spec["encoding"]["y"]["field"] == "value"
+    # Trend now ships as a layered spec: [line, text] so each datapoint
+    # gets a visible value label next to it. The line layer is first.
+    assert isinstance(spec["layer"], list)
+    assert len(spec["layer"]) == 2
+    line_mark = spec["layer"][0]["mark"]
+    text_mark = spec["layer"][1]["mark"]
+    assert line_mark["type"] == "line" if isinstance(line_mark, dict) else line_mark == "line"
+    assert text_mark["type"] == "text"
+    assert spec["layer"][0]["encoding"]["x"]["field"] == "period"
+    assert spec["layer"][0]["encoding"]["y"]["field"] == "value"
+    # Text layer carries the value field — vega-embed renders these
+    # next to each point.
+    assert spec["layer"][1]["encoding"]["text"]["field"] == "value"
     # Spec must roundtrip cleanly through JSON for storage in the KB / logs.
     assert json.loads(json.dumps(spec)) == spec
 
 
 def test_kp_to_vega_spec_share_uses_horizontal_layout():
-    """`share` kind maps to a bar mark with x/y swapped (horizontal bar)."""
+    """`share` kind maps to a bar mark with x/y swapped (horizontal bar),
+    layered with a text mark that prints the value at the end of each
+    bar."""
     kp = {
         "topic": "industry_mix",
         "viz": {"kind": "share"},
@@ -191,11 +204,19 @@ def test_kp_to_vega_spec_share_uses_horizontal_layout():
     }
     spec = kp_to_vega_spec(kp)
     assert spec is not None
-    assert spec["mark"] == "bar"
+    assert isinstance(spec["layer"], list)
+    assert len(spec["layer"]) == 2
+    bar_layer = spec["layer"][0]
+    text_layer = spec["layer"][1]
+    assert bar_layer["mark"] == "bar"
     # Horizontal: y is the categorical axis, x is quantitative.
-    assert spec["encoding"]["y"]["field"] == "group"
-    assert spec["encoding"]["x"]["field"] == "value"
-    assert spec["encoding"]["y"]["sort"]["order"] == "descending"
+    assert bar_layer["encoding"]["y"]["field"] == "group"
+    assert bar_layer["encoding"]["x"]["field"] == "value"
+    assert bar_layer["encoding"]["y"]["sort"]["order"] == "descending"
+    # Text layer offsets right of the bar with align=left.
+    assert text_layer["mark"]["type"] == "text"
+    assert text_layer["mark"]["align"] == "left"
+    assert text_layer["encoding"]["text"]["field"] == "value"
 
 
 def test_kp_to_vega_spec_returns_none_when_unviz_able():
@@ -301,8 +322,9 @@ def test_render_chart_trend_grid_drops_unparseable_series_silently(tmp_path):
 
 
 def test_kp_to_vega_spec_emits_layered_independent_y_for_trend_dual():
-    """trend_dual → Vega-Lite `layer` of two line marks with independent
-    y scales so each series uses its own y range."""
+    """trend_dual → Vega-Lite `layer` of two line+text mark PAIRS with
+    independent y scales. Each series gets its own line and its own
+    text-value overlay so the reviewer sees exact numbers."""
     kp = {
         "topic": "score_vs_dpd",
         "viz": {
@@ -319,12 +341,21 @@ def test_kp_to_vega_spec_emits_layered_independent_y_for_trend_dual():
     assert spec is not None
     assert spec["$schema"].endswith("v5.json")
     assert spec["data"]["values"] == kp["numbers"]
-    # Two layers — one per series — each with its own y encoding.
+    # Four layers: [score line, score text, dpd line, dpd text].
     assert isinstance(spec.get("layer"), list)
-    assert len(spec["layer"]) == 2
-    assert spec["layer"][0]["mark"] == "line"
-    assert spec["layer"][0]["encoding"]["y"]["field"] == "score"
-    assert spec["layer"][1]["encoding"]["y"]["field"] == "dpd"
+    assert len(spec["layer"]) == 4
+    line_marks = [
+        L for L in spec["layer"]
+        if isinstance(L["mark"], dict) and L["mark"]["type"] == "line"
+    ]
+    text_marks = [
+        L for L in spec["layer"]
+        if isinstance(L["mark"], dict) and L["mark"]["type"] == "text"
+    ]
+    assert len(line_marks) == 2
+    assert len(text_marks) == 2
+    assert {L["encoding"]["y"]["field"] for L in line_marks} == {"score", "dpd"}
+    assert {L["encoding"]["text"]["field"] for L in text_marks} == {"score", "dpd"}
     # Independent y scales — this is what makes the layout dual-axis.
     assert spec["resolve"]["scale"]["y"] == "independent"
     # JSON-roundtrippable.
@@ -332,7 +363,8 @@ def test_kp_to_vega_spec_emits_layered_independent_y_for_trend_dual():
 
 
 def test_kp_to_vega_spec_emits_vconcat_for_trend_grid():
-    """trend_grid → Vega-Lite `vconcat` of N single-series line specs."""
+    """trend_grid → Vega-Lite `vconcat` of N panels, each layering a
+    line and a text-label mark."""
     kp = {
         "topic": "credit_panel",
         "viz": {
@@ -349,10 +381,105 @@ def test_kp_to_vega_spec_emits_vconcat_for_trend_grid():
     assert spec is not None
     assert isinstance(spec.get("vconcat"), list)
     assert len(spec["vconcat"]) == 3
-    # Each sub-spec is a line chart of one y_field against the shared x.
-    fields = [sub["encoding"]["y"]["field"] for sub in spec["vconcat"]]
-    assert fields == ["tsr", "cdss", "txn_count"]
+    # Each sub-spec is a layered [line, text] pair against the shared x.
+    fields = []
     for sub in spec["vconcat"]:
-        assert sub["mark"] == "line"
-        assert sub["encoding"]["x"]["field"] == "period"
+        assert isinstance(sub["layer"], list)
+        assert len(sub["layer"]) == 2
+        line_layer, text_layer = sub["layer"]
+        assert line_layer["mark"]["type"] == "line"
+        assert text_layer["mark"]["type"] == "text"
+        assert line_layer["encoding"]["x"]["field"] == "period"
+        fields.append(line_layer["encoding"]["y"]["field"])
+        # Text layer carries the same y-field as text.
+        assert text_layer["encoding"]["text"]["field"] == line_layer["encoding"]["y"]["field"]
+    assert fields == ["tsr", "cdss", "txn_count"]
     assert json.loads(json.dumps(spec)) == spec
+
+
+# ── _sort_points: temporal / numeric / ranking / alpha ───────────────────────
+
+
+def test_sort_points_temporal_when_x_parses_as_date():
+    """Mixed-order dates → chronological ascending. This is what
+    prevents the back-and-forth zig-zag a trend line picks up when the
+    specialist hands the points in summary-call order instead of
+    chronological order."""
+    points = [
+        {"period": "2025-02", "value": 200},
+        {"period": "2024-11", "value": 50},
+        {"period": "2025-01", "value": 175},
+        {"period": "2024-12", "value": 120},
+    ]
+    out = _sort_points(points, "period", ["value"], "trend")
+    assert [p["period"] for p in out] == ["2024-11", "2024-12", "2025-01", "2025-02"]
+
+
+def test_sort_points_numeric_when_x_parses_as_number():
+    """Numeric x → ascending. Catches things like `score_band: 1..5`."""
+    points = [
+        {"band": 5, "share": 0.1},
+        {"band": 2, "share": 0.4},
+        {"band": 1, "share": 0.5},
+        {"band": 3, "share": 0.3},
+    ]
+    out = _sort_points(points, "band", ["share"], "trend")
+    assert [p["band"] for p in out] == [1, 2, 3, 5]
+
+
+def test_sort_points_ranking_for_categorical_share():
+    """`share` with categorical x → biggest first (descending by y).
+    Matches the existing horizontal-bar sort the share renderer does
+    internally — the sort layer just makes it the ALSO the order for
+    every consumer (Vega spec, downstream table rendering, etc.)."""
+    points = [
+        {"merchant": "C", "value": 100},
+        {"merchant": "A", "value": 500},
+        {"merchant": "B", "value": 250},
+        {"merchant": "D", "value": 50},
+    ]
+    out = _sort_points(points, "merchant", ["value"], "share")
+    assert [p["merchant"] for p in out] == ["A", "B", "C", "D"]
+
+
+def test_sort_points_alpha_fallback():
+    """Categorical x with a `trend` kind (where no ranking semantics
+    apply) → alpha ascending. Stable tie-breaking on equal y."""
+    points = [
+        {"label": "delta", "value": 1},
+        {"label": "alpha", "value": 2},
+        {"label": "charlie", "value": 3},
+        {"label": "bravo", "value": 4},
+    ]
+    out = _sort_points(points, "label", ["value"], "trend")
+    assert [p["label"] for p in out] == ["alpha", "bravo", "charlie", "delta"]
+
+
+# ── kind="table" sanity ──────────────────────────────────────────────────────
+
+
+def test_render_chart_skips_table_kind():
+    """`kind='table'` is handled at the make_chart-tool layer (the row
+    data goes straight to the SSE payload, no matplotlib render).
+    `render_chart` itself should be a no-op — return None without
+    raising so a stray call from a legacy code path doesn't crash."""
+    kp = {
+        "topic": "tiny_breakdown",
+        "viz": {"kind": "table", "x_field": "month", "y_fields": ["spend"]},
+        "numbers": [
+            {"month": "2025-05", "spend": 404152},
+            {"month": "2025-06", "spend": 219000},
+        ],
+    }
+    # Renderer treats `table` as unsupported (it isn't in _SUPPORTED_KINDS)
+    # and returns None — no exception, no PNG.
+    assert render_chart(kp, Path("/tmp"), turn_id="t1") is None
+
+
+def test_kp_to_vega_spec_skips_table_kind():
+    kp = {
+        "topic": "tiny_breakdown",
+        "viz": {"kind": "table", "x_field": "month", "y_fields": ["spend"]},
+        "numbers": [{"month": "2025-05", "spend": 404152}],
+    }
+    assert kp_to_vega_spec(kp) is None

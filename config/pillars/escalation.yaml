@@ -23,5 +23,8 @@ specialists:
   capacity_afford:
     focus: "Affordability Stress"
     prompt_overlay: "DTI above policy limits"
+  strategy:
+    focus: "Prior Interventions"
+    prompt_overlay: "Recent GL reductions / RLA actions signal escalating risk view"
 silenced_tables: []
 silenced_columns: {}

@@ -3,7 +3,7 @@ display_name: "Credit & Risk"
 focus: "Delinquency risk, bureau scores, cross-BU exposure, internal model scores and score drivers, spend patterns, WCC flags, capacity & affordability"
 
 # Data collection cut-off — "recent" is relative to this date
-cut_off_date: "2025-12-01"
+cut_off_date: "2025-07-01"
 
 # Pillar-wide vocabulary. Injected into orchestrator + every specialist.
 # Treats values as REFERENCE only — always verify via `get_table_schema`
@@ -98,6 +98,10 @@ specialists:
   capacity_afford:
     focus: "Capacity Headroom"
     prompt_overlay: "Limit vs DTI"
+
+  strategy:
+    focus: "Credit-Strategy Actions"
+    prompt_overlay: "Global-limit changes, RLA events; firm's historical risk view"
 
 silenced_tables: []
 silenced_columns: {}

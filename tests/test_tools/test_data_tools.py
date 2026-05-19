@@ -1,5 +1,7 @@
 """Tests for tools/data_tools.py (case-scoped)."""
 
+import json
+
 import pytest
 
 from datalayer.catalog import DataCatalog
@@ -174,10 +176,39 @@ def test_query_missing():
     assert "unavailable" in result.lower()
 
 
+def test_batch_aggregate_runs_multiple_scalars_in_one_call():
+    specs = [
+        {"table_name": "bureau_full", "column": "score", "op": "count"},
+        {"table_name": "bureau_full", "column": "score", "op": "min"},
+        {"table_name": "bureau_full", "column": "score", "op": "max"},
+        {
+            "table_name": "bureau_full",
+            "column": "derog_count",
+            "op": "sum",
+            "filter_column": "score",
+            "filter_value": "720",
+        },
+    ]
+
+    result = data_tools._batch_aggregate_impl(json.dumps(specs))
+    payload = json.loads(result)
+
+    assert len(payload["results"]) == 4
+    rendered = "\n".join(r["result"] for r in payload["results"])
+    assert "count" in rendered
+    assert "2" in rendered
+    assert "min(score)" in rendered
+    assert "max(score)" in rendered
+    assert "filtered by score eq '720'" in rendered
+
+
+def test_batch_aggregate_rejects_invalid_json():
+    result = data_tools._batch_aggregate_impl("not json")
+    payload = json.loads(result)
+    assert payload["error"] == "invalid_json"
+
+
 # ── summarize_trend ──────────────────────────────────────────────────────
-
-
-import json
 
 
 def _setup_spend_fixture():
@@ -326,6 +357,60 @@ def test_summarize_trend_date_range_narrowing():
     assert {"2025-02", "2025-03"} <= periods
 
 
+def test_batch_summarize_trend_runs_multiple_trends_in_one_call():
+    _setup_spend_fixture()
+    specs = [
+        {"table_name": "spends_data", "value_column": "Amount",
+         "time_column": "Date", "period": "month", "op": "sum"},
+        {"table_name": "spends_data", "value_column": "Amount",
+         "time_column": "Date", "period": "month", "op": "count"},
+    ]
+    raw = data_tools._batch_summarize_trend_impl(json.dumps(specs))
+    payload = json.loads(raw)
+    assert len(payload["results"]) == 2
+
+    # Each entry echoes the source value_column so the LLM can correlate
+    # result→indicator without re-parsing the spec.
+    assert payload["results"][0]["value_column"] == "Amount"
+    assert payload["results"][1]["value_column"] == "Amount"
+
+    # The per-trend `result` field carries the same JSON document a
+    # single summarize_trend call would have returned.
+    sum_trend = json.loads(payload["results"][0]["result"])
+    count_trend = json.loads(payload["results"][1]["result"])
+    assert sum_trend["op"] == "sum"
+    assert count_trend["op"] == "count"
+    assert sum_trend["summary"]["n_buckets"] == 4
+    # Mar-2025 sum = 1100; count = 2.
+    sum_mar = next(s for s in sum_trend["series"] if s["period"] == "2025-03")
+    count_mar = next(s for s in count_trend["series"] if s["period"] == "2025-03")
+    assert sum_mar["raw_value"] == 1100.0
+    assert count_mar["raw_value"] == 2
+
+
+def test_batch_summarize_trend_caps_at_six_specs():
+    _setup_spend_fixture()
+    spec = {"table_name": "spends_data", "value_column": "Amount",
+            "time_column": "Date", "period": "month", "op": "sum"}
+    raw = data_tools._batch_summarize_trend_impl(json.dumps([spec] * 8))
+    payload = json.loads(raw)
+    assert len(payload["results"]) == 6
+    assert "truncated" in payload
+    assert "first 6 of 8" in payload["truncated"]
+
+
+def test_batch_summarize_trend_rejects_invalid_json():
+    raw = data_tools._batch_summarize_trend_impl("not json")
+    payload = json.loads(raw)
+    assert payload["error"] == "invalid_json"
+
+
+def test_batch_summarize_trend_rejects_non_list():
+    raw = data_tools._batch_summarize_trend_impl(json.dumps({"table_name": "x"}))
+    payload = json.loads(raw)
+    assert payload["error"] == "invalid_specs"
+
+
 def test_summarize_trend_table_alias_resolves():
     _setup_spend_fixture()
     # Pass canonical 'spends' — the spends.yaml profile aliases it to spends_data.
@@ -373,6 +458,12 @@ def test_summarize_trend_no_rows():
     (["11-05-2024", "11-20-2024", "12-10-2024"], ["2024-11", "2024-12"]),
     # Compact ISO basic YYYYMMDD.
     (["20241105", "20241120", "20241210"], ["2024-11", "2024-12"]),
+    # US-slash date WITH trailing time, 2-digit year — the format the
+    # `strategy` table ships in. "5/28/24 3:03" / "2/15/25 14:22".
+    # The time portion is sub-resolution (we bucket by month) — strip
+    # it and reuse the MM/DD/YY parsing.
+    (["11/05/24 3:03", "11/20/24 14:22", "12/10/24 9:00"],
+     ["2024-11", "2024-12"]),
 ])
 def test_summarize_trend_handles_extended_date_formats(date_fmt, expected_periods):
     """Regression: private environment hits formats beyond the original

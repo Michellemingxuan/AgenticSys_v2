@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 @dataclass
@@ -51,3 +51,13 @@ class AppContext:
     # pending tasks at end of turn so the KB is fully populated before the
     # NEXT turn starts (and its KB-warmth digest reflects this turn's KPs).
     _pending_distillers: list = field(default_factory=list)
+    # Server-side SSE-emit hook. When wired by `server.py` at turn start,
+    # tools running inside `Runner.run` can publish typed events out to the
+    # frontend WITHOUT going through the orchestrator's run loop — e.g.
+    # `make_chart` calls this to fire a `chart_pending` event the instant
+    # a specialist starts plotting, so the UI can show a "working on the
+    # plots" placeholder long before the actual `chart` event (which only
+    # fires at end-of-turn after distillation drains). None outside an
+    # active session (tests, notebooks); tools must guard the call.
+    # Signature: `_emit_event(event_name: str, payload: dict) -> None`.
+    _emit_event: Callable[[str, dict], None] | None = None

@@ -17,23 +17,35 @@ class _Logger:
         self.events.append((evt, payload))
 
 
-def _make_ctx(tmp_path: Path) -> SimpleNamespace:
-    """AppContext-shaped stand-in carrying everything make_chart reads."""
+def _make_ctx(tmp_path: Path, capture_emits: list | None = None) -> SimpleNamespace:
+    """AppContext-shaped stand-in carrying everything make_chart reads.
+
+    Pass ``capture_emits`` (a list) to record any SSE events the tool
+    publishes via `_emit_event`. Each appended entry is `(event, payload)`.
+    """
     case_folder = tmp_path / "CASE-VIZ"
     case_folder.mkdir(exist_ok=True)
+    emit_fn = (
+        (lambda evt, payload: capture_emits.append((evt, payload)))
+        if capture_emits is not None else None
+    )
     return SimpleNamespace(
         logger=_Logger(),
         case_folder=case_folder,
         _specialist_kb={},
         _turn_id="abc123",
+        _emit_event=emit_fn,
     )
 
 
 def _good_points():
+    # 4+ entries to satisfy the validator's `_PLOT_MIN_POINTS` floor
+    # (plot kinds require ≥ 4; 1-3 row datasets must use kind='table').
     return [
         {"period": "2024-11", "value": 300},
         {"period": "2024-12", "value": 500},
         {"period": "2025-01", "value": 800},
+        {"period": "2025-02", "value": 900},
     ]
 
 
@@ -78,7 +90,12 @@ async def test_make_chart_writes_png_and_persists_kp(tmp_path):
     assert "image_path" in kp
     img = Path(kp["image_path"])
     assert img.exists() and img.suffix == ".png" and img.stat().st_size > 0
-    assert kp["vega_spec"]["mark"] == "line"
+    # Vega spec is layered [line, text] so each datapoint carries an
+    # exact-value label next to it.
+    assert isinstance(kp["vega_spec"]["layer"], list)
+    line_layer = kp["vega_spec"]["layer"][0]
+    line_mark = line_layer["mark"]
+    assert (line_mark["type"] if isinstance(line_mark, dict) else line_mark) == "line"
 
     # Tool-invocation event logged.
     assert any(e[0] == "make_chart_tool_invoked" for e in ctx.logger.events)
@@ -104,18 +121,40 @@ async def test_make_chart_rejects_bad_kind(tmp_path):
 
 @pytest.mark.asyncio
 async def test_make_chart_rejects_too_few_points(tmp_path):
+    """Plot kinds need ≥ 4 datapoints — the validator points the model at
+    kind='table' for 1-3 rows so the rows surface as a table card
+    instead of an unreadable plot."""
     tool = build_make_chart_tool("modeling")
     ctx = _make_ctx(tmp_path)
-    out = await tool.on_invoke_tool(
+    # 2 points — would pass the "1+ dicts" basic check but fail the
+    # per-plot-kind minimum.
+    out_two = await tool.on_invoke_tool(
         RunContextWrapper(ctx),
         json.dumps({
             "topic": "x", "kind": "trend",
-            "claim": "c", "points": [{"period": "2024-11", "value": 1}],
+            "claim": "c",
+            "points": [
+                {"period": "2024-11", "value": 1},
+                {"period": "2024-12", "value": 2},
+            ],
             "x_field": "period", "y_fields": ["value"], "source_call": "",
         }),
     )
-    assert "[make_chart error]" in out
-    assert "2+ dicts" in out
+    assert "[make_chart error]" in out_two
+    assert "at least 4 datapoints" in out_two
+    assert "kind='table'" in out_two
+
+    # Empty list — fails the basic 1+ dicts check.
+    out_zero = await tool.on_invoke_tool(
+        RunContextWrapper(ctx),
+        json.dumps({
+            "topic": "x", "kind": "trend",
+            "claim": "c", "points": [],
+            "x_field": "period", "y_fields": ["value"], "source_call": "",
+        }),
+    )
+    assert "[make_chart error]" in out_zero
+    assert "1+ dicts" in out_zero
 
 
 @pytest.mark.asyncio
@@ -140,11 +179,17 @@ async def test_make_chart_returns_error_on_bad_axes(tmp_path):
     string the LLM can act on, no KP written."""
     tool = build_make_chart_tool("modeling")
     ctx = _make_ctx(tmp_path)
+    # 4 points so we pass the points-count validator and reach the renderer.
     out = await tool.on_invoke_tool(
         RunContextWrapper(ctx),
         json.dumps({
             "topic": "bad_axes", "kind": "trend", "claim": "c",
-            "points": [{"label": "a", "score": 1}, {"label": "b", "score": 2}],
+            "points": [
+                {"label": "a", "score": 1},
+                {"label": "b", "score": 2},
+                {"label": "c", "score": 3},
+                {"label": "d", "score": 4},
+            ],
             "x_field": "period", "y_fields": ["value"],   # neither key in points
             "source_call": "",
         }),
@@ -185,6 +230,7 @@ async def test_make_chart_multi_series_renders_one_chart_with_all_fields(tmp_pat
         {"period": "2024-11", "spend": 300, "payment": 280},
         {"period": "2024-12", "spend": 500, "payment": 420},
         {"period": "2025-01", "spend": 800, "payment": 510},
+        {"period": "2025-02", "spend": 900, "payment": 600},
     ]
     out = await tool.on_invoke_tool(
         RunContextWrapper(ctx),
@@ -224,8 +270,12 @@ async def test_make_chart_share_kind_rejects_multi_series(tmp_path):
         RunContextWrapper(ctx),
         json.dumps({
             "topic": "x", "kind": "share", "claim": "c",
-            "points": [{"group": "A", "x": 1, "y": 2},
-                       {"group": "B", "x": 3, "y": 4}],
+            "points": [
+                {"group": "A", "x": 1, "y": 2},
+                {"group": "B", "x": 3, "y": 4},
+                {"group": "C", "x": 5, "y": 6},
+                {"group": "D", "x": 7, "y": 8},
+            ],
             "x_field": "group", "y_fields": ["x", "y"],
             "source_call": "",
         }),
@@ -276,10 +326,13 @@ async def test_trend_dual_requires_exactly_two_y_fields(tmp_path):
     assert "exactly 2" in out_one
     assert "kind='trend'" in out_one  # specifically steers to plain trend
 
-    # 3 y_fields is too many.
+    # 3 y_fields is too many. 4+ rows so we pass the points-count
+    # validator and reach the per-kind y_fields check.
     points_three = [
         {"period": "2024-11", "a": 1, "b": 2, "c": 3},
         {"period": "2024-12", "a": 2, "b": 3, "c": 4},
+        {"period": "2025-01", "a": 3, "b": 4, "c": 5},
+        {"period": "2025-02", "a": 4, "b": 5, "c": 6},
     ]
     out_three = await tool.on_invoke_tool(
         RunContextWrapper(ctx),
@@ -313,11 +366,14 @@ async def test_trend_grid_requires_two_to_six_y_fields(tmp_path):
     assert "[make_chart error]" in out_one
     assert "between 2 and 6" in out_one  # mentions the actual bounds
 
-    # 7 y_fields — error citing the upper bound.
+    # 7 y_fields — error citing the upper bound. 4+ rows so we pass
+    # the points-count validator and reach the per-kind y_fields check.
     keys = ["a", "b", "c", "d", "e", "f", "g"]
     points_seven = [
         {"period": "2024-11", **{k: i for i, k in enumerate(keys)}},
         {"period": "2024-12", **{k: i + 1 for i, k in enumerate(keys)}},
+        {"period": "2025-01", **{k: i + 2 for i, k in enumerate(keys)}},
+        {"period": "2025-02", **{k: i + 3 for i, k in enumerate(keys)}},
     ]
     out_seven = await tool.on_invoke_tool(
         RunContextWrapper(ctx),
@@ -405,3 +461,151 @@ async def test_make_chart_trend_grid_end_to_end(tmp_path):
     assert img.exists() and img.stat().st_size > 0
     # Vega spec is vconcat of 3 line panels.
     assert len(kp["vega_spec"]["vconcat"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_make_chart_emits_chart_pending_before_render(tmp_path):
+    """When the AppContext exposes an `_emit_event` hook, `make_chart` fires
+    a `chart_pending` event the moment validation passes — BEFORE the
+    PNG render runs. The frontend uses this to show a "working on the
+    plots" placeholder while the specialist's render completes (and the
+    actual `chart` SSE event lands later, at end-of-turn).
+
+    Payload contract: (specialist, topic, kind) so the frontend can match
+    the placeholder to the eventual chart event by (specialist, topic).
+    """
+    emits: list = []
+    tool = build_make_chart_tool("modeling")
+    ctx = _make_ctx(tmp_path, capture_emits=emits)
+
+    out = await tool.on_invoke_tool(
+        RunContextWrapper(ctx),
+        json.dumps({
+            "topic": "score_vs_dpd",
+            "kind": "trend_dual",
+            "claim": "Score declined as DPD climbed.",
+            "points": [
+                {"period": "2024-11", "score": 720, "dpd": 0},
+                {"period": "2024-12", "score": 705, "dpd": 15},
+                {"period": "2025-01", "score": 690, "dpd": 30},
+                {"period": "2025-02", "score": 680, "dpd": 45},
+            ],
+            "x_field": "period",
+            "y_fields": ["score", "dpd"],
+            "source_call": "summarize_trend(...)",
+        }),
+    )
+    assert "[chart created]" in out
+
+    # Exactly one pending event, fired with the right shape.
+    pending = [e for e in emits if e[0] == "chart_pending"]
+    assert len(pending) == 1
+    payload = pending[0][1]
+    assert payload == {
+        "specialist": "modeling",
+        "topic": "score_vs_dpd",
+        "kind": "trend_dual",
+    }
+
+
+@pytest.mark.asyncio
+async def test_make_chart_skips_chart_pending_when_no_emit_hook(tmp_path):
+    """When the AppContext has no `_emit_event` (legacy callers, notebooks,
+    or pre-wiring code paths), `make_chart` must NOT crash — it just
+    skips the pending emit and proceeds to render."""
+    tool = build_make_chart_tool("modeling")
+    ctx = _make_ctx(tmp_path)  # capture_emits=None → no emit hook
+    assert ctx._emit_event is None
+
+    out = await tool.on_invoke_tool(
+        RunContextWrapper(ctx),
+        json.dumps({
+            "topic": "x", "kind": "trend", "claim": "c",
+            "points": _good_points(),
+            "x_field": "period", "y_fields": ["value"], "source_call": "",
+        }),
+    )
+    assert "[chart created]" in out
+
+
+@pytest.mark.asyncio
+async def test_make_chart_skips_pending_event_when_validation_fails(tmp_path):
+    """Failed validation must NOT emit `chart_pending` — the placeholder
+    on the frontend would never be replaced because the actual `chart`
+    event will never fire for an invalid request."""
+    emits: list = []
+    tool = build_make_chart_tool("modeling")
+    ctx = _make_ctx(tmp_path, capture_emits=emits)
+
+    out = await tool.on_invoke_tool(
+        RunContextWrapper(ctx),
+        json.dumps({
+            "topic": "x", "kind": "scatter",  # invalid kind
+            "claim": "c", "points": _good_points(),
+            "x_field": "period", "y_fields": ["value"], "source_call": "",
+        }),
+    )
+    assert "[make_chart error]" in out
+    # No pending event was published.
+    assert [e for e in emits if e[0] == "chart_pending"] == []
+
+
+@pytest.mark.asyncio
+async def test_make_chart_table_kind_skips_render_and_persists_kp(tmp_path):
+    """`kind='table'` short-circuits the matplotlib render — no PNG file
+    is produced, no Vega spec attached, but the KP IS persisted so the
+    server's chart-collection path emits it as a chart event with the
+    row data inline. Used for 1-3 row datasets where a plot would just
+    be noise (e.g. last-3-months summary, two-period comparison)."""
+    tool = build_make_chart_tool("modeling")
+    ctx = _make_ctx(tmp_path)
+    rows = [
+        {"month": "2025-05", "spend": 404152},
+        {"month": "2025-06", "spend": 219000},
+    ]
+    out = await tool.on_invoke_tool(
+        RunContextWrapper(ctx),
+        json.dumps({
+            "topic": "spend_last_two_months",
+            "kind": "table",
+            "claim": "Spend halved May → June 2025.",
+            "points": rows,
+            "x_field": "month",
+            "y_fields": ["spend"],
+            "source_call": "summarize_trend('spends', 'Amount', 'Date', "
+                           "period='month', op='sum')",
+        }),
+    )
+    assert "[chart created]" in out
+    assert "table" in out  # tool surfaces the kind in its return message
+
+    kp = ctx._specialist_kb["modeling"][0]
+    assert kp["viz"]["kind"] == "table"
+    assert kp["numbers"] == rows
+    # No image rendered.
+    assert kp.get("image_path") is None
+    # No Vega spec attached (table is HTML-rendered on the frontend, not
+    # via vega-embed).
+    assert kp.get("vega_spec") is None
+
+
+@pytest.mark.asyncio
+async def test_make_chart_table_kind_accepts_one_row(tmp_path):
+    """Table kind has no minimum-row count — a single-row table is
+    still useful (e.g. cell-level fact box). Bypasses the
+    `_PLOT_MIN_POINTS=4` rule that the other kinds are subject to."""
+    tool = build_make_chart_tool("modeling")
+    ctx = _make_ctx(tmp_path)
+    out = await tool.on_invoke_tool(
+        RunContextWrapper(ctx),
+        json.dumps({
+            "topic": "single_fact", "kind": "table", "claim": "Latest score.",
+            "points": [{"month": "2025-07", "score": 642}],
+            "x_field": "month", "y_fields": ["score"],
+            "source_call": "",
+        }),
+    )
+    assert "[chart created]" in out
+    assert ctx._specialist_kb["modeling"][0]["numbers"] == [
+        {"month": "2025-07", "score": 642},
+    ]

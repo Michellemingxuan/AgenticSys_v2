@@ -157,6 +157,13 @@ _ISO_SLASH_RE = re.compile(r"^(\d{4})/(\d{1,2})/(\d{1,2})$")
 # We default to MM/DD/YYYY (American Express convention); when the first slot
 # is > 12 we re-interpret as DD/MM/YYYY (European fallback).
 _US_SLASH_RE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{2}|\d{4})$")
+# Same as `_US_SLASH_RE` but with a trailing time component the strategy
+# table ships in: "5/28/24 3:03", "2/15/25 14:22:11" (seconds optional).
+# We accept the date portion and discard the time — `summarize_trend` /
+# `aggregate_column` bucket by day-or-coarser, so HH:MM is sub-resolution.
+_US_SLASH_DATETIME_RE = re.compile(
+    r"^(\d{1,2})/(\d{1,2})/(\d{2}|\d{4})\s+\d{1,2}:\d{2}(?::\d{2})?$"
+)
 # Numeric dash form "16-11-2024" / "1-7-2024" — same MM/DD vs DD/MM
 # disambiguation as the slash form. Distinct from DD-MMM-YYYY because the
 # middle group is digits, not letters.
@@ -240,6 +247,22 @@ def _date_key(value: Any) -> tuple[int, int, int] | None:
             month, day = b, a   # DD/MM/YYYY — first slot was too big to be a month
         elif 1 <= a <= 12 and 1 <= b <= 31:
             month, day = a, b   # MM/DD/YYYY (default)
+        else:
+            return None
+        return (yr, month, day)
+
+    # US-slash date WITH trailing time ("5/28/24 3:03", "2/15/25 14:22:11").
+    # Strategy table ships this format — strip the time and reuse the
+    # same MM/DD vs DD/MM disambiguation.
+    m = _US_SLASH_DATETIME_RE.match(s)
+    if m:
+        a, b, yr = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if len(m.group(3)) == 2:
+            yr = _expand_two_digit_year(yr)
+        if a > 12 and 1 <= b <= 12:
+            month, day = b, a
+        elif 1 <= a <= 12 and 1 <= b <= 31:
+            month, day = a, b
         else:
             return None
         return (yr, month, day)
@@ -1325,6 +1348,78 @@ def aggregate_column(
     )
 
 
+def _batch_aggregate_impl(specs_json: str) -> str:
+    _log_call("batch_aggregate", {"specs_json": specs_json[:1000]})
+    try:
+        specs = json.loads(specs_json)
+    except json.JSONDecodeError as exc:
+        out = json.dumps({
+            "error": "invalid_json",
+            "message": str(exc),
+            "expected": "JSON list of aggregate_column argument objects",
+        }, indent=2)
+        _log_result("batch_aggregate", result=out, extra={"reason": "invalid_json"})
+        return out
+
+    if not isinstance(specs, list):
+        out = json.dumps({
+            "error": "invalid_specs",
+            "message": "specs_json must decode to a list",
+        }, indent=2)
+        _log_result("batch_aggregate", result=out, extra={"reason": "not_list"})
+        return out
+
+    results: list[dict[str, Any]] = []
+    for idx, spec in enumerate(specs[:10]):
+        if not isinstance(spec, dict):
+            results.append({
+                "index": idx,
+                "error": "spec must be an object",
+            })
+            continue
+        result = _aggregate_column_impl(
+            table_name=str(spec.get("table_name") or spec.get("table") or ""),
+            column=str(spec.get("column") or ""),
+            op=str(spec.get("op") or "sum"),
+            filter_column=str(spec.get("filter_column") or ""),
+            filter_value=str(spec.get("filter_value") or ""),
+            filter_op=str(spec.get("filter_op") or "eq"),
+        )
+        results.append({"index": idx, "result": result})
+
+    payload: dict[str, Any] = {"results": results}
+    if len(specs) > 10:
+        payload["truncated"] = f"ran first 10 of {len(specs)} requested aggregates"
+    out = json.dumps(payload, indent=2, default=str)
+    _log_result("batch_aggregate", result=out,
+                extra={"n_requested": len(specs), "n_run": len(results)})
+    return out
+
+
+@function_tool
+def batch_aggregate(specs_json: str) -> str:
+    """Run multiple ``aggregate_column`` operations in one tool call.
+
+    Use this when a question needs several scalar checks from the same case,
+    especially windowed count answers that require count + first date + last
+    date. This avoids one LLM round-trip per scalar.
+
+    ``specs_json`` must be a JSON list. Each item accepts the same arguments
+    as ``aggregate_column``:
+
+    ``{"table_name": "payments", "column": "payment_date", "op": "count",
+       "filter_column": "payment_status", "filter_value": "success"}``
+
+    Returns JSON:
+    ``{"results": [{"index": 0, "result": "count(...) = ..."}, ...]}``
+
+    Keep batches focused: 2-6 scalar aggregates. For time series use
+    ``summarize_trend`` instead; for category rankings use
+    ``summarize_by_group`` instead.
+    """
+    return _batch_aggregate_impl(specs_json)
+
+
 # ── summarize_trend ──────────────────────────────────────────────────────
 #
 # Pattern / trajectory tool. Collapses a typical "what is the spending
@@ -1781,6 +1876,101 @@ def summarize_trend(
         start_date=start_date,
         end_date=end_date,
     )
+
+
+def _batch_summarize_trend_impl(specs_json: str) -> str:
+    _log_call("batch_summarize_trend", {"specs_json": specs_json[:1000]})
+    try:
+        specs = json.loads(specs_json)
+    except json.JSONDecodeError as exc:
+        out = json.dumps({
+            "error": "invalid_json",
+            "message": str(exc),
+            "expected": "JSON list of summarize_trend argument objects",
+        }, indent=2)
+        _log_result("batch_summarize_trend", result=out,
+                    extra={"reason": "invalid_json"})
+        return out
+    if not isinstance(specs, list):
+        out = json.dumps({
+            "error": "invalid_specs",
+            "message": "specs_json must decode to a list",
+        }, indent=2)
+        _log_result("batch_summarize_trend", result=out,
+                    extra={"reason": "not_list"})
+        return out
+
+    # Cap at 6 — each trend returns a per-period series + summary, so the
+    # batched payload grows faster than batch_aggregate's. 6 covers the
+    # typical "trend each indicator in a concept group" pattern in
+    # modeling.md without blowing the per-tool size budget.
+    results: list[dict[str, Any]] = []
+    for idx, spec in enumerate(specs[:6]):
+        if not isinstance(spec, dict):
+            results.append({
+                "index": idx,
+                "error": "spec must be an object",
+            })
+            continue
+        result = _summarize_trend_impl(
+            table_name=str(spec.get("table_name") or spec.get("table") or ""),
+            value_column=str(spec.get("value_column") or ""),
+            time_column=str(spec.get("time_column") or ""),
+            period=str(spec.get("period") or "month"),
+            op=str(spec.get("op") or "sum"),
+            filter_column=str(spec.get("filter_column") or ""),
+            filter_value=str(spec.get("filter_value") or ""),
+            filter_op=str(spec.get("filter_op") or "eq"),
+            start_date=str(spec.get("start_date") or ""),
+            end_date=str(spec.get("end_date") or ""),
+        )
+        # Echo the value_column so the caller can map result→indicator
+        # without re-parsing the spec list (LLMs lose track of index
+        # ordering across long messages).
+        results.append({
+            "index": idx,
+            "value_column": str(spec.get("value_column") or ""),
+            "result": result,
+        })
+
+    payload: dict[str, Any] = {"results": results}
+    if len(specs) > 6:
+        payload["truncated"] = f"ran first 6 of {len(specs)} requested trends"
+    out = json.dumps(payload, indent=2, default=str)
+    _log_result("batch_summarize_trend", result=out,
+                extra={"n_requested": len(specs), "n_run": len(results)})
+    return out
+
+
+@function_tool
+def batch_summarize_trend(specs_json: str) -> str:
+    """Run multiple ``summarize_trend`` calls in ONE tool round-trip.
+
+    Use when you need to trend SEVERAL indicators from the same table in
+    the same window — the classic modeling case: "for each indicator in
+    the internal-delinquency concept group, give me the monthly trajectory
+    over trans_month." Doing this as separate ``summarize_trend`` calls
+    costs N LLM round-trips (~3-6s each); batching collapses them into
+    one. ALWAYS prefer this over a loop when you've already identified
+    2+ indicators to trend.
+
+    ``specs_json`` must be a JSON list. Each item accepts the same
+    arguments as ``summarize_trend``:
+
+    ``[{"table_name": "model_scores", "value_column": "times_30_dpd",
+        "time_column": "trans_month", "period": "month", "op": "max"},
+       {"table_name": "model_scores", "value_column": "tpf_internal_delinq_idx",
+        "time_column": "trans_month", "period": "month", "op": "max"}]``
+
+    Returns JSON ``{"results": [{"index": 0, "value_column": "...",
+    "result": "<summarize_trend output>"}, ...]}``. The per-trend
+    ``result`` is the same JSON document a single ``summarize_trend``
+    call would have returned (summary + series).
+
+    Cap: 6 specs per call (each trend carries a full per-period series).
+    For 7+ indicators, split into two batches.
+    """
+    return _batch_summarize_trend_impl(specs_json)
 
 
 # ── summarize_by_group ──────────────────────────────────────────────────

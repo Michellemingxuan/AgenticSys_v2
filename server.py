@@ -46,6 +46,7 @@ from datalayer.gateway import LocalDataGateway
 from llm.factory import FirewalledChatShim, build_session_clients
 from llm.firewall_stack import FirewallStack, redact_payload
 from logger.event_logger import EventLogger
+from logger.process_timer import ProcessTimer
 from main import _DATA_TABLES_DIR, _REPORTS_DIR, _resolve_data_source
 from models.types import FinalAnswer
 from orchestrator.orchestrator import Orchestrator
@@ -60,6 +61,8 @@ DATA_SOURCE = os.environ.get("DATA_SOURCE", "auto")
 PORT = int(os.environ.get("PORT", 3001))
 HOST = os.environ.get("HOST", "127.0.0.1")
 PING_INTERVAL_S = 15.0
+_QA_CACHE_MAX_ENTRIES = int(os.environ.get("QA_CACHE_MAX_ENTRIES", "64"))
+_SSE_QUEUE_MAXSIZE = int(os.environ.get("SSE_QUEUE_MAXSIZE", "256"))
 
 
 # ── Per-case session state ──────────────────────────────────────────────────
@@ -98,9 +101,23 @@ class CaseSession:
 
     def emit(self, event_name: str, payload: dict) -> None:
         """Fan out an SSE event to every subscriber of this case."""
+        event = (event_name, payload)
         with self.subscribers_lock:
             for q in self.subscribers:
-                q.put((event_name, payload))
+                try:
+                    q.put_nowait(event)
+                except queue.Full:
+                    # A slow/stale client should not let its queue retain an
+                    # unbounded backlog. Drop the oldest frame and keep the
+                    # newest state moving.
+                    try:
+                        q.get_nowait()
+                    except queue.Empty:
+                        pass
+                    try:
+                        q.put_nowait(event)
+                    except queue.Full:
+                        pass
 
 
 SESSIONS: dict[str, CaseSession] = {}
@@ -292,6 +309,46 @@ def _normalize_q(q: str) -> str:
     return " ".join((q or "").strip().lower().split())
 
 
+def _get_cached_qa(sess: CaseSession, cache_key: str | None) -> dict | None:
+    """Return a QA-cache entry and refresh its insertion order.
+
+    ``dict`` preserves insertion order on supported Python versions, so a
+    pop/reinsert gives us LRU behavior without changing the stored type or
+    existing tests/fixtures.
+    """
+    if not cache_key:
+        return None
+    cached = sess.qa_cache.get(cache_key)
+    if cached is None:
+        return None
+    try:
+        sess.qa_cache[cache_key] = sess.qa_cache.pop(cache_key)
+    except Exception:
+        pass
+    return cached
+
+
+def _store_cached_qa(sess: CaseSession, cache_key: str | None, value: dict) -> int:
+    """Store a QA-cache entry and evict oldest entries beyond the cap.
+
+    Returns the number of entries evicted. The cache is a speed optimization,
+    not the audit source, so bounding it avoids long sessions retaining every
+    answer payload forever.
+    """
+    if not cache_key:
+        return 0
+    sess.qa_cache[cache_key] = value
+    evicted = 0
+    while _QA_CACHE_MAX_ENTRIES > 0 and len(sess.qa_cache) > _QA_CACHE_MAX_ENTRIES:
+        try:
+            oldest = next(iter(sess.qa_cache))
+        except StopIteration:
+            break
+        sess.qa_cache.pop(oldest, None)
+        evicted += 1
+    return evicted
+
+
 # ── Phase 2 / 3 helpers — viz embedding + KB warmth ────────────────────────
 
 
@@ -321,18 +378,19 @@ def _format_kb_warmth_hint(specialist_kb: dict) -> str:
 
 
 def _collect_turn_charts(specialist_kb: dict, turn_id: str, case_id: str) -> list[dict]:
-    """Find every KP captured in this turn that has a rendered chart.
+    """Find every KP captured in this turn that surfaces in the Plots panel.
 
-    Returns a list of `{topic, url, specialist}` ready for embedding in
-    the agent_message markdown. The URL points at the Flask route
-    `/api/cases/<case_id>/charts/<filename>` so the frontend's existing
-    markdown renderer fetches the PNG via a normal HTTP GET.
+    Two kinds of KP qualify:
+      1. Rendered charts — KPs with an ``image_path`` set by
+         ``render_chart``. Returned with ``url`` pointing at the Flask
+         route ``/api/cases/<case_id>/charts/<filename>``.
+      2. Table KPs — ``viz.kind == "table"`` (no image; the rows are
+         shown as an HTML table in the panel). Returned with empty
+         ``url`` and ``numbers`` carrying the row data.
 
     Deduped by ``(specialist, topic)`` — when both the `make_chart` tool
-    and the auto-distiller produce a chart for the same topic in one turn
-    (the specialist explicitly charts a finding the distiller would have
-    auto-charted anyway), only the latest one renders. Latest wins so the
-    distiller's revision can correct an earlier explicit chart if needed.
+    and the auto-distiller produce an entry for the same topic in one
+    turn, the latest one wins (chronological iteration order).
     """
     if not isinstance(specialist_kb, dict):
         return []
@@ -346,19 +404,23 @@ def _collect_turn_charts(specialist_kb: dict, turn_id: str, case_id: str) -> lis
             if kp.get("captured_at_turn") != turn_id:
                 continue
             img_path = kp.get("image_path")
-            if not img_path:
+            viz = kp.get("viz") or {}
+            kind = viz.get("kind", "") if isinstance(viz, dict) else ""
+            is_table = kind == "table"
+            if not img_path and not is_table:
                 continue
             topic = kp.get("topic", "chart")
-            filename = Path(img_path).name
-            url = f"/api/cases/{case_id}/charts/{filename}"
+            entry: dict = {
+                "topic": topic,
+                "specialist": spec_name,
+                "url": "",
+            }
+            if img_path:
+                entry["url"] = f"/api/cases/{case_id}/charts/{Path(img_path).name}"
             # Latest wins per (specialist, topic). Iteration order over
             # the KB's chronological list means the last appended entry
             # naturally overwrites the earlier one for the same key.
-            by_key[(spec_name, topic)] = {
-                "topic": topic,
-                "url": url,
-                "specialist": spec_name,
-            }
+            by_key[(spec_name, topic)] = entry
     return list(by_key.values())
 
 
@@ -374,6 +436,60 @@ def _append_charts_to_answer(answer_text: str, charts: list[dict]) -> str:
     for c in charts:
         section.append(f"![{c['topic']}]({c['url']})")
     return body + "\n" + "\n".join(section)
+
+
+def _detect_missing_reanswers(tool_calls: list[dict]) -> list[dict]:
+    """Return one entry per `corrected_specialist` flagged by
+    `general_specialist` that did NOT get re-invoked AFTER the
+    general_specialist's tool call in the same turn.
+
+    Per the orchestrator's HARD GATE protocol Round 2.5: when
+    general_specialist's ``resolved`` list contains a Resolution with
+    ``corrected_specialist`` set, the orchestrator must re-invoke that
+    specialist with the correction folded into the sub-question before
+    emitting FinalAnswer. If the orchestrator skips that re-invocation,
+    the pre-correction (wrong) specialist output flows into synthesis.
+
+    Each returned dict carries the corrected_specialist name, the
+    corrected_value general_specialist verified, and a short clip of
+    the contradiction for the audit log.
+
+    Defensive: tool_calls entries may not have a parseable payload yet
+    (e.g., on partial stream completion), or general_specialist may have
+    failed to produce a structured output — those just yield no
+    missing-reanswer records (no false positives).
+    """
+    out: list[dict] = []
+    for gs_idx, gs_call in enumerate(tool_calls):
+        if gs_call.get("tool") != "general_specialist":
+            continue
+        payload = gs_call.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        resolved = payload.get("resolved") or []
+        if not isinstance(resolved, list):
+            continue
+        # Tools called AFTER this general_specialist invocation are
+        # candidate re-answers. We require the corrected specialist to
+        # appear by NAME in that suffix.
+        later_tools = {c.get("tool") for c in tool_calls[gs_idx + 1:]}
+        for r in resolved:
+            if not isinstance(r, dict):
+                continue
+            corrected = r.get("corrected_specialist")
+            if not corrected:
+                continue
+            if corrected in later_tools:
+                continue
+            out.append({
+                "corrected_specialist": corrected,
+                # `corrected_value` is nullable per schema (null when the
+                # resolution doesn't need a re-answer). `or ""` keeps the
+                # downstream f-string from rendering the literal "None".
+                "corrected_value": str(r.get("corrected_value") or "")[:200],
+                "contradiction": str(r.get("contradiction") or "")[:200],
+            })
+    return out
 
 
 def _find_kp(specialist_kb: dict, specialist: str, topic: str,
@@ -521,18 +637,32 @@ async def _run_turn_streamed(
     """
     if started_at is None:
         started_at = int(time.time() * 1000)
+    turn_timer = ProcessTimer(
+        sess.logger,
+        "turn",
+        turn_id=turn_id,
+        case_id=sess.case_id,
+    )
 
     # ── 1. Question check (screen + relevance) ─────────────────────────────
     # Build the list of prior reviewer questions in this session so the
     # relevance_check skill can flag near-duplicates (matched on subject +
     # time-range + scope). The qa_cache holds raw redacted-question strings
     # as values' "origin_question"; we surface those here.
+    timer_t0 = time.perf_counter()
     prior_questions = [v.get("origin_question", "") for v in sess.qa_cache.values()]
     prior_questions = [q for q in prior_questions if q]
+    turn_timer.record(
+        "prior_question_scan",
+        int((time.perf_counter() - timer_t0) * 1000),
+        prior_questions=len(prior_questions),
+        qa_cache_entries=len(sess.qa_cache),
+    )
     screen_t0 = time.time()
     try:
         verdict = await sess.chat_agent.screen(question, prior_questions=prior_questions)
     except Exception as exc:
+        turn_timer.summary(outcome="screen_failed")
         sess.emit("error", {"turn_id": turn_id, "message": f"screen failed: {exc}", "recoverable": True})
         sess.emit("turn_done", {"turn_id": turn_id, "ended_at": int(time.time() * 1000),
                                 "duration_ms": int(time.time() * 1000) - started_at,
@@ -545,6 +675,7 @@ async def _run_turn_streamed(
         "duration_ms": screen_duration_ms,
         "passed": verdict.passed,
     })
+    turn_timer.record("screen", screen_duration_ms, passed=verdict.passed)
 
     in_scope = verdict.passed
     outcome_after_screen = "ok" if in_scope else "screen_rejected"
@@ -571,14 +702,16 @@ async def _run_turn_streamed(
         })
         sess.emit("turn_done", {"turn_id": turn_id, "ended_at": ts,
                                 "duration_ms": ts - started_at, "outcome": "screen_rejected"})
+        turn_timer.summary(outcome="screen_rejected")
         return
 
     # ── 1.5. Cache lookup — exact-match first, then near-duplicate ───────
     # Cache key uses the redacted-question normalized form so identical
     # questions with different identifiers (case IDs etc.) collide as
     # intended. Rejections are not cached.
+    timer_t0 = time.perf_counter()
     cache_key = _normalize_q(verdict.redacted_question)
-    cached = sess.qa_cache.get(cache_key) if cache_key else None
+    cached = _get_cached_qa(sess, cache_key)
     cache_hit_kind = "exact" if cached is not None else None
     # Fall back to relevance_check's near-duplicate verdict — the LLM
     # judged this question a near-duplicate of an earlier one along
@@ -586,7 +719,7 @@ async def _run_turn_streamed(
     # question's cached answer.
     if cached is None and verdict.near_duplicate_of:
         near_dup_key = _normalize_q(verdict.near_duplicate_of)
-        cached = sess.qa_cache.get(near_dup_key) if near_dup_key else None
+        cached = _get_cached_qa(sess, near_dup_key)
         if cached is not None:
             cache_hit_kind = "near_duplicate"
             sess.logger.log("qa_cache_hit_near_duplicate", {
@@ -594,6 +727,12 @@ async def _run_turn_streamed(
                 "matched_prior": verdict.near_duplicate_of,
                 "match_reason": verdict.near_duplicate_reason,
             })
+    turn_timer.record(
+        "qa_cache_lookup",
+        int((time.perf_counter() - timer_t0) * 1000),
+        hit=cached is not None,
+        kind=cache_hit_kind,
+    )
     if cached is not None:
         sess.logger.log("qa_cache_hit", {
             "turn_id": turn_id, "norm_q": cache_key,
@@ -617,6 +756,31 @@ async def _run_turn_streamed(
                 "(no fresh data pull).*"
             )
         replayed_text = cached_text + note
+        # Replay the prior turn's reasoning trace so the orchestrator-flow
+        # / specialists panel populates on a cache hit. Without these
+        # emits, the UI receives only `final` + `agent_message` and the
+        # reviewer sees an answer appear with no trace of how it was
+        # produced — indistinguishable from a silent failure.
+        cached_tool_calls = cached.get("tool_calls") or []
+        if cached_tool_calls:
+            sess.emit("team_plan", {
+                "turn_id": turn_id,
+                "tool_calls": cached_tool_calls,
+            })
+            replay_ts = int(time.time() * 1000)
+            for tc in cached_tool_calls:
+                call_id = tc.get("call_id") or str(uuid.uuid4())
+                sess.emit("agent_started", {
+                    "turn_id": turn_id, "call_id": call_id,
+                    "tool": tc.get("tool"),
+                    "started_at": replay_ts,
+                })
+                sess.emit("agent_completed", {
+                    "turn_id": turn_id, "call_id": call_id,
+                    "tool": tc.get("tool"),
+                    "payload": tc.get("payload"),
+                    "duration_ms": tc.get("duration_ms", 0),
+                })
         # Re-emit any charts the original turn produced, scoped to THIS
         # turn's id so the reasoning-trace panel shows them on the replay.
         # Without this, the cached-answer replay would render with no charts
@@ -640,9 +804,11 @@ async def _run_turn_streamed(
             "turn_id": turn_id, "ended_at": ts,
             "duration_ms": ts - started_at, "outcome": "ok",
         })
+        turn_timer.summary(outcome="qa_cache_hit", cache_hit_kind=cache_hit_kind)
         return
 
     # ── 2. Build a fresh orchestrator for this turn ───────────────────────
+    timer_t0 = time.perf_counter()
     orchestrator = Orchestrator(
         llm=None, logger=sess.logger, registry=None,
         pillar=PILLAR, pillar_config=sess.pillar_yaml,
@@ -657,6 +823,20 @@ async def _run_turn_streamed(
     #   • distiller: the orchestrator's distiller_agent (stateless), used by
     #     redacting_tool for second-pass KP extraction.
     #   • turn_id: stamped onto each KP at distill time for audit / chronology.
+    # Emit hook for tools that want to publish typed SSE events DURING the
+    # run (not just at end-of-turn). Used today by `make_chart` to fire a
+    # `chart_pending` event the moment a specialist starts plotting, so the
+    # UI shows "working on plots" placeholders long before the actual
+    # `chart` event lands. The closure stamps `turn_id` so tool callers
+    # don't have to. Guard against `sess.emit` raising (closed connection,
+    # etc.) so a streaming failure to one client never poisons the agent
+    # run for the rest of the session.
+    def _emit_event(event_name: str, payload: dict) -> None:
+        try:
+            sess.emit(event_name, {**payload, "turn_id": turn_id})
+        except Exception:  # noqa: BLE001
+            pass
+
     ctx = AppContext(
         gateway=sess.gateway,
         case_folder=case_folder,
@@ -664,6 +844,11 @@ async def _run_turn_streamed(
         _specialist_kb=sess.specialist_kb,
         _distiller=getattr(orchestrator, "distiller_agent", None),
         _turn_id=turn_id,
+        _emit_event=_emit_event,
+    )
+    turn_timer.record(
+        "orchestrator_context_build",
+        int((time.perf_counter() - timer_t0) * 1000),
     )
 
     # Phase 3 — KB-warmth signal. When specialists have accumulated KPs from
@@ -671,6 +856,7 @@ async def _run_turn_streamed(
     # orchestrator's team_construction step has a runtime signal that nudges
     # toward reusing warm specialists on in-domain follow-ups. The hint is
     # informational only — the orchestrator retains LLM judgment.
+    timer_t0 = time.perf_counter()
     warmth_hint = _format_kb_warmth_hint(sess.specialist_kb)
     if warmth_hint:
         sess.logger.log("kb_warmth_hint_emitted", {
@@ -690,6 +876,12 @@ async def _run_turn_streamed(
         run_input = sess.input_history + [{"role": "user", "content": framed_question}]
     else:
         run_input = framed_question
+    turn_timer.record(
+        "memory_framing",
+        int((time.perf_counter() - timer_t0) * 1000),
+        input_history_len=len(sess.input_history),
+        warmth_hint_present=bool(warmth_hint),
+    )
 
     # ── 3. Stream the orchestrator run ────────────────────────────────────
     # Mark when we hand off to the orchestrator so we can measure the gap
@@ -697,6 +889,7 @@ async def _run_turn_streamed(
     # (the team-construction decision); when the user reports "slow to
     # arrive at team construction", THIS is the number to look at.
     orch_t0 = time.time()
+    orch_perf_t0 = time.perf_counter()
     sess.logger.log("turn_phase_orchestrator_starting", {
         "turn_id": turn_id,
         "input_history_len": len(sess.input_history),
@@ -706,8 +899,6 @@ async def _run_turn_streamed(
         "warmth_hint_present": bool(warmth_hint),
         "n_specialists_warm": sum(1 for kps in sess.specialist_kb.values() if kps),
     })
-    streamed = Runner.run_streamed(orchestrator.orchestrator_agent, run_input, context=ctx)
-
     call_index_by_id: dict[str, int] = {}  # call_id → index in tool_calls list
     tool_calls: list[dict] = []
     started_at_by_call: dict[str, int] = {}
@@ -749,191 +940,302 @@ async def _run_turn_streamed(
 
     final_answer: FinalAnswer | None = None
 
-    try:
-        async for event in streamed.stream_events():
-            if event.type != "run_item_stream_event":
-                continue
-            item = event.item
-            raw = getattr(item, "raw_item", None)
+    # Retry loop: on ``ModelBehaviorError`` (typically a malformed FinalAnswer
+    # — truncated JSON, schema validation failure, hallucinated tool name)
+    # try the orchestrator run ONCE more before falling through to the
+    # `_synthesize_fallback_answer` salvage path. Re-running re-invokes
+    # specialists, but the per-specialist conversation history persists in
+    # ``ctx._specialist_histories`` so warm specialists return faster on the
+    # second pass, and the KB ``ctx._specialist_kb`` keeps round-1 KPs
+    # available to the orchestrator's prompt.
+    #
+    # Frontend coordination: an ``orchestrator_retry`` SSE event fires
+    # between attempts so the UI can reset the previous attempt's
+    # mid-stream state (team_plan, agent_started) and replace it with
+    # the new attempt's events under the same turn_id.
+    _MAX_ORCH_ATTEMPTS = 2  # 1 initial + 1 retry
+    _orch_attempt = 0
+    while True:
+        if _orch_attempt > 0:
+            # Reset per-attempt SSE-emit state and the structured payload
+            # accumulator. The cross-attempt state (specialist_kb,
+            # specialist_histories on ctx) is intentionally preserved —
+            # warm specialists return faster on retry.
+            call_index_by_id.clear()
+            tool_calls.clear()
+            started_at_by_call.clear()
+            team_plan_emitted = False
+            first_tool_call_logged = False
+            specialist_errors_emitted = 0
+            final_answer = None
+        streamed = Runner.run_streamed(orchestrator.orchestrator_agent, run_input, context=ctx)
 
-            if isinstance(item, ToolCallItem):
-                name = (
-                    getattr(raw, "name", None)
-                    or (raw.get("name") if isinstance(raw, dict) else None)
-                    or "?"
-                )
-                call_id = (
-                    getattr(raw, "call_id", None)
-                    or (raw.get("call_id") if isinstance(raw, dict) else None)
-                    or str(uuid.uuid4())
-                )
-                args_str = (
-                    getattr(raw, "arguments", None)
-                    or (raw.get("arguments") if isinstance(raw, dict) else "{}")
-                )
-                try:
-                    args = json.loads(args_str) if isinstance(args_str, str) else (args_str or {})
-                except json.JSONDecodeError:
-                    args = {"raw": args_str}
-                sub_q = args.get("sub_question") or args.get("input") or json.dumps(args, default=str)
+        try:
+            async for event in streamed.stream_events():
+                if event.type != "run_item_stream_event":
+                    continue
+                item = event.item
+                raw = getattr(item, "raw_item", None)
 
-                call_index_by_id[call_id] = len(tool_calls)
-                tool_calls.append({"call_id": call_id, "tool": name, "sub_question": sub_q})
-                started_at_by_call[call_id] = int(time.time() * 1000)
+                if isinstance(item, ToolCallItem):
+                    name = (
+                        getattr(raw, "name", None)
+                        or (raw.get("name") if isinstance(raw, dict) else None)
+                        or "?"
+                    )
+                    call_id = (
+                        getattr(raw, "call_id", None)
+                        or (raw.get("call_id") if isinstance(raw, dict) else None)
+                        or str(uuid.uuid4())
+                    )
+                    args_str = (
+                        getattr(raw, "arguments", None)
+                        or (raw.get("arguments") if isinstance(raw, dict) else "{}")
+                    )
+                    try:
+                        args = json.loads(args_str) if isinstance(args_str, str) else (args_str or {})
+                    except json.JSONDecodeError:
+                        args = {"raw": args_str}
+                    sub_q = args.get("sub_question") or args.get("input") or json.dumps(args, default=str)
 
-                # The first tool call IS team construction — this is the
-                # gap the user reports as "time to team construction stage".
-                if not first_tool_call_logged:
-                    sess.logger.log("turn_phase_first_tool_call", {
-                        "turn_id": turn_id,
-                        "duration_ms_since_orch_start":
-                            int((time.time() - orch_t0) * 1000),
-                        "first_tool": name,
+                    call_index_by_id[call_id] = len(tool_calls)
+                    tool_calls.append({"call_id": call_id, "tool": name, "sub_question": sub_q})
+                    started_at_by_call[call_id] = int(time.time() * 1000)
+
+                    # The first tool call IS team construction — this is the
+                    # gap the user reports as "time to team construction stage".
+                    if not first_tool_call_logged:
+                        sess.logger.log("turn_phase_first_tool_call", {
+                            "turn_id": turn_id,
+                            "duration_ms_since_orch_start":
+                                int((time.time() - orch_t0) * 1000),
+                            "first_tool": name,
+                        })
+                        first_tool_call_logged = True
+
+                    # First tool call → emit team_plan once (the orchestrator may add more
+                    # later; we send team_plan again on subsequent calls for incremental UX).
+                    team_plan_emitted = True
+                    sess.emit("team_plan", {"turn_id": turn_id, "tool_calls": list(tool_calls)})
+                    sess.emit("agent_started", {
+                        "turn_id": turn_id, "call_id": call_id, "tool": name,
+                        "started_at": started_at_by_call[call_id],
                     })
-                    first_tool_call_logged = True
 
-                # First tool call → emit team_plan once (the orchestrator may add more
-                # later; we send team_plan again on subsequent calls for incremental UX).
-                team_plan_emitted = True
-                sess.emit("team_plan", {"turn_id": turn_id, "tool_calls": list(tool_calls)})
-                sess.emit("agent_started", {
-                    "turn_id": turn_id, "call_id": call_id, "tool": name,
-                    "started_at": started_at_by_call[call_id],
-                })
+                elif isinstance(item, ToolCallOutputItem):
+                    call_id = (raw.get("call_id") if isinstance(raw, dict) else None) or "?"
+                    tool = "?"
+                    if call_id in call_index_by_id:
+                        tool = tool_calls[call_index_by_id[call_id]]["tool"]
+                    payload = _safe_dump(item.output)
+                    started_ts = started_at_by_call.get(call_id, int(time.time() * 1000))
+                    duration_ms = int(time.time() * 1000) - started_ts
+                    # Stash the payload back onto `tool_calls` so a late-stage
+                    # orchestrator failure (ModelBehaviorError on FinalAnswer
+                    # parsing, etc.) can still synthesize a partial fallback
+                    # answer from the specialists' outputs the reviewer paid for.
+                    if call_id in call_index_by_id:
+                        tool_calls[call_index_by_id[call_id]]["payload"] = payload
+                        tool_calls[call_index_by_id[call_id]]["duration_ms"] = duration_ms
+                    sess.emit("agent_completed", {
+                        "turn_id": turn_id, "call_id": call_id, "tool": tool,
+                        "payload": payload, "duration_ms": duration_ms,
+                    })
+                    # If the redacting_tool wrapper recorded a failure for any
+                    # specialist this run, fan out typed `error` events now so
+                    # the UI can show the real cause beside the vague `[FAILED …]`
+                    # payload it just received.
+                    _drain_specialist_errors()
+                    # Stamp the time of the LAST agent_completed so we can
+                    # attribute the gap-to-end-of-stream to synthesis.
+                    last_agent_completed_at = time.time()
 
-            elif isinstance(item, ToolCallOutputItem):
-                call_id = (raw.get("call_id") if isinstance(raw, dict) else None) or "?"
-                tool = "?"
-                if call_id in call_index_by_id:
-                    tool = tool_calls[call_index_by_id[call_id]]["tool"]
-                payload = _safe_dump(item.output)
-                started_ts = started_at_by_call.get(call_id, int(time.time() * 1000))
-                duration_ms = int(time.time() * 1000) - started_ts
-                # Stash the payload back onto `tool_calls` so a late-stage
-                # orchestrator failure (ModelBehaviorError on FinalAnswer
-                # parsing, etc.) can still synthesize a partial fallback
-                # answer from the specialists' outputs the reviewer paid for.
-                if call_id in call_index_by_id:
-                    tool_calls[call_index_by_id[call_id]]["payload"] = payload
-                    tool_calls[call_index_by_id[call_id]]["duration_ms"] = duration_ms
-                sess.emit("agent_completed", {
-                    "turn_id": turn_id, "call_id": call_id, "tool": tool,
-                    "payload": payload, "duration_ms": duration_ms,
-                })
-                # If the redacting_tool wrapper recorded a failure for any
-                # specialist this run, fan out typed `error` events now so
-                # the UI can show the real cause beside the vague `[FAILED …]`
-                # payload it just received.
-                _drain_specialist_errors()
+                elif isinstance(item, MessageOutputItem):
+                    pass  # handled by .final_output below
 
-            elif isinstance(item, MessageOutputItem):
-                pass  # handled by .final_output below
+            # Drain complete — pull the final structured output. The
+            # gap between the last `agent_completed` and HERE is the
+            # orchestrator's synthesis pass — the model generating the
+            # FinalAnswer JSON. Log it as its own phase so slow
+            # synthesis on simple questions is diagnosable from the
+            # JSONL alone (was previously invisible — synthesis time
+            # was bundled into `duration_ms` on `turn_done` along with
+            # specialist runtime + end-of-turn drain).
+            try:
+                _last = locals().get("last_agent_completed_at")
+                if isinstance(_last, (int, float)):
+                    synth_ms = int((time.time() - _last) * 1000)
+                    sess.logger.log("turn_phase_synthesis_done", {
+                        "turn_id": turn_id,
+                        "duration_ms": synth_ms,
+                        "n_tool_calls": len(tool_calls),
+                    })
+            except Exception:
+                pass
+            final_raw = streamed.final_output
+            try:
+                final_answer = redact_payload(final_raw) if final_raw else None
+            except Exception:
+                final_answer = final_raw
 
-        # Drain complete — pull the final structured output.
-        final_raw = streamed.final_output
-        try:
-            final_answer = redact_payload(final_raw) if final_raw else None
-        except Exception:
-            final_answer = final_raw
-
-        # Persist conversation memory for the next turn. Prune older turns'
-        # tool-result payloads to keep input_history bounded — without this,
-        # each turn's full SpecialistOutput JSON accumulates and feeds back
-        # into every subsequent orchestrator call, dominating latency by
-        # turn 5+. The specialists' KB (populated by the distiller) is the
-        # replay path for elided content.
-        try:
-            raw_history = streamed.to_input_list()
-            pruned, prune_stats = _prune_input_history(
-                raw_history, keep_recent_turns=_INPUT_HISTORY_KEEP_RECENT_TURNS,
-            )
-            sess.input_history = pruned
-            if prune_stats["items_elided"]:
-                sess.logger.log("input_history_pruned", {
-                    "turn_id": turn_id,
+            # Persist conversation memory for the next turn. Prune older turns'
+            # tool-result payloads to keep input_history bounded — without this,
+            # each turn's full SpecialistOutput JSON accumulates and feeds back
+            # into every subsequent orchestrator call, dominating latency by
+            # turn 5+. The specialists' KB (populated by the distiller) is the
+            # replay path for elided content.
+            try:
+                timer_t0 = time.perf_counter()
+                raw_history = streamed.to_input_list()
+                pruned, prune_stats = _prune_input_history(
+                    raw_history, keep_recent_turns=_INPUT_HISTORY_KEEP_RECENT_TURNS,
+                )
+                sess.input_history = pruned
+                turn_timer.record(
+                    "input_history_prune",
+                    int((time.perf_counter() - timer_t0) * 1000),
                     **prune_stats,
-                    "kept_recent_turns": _INPUT_HISTORY_KEEP_RECENT_TURNS,
-                    "history_len_after": len(pruned),
+                    history_len_after=len(pruned),
+                )
+                if prune_stats["items_elided"]:
+                    sess.logger.log("input_history_pruned", {
+                        "turn_id": turn_id,
+                        **prune_stats,
+                        "kept_recent_turns": _INPUT_HISTORY_KEEP_RECENT_TURNS,
+                        "history_len_after": len(pruned),
+                    })
+            except Exception:
+                pass  # SDK may not always support; degrade gracefully
+
+            # Successful attempt — exit the retry loop.
+            break
+
+        except AgentsException as exc:
+            # Retry-once on ``ModelBehaviorError`` BEFORE falling through to
+            # the fallback synthesis. A malformed FinalAnswer (truncated
+            # JSON / schema validation failure / hallucinated tool name)
+            # often clears on a fresh roll because the model's output is
+            # non-deterministic. Other AgentsException subclasses (UserError,
+            # guardrail tripwires) are not retried — they reflect a real
+            # protocol or configuration problem, not transient malformity.
+            if (
+                isinstance(exc, ModelBehaviorError)
+                and _orch_attempt + 1 < _MAX_ORCH_ATTEMPTS
+            ):
+                _orch_attempt += 1
+                turn_timer.record(
+                    "orchestrator_attempt_failed",
+                    int((time.perf_counter() - orch_perf_t0) * 1000),
+                    attempt=_orch_attempt,
+                    exception_type=type(exc).__name__,
+                )
+                sess.logger.log("orchestrator_retry", {
+                    "turn_id": turn_id,
+                    "attempt": _orch_attempt,
+                    "exception_type": type(exc).__name__,
+                    "message": str(exc)[:300],
+                    "n_tool_calls_completed": sum(
+                        1 for c in tool_calls if "payload" in c
+                    ),
                 })
-        except Exception:
-            pass  # SDK may not always support; degrade gracefully
+                sess.emit("orchestrator_retry", {
+                    "turn_id": turn_id,
+                    "attempt": _orch_attempt,
+                    "reason": "model_behavior_error",
+                    "message": (
+                        "Retrying — the model's FinalAnswer didn't parse "
+                        "(typically a transient JSON malformity)."
+                    ),
+                })
+                continue  # back to top of while loop → reset state + rerun
 
-    except AgentsException as exc:
-        # Drain any specialist-level failures recorded before the orchestrator
-        # itself died so the reviewer still sees what broke under the hood.
-        _drain_specialist_errors()
+            # Drain any specialist-level failures recorded before the orchestrator
+            # itself died so the reviewer still sees what broke under the hood.
+            _drain_specialist_errors()
 
-        # Two failure modes converge here:
-        #   • ModelBehaviorError — the model emitted text the SDK couldn't
-        #     parse as FinalAnswer (truncated JSON, pseudo tool-call text,
-        #     output-schema mismatch). The specialists' work IS valid; only
-        #     the final synthesis is broken. Recoverable.
-        #   • Other AgentsException — UserError, guardrail tripwires, etc.
-        #     Generally not recoverable but we still surface what we have.
-        is_model_behavior = isinstance(exc, ModelBehaviorError)
-        kind = "model_behavior" if is_model_behavior else type(exc).__name__
+            # Two failure modes converge here:
+            #   • ModelBehaviorError — the model emitted text the SDK couldn't
+            #     parse as FinalAnswer (truncated JSON, pseudo tool-call text,
+            #     output-schema mismatch). The specialists' work IS valid; only
+            #     the final synthesis is broken. Recoverable.
+            #   • Other AgentsException — UserError, guardrail tripwires, etc.
+            #     Generally not recoverable but we still surface what we have.
+            is_model_behavior = isinstance(exc, ModelBehaviorError)
+            kind = "model_behavior" if is_model_behavior else type(exc).__name__
 
-        # Human-readable error for the SSE `error` event — strip the noisy
-        # Pydantic v2 paragraph so the UI shows something a reviewer can act
-        # on, not a 600-char schema dump.
-        raw = str(exc)
-        if is_model_behavior:
-            short = (
-                "Orchestrator could not produce a valid final answer "
-                "(the model's output was malformed or truncated). "
-                "Returning a partial summary built from the specialists' "
-                "results that did succeed."
+            # Human-readable error for the SSE `error` event — strip the noisy
+            # Pydantic v2 paragraph so the UI shows something a reviewer can act
+            # on, not a 600-char schema dump.
+            raw = str(exc)
+            if is_model_behavior:
+                short = (
+                    "Orchestrator could not produce a valid final answer "
+                    "(the model's output was malformed or truncated). "
+                    "Returning a partial summary built from the specialists' "
+                    "results that did succeed."
+                )
+            else:
+                short = f"Orchestrator failed: {type(exc).__name__}: {raw.splitlines()[0][:200]}"
+
+            sess.logger.log("orchestrator_exception", {
+                "turn_id": turn_id,
+                "exception_type": type(exc).__name__,
+                "message": raw[:1000],
+                "kind": kind,
+                "n_tool_calls_completed": sum(1 for c in tool_calls if "payload" in c),
+            })
+            sess.emit("error", {
+                "turn_id": turn_id,
+                "message": short,
+                "kind": kind,
+                "recoverable": is_model_behavior,
+            })
+
+            # Build a fallback FinalAnswer from whatever specialists DID return.
+            # Without this the reviewer would see "(no answer produced)" plus the
+            # raw exception, and the work the specialists did would be wasted.
+            answer_text, fallback_flags = _synthesize_fallback_answer(
+                tool_calls=tool_calls, error_kind=kind, error_message=raw,
             )
-        else:
-            short = f"Orchestrator failed: {type(exc).__name__}: {raw.splitlines()[0][:200]}"
+            flags = list(fallback_flags)
 
-        sess.logger.log("orchestrator_exception", {
-            "turn_id": turn_id,
-            "exception_type": type(exc).__name__,
-            "message": raw[:1000],
-            "kind": kind,
-            "n_tool_calls_completed": sum(1 for c in tool_calls if "payload" in c),
-        })
-        sess.emit("error", {
-            "turn_id": turn_id,
-            "message": short,
-            "kind": kind,
-            "recoverable": is_model_behavior,
-        })
+            # Append per-specialist failures and any protocol violations to flags
+            # the same way the success path does, so the audit trail is uniform.
+            specialist_failures = getattr(ctx, "_specialist_errors", None) or []
+            for e in specialist_failures:
+                flags.append(
+                    f"specialist '{e['specialist']}' failed: "
+                    f"{e['error_type']}: {e['error_message']}"
+                )
 
-        # Build a fallback FinalAnswer from whatever specialists DID return.
-        # Without this the reviewer would see "(no answer produced)" plus the
-        # raw exception, and the work the specialists did would be wasted.
-        answer_text, fallback_flags = _synthesize_fallback_answer(
-            tool_calls=tool_calls, error_kind=kind, error_message=raw,
-        )
-        flags = list(fallback_flags)
-
-        # Append per-specialist failures and any protocol violations to flags
-        # the same way the success path does, so the audit trail is uniform.
-        specialist_failures = getattr(ctx, "_specialist_errors", None) or []
-        for e in specialist_failures:
-            flags.append(
-                f"specialist '{e['specialist']}' failed: "
-                f"{e['error_type']}: {e['error_message']}"
+            ts = int(time.time() * 1000)
+            sess.emit("final", {
+                "turn_id": turn_id, "answer": answer_text, "flags": flags,
+                "timeline": [], "data_pull_request": None,
+            })
+            sess.emit("agent_message", {
+                "id": str(uuid.uuid4()), "role": "agent", "text": answer_text,
+                "timestamp": ts, "turn_id": turn_id,
+            })
+            sess.emit("turn_done", {
+                "turn_id": turn_id, "ended_at": ts,
+                "duration_ms": ts - started_at,
+                "outcome": "orchestrator_error_fallback" if is_model_behavior
+                           else "orchestrator_error",
+            })
+            turn_timer.summary(
+                outcome="orchestrator_error_fallback" if is_model_behavior
+                else "orchestrator_error",
+                n_tool_calls=len(tool_calls),
             )
+            return
 
-        ts = int(time.time() * 1000)
-        sess.emit("final", {
-            "turn_id": turn_id, "answer": answer_text, "flags": flags,
-            "timeline": [], "data_pull_request": None,
-        })
-        sess.emit("agent_message", {
-            "id": str(uuid.uuid4()), "role": "agent", "text": answer_text,
-            "timestamp": ts, "turn_id": turn_id,
-        })
-        sess.emit("turn_done", {
-            "turn_id": turn_id, "ended_at": ts,
-            "duration_ms": ts - started_at,
-            "outcome": "orchestrator_error_fallback" if is_model_behavior
-                       else "orchestrator_error",
-        })
-        return
+    turn_timer.record(
+        "orchestrator_stream",
+        int((time.perf_counter() - orch_perf_t0) * 1000),
+        n_tool_calls=len(tool_calls),
+        n_attempts=_orch_attempt + 1,
+    )
 
     # Drain any errors that landed after the last tool call (e.g., a parallel
     # specialist that recorded its failure between the final agent_completed
@@ -1005,6 +1307,45 @@ async def _run_turn_streamed(
             "n_domain_specialists": len(unique_domain_specialists),
             "domain_specialists": sorted(unique_domain_specialists),
         })
+    elif len(unique_domain_specialists) == 1 and general_specialist_called:
+        # Converse violation: general_specialist invoked on a 1-specialist
+        # turn — wastes 30-60s and produces an empty ReviewReport (a single
+        # specialist cannot disagree with itself). Flag so the LLM's
+        # training signal sees this is wrong.
+        violation_flag = (
+            f"general_specialist invoked unnecessarily (protocol violation: "
+            f"only 1 domain specialist ran — nothing to cross-compare)"
+        )
+        flags = list(flags or []) + [violation_flag]
+        sess.logger.log("orchestrator_protocol_violation", {
+            "turn_id": turn_id,
+            "violation": "unnecessary_general_specialist",
+            "n_domain_specialists": 1,
+            "domain_specialists": sorted(unique_domain_specialists),
+        })
+
+    # Round 2.5 protocol check: when general_specialist's `resolved` entries
+    # carry a `corrected_specialist`, the orchestrator MUST re-invoke that
+    # specialist with the correction before finalizing (see HARD GATE block
+    # in orchestrator_agent.py). If a re-invocation is missing, the
+    # pre-correction (wrong) specialist output flowed into synthesis —
+    # flag it so the reviewer sees the violation in the audit trail.
+    missing_reanswers = _detect_missing_reanswers(tool_calls)
+    if missing_reanswers:
+        for mr in missing_reanswers:
+            violation_flag = (
+                f"re-answer not invoked (protocol violation: "
+                f"general_specialist flagged `{mr['corrected_specialist']}` "
+                f"for correction to `{mr['corrected_value']}` but the "
+                f"specialist was not re-invoked with that correction)"
+            )
+            flags = list(flags or []) + [violation_flag]
+        sess.logger.log("orchestrator_protocol_violation", {
+            "turn_id": turn_id,
+            "violation": "missing_reanswer",
+            "n_missing": len(missing_reanswers),
+            "missing": missing_reanswers,
+        })
 
     # Drain any in-flight distiller tasks before reading the KB for chart
     # collection / next-turn warmth. The redacting_tool fires distillation
@@ -1012,6 +1353,7 @@ async def _run_turn_streamed(
     # the distiller round-trip on the critical path; here at end-of-turn
     # we wait for them so the KB / charts reflect the full set.
     pending = getattr(ctx, "_pending_distillers", None) or []
+    timer_t0 = time.perf_counter()
     if pending:
         try:
             await asyncio.wait_for(
@@ -1023,6 +1365,12 @@ async def _run_turn_streamed(
                 "turn_id": turn_id,
                 "n_pending": sum(1 for t in pending if not t.done()),
             })
+    turn_timer.record(
+        "distiller_drain",
+        int((time.perf_counter() - timer_t0) * 1000),
+        n_pending=len(pending),
+        n_pending_unfinished=sum(1 for t in pending if not t.done()) if pending else 0,
+    )
 
     # Phase 2 (revised) — surface charts in the reasoning-trace panel, NOT
     # inline in the chat. Each chart this turn is emitted as a typed `chart`
@@ -1030,6 +1378,7 @@ async def _run_turn_streamed(
     # specialist's findings. Keeps the chat clean (text answer only) while
     # the trace gives reviewers click-to-open access to plots tied to the
     # specific finding that produced them.
+    timer_t0 = time.perf_counter()
     turn_charts = _collect_turn_charts(sess.specialist_kb, turn_id, sess.case_id)
     chart_payloads: list[dict] = []  # turn_id-less, reusable on cached replay
     if turn_charts:
@@ -1038,15 +1387,28 @@ async def _run_turn_streamed(
         # collected the chart URL/topic/specialist in `_collect_turn_charts`.
         for c in turn_charts:
             kp = _find_kp(sess.specialist_kb, c["specialist"], c["topic"], turn_id)
-            chart_payloads.append({
+            viz = (kp or {}).get("viz") or {}
+            payload = {
                 "specialist": c["specialist"],
                 "topic": c["topic"],
                 "url": c["url"],
                 "claim": (kp or {}).get("claim", ""),
                 "source_call": (kp or {}).get("source_call", ""),
-                "kind": ((kp or {}).get("viz") or {}).get("kind", ""),
+                "kind": viz.get("kind", "") if isinstance(viz, dict) else "",
                 "vega_spec": (kp or {}).get("vega_spec"),
-            })
+            }
+            # Table KPs carry the row data (`numbers`) + the x/y field
+            # names so the frontend can render a proper HTML table. The
+            # row order is whatever the specialist passed in — already
+            # sorted upstream (e.g. by `_sort_points` for plot kinds), so
+            # the frontend renders them as-is.
+            if payload["kind"] == "table":
+                payload["numbers"] = (kp or {}).get("numbers") or []
+                payload["x_field"] = viz.get("x_field", "") if isinstance(viz, dict) else ""
+                payload["y_fields"] = (
+                    viz.get("y_fields") or [] if isinstance(viz, dict) else []
+                )
+            chart_payloads.append(payload)
         for p in chart_payloads:
             sess.emit("chart", {**p, "turn_id": turn_id})
         sess.logger.log("turn_charts_emitted", {
@@ -1054,7 +1416,13 @@ async def _run_turn_streamed(
             "n_charts": len(chart_payloads),
             "topics": [p["topic"] for p in chart_payloads],
         })
+    turn_timer.record(
+        "chart_collect_emit",
+        int((time.perf_counter() - timer_t0) * 1000),
+        n_charts=len(chart_payloads),
+    )
 
+    timer_t0 = time.perf_counter()
     ts = int(time.time() * 1000)
     sess.emit("final", {
         "turn_id": turn_id, "answer": answer_text, "flags": flags,
@@ -1068,13 +1436,18 @@ async def _run_turn_streamed(
         "turn_id": turn_id, "ended_at": ts,
         "duration_ms": ts - started_at, "outcome": "ok",
     })
+    turn_timer.record(
+        "final_sse_emit",
+        int((time.perf_counter() - timer_t0) * 1000),
+    )
 
     # Cache the answer for exact-match replay on identical follow-up
     # questions in this session. Skip when the run produced no real answer
     # (final_answer was None) so we don't poison the cache with the
     # "(no answer produced)" sentinel.
     if final_answer is not None and cache_key:
-        sess.qa_cache[cache_key] = {
+        timer_t0 = time.perf_counter()
+        evicted_cache_entries = _store_cached_qa(sess, cache_key, {
             "answer": answer_text,
             "flags": list(flags or []),
             "data_pull_request": _safe_dump(data_pull),
@@ -1087,10 +1460,38 @@ async def _run_turn_streamed(
             # reports/<case>/charts/ and serve fine on replay since the URL
             # is unchanged.
             "charts": chart_payloads,
-        }
+            # Tool-call records (team_plan + each specialist's payload +
+            # duration) so a cache-hit replay can repopulate the
+            # orchestrator-flow / specialists panel. Without these, the
+            # cached-answer replay arrives with an empty reasoning trace
+            # and looks like a silent failure to the reviewer.
+            "tool_calls": [
+                {
+                    "call_id": tc.get("call_id"),
+                    "tool": tc.get("tool"),
+                    "sub_question": tc.get("sub_question"),
+                    "payload": tc.get("payload"),
+                    "duration_ms": tc.get("duration_ms"),
+                }
+                for tc in tool_calls
+            ],
+        })
         sess.logger.log("qa_cache_store",
                         {"turn_id": turn_id, "norm_q": cache_key,
-                         "answer_len": len(answer_text)})
+                         "answer_len": len(answer_text),
+                         "entries_now": len(sess.qa_cache),
+                         "entries_evicted": evicted_cache_entries})
+        turn_timer.record(
+            "qa_cache_store",
+            int((time.perf_counter() - timer_t0) * 1000),
+            entries_now=len(sess.qa_cache),
+            entries_evicted=evicted_cache_entries,
+        )
+    turn_timer.summary(
+        outcome="ok",
+        n_tool_calls=len(tool_calls),
+        n_charts=len(chart_payloads),
+    )
 
 
 def _spawn_turn(sess: CaseSession, turn_id: str, question: str) -> None:
@@ -1240,7 +1641,7 @@ def stream(case_id: str):
     except KeyError as exc:
         return jsonify({"error": str(exc)}), 404
 
-    sub_q: queue.Queue = queue.Queue()
+    sub_q: queue.Queue = queue.Queue(maxsize=_SSE_QUEUE_MAXSIZE)
     with sess.subscribers_lock:
         sess.subscribers.append(sub_q)
     print(f"[SSE] +client case={case_id} (total: {len(sess.subscribers)})")

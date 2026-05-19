@@ -8,9 +8,18 @@ def test_build_general_specialist_returns_agent():
     assert isinstance(agent, Agent)
     assert agent.name == "general_specialist"
     assert agent.output_type.output_type is ReviewReport
-    # general_specialist now gets exactly one tool — `make_chart` — for
-    # producing cross-domain comparison charts (overlay two specialists'
-    # series on the same axis). It does NOT have data-query tools because
-    # comparison.md forbids introducing new factual claims.
-    assert [t.name for t in agent.tools] == ["make_chart"]
+    # general_specialist gets five tools:
+    #   • make_chart for cross-domain comparison charts.
+    #   • list_available_tables / get_table_schema / aggregate_column /
+    #     batch_aggregate —
+    #     verification-only data tools that let it CHECK date/time anchors
+    #     when specialists disagree on event timing (see comparison.md's
+    #     "Time/date consistency check" section). Pointedly excludes
+    #     query_table / summarize_trend / summarize_by_group — those are
+    #     specialist-level analyses, not verification probes.
+    tool_names = {t.name for t in agent.tools}
+    assert tool_names == {
+        "list_available_tables", "get_table_schema",
+        "aggregate_column", "batch_aggregate", "make_chart",
+    }
     assert "compare" in agent.instructions.lower() or "contradiction" in agent.instructions.lower()

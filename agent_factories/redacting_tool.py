@@ -3,21 +3,28 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import traceback
 from pathlib import Path
 
 from agents import Agent, RunContextWrapper, Runner, function_tool
 from agents.exceptions import AgentsException, MaxTurnsExceeded
 
+from logger.process_timer import ProcessTimer
 from llm.firewall_stack import redact_payload, sanitize_message
 from tools.viz_renderer import kp_to_vega_spec, render_chart
 
 
-# Inner-specialist turn budget. SDK default is 10, which is too tight for
-# data-heavy questions ("spending pattern", "default journey") that require
-# schema probe + multiple month-by-month aggregates. 25 covers the normal
-# worst case while still bounding runaway loops.
-_SPECIALIST_MAX_TURNS = 25
+# Inner-specialist turn budget. SDK default is 10. 25 was previously
+# used to cover data-heavy questions, but in practice the model uses
+# the full budget even on narrow count-type questions ("how many
+# successful payments"), driving 90-180s specialist runtime. 15 is
+# the sweet spot: data-heavy questions still get schema probe + 3-4
+# month-by-month aggregates + 1-2 charts (≈ 8-12 turns), while
+# runaway exploration is capped at ~45s wall-clock instead of 150s.
+# Specialist prompt (`data_query.md`) was updated alongside this to
+# explicitly encourage tool-call frugality.
+_SPECIALIST_MAX_TURNS = 15
 
 # Wall-clock budget per specialist call. Bounds hangs from stalled LLM /
 # transport layers that ``max_turns`` alone can't catch. 240s is generous
@@ -30,7 +37,22 @@ _SPECIALIST_TIMEOUT_S = 240.0
 # text-extraction; should be fast. If it stalls, log + skip — the specialist
 # answer is already in flight to the orchestrator and we degrade gracefully
 # to "no KB update this turn."
-_DISTILLER_TIMEOUT_S = 30.0
+#
+# Bumped 30s → 60s after observing real-world timeouts on chunky
+# specialists (spend_payments returning ~8 chartable claims at once,
+# case 366132845011 turn around 06:20). The distiller timing out kills
+# BOTH KB warmth for the next turn AND charts for the current turn (the
+# auto-distiller is the primary chart-generation path; make_chart is
+# specialist-explicit and proves unreliable when the LLM forgets). 60s
+# is still under the slowest specialist budget (240s) so end-of-turn
+# drain doesn't blow up.
+_DISTILLER_TIMEOUT_S = 60.0
+
+_SPECIALIST_HISTORY_KEEP_RECENT_USER_MESSAGES = 2
+_ELIDED_SPECIALIST_TOOL_OUTPUT = (
+    "(elided - earlier in-turn specialist tool output; rely on the latest "
+    "turn context or re-query only if the value is still needed.)"
+)
 
 
 def _active_kps(kps: list[dict]) -> list[dict]:
@@ -77,6 +99,50 @@ def _format_kb_digest(kps: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _compact_specialist_history(
+    history: list,
+    keep_recent_user_messages: int = _SPECIALIST_HISTORY_KEEP_RECENT_USER_MESSAGES,
+) -> tuple[list, dict]:
+    """Elide older tool-result payloads from a specialist transcript.
+
+    The transcript is only reused inside the same outer turn, mainly for
+    follow-up calls and retry salvage. Keeping the latest user-message window
+    intact preserves local continuity while preventing earlier large data-tool
+    outputs from being retained repeatedly in ``AppContext``.
+    """
+    stats = {"items_total": len(history) if isinstance(history, list) else 0,
+             "items_elided": 0, "bytes_saved": 0}
+    if not isinstance(history, list) or not history:
+        return history, stats
+
+    user_idxs = [
+        i for i, item in enumerate(history)
+        if isinstance(item, dict) and item.get("role") == "user"
+    ]
+    if len(user_idxs) <= keep_recent_user_messages:
+        return history, stats
+
+    cutoff_idx = user_idxs[-keep_recent_user_messages]
+    compacted: list = []
+    for i, item in enumerate(history):
+        if i >= cutoff_idx:
+            compacted.append(item)
+            continue
+        if isinstance(item, dict) and item.get("type") == "function_call_output":
+            old_output = item.get("output", "")
+            if isinstance(old_output, str) and old_output != _ELIDED_SPECIALIST_TOOL_OUTPUT:
+                stub = dict(item)
+                stub["output"] = _ELIDED_SPECIALIST_TOOL_OUTPUT
+                compacted.append(stub)
+                stats["items_elided"] += 1
+                stats["bytes_saved"] += max(
+                    0, len(old_output) - len(_ELIDED_SPECIALIST_TOOL_OUTPUT),
+                )
+                continue
+        compacted.append(item)
+    return compacted, stats
+
+
 async def _distill_and_persist(
     app_ctx, name: str, sub_question: str, specialist_output,
 ) -> int:
@@ -95,10 +161,36 @@ async def _distill_and_persist(
 
     logger = getattr(app_ctx, "logger", None)
 
+    # Skip distillation for non-data specialists. report_agent returns a
+    # ReportDraft (narrative `coverage` / `answer` / `evidence_excerpts` /
+    # `files_consulted`), NOT a SpecialistOutput with quantitative
+    # `findings` / `numbers`. The distiller's prompt is tuned for
+    # SpecialistOutput shape — running it on a ReportDraft costs ~20s for
+    # an LLM round-trip on a mismatched input that produces trivial KPs
+    # (see case-366132845011-aefd66 turn 28fef28354b0: distiller_runner =
+    # 22.8s, n_added = 1 KP). Off the critical path most turns, but it
+    # gates end-of-turn drain when synthesis is fast. Drop it for the
+    # report_agent specialist explicitly so the cost is gone.
+    if name == "report_agent":
+        if logger is not None:
+            logger.log("distiller_skipped", {
+                "specialist": name,
+                "reason": "non_specialist_output_shape",
+            })
+        return 0
+
+    timer = ProcessTimer(
+        logger,
+        "distiller",
+        turn_id=getattr(app_ctx, "_turn_id", None),
+        specialist=name,
+    )
+
     # Pack a compact, JSON-serializable view of the specialist's output for
     # the distiller's prompt. SpecialistOutput is a Pydantic model on the
     # success path; on failures we'd be a "[FAILED ...]" string, but we
     # only get here on success so that branch is paranoia.
+    t0 = time.perf_counter()
     try:
         if hasattr(specialist_output, "model_dump"):
             output_payload = json.dumps(specialist_output.model_dump(), default=str)
@@ -108,6 +200,11 @@ async def _distill_and_persist(
             output_payload = json.dumps(specialist_output, default=str)
     except Exception:
         output_payload = str(specialist_output)
+    timer.record(
+        "distiller_input_serialize",
+        int((time.perf_counter() - t0) * 1000),
+        payload_chars=len(output_payload),
+    )
 
     distiller_input = (
         f"Specialist: {name}\n"
@@ -116,9 +213,14 @@ async def _distill_and_persist(
     )
 
     try:
+        t0 = time.perf_counter()
         result = await asyncio.wait_for(
             Runner.run(distiller, distiller_input, context=app_ctx, max_turns=2),
             timeout=_DISTILLER_TIMEOUT_S,
+        )
+        timer.record(
+            "distiller_runner",
+            int((time.perf_counter() - t0) * 1000),
         )
     except Exception as exc:  # noqa: BLE001 - distillation is best-effort
         if logger is not None:
@@ -127,17 +229,22 @@ async def _distill_and_persist(
                 "error_type": type(exc).__name__,
                 "error_message": str(exc)[:500],
             })
+        timer.summary(outcome="failed", error_type=type(exc).__name__)
         return 0
 
     out = getattr(result, "final_output", None)
     new_kps = getattr(out, "knowledge_points", None) or []
     if not isinstance(new_kps, list):
+        timer.summary(outcome="no_kps", n_added=0)
         return 0
 
     turn_id = getattr(app_ctx, "_turn_id", None)
     case_folder = getattr(app_ctx, "case_folder", None)
     sess_list = kb.setdefault(name, [])
     added_topics: list[str] = []
+    n_with_charts = 0
+    render_total_ms = 0
+    t0 = time.perf_counter()
     for kp in new_kps:
         try:
             kp_dict = kp.model_dump() if hasattr(kp, "model_dump") else dict(kp)
@@ -156,12 +263,15 @@ async def _distill_and_persist(
                 kp_dict["vega_spec"] = spec
             if case_folder is not None:
                 charts_dir = Path(case_folder) / "charts"
+                render_t0 = time.perf_counter()
                 img_path = render_chart(
                     kp_dict, charts_dir,
                     turn_id=turn_id, logger=logger,
                 )
+                render_total_ms += int((time.perf_counter() - render_t0) * 1000)
                 if img_path is not None:
                     kp_dict["image_path"] = img_path
+                    n_with_charts += 1
 
         sess_list.append(kp_dict)
         if kp_dict.get("topic"):
@@ -176,6 +286,19 @@ async def _distill_and_persist(
             "n_with_charts": sum(1 for k in sess_list[-len(added_topics):]
                                  if k.get("image_path")),
         })
+    timer.record(
+        "kp_persist_and_render",
+        int((time.perf_counter() - t0) * 1000),
+        n_kps=len(new_kps),
+        n_added=len(added_topics),
+        n_with_charts=n_with_charts,
+        render_total_ms=render_total_ms,
+    )
+    timer.summary(
+        outcome="ok",
+        n_added=len(added_topics),
+        n_with_charts=n_with_charts,
+    )
     return len(added_topics)
 
 
@@ -252,6 +375,7 @@ def redacting_tool(agent: Agent, name: str, description: str):
 
     @function_tool(name_override=name, description_override=description)
     async def _runner(ctx: RunContextWrapper, sub_question: str) -> str:
+        runner_started = time.perf_counter()
         redacted_in = sanitize_message(sub_question)
 
         # Look up per-specialist history on the surrounding AppContext.
@@ -259,6 +383,13 @@ def redacting_tool(agent: Agent, name: str, description: str):
         # tests with a bare context object), behave like the legacy
         # single-turn path.
         app_ctx = ctx.context if ctx else None
+        logger = getattr(app_ctx, "logger", None)
+        timer = ProcessTimer(
+            logger,
+            "specialist_call",
+            turn_id=getattr(app_ctx, "_turn_id", None),
+            specialist=name,
+        )
         histories = getattr(app_ctx, "_specialist_histories", None)
         prior = histories.get(name) if isinstance(histories, dict) else None
 
@@ -279,11 +410,15 @@ def redacting_tool(agent: Agent, name: str, description: str):
                 seen = None
         if isinstance(seen, dict) and cache_key in seen:
             cached = seen[cache_key]
-            logger = getattr(app_ctx, "logger", None)
             if logger is not None:
                 logger.log("specialist_call_dedup_hit",
                            {"specialist": name,
                             "sub_question_norm": cache_key[1]})
+            timer.summary(
+                outcome="dedup_hit",
+                total_ms=int((time.perf_counter() - runner_started) * 1000),
+                sub_question_chars=len(redacted_in),
+            )
             return cached
 
         # KB digest preface — the specialist's accumulated knowledge from
@@ -305,6 +440,14 @@ def redacting_tool(agent: Agent, name: str, description: str):
             run_input = prior + [{"role": "user", "content": contextual_in}]
         else:
             run_input = contextual_in
+        timer.record(
+            "specialist_context_prepare",
+            int((time.perf_counter() - runner_started) * 1000),
+            has_prior=bool(prior),
+            kb_digest_prepended=contextual_in != redacted_in,
+            sub_question_chars=len(redacted_in),
+            run_input_items=len(run_input) if isinstance(run_input, list) else 1,
+        )
 
         # Wall-clock + turn-budget + exception fence around the inner run.
         # Without these, a hung LLM / network layer or any non-MaxTurnsExceeded
@@ -315,6 +458,7 @@ def redacting_tool(agent: Agent, name: str, description: str):
         # and the reviewer never sees the real cause. We catch each class
         # explicitly, log it, and return a structured ``[FAILED …]`` payload.
         try:
+            t0 = time.perf_counter()
             result = await asyncio.wait_for(
                 Runner.run(
                     inner, run_input, context=app_ctx,
@@ -322,7 +466,17 @@ def redacting_tool(agent: Agent, name: str, description: str):
                 ),
                 timeout=_SPECIALIST_TIMEOUT_S,
             )
+            timer.record(
+                "specialist_runner",
+                int((time.perf_counter() - t0) * 1000),
+                max_turns=_SPECIALIST_MAX_TURNS,
+            )
         except MaxTurnsExceeded as exc:
+            timer.summary(
+                outcome="failed",
+                error_type="max_turns_exceeded",
+                total_ms=int((time.perf_counter() - runner_started) * 1000),
+            )
             return _record_failure(
                 app_ctx, name, redacted_in,
                 "max_turns_exceeded",
@@ -331,6 +485,11 @@ def redacting_tool(agent: Agent, name: str, description: str):
                 exc,
             )
         except asyncio.TimeoutError as exc:
+            timer.summary(
+                outcome="failed",
+                error_type="timeout",
+                total_ms=int((time.perf_counter() - runner_started) * 1000),
+            )
             return _record_failure(
                 app_ctx, name, redacted_in,
                 "timeout",
@@ -342,6 +501,11 @@ def redacting_tool(agent: Agent, name: str, description: str):
             # Covers ModelBehaviorError (malformed JSON / nonexistent tool /
             # output-schema parse failure), UserError (SDK misuse), and
             # guardrail tripwires.
+            timer.summary(
+                outcome="failed",
+                error_type=type(exc).__name__,
+                total_ms=int((time.perf_counter() - runner_started) * 1000),
+            )
             return _record_failure(
                 app_ctx, name, redacted_in,
                 type(exc).__name__,
@@ -352,6 +516,11 @@ def redacting_tool(agent: Agent, name: str, description: str):
             # Network / transport / serialization / anything else. We don't
             # want a stray exception class to slip past and surface as the
             # SDK's generic paraphrase.
+            timer.summary(
+                outcome="failed",
+                error_type=type(exc).__name__,
+                total_ms=int((time.perf_counter() - runner_started) * 1000),
+            )
             return _record_failure(
                 app_ctx, name, redacted_in,
                 type(exc).__name__,
@@ -362,19 +531,46 @@ def redacting_tool(agent: Agent, name: str, description: str):
         # Persist the updated history so the next call to this specialist
         # in the same context picks up where we left off.
         if isinstance(histories, dict) and hasattr(result, "to_input_list"):
-            histories[name] = result.to_input_list()
+            t0 = time.perf_counter()
+            next_history = result.to_input_list()
+            next_history, history_stats = _compact_specialist_history(next_history)
+            histories[name] = next_history
+            timer.record(
+                "specialist_history_compact",
+                int((time.perf_counter() - t0) * 1000),
+                **history_stats,
+            )
+            if history_stats["items_elided"]:
+                if logger is not None:
+                    logger.log("specialist_history_compacted", {
+                        "specialist": name,
+                        **history_stats,
+                        "kept_recent_user_messages":
+                            _SPECIALIST_HISTORY_KEEP_RECENT_USER_MESSAGES,
+                    })
 
+        t0 = time.perf_counter()
         try:
             payload = redact_payload(result.final_output)
         except Exception as exc:  # noqa: BLE001
             # Output redaction failure is rare but should not look like a
             # silent drop. Surface it the same way as a run failure.
+            timer.summary(
+                outcome="failed",
+                error_type=f"redact_{type(exc).__name__}",
+                total_ms=int((time.perf_counter() - runner_started) * 1000),
+            )
             return _record_failure(
                 app_ctx, name, redacted_in,
                 f"redact_{type(exc).__name__}",
                 f"output redaction failed: {exc}",
                 exc,
             )
+        timer.record(
+            "specialist_output_redact",
+            int((time.perf_counter() - t0) * 1000),
+            payload_chars=len(payload) if isinstance(payload, str) else 0,
+        )
 
         # Second pass — distill knowledge points from the (un-redacted)
         # SpecialistOutput. We FIRE AND FORGET so the orchestrator receives
@@ -383,6 +579,7 @@ def redacting_tool(agent: Agent, name: str, description: str):
         # end-of-turn so the KB is fully populated before the next turn's
         # warmth digest is built.
         pending = getattr(app_ctx, "_pending_distillers", None)
+        t0 = time.perf_counter()
         try:
             task = asyncio.create_task(
                 _distill_and_persist(
@@ -393,16 +590,25 @@ def redacting_tool(agent: Agent, name: str, description: str):
             if isinstance(pending, list):
                 pending.append(task)
         except Exception as exc:  # noqa: BLE001 - belt-and-suspenders
-            logger = getattr(app_ctx, "logger", None)
             if logger is not None:
                 logger.log("distiller_outer_failure", {
                     "specialist": name,
                     "error_type": type(exc).__name__,
                     "error_message": str(exc)[:500],
                 })
+        timer.record(
+            "distiller_schedule",
+            int((time.perf_counter() - t0) * 1000),
+            pending_distillers=len(pending) if isinstance(pending, list) else None,
+        )
 
         if isinstance(seen, dict):
             seen[cache_key] = payload
+        timer.summary(
+            outcome="ok",
+            total_ms=int((time.perf_counter() - runner_started) * 1000),
+            sub_question_chars=len(redacted_in),
+        )
         return payload
 
     return _runner

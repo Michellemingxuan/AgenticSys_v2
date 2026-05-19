@@ -26,7 +26,13 @@ from agents import RunContextWrapper, function_tool
 from tools.viz_renderer import kp_to_vega_spec, render_chart
 
 
-_VALID_KINDS = ("trend", "bar", "share", "trend_dual", "trend_grid")
+_VALID_KINDS = ("trend", "bar", "share", "trend_dual", "trend_grid", "table")
+
+# Plot kinds (everything except `table`) need enough datapoints for the
+# shape to actually convey something — 4 is the project's minimum (also
+# documented in skills/workflow/data_query.md). Below that, the visual
+# is just noise compared to the equivalent inline table.
+_PLOT_MIN_POINTS = 4
 
 
 def build_make_chart_tool(specialist_name: str):
@@ -39,17 +45,14 @@ def build_make_chart_tool(specialist_name: str):
         strict_mode=False,
         name_override="make_chart",
         description_override=(
-            "Render a chart from a series of points and surface it in the "
-            "reasoning trace (NOT inline in the chat answer). Use AFTER a "
-            "data tool (summarize_trend / summarize_by_group / "
-            "aggregate_column) produced the numbers; pass that series via "
-            "`points`. Multiple variables on the same x-axis (typically "
-            "time) belong on ONE chart — pick the kind by scale: `trend` "
-            "for same-scale series on a shared y-axis; `trend_dual` for "
-            "exactly 2 series on different but related scales (twin y); "
-            "`trend_grid` for 3+ series on different scales (N stacked "
-            "panels). Be selective — only chart when the visual conveys "
-            "what numbers alone can't."
+            "Render a chart in the reasoning trace from a series of points. "
+            "`kind` ∈ {trend, bar, share, trend_dual, trend_grid, table}: "
+            "trend = same-scale lines; trend_dual = 2 series, different "
+            "scales (twin y); trend_grid = 3+ series, different scales "
+            "(stacked panels); bar/share = categorical; table = 1-3 rows "
+            "(no image). Plots need ≥ 4 points; `points` MUST include every "
+            "row from the source aggregate, not just the cited ones. "
+            "Call sparingly — the auto-distiller already charts findings."
         ),
     )
     async def make_chart(
@@ -71,10 +74,10 @@ def build_make_chart_tool(specialist_name: str):
                 f"charts over time, 'bar' for vertical bars, 'share' for "
                 f"horizontal-bar breakdowns sorted by value."
             )
-        if not isinstance(points, list) or len(points) < 2:
+        if not isinstance(points, list) or len(points) < 1:
             n = len(points) if isinstance(points, list) else "n/a"
             return (
-                f"[make_chart error] `points` must be a list of 2+ dicts; "
+                f"[make_chart error] `points` must be a list of 1+ dicts; "
                 f"got {type(points).__name__} of len {n}. Pass the series "
                 f"from your prior summarize_trend / summarize_by_group call."
             )
@@ -82,6 +85,20 @@ def build_make_chart_tool(specialist_name: str):
             return (
                 "[make_chart error] every entry in `points` must be a dict; "
                 "got at least one non-dict entry."
+            )
+        # Enforce the ≥ 4 minimum for actual plots. 1-3 points belong in
+        # a table — the route the LLM should take is `kind='table'`,
+        # which surfaces a table card in the Plots panel instead of
+        # rendering an image.
+        if kind != "table" and len(points) < _PLOT_MIN_POINTS:
+            return (
+                f"[make_chart error] `kind={kind!r}` plots need at least "
+                f"{_PLOT_MIN_POINTS} datapoints; got {len(points)}. With "
+                f"1-3 rows the chart shape is noise — pass the same "
+                f"`points` with `kind='table'` to surface the rows as a "
+                f"compact table card in the Plots panel. (No image is "
+                f"rendered for tables; the data structure is sent to the "
+                f"frontend directly.)"
             )
         if not topic.strip() or not claim.strip():
             return (
@@ -122,6 +139,7 @@ def build_make_chart_tool(specialist_name: str):
         case_folder = getattr(app_ctx, "case_folder", None)
         turn_id = getattr(app_ctx, "_turn_id", None)
         logger = getattr(app_ctx, "logger", None)
+        emit_event = getattr(app_ctx, "_emit_event", None)
 
         if kb is None or case_folder is None:
             # Test paths or legacy callers without a full session — we
@@ -132,6 +150,19 @@ def build_make_chart_tool(specialist_name: str):
                 "cannot persist chart. Continue without the chart and "
                 "include the numbers in your `evidence` instead."
             )
+
+        # Fire `chart_pending` BEFORE rendering so the frontend can show a
+        # "working on plots" placeholder while matplotlib runs (a typical
+        # render is sub-second but the actual `chart` event only lands at
+        # end-of-turn after the distiller drains — that gap is what the
+        # placeholder bridges). The pending event is keyed by (specialist,
+        # topic) so the frontend can match it to the eventual chart event.
+        if callable(emit_event):
+            emit_event("chart_pending", {
+                "specialist": specialist_name,
+                "topic": topic.strip(),
+                "kind": kind,
+            })
 
         # Build a KnowledgePoint-shaped dict matching the auto-distiller's
         # output schema. `confidence='high'` because the specialist
@@ -145,6 +176,30 @@ def build_make_chart_tool(specialist_name: str):
             "captured_at_turn": turn_id,
             "confidence": "high",
         }
+
+        # Table kind: skip the matplotlib render entirely. The frontend
+        # renders the `numbers` array as a real HTML table in the Plots
+        # panel. We still persist the KP so the existing chart-emit
+        # pipeline (server-side `_collect_turn_charts` + `chart` SSE
+        # event) picks it up.
+        if kind == "table":
+            kb.setdefault(specialist_name, []).append(kp_dict)
+            if logger is not None:
+                logger.log("make_chart_tool_invoked", {
+                    "specialist": specialist_name,
+                    "topic": topic,
+                    "kind": kind,
+                    "n_points": len(points),
+                    "n_series": len(y_fields),
+                    "image_path": None,
+                })
+            return (
+                f"[chart created] topic={topic!r} kind='table' "
+                f"({len(points)} rows × {len(y_fields)} columns). The "
+                f"table will surface in the Plots panel this turn. "
+                f"Reference the topic in `findings` so the narrative "
+                f"can refer to it; do NOT re-render."
+            )
 
         # Vega-Lite spec for downstream / interactive consumers.
         spec = kp_to_vega_spec(kp_dict)

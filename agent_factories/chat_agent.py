@@ -26,6 +26,33 @@ CHAT_SYSTEM_PROMPT = (
 )
 
 
+def _is_trivially_safe_question(text: str) -> bool:
+    """True when the text plainly carries no identifiers we'd need to
+    redact. Used to skip the redact LLM round-trip on short out-of-scope
+    questions ("what to eat", "hi", etc.) — the redact step is masking
+    case IDs / SSNs / emails which by definition can't be present here.
+
+    Rules (conservative; favors running redact when in doubt):
+      - Length < 80 chars (long inputs are more likely to embed something).
+      - No digit run of 3+ characters (case IDs are 12-digit strings; this
+        also catches account numbers, phone digits, etc.).
+      - No '@' (emails).
+    """
+    if not text or len(text) >= 80:
+        return False
+    if "@" in text:
+        return False
+    run = 0
+    for ch in text:
+        if ch.isdigit():
+            run += 1
+            if run >= 3:
+                return False
+        else:
+            run = 0
+    return True
+
+
 class ChatAgent:
     """Human-conversation boundary: input screening + output formatting + follow-up Q&A.
 
@@ -76,6 +103,13 @@ class ChatAgent:
         so relevance-check still gets a chance. If the relevance step is
         blocked, defaults to `passed=True` (fail-open on guardrail blocks
         so a reviewer isn't silently stonewalled by a firewall hiccup).
+
+        Fast path: short, plainly-non-sensitive questions (< 80 chars, no
+        digits, no '@') skip the redact LLM call entirely — there's nothing
+        to mask and the round-trip just adds 1-2s of latency for trivial
+        inputs like "what to eat" or "hi". Anything that LOOKS like it
+        could carry identifiers (digit sequences = case IDs / SSNs / phone
+        numbers, '@' = emails) still goes through redact.
         """
         self.logger.log(
             "chat_screen_start",
@@ -83,7 +117,12 @@ class ChatAgent:
              "n_prior_questions": len(prior_questions or [])},
         )
 
-        redacted = await self.redact(question)
+        if _is_trivially_safe_question(question):
+            self.logger.log("chat_redact_skipped",
+                            {"reason": "trivial_no_pii", "question_len": len(question)})
+            redacted = question
+        else:
+            redacted = await self.redact(question)
         passed, reason, near_dup, near_dup_reason = await self.relevance_check(
             redacted, prior_questions=prior_questions or []
         )

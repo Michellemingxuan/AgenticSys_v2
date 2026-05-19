@@ -359,6 +359,7 @@ async def test_redacting_tool_success_does_not_record_error():
 
 from agent_factories.redacting_tool import (
     _active_kps,
+    _compact_specialist_history,
     _format_kb_digest,
     _distill_and_persist,
 )
@@ -423,6 +424,30 @@ def test_format_kb_digest_renders_active_set_only():
     assert "(revised)" in digest          # the active claim is the newer one
     assert "FICO 720→680" not in digest   # the older claim is hidden
     assert "[medium]" in digest
+
+
+def test_compact_specialist_history_elides_old_tool_outputs_only():
+    history = [
+        {"role": "user", "content": "first"},
+        {"type": "function_call_output", "call_id": "old", "output": "x" * 5000},
+        {"role": "assistant", "content": "first answer"},
+        {"role": "user", "content": "second"},
+        {"type": "function_call_output", "call_id": "recent-1", "output": "y" * 100},
+        {"role": "assistant", "content": "second answer"},
+        {"role": "user", "content": "third"},
+        {"type": "function_call_output", "call_id": "recent-2", "output": "z" * 100},
+        {"role": "assistant", "content": "third answer"},
+    ]
+
+    compacted, stats = _compact_specialist_history(history, keep_recent_user_messages=2)
+
+    assert len(compacted) == len(history)
+    assert stats["items_elided"] == 1
+    assert stats["bytes_saved"] > 4000
+    assert compacted[1]["call_id"] == "old"
+    assert compacted[1]["output"].startswith("(elided")
+    assert compacted[4] == history[4]
+    assert compacted[7] == history[7]
 
 
 @pytest.mark.asyncio
@@ -638,3 +663,41 @@ def test_distill_and_persist_noop_when_distiller_unwired():
     )
     assert n == 0
     assert ctx_no_distiller._specialist_kb == {}
+
+
+def test_distill_and_persist_skips_report_agent():
+    """report_agent returns ReportDraft (narrative), not SpecialistOutput —
+    running the distiller on it costs ~20s for trivial KPs. The wrapper
+    must short-circuit so neither the distiller LLM call nor the KB write
+    happens for report_agent. The distiller mock is asserted untouched."""
+    import asyncio as _asyncio
+    from types import SimpleNamespace
+
+    distiller_calls: list = []
+
+    class _MockDistiller:
+        def __call__(self, *args, **kwargs):
+            distiller_calls.append((args, kwargs))
+            raise AssertionError("distiller should not have been invoked for report_agent")
+
+    logged_events: list = []
+
+    class _MockLogger:
+        def log(self, event, payload):
+            logged_events.append((event, payload))
+
+    ctx = SimpleNamespace(
+        logger=_MockLogger(),
+        _specialist_kb={},
+        _distiller=_MockDistiller(),
+        _turn_id="t-1",
+    )
+    n = _asyncio.get_event_loop().run_until_complete(
+        _distill_and_persist(ctx, "report_agent", "q", "out")
+    )
+    assert n == 0
+    assert distiller_calls == []
+    assert ctx._specialist_kb == {}
+    # The skip is observable in the JSONL so perf regressions are auditable.
+    assert any(e == "distiller_skipped" and p.get("specialist") == "report_agent"
+               for e, p in logged_events)

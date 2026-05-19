@@ -96,6 +96,95 @@ def _coerce_numbers(numbers: Any) -> list[dict] | None:
     return numbers
 
 
+# Date-like x-values get parsed via these formats (tried in order) so we
+# can sort temporally. Anything that fails ALL parsers is treated as
+# categorical and falls back to a lexicographic sort.
+_DATE_FORMATS = (
+    "%Y-%m-%d", "%Y-%m", "%Y/%m/%d", "%Y/%m",
+    "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f",
+    "%m/%d/%Y", "%d-%m-%Y", "%d/%m/%Y",
+    "%b %Y", "%B %Y", "%b-%y", "%b-%Y", "%Y",
+)
+
+
+def _parse_date_key(x: Any) -> Any:
+    """Return a ``datetime`` if ``x`` parses as one of our date formats,
+    otherwise None. Used as the temporal-sort key. Compact, format-by-
+    format try-loop — matches the same pragma used in
+    ``tools/data_tools.py:_date_key``."""
+    if x is None:
+        return None
+    if isinstance(x, (int, float)) and not isinstance(x, bool):
+        return None  # numbers aren't dates here; let other branches sort
+    s = str(x).strip()
+    if not s:
+        return None
+    from datetime import datetime
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _sort_points(
+    points: list[dict],
+    x_field: str,
+    y_fields: list[str],
+    kind: str,
+) -> list[dict]:
+    """Re-order the points array into a logical sequence for plotting.
+
+    Priority:
+      1. **Temporal** — if every x parses as a date, sort by date ascending.
+      2. **Numeric x** — if every x is a number, sort numerically ascending.
+      3. **Ranking** — for `bar` / `share` with categorical x and a SINGLE
+         y_field, sort by y descending (top-N readability — biggest bar
+         on the left for `bar`, on the top for `share`).
+      4. **Alphabetic** — fallback, sort by str(x) ascending.
+
+    Sort is stable; ties preserve the original order so multi-series
+    `trend` charts keep their entries aligned across series.
+    """
+    if len(points) < 2:
+        return list(points)
+
+    xs = [p.get(x_field) for p in points]
+
+    # (1) temporal
+    date_keys = [_parse_date_key(x) for x in xs]
+    if all(k is not None for k in date_keys):
+        return [p for _, p in sorted(zip(date_keys, points), key=lambda pair: pair[0])]
+
+    # (2) numeric
+    def _as_float(x: Any) -> float | None:
+        try:
+            return float(x)
+        except (TypeError, ValueError):
+            return None
+
+    nums = [_as_float(x) for x in xs]
+    if all(n is not None for n in nums):
+        return [p for _, p in sorted(zip(nums, points), key=lambda pair: pair[0])]
+
+    # (3) ranking — bar/share single-series, sort by y desc
+    if kind in ("bar", "share") and len(y_fields) == 1:
+        yf = y_fields[0]
+
+        def _y(p: dict) -> float:
+            v = p.get(yf)
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return float("-inf")
+
+        return sorted(points, key=_y, reverse=True)
+
+    # (4) alpha fallback
+    return sorted(points, key=lambda p: str(p.get(x_field, "")))
+
+
 def _resolve_axes(kp_viz: dict, numbers: list[dict]) -> tuple[str, list[str]] | None:
     """Resolve x_field + a LIST of y_fields. Multi-series charts (e.g.
     spend vs payment over time) plot one line per y_field on the same axes.
@@ -143,7 +232,14 @@ def _extract_xy(numbers: list[dict], x_field: str, y_field: str
                 ) -> tuple[list, list[float]] | None:
     """Build parallel x / y arrays for a single y series. Drops entries with
     missing or non-numeric y values; returns None when nothing usable
-    remains."""
+    remains.
+
+    Note: ``float("NaN")`` doesn't raise — it returns the IEEE NaN value.
+    We treat NaN / ±inf as "unparseable" too because matplotlib's
+    annotate call chokes on non-finite xy coordinates, and a chart with
+    a NaN point reads as broken to a reviewer regardless.
+    """
+    import math
     xs: list = []
     ys: list[float] = []
     for n in numbers:
@@ -152,9 +248,12 @@ def _extract_xy(numbers: list[dict], x_field: str, y_field: str
         if x is None or y is None:
             continue
         try:
-            ys.append(float(y))
+            fy = float(y)
         except (TypeError, ValueError):
             continue
+        if not math.isfinite(fy):
+            continue
+        ys.append(fy)
         xs.append(x)
     if not xs:
         return None
@@ -173,6 +272,58 @@ def _format_axis_value(v: float) -> str:
     if av == int(av):
         return f"{int(v)}"
     return f"{v:.2f}"
+
+
+def _annotate_points(ax, xs, ys, color: str, fontsize: int = 8) -> None:
+    """Write each y value as a small label just above its data point so
+    the reviewer can read exact figures off the chart without
+    cross-referencing the y-axis ticks.
+
+    Offset is in display pixels (8px above the marker) so dense series
+    don't push labels off the top of the chart at low DPI. Skip labels
+    that would land too close to the previous one (3% of the x-range
+    threshold) — only relevant when the chart has dozens of points and
+    they bunch up.
+    """
+    if not ys:
+        return
+    last_x: float | None = None
+    span = (max(xs) - min(xs)) if len(xs) > 1 else 1.0
+    min_gap = max(span * 0.03, 0)
+    for x, y in zip(xs, ys):
+        if last_x is not None and (x - last_x) < min_gap:
+            continue
+        ax.annotate(
+            _format_axis_value(y),
+            xy=(x, y),
+            xytext=(0, 8),
+            textcoords="offset points",
+            ha="center", va="bottom",
+            fontsize=fontsize,
+            color=color,
+            fontweight="600",
+        )
+        last_x = x
+
+
+def _annotate_bars(ax, xs, ys, color: str, fontsize: int = 9) -> None:
+    """Write each bar's value just above the top of the bar. Centered
+    horizontally on the bar; offset 4px vertically so the text reads as
+    a label above the bar rather than overlapping it.
+    """
+    for x, y in zip(xs, ys):
+        if y is None:
+            continue
+        ax.annotate(
+            _format_axis_value(y),
+            xy=(x, y),
+            xytext=(0, 4),
+            textcoords="offset points",
+            ha="center", va="bottom",
+            fontsize=fontsize,
+            color=color,
+            fontweight="600",
+        )
 
 
 def render_chart(
@@ -214,6 +365,14 @@ def render_chart(
                         "sample_keys": list(numbers[0].keys())})
         return None
     x_field, y_fields = axes
+
+    # Sort the points into a logical order BEFORE extracting parallel
+    # arrays. For temporal x → chronological; for ranking-style charts
+    # → biggest bar first; else alpha. Without this, an unsorted points
+    # array drawn into a `trend` chart can produce nonsensical
+    # back-and-forth line segments when the specialist's tool calls
+    # returned data in non-chronological order.
+    numbers = _sort_points(numbers, x_field, y_fields, kind)
 
     # One (xs, ys) pair per y_field — supports multi-series trend/bar.
     extracted = []
@@ -279,6 +438,7 @@ def render_chart(
                 color = _PALETTE[i % len(_PALETTE)]
                 panel_ax.plot(indices, ys, marker="o", linewidth=2.0,
                               markersize=5.0, color=color)
+                _annotate_points(panel_ax, indices, ys, color)
                 panel_ax.set_ylabel(yf)
                 panel_ax.yaxis.set_major_formatter(
                     plt.FuncFormatter(lambda v, _p: _format_axis_value(v)))
@@ -313,6 +473,10 @@ def render_chart(
                     color = _PALETTE[i % len(_PALETTE)]
                     ax.plot(indices, ys, marker="o", linewidth=2.0, markersize=5.5,
                             color=color, label=yf if is_multi else None)
+                    # Annotate each point with its exact value so the reviewer
+                    # can read figures off the chart without cross-referencing
+                    # the y-axis ticks.
+                    _annotate_points(ax, indices, ys, color)
                 ax.set_xticks(indices)
                 # Thin to ~10 visible labels max so dense series stay readable
                 # without dropping the first / last (those are anchor points).
@@ -337,13 +501,16 @@ def render_chart(
                 if n_series == 1:
                     yf, (_, ys) = extracted[0]
                     ax.bar(indices, ys, color=_PALETTE[0], width=0.6)
+                    _annotate_bars(ax, indices, ys, _PALETTE[0])
                 else:
                     # Grouped bars side-by-side per x value.
                     bar_w = 0.8 / n_series
                     for i, (yf, (_, ys)) in enumerate(extracted):
                         offsets = [x + (i - (n_series - 1) / 2) * bar_w for x in indices]
+                        color = _PALETTE[i % len(_PALETTE)]
                         ax.bar(offsets, ys, width=bar_w * 0.95,
-                               color=_PALETTE[i % len(_PALETTE)], label=yf)
+                               color=color, label=yf)
+                        _annotate_bars(ax, offsets, ys, color, fontsize=8)
                     ax.legend(loc="best", frameon=False, fontsize=9)
                 ax.set_xticks(indices)
                 ax.set_xticklabels([str(x) for x in xs_first], rotation=30,
@@ -384,9 +551,11 @@ def render_chart(
 
                 line1, = ax.plot(indices, ys1, marker="o", linewidth=2.0,
                                  markersize=5.5, color=primary_color, label=yf1)
+                _annotate_points(ax, indices, ys1, primary_color)
                 ax2 = ax.twinx()
                 line2, = ax2.plot(indices, ys2, marker="s", linewidth=2.0,
                                   markersize=5.5, color=secondary_color, label=yf2)
+                _annotate_points(ax2, indices, ys2, secondary_color)
 
                 ax.set_xticks(indices)
                 n = len(xs_first)
@@ -511,39 +680,72 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
         "data": {"values": numbers},
     }
 
-    # Map our `kind` vocabulary to Vega-Lite marks. `share` → horizontal
-    # bar (same as the matplotlib path); always single-series.
+    # Vega-Lite number format for value labels. ".3~s" gives ~3
+    # significant figures with SI suffix and strips trailing zeros:
+    #   1200 → "1.2k", 12000 → "12k", 1_234_567 → "1.23M". Same idea as
+    # `_format_axis_value` on the matplotlib path, so the PNG and the
+    # interactive SVG read consistently.
+    _LABEL_FMT = ".3~s"
+
+    # Map our `kind` vocabulary to Vega-Lite marks. Every chart kind
+    # layers a `text` mark over the primary mark so the exact value
+    # appears next to each datapoint / bar — matches the matplotlib
+    # path's `_annotate_points` / `_annotate_bars` / inline `share`
+    # labels so the interactive chart never reads as less informative
+    # than the static PNG.
     if kind == "trend":
-        spec["mark"] = "line"
-        encoding: dict = {
+        y_value_field = "value" if is_multi else primary_y
+        line_enc: dict = {
             "x": {"field": x_field, "type": "ordinal"},
-            "y": {"field": "value" if is_multi else primary_y,
-                  "type": "quantitative"},
+            "y": {"field": y_value_field, "type": "quantitative"},
+        }
+        text_enc: dict = {
+            "x": {"field": x_field, "type": "ordinal"},
+            "y": {"field": y_value_field, "type": "quantitative"},
+            "text": {"field": y_value_field, "type": "quantitative",
+                     "format": _LABEL_FMT},
         }
         if is_multi:
             spec["transform"] = [{"fold": y_fields, "as": ["series", "value"]}]
-            encoding["color"] = {"field": "series", "type": "nominal"}
-        spec["encoding"] = encoding
+            line_enc["color"] = {"field": "series", "type": "nominal"}
+            text_enc["color"] = {"field": "series", "type": "nominal"}
+        spec["layer"] = [
+            {"mark": {"type": "line", "point": True}, "encoding": line_enc},
+            {"mark": {"type": "text", "dy": -10, "fontSize": 10,
+                      "fontWeight": 600}, "encoding": text_enc},
+        ]
     elif kind == "bar":
-        spec["mark"] = "bar"
-        encoding = {
+        y_value_field = "value" if is_multi else primary_y
+        bar_enc: dict = {
             "x": {"field": x_field, "type": "ordinal"},
-            "y": {"field": "value" if is_multi else primary_y,
-                  "type": "quantitative"},
+            "y": {"field": y_value_field, "type": "quantitative"},
+        }
+        text_enc = {
+            "x": {"field": x_field, "type": "ordinal"},
+            "y": {"field": y_value_field, "type": "quantitative"},
+            "text": {"field": y_value_field, "type": "quantitative",
+                     "format": _LABEL_FMT},
         }
         if is_multi:
             spec["transform"] = [{"fold": y_fields, "as": ["series", "value"]}]
-            encoding["color"] = {"field": "series", "type": "nominal"}
-            encoding["xOffset"] = {"field": "series", "type": "nominal"}
-        spec["encoding"] = encoding
+            bar_enc["color"] = {"field": "series", "type": "nominal"}
+            bar_enc["xOffset"] = {"field": "series", "type": "nominal"}
+            text_enc["color"] = {"field": "series", "type": "nominal"}
+            text_enc["xOffset"] = {"field": "series", "type": "nominal"}
+        spec["layer"] = [
+            {"mark": "bar", "encoding": bar_enc},
+            {"mark": {"type": "text", "dy": -6, "fontSize": 10,
+                      "fontWeight": 600}, "encoding": text_enc},
+        ]
     elif kind == "trend_dual":
         # Layered spec — two line marks, each bound to its own y_field,
         # with independent y scales so the two series don't have to share
-        # a numeric range.
+        # a numeric range. Each line also gets a text overlay with the
+        # exact value next to every point.
         y_left, y_right = y_fields[0], y_fields[1]
         spec["layer"] = [
             {
-                "mark": "line",
+                "mark": {"type": "line", "point": True},
                 "encoding": {
                     "x": {"field": x_field, "type": "ordinal"},
                     "y": {"field": y_left, "type": "quantitative"},
@@ -551,35 +753,90 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
                 },
             },
             {
-                "mark": "line",
+                "mark": {"type": "text", "dy": -10, "fontSize": 10,
+                         "fontWeight": 600},
+                "encoding": {
+                    "x": {"field": x_field, "type": "ordinal"},
+                    "y": {"field": y_left, "type": "quantitative"},
+                    "color": {"datum": y_left, "type": "nominal"},
+                    "text": {"field": y_left, "type": "quantitative",
+                             "format": _LABEL_FMT},
+                },
+            },
+            {
+                "mark": {"type": "line", "point": True},
                 "encoding": {
                     "x": {"field": x_field, "type": "ordinal"},
                     "y": {"field": y_right, "type": "quantitative"},
                     "color": {"datum": y_right, "type": "nominal"},
                 },
             },
+            {
+                "mark": {"type": "text", "dy": -10, "fontSize": 10,
+                         "fontWeight": 600},
+                "encoding": {
+                    "x": {"field": x_field, "type": "ordinal"},
+                    "y": {"field": y_right, "type": "quantitative"},
+                    "color": {"datum": y_right, "type": "nominal"},
+                    "text": {"field": y_right, "type": "quantitative",
+                             "format": _LABEL_FMT},
+                },
+            },
         ]
         spec["resolve"] = {"scale": {"y": "independent"}}
     elif kind == "trend_grid":
         # Stacked single-series line charts sharing the x-axis. Each
-        # sub-spec is independent so each y-scale auto-fits its series.
+        # sub-spec is independent (own y-scale) and layers a text mark
+        # for the per-point value.
         spec["vconcat"] = [
             {
-                "mark": "line",
-                "encoding": {
-                    "x": {"field": x_field, "type": "ordinal"},
-                    "y": {"field": yf, "type": "quantitative"},
-                },
+                "layer": [
+                    {
+                        "mark": {"type": "line", "point": True},
+                        "encoding": {
+                            "x": {"field": x_field, "type": "ordinal"},
+                            "y": {"field": yf, "type": "quantitative"},
+                        },
+                    },
+                    {
+                        "mark": {"type": "text", "dy": -10, "fontSize": 10,
+                                 "fontWeight": 600},
+                        "encoding": {
+                            "x": {"field": x_field, "type": "ordinal"},
+                            "y": {"field": yf, "type": "quantitative"},
+                            "text": {"field": yf, "type": "quantitative",
+                                     "format": _LABEL_FMT},
+                        },
+                    },
+                ],
             }
             for yf in y_fields
         ]
     else:  # share — horizontal, single-series only
-        spec["mark"] = "bar"
-        spec["encoding"] = {
-            "y": {"field": x_field, "type": "ordinal",
-                  "sort": {"field": primary_y, "order": "descending"}},
-            "x": {"field": primary_y, "type": "quantitative"},
-        }
+        spec["layer"] = [
+            {
+                "mark": "bar",
+                "encoding": {
+                    "y": {"field": x_field, "type": "ordinal",
+                          "sort": {"field": primary_y, "order": "descending"}},
+                    "x": {"field": primary_y, "type": "quantitative"},
+                },
+            },
+            {
+                # Value labels at the end of each horizontal bar (dx=4,
+                # align=left). Mirrors the matplotlib `share` branch
+                # that inlines labels just past the bar end.
+                "mark": {"type": "text", "dx": 4, "align": "left",
+                         "fontSize": 10, "fontWeight": 600},
+                "encoding": {
+                    "y": {"field": x_field, "type": "ordinal",
+                          "sort": {"field": primary_y, "order": "descending"}},
+                    "x": {"field": primary_y, "type": "quantitative"},
+                    "text": {"field": primary_y, "type": "quantitative",
+                             "format": _LABEL_FMT},
+                },
+            },
+        ]
 
     title = str(kp.get("topic") or "").replace("_", " ").strip()
     if title:

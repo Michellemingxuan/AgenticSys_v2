@@ -23,5 +23,8 @@ specialists:
   capacity_afford:
     focus: "Growth Headroom"
     prompt_overlay: "Capacity for additional products"
+  strategy:
+    focus: "Strategy-Action History"
+    prompt_overlay: "Past GL reductions / RLA events constrain growth headroom"
 silenced_tables: []
 silenced_columns: {}

@@ -68,3 +68,14 @@ Examples: "Does **the model** have info about spending?" → `modeling`. "Does *
 - Uses the specialist's data vocabulary (name the column/table when you know it).
 - Orthogonal across specialists — no duplicates.
 - One specialist → sub-question may equal the root question verbatim.
+
+### Subject vs condition on multi-specialist turns
+
+For multi-specialist turns where the reviewer's question has the shape *"why is X high while Y looks healthy?"* / *"how does X relate to Y?"* / etc., identify the **subject** (the main concept being asked about — e.g., "TSR") and the **condition** (the context the subject is being framed against — e.g., "bureau is healthy"). Then write the sub-questions so each specialist knows its role:
+
+- **Subject specialist** (whose domain carries the subject concept) gets the MAIN question: *"Why is TSR high? Analyze the trajectory, drivers, and what's pushing it up. Note the apparent contradiction with bureau healthiness."* — they take main responsibility for the answer and can query cross-domain freely.
+- **Condition specialist** (whose domain carries the condition concept) gets the SUPPORTING question: *"Confirm the bureau picture is healthy: FICO, derog marks, delinquent_external_trades, etc. Light cross-peek into model_scores / score_drivers if helpful to anchor the framing, but don't analyze TSR in depth — that's modeling's lane this turn."* — they take supporting responsibility.
+
+Specialists CAN query each other's tables regardless of role (no table is "owned"); the role just decides depth — subject = deep, condition = shallow cross-peek. See the "Cross-domain queries" section in `data_query.md` for the discipline specialists apply on their side.
+
+Single-specialist turns and turns where the question is genuinely symmetric (no clear subject) don't need this framing — write sub-questions directly.

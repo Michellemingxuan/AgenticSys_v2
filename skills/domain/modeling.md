@@ -50,6 +50,26 @@ When a column shows up in the schema:
 - Its description names a **third-party / sub-model score** (Paydex, SBFE, LexisNexis, RNN, payment-channel risk, CBR, etc.) — typically a noun-phrase ending in "score" — → **Layer 2**.
 - Otherwise → **Layer 3** feature variable. Classify it into one of the concept groups below by reading the description.
 
+# Score → column mapping (load-bearing — read carefully)
+
+The colloquial score names don't always match the column names that carry them. Two specific mappings to internalize:
+
+- **CDSS** (Credit Decision Support System) → the `credit_loss_prob` column. *Not* `cust_eff_se_cdss_5_180_day_score` — that column's catalog description says **Merchant Risk Score** despite the `cdss` substring in its name; it's a Layer-2 embedded score, not the headline CDSS.
+- **TSR** (Total Structural Risk) → the `tot_struct_risk_score` column.
+
+When the reviewer or the report agent says "CDSS", the load-bearing number is `credit_loss_prob`. Quote both: *"CDSS (`credit_loss_prob`): X"*.
+
+# Consumer vs commercial conditioning — same column, different model
+
+CDSS and TSR each exist in **two versions**: one for consumer cards (`CPS`) and one for commercial cards (`SBS`). **Only ONE version appears in `model_scores` for any given case** — the version matching the case's card portfolio. A case about an SBS-card default carries the *commercial* CDSS / TSR; a CPS case carries the *consumer* versions. The column names (`credit_loss_prob`, `tot_struct_risk_score`) are identical across both versions — the data doesn't self-label.
+
+**Implications for analysis:**
+
+- Establish the case's portfolio FIRST (from `crossbu_cards.card_portfolio` via the `crossbu` specialist or from the report agent's context). Common values: `'CPS'` = consumer, `'SBS'` = commercial.
+- When citing CDSS / TSR in `findings`, **label the portfolio**: *"TSR (commercial version, since this case is on SBS card): 24.5 — risky (threshold > 20)."* Without the portfolio tag, the score is uninterpretable.
+- Risky thresholds are MODEL-SPECIFIC. The catalog descriptions list one threshold ("Scores from 20-100 are considered risky" for TSR); confirm against the version the case actually carries before applying. If the reviewer asks about consumer-vs-commercial comparison of CDSS or TSR within the same case, **there's no data to compare** — only one version is present. Flag in `data_gaps`: *"only the <consumer/commercial> version of CDSS/TSR is materialized for this case; cross-portfolio comparison not possible from `model_scores`."*
+- If the portfolio is ambiguous (case has both CPS and SBS cards), the materialized version usually corresponds to the card in default OR the dominant exposure. Defer to `crossbu`'s portfolio mix — and surface the ambiguity rather than guessing.
+
 # Concept groups (Layer 3) — recognize them from the column description, not from a fixed list
 
 For each group: the **concept**, the **vocabulary** to look for in column names and descriptions, a couple of *illustrative* columns (the case schema may carry more, fewer, or new ones), and the routing implication.
@@ -68,6 +88,8 @@ Vocabulary: "income" / "incom", "debt_srvc" / "debt servicing", "paydown", "pymc
 
 ### Spend-pattern features (ML-derived)
 Vocabulary: "spend_concentration", "out_of_pattern" / "oop", "rnn_score" (also Layer 2), "wtd_pd_unpaid", "spend_divergence". Examples: `cust_enhnc_one_way_spend_concentration_30day_rt1`, `oop_interaction`, `se_no_norm_wtd_pd_unpaid_amt`. The orchestrator pairs you with `spend_payments` and `crossbu` on spending questions — you carry the **ML-derived spend features** that feed the risk scores, not the raw transactions.
+
+**LANE DISCIPLINE — do NOT compute raw spend / payment / balance totals.** Even though `model_scores` carries spend-derived columns (rolling sums, normalized indices, share metrics), those are FEATURES at the model's chosen window and normalization — they are NOT the canonical transaction-level totals. Reporting a "total spend = $X" from `model_scores` is a category error: the right answer comes from `spends_data.Amount` (owned by `spend_payments`) and will routinely disagree. Examples of the trap (observed on real cases): modeling reports total spend `$1.2M` from a 12-month feature window while `spend_payments` reports `$1.7M` from the full transaction history — general_specialist correctly flags spend_payments as canonical. **Stay in your lane:** when a question touches absolute spend / payment volume, surface the model's SCORE response to that volume (e.g. "out-of-pattern index crossed risky threshold in May", "spend-concentration feature shifted from `0.21 → 0.37` over Mar-May") — never a dollar total derived from `model_scores`.
 
 ### Trends, tenure & aging
 Vocabulary: "trnd_indx" / "trend index", "tenure", "ten_to_amex", "rec_age" / "agec" / "agel", "old_rec". Examples: `hcam_src_trnd_indx`, `hcam_bal_trnd_indx`, `tpf_cust_mod_tenure`, `cb_ten_to_amex_tenure`. Trend-index features turn risky on direction (FICO trend < negative threshold = deteriorating); tenure features are usually baseline/divisor inputs rather than risky-on-their-own.
@@ -103,7 +125,7 @@ For ANY reviewer concept (delinquency, exposure, capacity, spend pattern, paymen
 1. **Probe schema once** with `get_table_schema('model_scores')`. Read the descriptions — they tell you what each column measures and (usually) when it's risky.
 2. **Map the reviewer's concept to a group** using the vocabulary hints above. Pull the columns whose names or descriptions match the concept. Don't restrict yourself to the example columns listed in this skill — anything in the schema whose description matches the concept counts.
 3. **Read the threshold from the description**, not from memory. Descriptions like *"Values above 0.5 are risky"* or *"Values below 693 are risky"* are the source of truth — quote them verbatim. When a description doesn't state a threshold, lean on trajectory (rising / falling / inflection over `trans_month`) and relative position rather than inventing a cutoff.
-4. **Trend each indicator** — `summarize_trend('model_scores', '<column>', 'trans_month', period='month', op='max')`. Trajectory beats a single snapshot.
+4. **Trend each indicator IN ONE BATCH** — once you've picked the relevant columns in step 3, dispatch them via `batch_summarize_trend` (up to 6 per call). Example: `batch_summarize_trend('[{"table_name":"model_scores","value_column":"times_30_dpd","time_column":"trans_month","period":"month","op":"max"}, {"table_name":"model_scores","value_column":"tpf_internal_delinq_idx","time_column":"trans_month","period":"month","op":"max"}, ...]')`. This collapses N round-trips (~3-6s each) into one. Trajectory beats a single snapshot; a per-indicator loop burns the turn budget.
 5. **Quote individual breaches by column name** with the threshold from the description: *"`<column>` reached <value> in <month> — risky threshold from catalog: <quoted threshold>."* Don't paraphrase the column.
 6. **Quote the GROUP COMPOSITE alongside individual hits**: *"N of the M `<group>` indicators present on this case crossed their risky thresholds in <window>: `col1`, `col2`, …"* — this is the harder-to-fake signal.
 7. **Bridge to output scores via `score_drivers`** when a breaching indicator appears in `top_<score>*` / `bottom_<score>*` — that ties the feature-level finding to the headline-score move.
