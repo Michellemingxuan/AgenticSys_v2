@@ -403,6 +403,32 @@ def render_chart(
                         "error": str(exc)})
         return None
 
+    # Defense-in-depth: if a sibling KP this turn already wrote to this
+    # filename (same <turn>-<topic> slug — distiller misclassified two
+    # distinct metrics under one topic), suffix the new file with a
+    # counter so we don't silently overwrite the earlier render. The
+    # downstream `_collect_turn_charts` still dedupes by topic — see
+    # caller comments — so the new filename also surfaces a side-by-
+    # side render only when the KB carries distinct topics. The PNG
+    # preservation here is for forensics: when the distiller bug
+    # recurs, the missing chart's PNG is still on disk to recover.
+    out_dir_path = out_dir
+    candidate = out_dir_path / filename
+    suffix = 1
+    while candidate.exists():
+        suffix += 1
+        filename = f"{tid}-{topic}__dup{suffix}.png"
+        candidate = out_dir_path / filename
+        if suffix > 9:  # paranoia cap: never write more than 8 dupes
+            break
+    if suffix > 1 and logger is not None:
+        logger.log("viz_render_filename_collision", {
+            "topic": kp.get("topic"),
+            "turn_id": turn_id,
+            "resolved_filename": filename,
+            "collision_index": suffix,
+        })
+
     out_path = out_dir / filename
     is_multi = len(extracted) > 1
     # No title baked into the PNG — the surrounding UI (chart-button label

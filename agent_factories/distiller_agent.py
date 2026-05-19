@@ -48,10 +48,34 @@ already stated.
 
 - `topic`: short snake_case slug for grouping. Examples:
   `monthly_spend_trend`, `top_merchants_by_sum`, `delinquency_indicator_breaches`,
-  `payment_returns_total`, `fico_trajectory`.
-  Use the SAME topic when re-answering the same conceptual question — the
-  newer KP supersedes the older one in the active view (older is retained
-  for audit).
+  `payment_returns_total`, `fico_trajectory`, `cdss_score_trend`,
+  `tsr_score_trend`.
+
+  **Two KPs in the same turn MUST NOT share a topic unless they answer
+  THE SAME conceptual question** (in which case the later supersedes the
+  earlier in the active view; older is retained for audit). Different
+  metrics, different columns, different score names = different topics.
+  This rule is load-bearing: downstream chart collection dedupes by
+  topic, so collisions cause charts to silently disappear.
+
+  Examples that MUST get distinct topics (real failure case — both got
+  `model_scores_trend` and CDSS's chart was overwritten by TSR's):
+  - CDSS trajectory  → `cdss_score_trend` (column: `credit_loss_prob`)
+  - TSR trajectory   → `tsr_score_trend`  (column: `tot_struct_risk_score`)
+  - Internal delinq  → `internal_delinquency_index_trend`
+  - External delinq  → `external_delinquency_index_trend`
+
+  Naming rule: when the claim is about a specific named score / metric /
+  indicator, **put the metric name IN the topic slug**, never a generic
+  family label like `model_scores_trend` / `delinquency_trend` /
+  `spend_metrics_trend`. If you're tempted to use a family name, ask
+  whether the next KP this turn will share that family — if yes, you
+  need per-metric slugs.
+
+  **Preferred alternative when the question genuinely covers 2+ metrics
+  on the same x-axis** (CDSS AND TSR over the same trans_month series):
+  emit ONE multi-series KP instead of two single-series KPs. See the
+  `viz` field below for the multi-series shape.
 
 - `claim`: ONE sentence that includes the specific numbers, named entities,
   and time window. **The time window in the claim MUST match the first and
@@ -82,18 +106,49 @@ already stated.
   (2025-07)" → `numbers` MUST list all 9 months (2024-11, 2024-12, 2025-01,
   …, 2025-07), NOT just the 3 anchor periods named in the claim.
 
-- `viz`: optional `{"kind": "trend"|"bar"|"share", "x_field": "...", "y_fields": ["..."]}`
+- `viz`: optional `{"kind": "trend"|"trend_dual"|"trend_grid"|"bar"|"share", "x_field": "...", "y_fields": ["..."]}`
   spec. **Charts surface in the reviewer's reasoning trace, not inline in
   the chat answer. Be selective:** include `viz` only when ALL hold:
   (a) `numbers` has ≥ 4 entries — short series read fine as prose;
   (b) the shape itself (slope, peak, gap, divergence) is what makes the
       claim land — not just the values;
   (c) the same shape isn't already covered by an earlier KP this turn.
-  When 2+ related metrics appear in the same window (e.g. spend AND
-  payment both per month, or internal AND external delinquency indices
-  over time), prefer ONE multi-series chart with `y_fields` listing each
-  metric, NOT separate single-line charts. Field names must match the keys
-  actually present in `numbers`. `share` (horizontal-bar breakdown) is
+
+  **MULTI-METRIC RULE (load-bearing — read carefully).** When the
+  specialist's findings cover 2+ related metrics on the SAME x-axis
+  (typically a time series): emit ONE multi-series KP, NOT N single-
+  series KPs. `numbers` becomes one row per period with one key per
+  metric, and `y_fields` lists every metric to plot. Pick the kind by
+  scale:
+  - **Same scale and unit** (all percentages, all dollar amounts):
+    `kind="trend"` with `y_fields=[var1, var2, ...]` — single shared
+    y-axis, one line per variable.
+  - **Exactly 2 metrics on different scales** (e.g. CDSS = 0-1
+    probability + TSR = 0-100 score, or a count + a rate):
+    `kind="trend_dual"` with `y_fields=[primary, secondary]` — twin
+    y-axes.
+  - **3-6 metrics on different scales**: `kind="trend_grid"` with
+    `y_fields=[var1, var2, ...]` — stacked panels sharing the time axis.
+
+  Worked example for the question *"how did CDSS and TSR react in this
+  case?"* — these are different scales (probability vs. score band) so
+  use `trend_dual`:
+  ```
+  topic = "cdss_tsr_trajectory"
+  numbers = [
+    {"period": "2024-11", "credit_loss_prob": 0.12, "tot_struct_risk_score": 24.5},
+    {"period": "2024-12", "credit_loss_prob": 0.18, "tot_struct_risk_score": 28.2},
+    ... ALL 18 trans_month entries from the specialist's series, no abridging ...
+  ]
+  viz  = {"kind": "trend_dual", "x_field": "period",
+          "y_fields": ["credit_loss_prob", "tot_struct_risk_score"]}
+  ```
+  Two SEPARATE single-series KPs (`cdss_score_trend` and `tsr_score_trend`)
+  is the WRONG shape here — the reviewer's mental model is "compare them
+  side-by-side", not "show me two unrelated charts."
+
+  Field names in `y_fields` must match the keys actually present in
+  EVERY entry of `numbers`. `share` (horizontal-bar breakdown) is
   single-series only.
 
 - `source_call`: the tool invocation that produced the data, when the

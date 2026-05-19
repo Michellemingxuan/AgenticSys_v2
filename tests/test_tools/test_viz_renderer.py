@@ -140,6 +140,49 @@ def test_render_chart_drops_non_numeric_y_values(tmp_path):
     assert out is not None  # rendered with 2 valid points
 
 
+def test_render_chart_filename_collision_writes_dup_suffix(tmp_path):
+    """When two KPs in the same turn share a topic slug (real bug from
+    case-366132845011-815159: distiller put both CDSS and TSR under
+    'model_scores_trend' and the second render overwrote the first),
+    the renderer must write the second to a `__dup2.png` filename
+    instead of silently overwriting. The KB dedup still strips the
+    second downstream, but the PNG is preserved for forensics + the
+    `viz_render_filename_collision` event lands in the JSONL."""
+    logged: list = []
+
+    class _MockLogger:
+        def log(self, ev, payload):
+            logged.append((ev, payload))
+
+    kp = {
+        "topic": "model_scores_trend",
+        "viz": {"kind": "trend", "x_field": "period", "y_field": "value"},
+        "numbers": [
+            {"period": "2024-11", "value": 0.12},
+            {"period": "2024-12", "value": 0.18},
+            {"period": "2025-01", "value": 0.22},
+            {"period": "2025-02", "value": 0.30},
+        ],
+        "captured_at_turn": "turnxyz",
+    }
+
+    first = render_chart(kp, tmp_path / "charts", turn_id="turnxyz",
+                         logger=_MockLogger())
+    second = render_chart(kp, tmp_path / "charts", turn_id="turnxyz",
+                          logger=_MockLogger())
+
+    assert first is not None and second is not None
+    # Different files on disk — second did NOT overwrite first.
+    assert Path(first).name != Path(second).name
+    assert Path(first).exists() and Path(second).exists()
+    assert Path(first).stat().st_size > 0 and Path(second).stat().st_size > 0
+    # Second filename carries the dup-suffix marker so the collision is
+    # visible from a directory listing alone.
+    assert "__dup2.png" in Path(second).name
+    # The collision is observable in the JSONL.
+    assert any(ev == "viz_render_filename_collision" for ev, _ in logged)
+
+
 def test_render_chart_returns_none_when_all_y_unparseable(tmp_path):
     kp = {
         "topic": "x",
