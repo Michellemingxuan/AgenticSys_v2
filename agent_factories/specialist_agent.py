@@ -21,10 +21,17 @@ from tools.data_viz_tools import build_make_chart_tool
 
 _WORKFLOW_DIR = Path(__file__).parent.parent / "skills" / "workflow"
 _BASE_INSTRUCTIONS = _load_skill(_WORKFLOW_DIR / "data_query.md").body
+# Shared chart-construction rules — read by every specialist that has
+# `make_chart` in its tool list. Composed AFTER the data_query body so
+# the data_query "Charting" pointer is followed by the actual rules.
+# Same skill is composed into general_specialist; keeps chart rules
+# from drifting between callers.
+_DATA_VIZ_INSTRUCTIONS = _load_skill(_WORKFLOW_DIR / "data_viz.md").body
 
 
 def _compose_instructions(skill: DomainSkill, pillar: dict) -> str:
     parts = [_BASE_INSTRUCTIONS,
+             _DATA_VIZ_INSTRUCTIONS,
              f"Domain: {skill.name}",
              f"Expertise: {skill.system_prompt}"]
     if skill.data_hints:

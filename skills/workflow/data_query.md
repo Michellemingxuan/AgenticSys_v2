@@ -133,19 +133,7 @@ Also add a `data_gaps` entry: `"requested window <X> exceeds available data <Y> 
 
 **Tables** for ≥ 3 parallel records (top-N rankings, period-by-period values, threshold breaches). Markdown tables render natively in the reasoning trace and let the reviewer scan numbers in seconds. Skip tables for single scalars or 1-2 row breakdowns.
 
-**Charting (`make_chart`) — keep off the critical path.** Each chart is a separate LLM round-trip. The auto-distiller post-processes your `findings` for chartable claims after your answer returns, so do NOT call `make_chart` by default. Call it only when the user explicitly asks for a chart/table, or when you have already merged multiple tool results into a chart the distiller cannot reconstruct. For 1-3 rows use `kind="table"` — surfaces the rows as a table card in the Plots panel with no image rendered. Plot kinds (`trend` / `bar` / `share` / `trend_dual` / `trend_grid`) require ≥ 4 points; the table kind has no minimum.
-
-**Bar vs share (when picking a non-temporal chart):** vertical `kind="bar"` is fine for **≤ 4 categories** with short x-labels. For **5 or more bars**, switch to `kind="share"` (horizontal bar) — rotated x-tick labels start truncating and overlapping in vertical bars beyond 4-5 categories, while horizontal bars stack top-to-bottom (sorted by value), giving the reviewer a clean ranked list to scan. Rule of thumb: any "top-N merchants / industries / branches / specialists" breakdown with N ≥ 5 → `share`. Both renderers print the exact value next to each bar; you don't need a separate table call for the numbers.
-
-When multiple variables share the same x-axis (typically time), they belong on ONE chart, not N. Pick the kind by scale:
-
-- **Same scale and unit** (all percentages, all dollar amounts, all score bands): `kind="trend"` with `y_fields=[var1, var2, ...]` — single shared y-axis, one line per variable.
-- **Exactly 2 variables on different but related scales** (e.g., a score 0–1000 + DPD 0–90, or a count + a rate): `kind="trend_dual"` with `y_fields=[primary, secondary]` — twin y-axes, primary on the left, secondary on the right.
-- **3+ variables of different scales** (TSR + CDSS + counts + dollars, etc.): `kind="trend_grid"` with `y_fields=[var1, var2, var3, ...]` — N stacked panels sharing the time axis, each with its own y-scale (cap at 6).
-
-Never emit N separate `kind="trend"` calls for variables on the same x-axis. One merged points list, one make_chart call. Tell same-scale from different-scale by checking the source columns' units via `get_table_schema` before choosing.
-
-You can merge data from MULTIPLE tables / tool calls into one chart — align by a shared `x_field` (typically `period`), then ONE `make_chart` call with `y_fields=[var1, var2, ...]`. When you DO call `make_chart`, pass EVERY row from the underlying aggregates in `points` — not just the periods/groups you mention in the claim. The renderer plots `points` exactly as given; dropping interior rows produces a chart with gaps that misrepresents the data.
+**Charting (`make_chart`).** Chart-construction rules — when to call vs. trust the auto-distiller, kind picking (`trend` / `trend_dual` / `trend_grid` / `bar` / `share` / `table`), multi-series alignment, threshold reference lines — live in the shared `data_viz.md` skill body composed below this one. Read those rules before calling `make_chart`. Default policy: don't call it; the auto-distiller renders chartable claims from your `findings` automatically.
 
 ## Anti-hallucination
 

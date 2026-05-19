@@ -20,6 +20,12 @@ _WORKFLOW_DIR = Path(__file__).parent.parent / "skills" / "workflow"
 
 
 COMPARE_SYSTEM_PROMPT = _load_skill(_WORKFLOW_DIR / "comparison.md").body
+# Shared chart-construction rules — same skill the domain specialists
+# read. Composed AFTER comparison.md so the comparison-skill's
+# cross-domain pointer is followed by the kind-picking / multi-series /
+# threshold rules without duplication.
+_DATA_VIZ_INSTRUCTIONS = _load_skill(_WORKFLOW_DIR / "data_viz.md").body
+_FULL_INSTRUCTIONS = COMPARE_SYSTEM_PROMPT + "\n\n" + _DATA_VIZ_INSTRUCTIONS
 
 
 def build_general_specialist(model) -> Agent:
@@ -39,7 +45,7 @@ def build_general_specialist(model) -> Agent:
     make_chart = build_make_chart_tool("general_specialist")
     return Agent(
         name="general_specialist",
-        instructions=COMPARE_SYSTEM_PROMPT,
+        instructions=_FULL_INSTRUCTIONS,
         tools=[
             list_available_tables,
             get_table_schema,

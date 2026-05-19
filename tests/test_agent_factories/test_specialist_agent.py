@@ -28,3 +28,9 @@ def test_build_specialist_agent_returns_agent():
         "make_chart",
     }
     assert agent.model_settings.parallel_tool_calls is True
+    # The shared data_viz skill is composed in alongside data_query so chart
+    # rules don't drift between callers. Sentinel phrases from the body
+    # confirm the skill content (not just an empty include).
+    assert "trend_dual" in agent.instructions
+    assert "trend_grid" in agent.instructions
+    assert "threshold_<y_field>" in agent.instructions

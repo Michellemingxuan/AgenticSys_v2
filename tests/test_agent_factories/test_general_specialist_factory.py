@@ -23,3 +23,7 @@ def test_build_general_specialist_returns_agent():
         "aggregate_column", "batch_aggregate", "make_chart",
     }
     assert "compare" in agent.instructions.lower() or "contradiction" in agent.instructions.lower()
+    # The shared data_viz skill must be composed in — same source as the
+    # domain specialists, so chart rules don't drift between callers.
+    assert "trend_dual" in agent.instructions
+    assert "threshold_<y_field>" in agent.instructions
