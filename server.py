@@ -70,6 +70,22 @@ PING_INTERVAL_S = 5.0  # was 15.0 — tighter pings reduce silent SSE disconnect
 _QA_CACHE_MAX_ENTRIES = int(os.environ.get("QA_CACHE_MAX_ENTRIES", "64"))
 _SSE_QUEUE_MAXSIZE = int(os.environ.get("SSE_QUEUE_MAXSIZE", "256"))
 
+# Wall-clock budget for a complete turn (screen + orchestrator + all
+# specialists + synthesis + drain). 360s covers the worst legitimate
+# case: 240s specialist budget × parallel + 60s synthesis + buffer.
+# Beyond this, the turn is stuck — most likely a hung LLM HTTP call
+# (no SDK-level wall-clock fence on the orchestrator's own round-trips
+# the way `_SPECIALIST_TIMEOUT_S` fences the specialists). The lock-
+# release path in `_spawn_turn` depends on `_run_turn_streamed`
+# returning; without this fence, a hang there strands the per-case
+# `turn_lock` forever and every subsequent question on the same case
+# blocks indefinitely on line 1569's unbounded `lock.acquire()`. Real
+# failure mode: user restarts the server, asks a question, sees no
+# response — the first turn's orchestrator hung (often a transient
+# DNS/TLS warmup on a fresh AsyncOpenAI client), and every later
+# question queued behind it.
+_TURN_WALL_CLOCK_S = float(os.environ.get("TURN_WALL_CLOCK_S", "360"))
+
 
 # ── Per-case session state ──────────────────────────────────────────────────
 
@@ -1573,9 +1589,47 @@ def _spawn_turn(sess: CaseSession, turn_id: str, question: str) -> None:
             # parameter; the inner function uses that to drive duration
             # math without re-emitting reviewer_message / turn_started /
             # team_plan that we already fired above.
-            asyncio.run(_run_turn_streamed(
-                sess, turn_id, question, started_at=started_at,
-            ))
+            #
+            # Wall-clock fence (`_TURN_WALL_CLOCK_S`): without this, a
+            # hung LLM HTTP call inside the orchestrator (DNS warmup, TLS
+            # handshake, network blip) strands the per-case turn_lock
+            # forever — every subsequent question on this case blocks on
+            # the unbounded lock.acquire() above. On timeout we cancel
+            # the coroutine (asyncio.wait_for raises TimeoutError), emit
+            # a clear error to the user, and fall through to the
+            # `finally` clause that releases the lock so the NEXT
+            # question can proceed.
+            try:
+                asyncio.run(asyncio.wait_for(
+                    _run_turn_streamed(
+                        sess, turn_id, question, started_at=started_at,
+                    ),
+                    timeout=_TURN_WALL_CLOCK_S,
+                ))
+            except asyncio.TimeoutError:
+                sess.logger.log("turn_wall_clock_timeout", {
+                    "turn_id": turn_id,
+                    "limit_s": _TURN_WALL_CLOCK_S,
+                    "note": ("turn exceeded the per-turn budget — most "
+                             "likely a hung orchestrator LLM call. "
+                             "Lock released; next question can run."),
+                })
+                ts = int(time.time() * 1000)
+                sess.emit("error", {
+                    "turn_id": turn_id,
+                    "message": (
+                        f"Turn exceeded the {_TURN_WALL_CLOCK_S:.0f}s budget "
+                        f"— most likely a hung LLM call. The lock has been "
+                        f"released so your next question can proceed."
+                    ),
+                    "recoverable": False,
+                })
+                sess.emit("turn_done", {
+                    "turn_id": turn_id,
+                    "ended_at": ts,
+                    "duration_ms": ts - started_at,
+                    "outcome": "timeout",
+                })
         finally:
             sess.turn_lock.release()
     threading.Thread(target=_runner, daemon=True, name=f"turn-{turn_id[:8]}").start()
