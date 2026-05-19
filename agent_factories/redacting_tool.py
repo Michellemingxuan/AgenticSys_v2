@@ -11,7 +11,7 @@ from agents import Agent, RunContextWrapper, Runner, function_tool
 from agents.exceptions import AgentsException, MaxTurnsExceeded
 
 from logger.process_timer import ProcessTimer
-from llm.firewall_stack import redact_payload, sanitize_message
+from llm.firewall_stack import LLM_CALL_KIND, redact_payload, sanitize_message
 from tools.viz_renderer import kp_to_vega_spec, render_chart
 
 
@@ -459,13 +459,27 @@ def redacting_tool(agent: Agent, name: str, description: str):
         # explicitly, log it, and return a structured ``[FAILED …]`` payload.
         try:
             t0 = time.perf_counter()
-            result = await asyncio.wait_for(
-                Runner.run(
-                    inner, run_input, context=app_ctx,
-                    max_turns=_SPECIALIST_MAX_TURNS,
-                ),
-                timeout=_SPECIALIST_TIMEOUT_S,
-            )
+            # Mark every LLM call originating from inside this
+            # specialist's Runner.run as "specialist"-kind. The
+            # firewall stack routes these to the specialist semaphore
+            # pool (FIREWALL_SPECIALIST_CONCURRENCY, default 8),
+            # leaving the orchestrator pool reserved for the
+            # team-planning / synthesis calls that happen outside any
+            # specialist context. Without this routing, a Round-1 burst
+            # of 3 specialists × 4-6 internal LLM calls each piled up
+            # behind a single 3-slot semaphore, serializing work that
+            # should be parallel.
+            kind_token = LLM_CALL_KIND.set("specialist")
+            try:
+                result = await asyncio.wait_for(
+                    Runner.run(
+                        inner, run_input, context=app_ctx,
+                        max_turns=_SPECIALIST_MAX_TURNS,
+                    ),
+                    timeout=_SPECIALIST_TIMEOUT_S,
+                )
+            finally:
+                LLM_CALL_KIND.reset(kind_token)
             timer.record(
                 "specialist_runner",
                 int((time.perf_counter() - t0) * 1000),

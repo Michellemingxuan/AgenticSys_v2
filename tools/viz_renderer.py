@@ -900,6 +900,16 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
     is_multi = len(y_fields) > 1
     primary_y = y_fields[0]
 
+    # Sort points before stuffing into `data.values`. Vega-Lite renders
+    # ordinal x-axes in data order by default, so without this the
+    # frontend chart shows bars / line points in whatever order the
+    # distiller / specialist emitted — typically alphabetical or
+    # tool-return order. The matplotlib path already does this at line
+    # 475; mirror it here so the two renderers agree. Categorical
+    # single-series bar with no temporal x → value-descending (the
+    # user's preference, see feedback-plots-preference memory).
+    numbers = _sort_points(numbers, x_field, y_fields, kind)
+
     spec: dict = {
         "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
         "data": {"values": numbers},

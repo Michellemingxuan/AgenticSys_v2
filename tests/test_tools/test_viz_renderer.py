@@ -262,6 +262,51 @@ def test_kp_to_vega_spec_share_uses_horizontal_layout():
     assert text_layer["encoding"]["text"]["field"] == "value"
 
 
+def test_kp_to_vega_spec_sorts_categorical_bar_by_value_desc():
+    """Real failure case (case-spend_payments, top-merchants-by-spend
+    chart): distiller emitted merchants alphabetically; render_chart
+    sorted them via _sort_points but kp_to_vega_spec did not, so the
+    frontend SVG showed bars in alphabetical (meaningless) order
+    instead of rank-descending. Per the plots-preference memory,
+    every chart's points must be sorted by a meaningful dimension
+    BEFORE rendering — temporal asc / rank desc / category-natural,
+    never tool-return order. The two renderers must agree."""
+    kp = {
+        "topic": "top_merchants_by_total_spend",
+        "viz": {"kind": "bar", "x_field": "merchant",
+                "y_fields": ["total_spend"]},
+        "numbers": [
+            {"merchant": "AMAZON",    "total_spend": 80_670},
+            {"merchant": "ATERET",    "total_spend": 58_118},
+            {"merchant": "CONSOLIDATED", "total_spend": 171_837},
+            {"merchant": "DEPENDABLE",   "total_spend": 89_227},
+            {"merchant": "S BERTRAM",    "total_spend": 244_840},
+        ],
+    }
+    spec = kp_to_vega_spec(kp)
+    assert spec is not None
+    order = [row["merchant"] for row in spec["data"]["values"]]
+    assert order == ["S BERTRAM", "CONSOLIDATED", "DEPENDABLE", "AMAZON", "ATERET"]
+
+
+def test_kp_to_vega_spec_sorts_trend_chronologically():
+    """Temporal `trend`: data given out-of-order must be sorted
+    chronologically before rendering, else the SVG line zig-zags."""
+    kp = {
+        "topic": "monthly_spend",
+        "viz": {"kind": "trend", "x_field": "period", "y_fields": ["value"]},
+        "numbers": [
+            {"period": "2025-03", "value": 300},
+            {"period": "2024-11", "value": 100},
+            {"period": "2025-01", "value": 200},
+            {"period": "2024-12", "value": 150},
+        ],
+    }
+    spec = kp_to_vega_spec(kp)
+    periods = [row["period"] for row in spec["data"]["values"]]
+    assert periods == ["2024-11", "2024-12", "2025-01", "2025-03"]
+
+
 def test_kp_to_vega_spec_returns_none_when_unviz_able():
     """Non-chartable KPs round-trip to None — symmetric with render_chart."""
     assert kp_to_vega_spec({"topic": "x"}) is None

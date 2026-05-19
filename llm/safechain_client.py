@@ -177,7 +177,7 @@ class _SafeChainChatCompletions:
         messages = [_redact_message(m) for m in messages]
         while True:
             try:
-                async with firewall.semaphore:
+                async with firewall.gate():
                     return await self._invoke(
                         model=model,
                         messages=messages,
