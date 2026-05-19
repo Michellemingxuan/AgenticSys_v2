@@ -260,6 +260,39 @@ def _extract_xy(numbers: list[dict], x_field: str, y_field: str
     return xs, ys
 
 
+def _consistent_threshold(numbers: list[dict]) -> float | None:
+    """If every entry in ``numbers`` has the same finite numeric
+    ``threshold`` value, return it; otherwise None.
+
+    The distiller's KP shape allows a per-row ``threshold`` key on
+    threshold-breach claims (e.g. *"`times_30_dpd` crossed risky
+    threshold > 1 in 2024-Q4"*). When the threshold is constant across
+    the whole series — the common case for catalog-defined risky cutoffs
+    like "Values above 0.5 are risky" — we draw a single horizontal
+    reference line on the chart. Per-row varying thresholds (rare) skip
+    rendering to avoid a misleading step-function overlay.
+    """
+    import math
+    seen: float | None = None
+    for n in numbers:
+        if not isinstance(n, dict):
+            continue
+        t = n.get("threshold")
+        if t is None:
+            return None  # at least one row lacks a threshold → bail
+        try:
+            ft = float(t)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(ft):
+            return None
+        if seen is None:
+            seen = ft
+        elif seen != ft:
+            return None  # rows disagree on threshold → bail
+    return seen
+
+
 def _align_multi_series_points(
     numbers: list[dict], x_field: str, y_fields: list[str],
 ) -> list[dict]:
@@ -598,6 +631,26 @@ def render_chart(
                     # can read figures off the chart without cross-referencing
                     # the y-axis ticks.
                     _annotate_points(ax, indices, ys, color)
+                # Threshold reference line — when every `numbers` entry
+                # carries the same finite `threshold` value (e.g. catalog
+                # "Values above 0.5 are risky"), draw a dashed horizontal
+                # at that y plus an end-of-line label so the reader can
+                # see at a glance which points breach. Skipped for
+                # multi-series same-scale trends where the per-series
+                # threshold might differ but only a single key is given
+                # — unsafe to apply one threshold across mixed metrics.
+                threshold = (
+                    _consistent_threshold(numbers) if not is_multi else None
+                )
+                if threshold is not None:
+                    ax.axhline(threshold, color="#666666", linestyle="--",
+                               linewidth=1.0, alpha=0.85, zorder=0)
+                    ax.text(
+                        len(indices) - 1, threshold,
+                        f"  threshold: {_format_axis_value(threshold)}",
+                        va="center", ha="left", fontsize=9,
+                        color="#3c4043", fontweight="600",
+                    )
                 ax.set_xticks(indices)
                 # Thin to ~10 visible labels max so dense series stay readable
                 # without dropping the first / last (those are anchor points).
@@ -851,6 +904,30 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
                 {"mark": {"type": "text", "dy": -10, "fontSize": 10,
                           "fontWeight": 600}, "encoding": text_enc},
             ]
+            # Threshold reference line — same data shape as the matplotlib
+            # path (every `numbers` row carries a constant `threshold`).
+            # Render as a `rule` mark at the threshold y plus a `text`
+            # mark labeling it at the right edge of the chart. Single-
+            # series only; multi-series same-scale trends skip this
+            # because one threshold key against mixed metrics is unsafe.
+            t = _consistent_threshold(numbers)
+            if t is not None:
+                spec["layer"].append({
+                    "mark": {"type": "rule", "strokeDash": [4, 3],
+                             "color": "#666666", "opacity": 0.85},
+                    "encoding": {
+                        "y": {"datum": t, "type": "quantitative"},
+                    },
+                })
+                spec["layer"].append({
+                    "mark": {"type": "text", "align": "right", "baseline": "bottom",
+                             "dx": -4, "dy": -2, "fontSize": 10,
+                             "fontWeight": 600, "color": "#3c4043"},
+                    "encoding": {
+                        "y": {"datum": t, "type": "quantitative"},
+                        "text": {"value": f"threshold: {t}"},
+                    },
+                })
     elif kind == "bar":
         y_value_field = "value" if is_multi else primary_y
         bar_enc: dict = {

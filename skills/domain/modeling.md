@@ -43,7 +43,17 @@ Questions like *"how did CDSS / TSR / `<output score>` react"*, *"what's the tra
    ```
    Use `op='max'` (not `sum`/`mean`) — these are point-in-time risk scores; the per-month max is the canonical reading.
 
-2. **(Optional, ONLY if the reviewer asked WHY)** `query_table('score_drivers', columns=['trans_month','top_credit_loss_prob1','top_credit_loss_prob2','top_credit_loss_prob3','top_tot_struct_risk_score1','top_tot_struct_risk_score2','top_tot_struct_risk_score3'])` — pull the top driver columns for each score, narrate driver rotation at the inflection months. Skip this step when the question only asks about the trajectory shape, not the causes.
+2. **(Optional, ONLY if the reviewer asked WHY)** Pull driver names. **CRITICAL — driver column names on `score_drivers` are NOT the same as the numeric-value columns on `model_scores`**:
+   - On `model_scores`: numeric values live in `credit_loss_prob` (CDSS) and `tot_struct_risk_score` (TSR).
+   - On `score_drivers`: top driver feature names live in `top_cdss1..5` and `top_tsr1..5` (short family slug, not the model_scores column name).
+
+   ```
+   query_table('score_drivers', columns='trans_month,top_cdss1,top_cdss2,top_cdss3,top_tsr1,top_tsr2,top_tsr3')
+   ```
+
+   If the query returns rows containing ONLY `trans_month` (driver columns silently dropped), it means this case's schema uses a different family slug. In that case probe `get_table_schema('score_drivers')` first to discover the actual `top_<family>*` columns, THEN re-query with the discovered names. Don't narrate "drivers were redacted / missing" without first confirming the column names exist in the schema — empty rows on a wrong-column-name query is the most common cause of that false finding (real case: `case-e77921` agent emitted "redacted or missing feature names" when the query just used the wrong slug).
+
+   Skip step 2 entirely when the question only asks about the trajectory shape, not the causes.
 
 **Hard cap: 2 tool calls.** Don't `get_table_schema` first (you already know the column names — `credit_loss_prob` = CDSS, `tot_struct_risk_score` = TSR; this skill states them). Don't widen to the concept-groups menu. The reviewer asked about specific named scores — answer those, not "the whole modeling picture."
 

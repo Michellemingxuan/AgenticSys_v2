@@ -94,6 +94,14 @@ already stated.
   - threshold breaches: `[{"period": "2024-Q4", "value": 3, "threshold": 1}]`
   Empty list when the claim is a single scalar or has no underlying series.
 
+  **Carry `threshold` on EVERY row of a trend when the source catalog
+  stated one** (e.g. `get_table_schema` description said *"Values above
+  0.5 are risky"* → `threshold = 0.5` on every row). The renderer draws
+  a horizontal dashed reference line on the chart so the reviewer sees
+  at a glance which periods breach. If the threshold varies per row or
+  isn't documented, omit the key — a partial / inconsistent threshold
+  skips the line rather than misleading.
+
   **INCLUDE EVERY POINT FROM THE SOURCE SERIES — do NOT abridge.** If the
   specialist's `summarize_trend` or `summarize_by_group` returned N rows,
   `numbers` MUST contain all N entries, even when the `claim` text

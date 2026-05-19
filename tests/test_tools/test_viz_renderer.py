@@ -297,6 +297,91 @@ def test_render_chart_writes_png_for_trend_dual(tmp_path):
     assert "score_vs_dpd" in p.name
 
 
+def test_render_chart_trend_with_consistent_threshold_renders(tmp_path):
+    """When every `numbers` row carries the same finite `threshold`,
+    the renderer draws a horizontal dashed reference line on the chart.
+    Verified by writing a PNG that's measurably larger than the same
+    chart without the threshold (the extra line + label add pixels)."""
+    base_numbers = [
+        {"period": "2024-11", "value": 0.12},
+        {"period": "2024-12", "value": 0.18},
+        {"period": "2025-01", "value": 0.55},
+        {"period": "2025-02", "value": 0.62},
+    ]
+    kp_no_t = {
+        "topic": "score_no_threshold",
+        "viz": {"kind": "trend", "x_field": "period", "y_fields": ["value"]},
+        "numbers": base_numbers,
+        "captured_at_turn": "t_no",
+    }
+    out_no = render_chart(kp_no_t, tmp_path / "no", turn_id="t_no")
+    assert out_no is not None
+
+    kp_with_t = {
+        "topic": "score_with_threshold",
+        "viz": {"kind": "trend", "x_field": "period", "y_fields": ["value"]},
+        "numbers": [{**n, "threshold": 0.5} for n in base_numbers],
+        "captured_at_turn": "t_yes",
+    }
+    out_with = render_chart(kp_with_t, tmp_path / "yes", turn_id="t_yes")
+    assert out_with is not None
+
+    # Threshold version is a separate PNG (different filename → no overwrite).
+    assert Path(out_with).exists() and Path(out_no).exists()
+    # And it has more pixels (rule + label add ink). Allow a generous
+    # margin since matplotlib output isn't perfectly deterministic.
+    size_no = Path(out_no).stat().st_size
+    size_with = Path(out_with).stat().st_size
+    assert size_with > size_no, (
+        f"chart with threshold should be larger than without; "
+        f"got {size_with} vs {size_no}"
+    )
+
+
+def test_render_chart_skips_threshold_when_inconsistent(tmp_path):
+    """If rows disagree on threshold (or any row is missing it), do NOT
+    draw a misleading single line. The chart still renders normally."""
+    kp = {
+        "topic": "varying_threshold",
+        "viz": {"kind": "trend", "x_field": "period", "y_fields": ["value"]},
+        "numbers": [
+            {"period": "2024-11", "value": 0.12, "threshold": 0.5},
+            {"period": "2024-12", "value": 0.18, "threshold": 0.6},  # disagree
+            {"period": "2025-01", "value": 0.55},                     # missing
+            {"period": "2025-02", "value": 0.62, "threshold": 0.5},
+        ],
+        "captured_at_turn": "t_var",
+    }
+    out = render_chart(kp, tmp_path / "charts", turn_id="t_var")
+    assert out is not None  # chart still renders
+
+
+def test_kp_to_vega_spec_trend_emits_rule_layer_for_threshold():
+    """Vega-Lite spec must include a `rule` mark layer + a `text` label
+    when the rows carry a consistent threshold."""
+    kp = {
+        "topic": "dpd_with_breach",
+        "viz": {"kind": "trend", "x_field": "period", "y_fields": ["value"]},
+        "numbers": [
+            {"period": "2024-11", "value": 0, "threshold": 1},
+            {"period": "2024-12", "value": 0, "threshold": 1},
+            {"period": "2025-01", "value": 2, "threshold": 1},
+            {"period": "2025-02", "value": 3, "threshold": 1},
+        ],
+    }
+    spec = kp_to_vega_spec(kp)
+    assert spec is not None
+    layers = spec.get("layer", [])
+    marks = [
+        L["mark"]["type"] if isinstance(L["mark"], dict) else L["mark"]
+        for L in layers
+    ]
+    assert "rule" in marks, f"expected a rule layer for the threshold; got {marks}"
+    rule_layer = next(L for L in layers
+                      if isinstance(L["mark"], dict) and L["mark"]["type"] == "rule")
+    assert rule_layer["encoding"]["y"]["datum"] == 1
+
+
 def test_render_chart_trend_dual_with_partial_missing_y_aligns_points(tmp_path):
     """Regression: case-aefd66 turn `5b8f94089581` failed with
     `ValueError: x and y must have same first dimension, but have shapes
