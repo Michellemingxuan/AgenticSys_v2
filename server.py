@@ -86,6 +86,31 @@ _SSE_QUEUE_MAXSIZE = int(os.environ.get("SSE_QUEUE_MAXSIZE", "256"))
 # question queued behind it.
 _TURN_WALL_CLOCK_S = float(os.environ.get("TURN_WALL_CLOCK_S", "360"))
 
+# Tighter fence around the screen phase specifically. Screen is one
+# `redact` LLM call (often skipped) + one `relevance_check` LLM call —
+# normally <5s end-to-end per the project's performance-targets memory.
+# A 30s ceiling catches a hung LLM (most often on the safechain backend
+# in private env, where transient HTTP-pool exhaustion strands a call
+# that the 360s turn fence eventually catches but feels like forever
+# from the user's POV). On screen timeout we surface a clear "screen
+# took too long" error to the user instead of leaving them watching a
+# silent "question check" spinner for 6 minutes. Real failure mode the
+# user reported: "stuck in question check, refresh doesn't help, need
+# to restart the server or clear history multiple times."
+_SCREEN_TIMEOUT_S = float(os.environ.get("SCREEN_TIMEOUT_S", "30"))
+
+# Cap the prior-questions list sent into the relevance_check skill.
+# Without this, the prompt for the screen LLM grows as the qa_cache
+# fills (up to 64 entries), and on the safechain backend a larger
+# prompt is more likely to hit transient HTTP timeouts mid-call. 12
+# most recent is plenty for near-duplicate detection on a single
+# review session — older questions are unlikely to be re-asked
+# verbatim and the cost-of-missing-one is small (the orchestrator
+# still re-answers correctly, just without the cache shortcut).
+_PRIOR_QUESTIONS_FOR_SCREEN = int(
+    os.environ.get("PRIOR_QUESTIONS_FOR_SCREEN", "12")
+)
+
 
 # ── Per-case session state ──────────────────────────────────────────────────
 
@@ -674,6 +699,12 @@ async def _run_turn_streamed(
     timer_t0 = time.perf_counter()
     prior_questions = [v.get("origin_question", "") for v in sess.qa_cache.values()]
     prior_questions = [q for q in prior_questions if q]
+    # Cap to the N most-recent prior questions to keep the relevance_check
+    # prompt bounded as the qa_cache fills over the session. qa_cache uses
+    # LRU ordering (insertion order + move-to-end on hits), so the last N
+    # entries are the most recently used / asked. See _PRIOR_QUESTIONS_FOR_SCREEN.
+    if len(prior_questions) > _PRIOR_QUESTIONS_FOR_SCREEN:
+        prior_questions = prior_questions[-_PRIOR_QUESTIONS_FOR_SCREEN:]
     turn_timer.record(
         "prior_question_scan",
         int((time.perf_counter() - timer_t0) * 1000),
@@ -682,7 +713,43 @@ async def _run_turn_streamed(
     )
     screen_t0 = time.time()
     try:
-        verdict = await sess.chat_agent.screen(question, prior_questions=prior_questions)
+        # Tight wall-clock fence around the screen LLM calls. Normal
+        # screen is <5s (one redact + one relevance_check, both small
+        # prompts). A hang here used to wait for the 360s turn-level
+        # fence to fire — user-visible as a stuck "question check"
+        # spinner indistinguishable from a crashed server. The 30s
+        # ceiling is well above the legitimate p99 and well below the
+        # "I'll restart the server" patience threshold. See the
+        # `_SCREEN_TIMEOUT_S` block at the top of this file for the
+        # failure-mode reasoning (safechain backend HTTP-pool exhaust).
+        verdict = await asyncio.wait_for(
+            sess.chat_agent.screen(question, prior_questions=prior_questions),
+            timeout=_SCREEN_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError:
+        sess.logger.log("screen_timeout", {
+            "turn_id": turn_id,
+            "limit_s": _SCREEN_TIMEOUT_S,
+            "prior_questions_sent": len(prior_questions),
+        })
+        turn_timer.summary(outcome="screen_timeout")
+        sess.emit("error", {
+            "turn_id": turn_id,
+            "message": (
+                f"Question-check phase exceeded the {_SCREEN_TIMEOUT_S:.0f}s "
+                f"budget — likely a transient LLM-backend stall. Try again; "
+                f"if it recurs, clearing case history via the rewind action "
+                f"can shrink the screen prompt and unstick it."
+            ),
+            "recoverable": False,
+        })
+        sess.emit("turn_done", {
+            "turn_id": turn_id,
+            "ended_at": int(time.time() * 1000),
+            "duration_ms": int(time.time() * 1000) - started_at,
+            "outcome": "screen_timeout",
+        })
+        return
     except Exception as exc:
         turn_timer.summary(outcome="screen_failed")
         sess.emit("error", {"turn_id": turn_id, "message": f"screen failed: {exc}", "recoverable": True})
