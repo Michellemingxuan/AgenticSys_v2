@@ -1802,17 +1802,37 @@ def _spawn_turn(sess: CaseSession, turn_id: str, question: str) -> None:
                     })
                 except (asyncio.CancelledError, _TurnAborted) as exc:
                     # Either: aggressive task.cancel() from post_rewind
-                    # propagated as CancelledError, or a phase-boundary
-                    # checkpoint raised _TurnAborted (cooperative path).
-                    # Treat both the same — emit a clean turn_done so the
-                    # frontend closes this turn's row; the lock release
-                    # in the outer finally unblocks the queued new turn.
+                    # or post_cancel_turn propagated as CancelledError,
+                    # or a phase-boundary checkpoint raised _TurnAborted
+                    # (cooperative path). Treat both the same.
+                    #
+                    # Emit `error` BEFORE `turn_done` so the frontend's
+                    # orchestration-flow panel surfaces a clear
+                    # interruption indicator (status='error', error=...)
+                    # rather than silently transitioning the turn to
+                    # 'done'. The frontend's turn_done handler is
+                    # tweaked to NOT overwrite status='error' so the
+                    # interruption stays visible until the next turn.
                     reason = "task_cancelled" if isinstance(exc, asyncio.CancelledError) else str(exc)
                     sess.logger.log("turn_aborted", {
                         "turn_id": turn_id,
                         "reason": reason,
                     })
                     ts = int(time.time() * 1000)
+                    sess.emit("error", {
+                        "turn_id": turn_id,
+                        "message": (
+                            "Interrupted — the answer was stopped. "
+                            "Ask another question whenever ready."
+                        ),
+                        "recoverable": False,
+                        # `kind` lets the frontend distinguish "user
+                        # pressed Stop" from "LLM hit a hard error". The
+                        # orchestration flow can render a Stop icon
+                        # instead of a red error chevron when kind is
+                        # 'interrupted'.
+                        "kind": "interrupted",
+                    })
                     sess.emit("turn_done", {
                         "turn_id": turn_id,
                         "ended_at": ts,
@@ -1884,6 +1904,60 @@ def _start_turn(case_id: str):
     turn_id = uuid.uuid4().hex[:12]
     _spawn_turn(sess, turn_id, text)
     return jsonify({"turn_id": turn_id}), 202
+
+
+@app.post("/api/cases/<case_id>/cancel-turn")
+def post_cancel_turn(case_id: str):
+    """Interrupt the currently in-flight turn without clearing session
+    history.
+
+    Distinct from `/rewind` (which also wipes `qa_cache`, `input_history`,
+    `specialist_kb`): this endpoint is for the user who explicitly
+    pressed a Stop button while the system was still answering — they
+    want to abort the current LLM round and re-ask, but keep their
+    accumulated context. The cancellation uses the same aggressive
+    `loop.call_soon_threadsafe(task.cancel)` path as rewind, so an
+    in-flight LLM await is interrupted directly (typically sub-second).
+
+    Returns 200 with `{"status": "cancelled" | "no_turn_in_flight",
+    "task_cancel_dispatched": bool}` so the frontend can show the user
+    whether anything was actually interrupted.
+    """
+    try:
+        sess = _get_or_create_session(case_id)
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+
+    if not sess.turn_lock.locked():
+        # No turn in flight — nothing to cancel. Return 200 so the
+        # frontend doesn't surface a spurious error when the user
+        # double-clicks Stop after a turn just finished.
+        sess.logger.log("cancel_turn_noop", {"case_id": case_id})
+        return jsonify({
+            "status": "no_turn_in_flight",
+            "task_cancel_dispatched": False,
+        }), 200
+
+    cancelled_task = False
+    inflight = sess.current_inflight
+    if isinstance(inflight, tuple) and len(inflight) == 2:
+        loop, task = inflight
+        try:
+            loop.call_soon_threadsafe(task.cancel)
+            cancelled_task = True
+        except Exception:
+            # Loop already closed / task already done. The cooperative
+            # event is still our fallback path.
+            pass
+    sess.cancel_in_flight.set()
+    sess.logger.log("turn_cancelled_by_user", {
+        "case_id": case_id,
+        "task_cancel_dispatched": cancelled_task,
+    })
+    return jsonify({
+        "status": "cancelled",
+        "task_cancel_dispatched": cancelled_task,
+    }), 200
 
 
 @app.post("/api/cases/<case_id>/rewind")
