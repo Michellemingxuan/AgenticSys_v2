@@ -260,6 +260,50 @@ def _extract_xy(numbers: list[dict], x_field: str, y_field: str
     return xs, ys
 
 
+def _align_multi_series_points(
+    numbers: list[dict], x_field: str, y_fields: list[str],
+) -> list[dict]:
+    """Filter ``numbers`` to entries where x is present AND EVERY y_field
+    has a finite numeric value.
+
+    Why this exists: multi-series chart kinds (trend with 2+ y_fields,
+    trend_dual, trend_grid) plot one line per y_field on a SHARED x-axis.
+    Per-series ``_extract_xy`` drops entries with a missing y, but it
+    does so independently per series — so if one period has CDSS but a
+    NaN TSR (or vice versa), the two extracted arrays come out at
+    different lengths and matplotlib raises ``ValueError: x and y must
+    have same first dimension``. Real failure case: case-aefd66 turn
+    `5b8f94089581`, topic `cdss_tsr_trajectory` — shapes (4,) and (5,).
+
+    Pre-filtering to common-valid rows up front guarantees every
+    downstream ``_extract_xy`` produces same-length arrays. Single-
+    series kinds (bar / share, or trend with 1 y_field) don't call
+    this — their per-series extraction is independent by design.
+    """
+    import math
+    aligned: list[dict] = []
+    for n in numbers:
+        if n.get(x_field) is None:
+            continue
+        ok = True
+        for yf in y_fields:
+            v = n.get(yf)
+            if v is None:
+                ok = False
+                break
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                ok = False
+                break
+            if not math.isfinite(fv):
+                ok = False
+                break
+        if ok:
+            aligned.append(n)
+    return aligned
+
+
 def _format_axis_value(v: float) -> str:
     """Compact human-readable label for tick values. $12,500 → '$12.5K',
     1.2e6 → '1.2M', etc. Used on y-axis tick labels for trend/bar so big
@@ -373,6 +417,57 @@ def render_chart(
     # back-and-forth line segments when the specialist's tool calls
     # returned data in non-chronological order.
     numbers = _sort_points(numbers, x_field, y_fields, kind)
+
+    # Multi-series alignment: when 2+ y_fields share the same x-axis
+    # (multi-y trend, trend_dual, trend_grid), pre-filter `numbers` to
+    # rows where every RESOLVABLE y_field is finite-numeric. Without
+    # alignment, a missing/NaN entry on one series produces shorter ys
+    # arrays on different series and matplotlib raises ValueError
+    # (case-aefd66 turn `5b8f94089581`, topic `cdss_tsr_trajectory`).
+    #
+    # First, drop y_fields that have ZERO numeric values across the
+    # whole series — those series wouldn't render anyway, and forcing
+    # alignment against them would empty `numbers`. This preserves the
+    # "drop unparseable series silently" contract from the pre-fix
+    # behavior. Single-series kinds (single-y trend, bar, share) bypass
+    # the whole block — only one series to extract.
+    if len(y_fields) > 1 or kind in ("trend_dual", "trend_grid"):
+        def _has_any_numeric(yf: str) -> bool:
+            import math as _m
+            for n in numbers:
+                v = n.get(yf)
+                if v is None:
+                    continue
+                try:
+                    fv = float(v)
+                except (TypeError, ValueError):
+                    continue
+                if _m.isfinite(fv):
+                    return True
+            return False
+
+        resolvable = [yf for yf in y_fields if _has_any_numeric(yf)]
+        if not resolvable:
+            if logger is not None:
+                logger.log("viz_render_skipped",
+                           {"reason": "no_resolvable_y_fields",
+                            "topic": kp.get("topic"),
+                            "x_field": x_field,
+                            "y_fields": y_fields})
+            return None
+        y_fields = resolvable
+        numbers = _align_multi_series_points(numbers, x_field, y_fields)
+        if not numbers:
+            if logger is not None:
+                logger.log("viz_render_skipped",
+                           {"reason": "no_aligned_points",
+                            "topic": kp.get("topic"),
+                            "x_field": x_field,
+                            "y_fields": y_fields,
+                            "note": ("no entries had finite values for all "
+                                     "resolvable y_fields; cannot align "
+                                     "multi-series.")})
+            return None
 
     # One (xs, ys) pair per y_field — supports multi-series trend/bar.
     extracted = []

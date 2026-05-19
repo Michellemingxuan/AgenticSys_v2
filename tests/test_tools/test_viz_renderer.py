@@ -297,6 +297,45 @@ def test_render_chart_writes_png_for_trend_dual(tmp_path):
     assert "score_vs_dpd" in p.name
 
 
+def test_render_chart_trend_dual_with_partial_missing_y_aligns_points(tmp_path):
+    """Regression: case-aefd66 turn `5b8f94089581` failed with
+    `ValueError: x and y must have same first dimension, but have shapes
+    (4,) and (5,)`. The distiller produced a CDSS+TSR series where one
+    period had a NaN/None TSR — `_extract_xy` independently dropped that
+    entry from TSR's array but not CDSS's, yielding mismatched lengths
+    that matplotlib rejected. After the fix, multi-series kinds pre-
+    filter `numbers` to rows where ALL y_fields are valid, so both
+    series share the same x-axis and the chart renders successfully.
+    """
+    kp = {
+        "topic": "cdss_tsr_trajectory",
+        "viz": {
+            "kind": "trend_dual",
+            "x_field": "period",
+            "y_fields": ["credit_loss_prob", "tot_struct_risk_score"],
+        },
+        "numbers": [
+            {"period": "2024-11", "credit_loss_prob": 0.12,
+             "tot_struct_risk_score": 22.0},
+            # ONE period with a missing TSR — pre-fix would mismatch.
+            {"period": "2024-12", "credit_loss_prob": 0.18,
+             "tot_struct_risk_score": None},
+            {"period": "2025-01", "credit_loss_prob": 0.22,
+             "tot_struct_risk_score": 28.0},
+            {"period": "2025-02", "credit_loss_prob": 0.30,
+             "tot_struct_risk_score": 32.0},
+            {"period": "2025-03", "credit_loss_prob": 0.42,
+             "tot_struct_risk_score": 38.0},
+        ],
+        "captured_at_turn": "t_align",
+    }
+    out = render_chart(kp, tmp_path / "charts", turn_id="t_align")
+    assert out is not None, "trend_dual must render despite a single missing y on one series"
+    p = Path(out)
+    assert p.exists()
+    assert p.stat().st_size > 0
+
+
 def test_render_chart_trend_dual_returns_none_when_only_one_resolvable_series(tmp_path):
     """If one of the two y_fields is absent or all non-numeric, the dual
     layout collapses — bail rather than silently render a misleading

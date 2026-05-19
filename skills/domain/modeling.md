@@ -33,6 +33,22 @@ You analyze internal ML model scores: their trajectories, divergences, and what 
 
 When a reviewer says "the model" / "the models" / "model", they mean these INTERNAL ML risk-scoring models (CDSS, TSR, etc.) — not the case-review agent system, not a generic abstraction. Treat such questions as questions about what's in `model_scores` and `score_drivers`.
 
+## ⚡ FAST LANE — output-score trajectory questions (≤ 2 tool calls)
+
+Questions like *"how did CDSS / TSR / `<output score>` react"*, *"what's the trajectory of CDSS"*, *"how did the model scores move over time"* → DO NOT loop through concept groups or schema-probe widely. Use this exact recipe:
+
+1. **ONE** `batch_summarize_trend` on the named output scores over `trans_month`. For CDSS+TSR specifically:
+   ```
+   batch_summarize_trend('[{"table_name":"model_scores","value_column":"credit_loss_prob","time_column":"trans_month","period":"month","op":"max"}, {"table_name":"model_scores","value_column":"tot_struct_risk_score","time_column":"trans_month","period":"month","op":"max"}]')
+   ```
+   Use `op='max'` (not `sum`/`mean`) — these are point-in-time risk scores; the per-month max is the canonical reading.
+
+2. **(Optional, ONLY if the reviewer asked WHY)** `query_table('score_drivers', columns=['trans_month','top_credit_loss_prob1','top_credit_loss_prob2','top_credit_loss_prob3','top_tot_struct_risk_score1','top_tot_struct_risk_score2','top_tot_struct_risk_score3'])` — pull the top driver columns for each score, narrate driver rotation at the inflection months. Skip this step when the question only asks about the trajectory shape, not the causes.
+
+**Hard cap: 2 tool calls.** Don't `get_table_schema` first (you already know the column names — `credit_loss_prob` = CDSS, `tot_struct_risk_score` = TSR; this skill states them). Don't widen to the concept-groups menu. The reviewer asked about specific named scores — answer those, not "the whole modeling picture."
+
+For follow-up depth questions (*"why did CDSS jump in May?"*, *"which features drove the TSR rise?"*), THEN drop into the concept-groups + score_drivers analysis below — but that's a separate turn.
+
 # What lives on `model_scores` — three layers, mixed by column
 
 `model_scores` is wide (50+ columns per `trans_month` snapshot) and mixes three kinds of column. **The catalog already documents each column** — its `description` text typically encodes the meaning *and* a risky threshold ("Values above 0.5 are risky", "Values below 693 are risky", etc.). Read those descriptions at runtime via `get_table_schema('model_scores')`; don't try to memorize the list. Map each column to its layer:
