@@ -35,17 +35,44 @@ class DataCatalog:
         return sorted(self._profiles.keys())
 
     def get_schema(self, table_name: str) -> dict | None:
-        """Return column schema: {col_name: {type, description}}."""
+        """Return column schema: {col_name: {type, description, ...}}.
+
+        Includes ``risk_threshold`` and ``risk_direction`` when declared
+        in the profile, so downstream tools and the distiller can inject
+        threshold lines into charts without parsing description text.
+        """
         profile = self._profiles.get(table_name)
         if profile is None:
             return None
         schema: dict[str, dict] = {}
         for col_name, spec in profile["columns"].items():
-            schema[col_name] = {
+            entry: dict = {
                 "type": spec["dtype"],
                 "description": spec.get("description", ""),
             }
+            if "risk_threshold" in spec:
+                entry["risk_threshold"] = spec["risk_threshold"]
+                entry["risk_direction"] = spec.get("risk_direction", "above")
+            schema[col_name] = entry
         return schema
+
+    def get_thresholds(self, table_name: str) -> dict[str, dict]:
+        """Return ``{col_name: {value, direction}}`` for columns with risk_threshold.
+
+        Used by the post-distillation fill step to auto-inject threshold
+        values into KP numbers without LLM extraction.
+        """
+        profile = self._profiles.get(table_name)
+        if profile is None:
+            return {}
+        out: dict[str, dict] = {}
+        for col_name, spec in (profile.get("columns") or {}).items():
+            if "risk_threshold" in spec:
+                out[col_name] = {
+                    "value": spec["risk_threshold"],
+                    "direction": spec.get("risk_direction", "above"),
+                }
+        return out
 
     def get_description(self, table_name: str) -> str:
         profile = self._profiles.get(table_name)

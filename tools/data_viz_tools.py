@@ -26,13 +26,61 @@ from agents import RunContextWrapper, function_tool
 from tools.viz_renderer import kp_to_vega_spec, render_chart
 
 
-_VALID_KINDS = ("trend", "bar", "share", "trend_dual", "trend_grid", "table")
+_VALID_KINDS = ("trend", "bar", "share", "trend_dual", "trend_grid", "table",
+                 "histogram", "kde", "pie")
 
 # Plot kinds (everything except `table`) need enough datapoints for the
 # shape to actually convey something — 4 is the project's minimum (also
 # documented in skills/workflow/data_query.md). Below that, the visual
 # is just noise compared to the equivalent inline table.
 _PLOT_MIN_POINTS = 4
+
+
+_DATA_VIZ_SKILL_PATH = (
+    Path(__file__).parent.parent / "skills" / "workflow" / "data_viz.md"
+)
+
+# Cache the skill body once; the file doesn't change at runtime.
+_DATA_VIZ_BODY_CACHE: str | None = None
+
+
+def _load_data_viz_body() -> str:
+    """Read skills/workflow/data_viz.md once and cache. Returned as the
+    payload of the ``get_chart_guidance()`` lazy-loaded tool — the
+    specialist calls it only when about to plot, so its ~7.9 KB of
+    chart-construction rules don't bloat the default system prompt for
+    questions that never chart.
+    """
+    global _DATA_VIZ_BODY_CACHE
+    if _DATA_VIZ_BODY_CACHE is None:
+        try:
+            text = _DATA_VIZ_SKILL_PATH.read_text(encoding="utf-8")
+            # Strip the YAML frontmatter — the model only needs the body.
+            if text.startswith("---"):
+                end = text.find("\n---", 3)
+                if end > 0:
+                    text = text[end + 4:].lstrip()
+            _DATA_VIZ_BODY_CACHE = text
+        except Exception:  # noqa: BLE001
+            _DATA_VIZ_BODY_CACHE = (
+                "(chart guidance not available — fall back to the "
+                "minimal description on make_chart itself.)"
+            )
+    return _DATA_VIZ_BODY_CACHE
+
+
+@function_tool(
+    strict_mode=False,
+    name_override="get_chart_guidance",
+    description_override=(
+        "Returns the chart-construction rulebook (how to pick `kind`, "
+        "multi-series alignment, threshold reference lines, topic naming, "
+        "common errors). Call this ONCE before invoking `make_chart` if "
+        "you need detailed guidance beyond the basics in § SYNTHESIZE."
+    ),
+)
+async def get_chart_guidance(ctx: RunContextWrapper) -> str:  # noqa: ARG001
+    return _load_data_viz_body()
 
 
 def build_make_chart_tool(specialist_name: str):
@@ -45,17 +93,15 @@ def build_make_chart_tool(specialist_name: str):
         strict_mode=False,
         name_override="make_chart",
         description_override=(
-            "Render a chart in the reasoning trace from a series of points. "
-            "`kind` ∈ {trend, bar, share, trend_dual, trend_grid, table}: "
-            "trend = same-scale lines; trend_dual = 2 series, different "
-            "scales (twin y); trend_grid = 3+ series, different scales "
-            "(stacked panels); **bar = DEFAULT for categorical breakdowns "
-            "(vertical, auto-sorted by value desc — top-N merchants etc.)**; "
-            "share = horizontal escape valve, ONLY when labels truly can't "
-            "fit vertical (multi-word names AND 8+ categories); table = 1-3 "
-            "rows (no image). Plots need ≥ 4 points; `points` MUST include "
-            "every row from the source aggregate, not just the cited ones. "
-            "Call sparingly — the auto-distiller already charts findings."
+            "Render a chart in the reasoning trace. Call after summarize_trend "
+            "/ summarize_by_group returns ≥ 4 data points — pass the COMPLETE "
+            "series from the tool result. "
+            "`kind` ∈ {trend, bar, share, trend_dual, trend_grid, table, "
+            "histogram, kde, pie}: "
+            "trend = same-scale lines; trend_dual = twin y; bar = DEFAULT "
+            "for categorical (vertical, sorted by value desc); "
+            "histogram = value distribution; kde = density curve; "
+            "pie = proportional breakdown; table = 1-3 rows."
         ),
     )
     async def make_chart(
@@ -205,6 +251,20 @@ def build_make_chart_tool(specialist_name: str):
                 f"Reference the topic in `findings` so the narrative "
                 f"can refer to it; do NOT re-render."
             )
+
+        # Auto-inject thresholds from the catalog before rendering.
+        catalog = getattr(app_ctx, "_catalog", None)
+        if catalog and hasattr(catalog, "get_thresholds"):
+            for table_name in (catalog.list_tables() if hasattr(catalog, "list_tables") else []):
+                thresholds = catalog.get_thresholds(table_name)
+                for yf in y_fields:
+                    th_key = f"threshold_{yf}" if len(y_fields) > 1 else "threshold"
+                    if yf in thresholds and not any(
+                        p.get(th_key) is not None for p in points
+                    ):
+                        th_val = thresholds[yf]["value"]
+                        for p in points:
+                            p[th_key] = th_val
 
         # Vega-Lite spec for downstream / interactive consumers.
         spec = kp_to_vega_spec(kp_dict)

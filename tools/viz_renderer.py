@@ -29,7 +29,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 
-_SUPPORTED_KINDS = {"trend", "bar", "share", "trend_dual", "trend_grid"}
+_SUPPORTED_KINDS = {"trend", "bar", "share", "trend_dual", "trend_grid",
+                     "histogram", "kde", "pie"}
 
 # Used to slugify topic names for filesystem safety. We keep alphanumerics +
 # underscores; everything else collapses to a single underscore.
@@ -594,7 +595,7 @@ def render_chart(
             n_panels = len(extracted)
             fig, axes = plt.subplots(
                 n_panels, 1, sharex=True,
-                figsize=(8.5, 2.2 * n_panels), dpi=140,
+                figsize=(8.5, 2.2 * n_panels), dpi=300,
             )
             # plt.subplots returns a single Axes when n_panels == 1; wrap
             # to a list so the per-panel loop below is uniform.
@@ -637,7 +638,7 @@ def render_chart(
             fig.savefig(out_path, format="png", bbox_inches="tight",
                         facecolor=fig.get_facecolor())
         else:
-            fig, ax = plt.subplots(figsize=(8.5, 4.5), dpi=140)
+            fig, ax = plt.subplots(figsize=(8.5, 4.5), dpi=300)
 
             if kind == "trend":
                 xs_first = extracted[0][1][0]
@@ -667,12 +668,14 @@ def render_chart(
                 )
                 if threshold is not None:
                     ax.axhline(threshold, color="#666666", linestyle="--",
-                               linewidth=1.0, alpha=0.85, zorder=0)
-                    ax.text(
-                        len(indices) - 1, threshold,
-                        f"  threshold: {_format_axis_value(threshold)}",
-                        va="center", ha="left", fontsize=9,
-                        color="#3c4043", fontweight="600",
+                               linewidth=1.0, alpha=0.5, zorder=0)
+                    ax.annotate(
+                        f"threshold: {_format_axis_value(threshold)}",
+                        xy=(len(indices) - 1, threshold),
+                        xytext=(4, 4), textcoords="offset points",
+                        fontsize=9, color="#3c4043", zorder=5,
+                        bbox=dict(boxstyle="round,pad=0.3",
+                                  facecolor="white", edgecolor="none"),
                     )
                 ax.set_xticks(indices)
                 # Thin to ~10 visible labels max so dense series stay readable
@@ -794,25 +797,30 @@ def render_chart(
                 t_left = _per_field_threshold(numbers, yf1)
                 if t_left is not None:
                     ax.axhline(t_left, color=primary_color, linestyle="--",
-                               linewidth=1.0, alpha=0.7, zorder=0)
-                    ax.text(
-                        len(indices) - 1, t_left,
-                        f"  {_format_axis_value(t_left)}",
-                        va="center", ha="left", fontsize=8,
-                        color=primary_color, fontweight="600",
+                               linewidth=1.0, alpha=0.4, zorder=0)
+                    ax.annotate(
+                        f"{yf1}: {_format_axis_value(t_left)}",
+                        xy=(len(indices) - 1, t_left),
+                        xytext=(4, 4), textcoords="offset points",
+                        fontsize=9, color=primary_color, zorder=5,
+                        bbox=dict(boxstyle="round,pad=0.3",
+                                  facecolor="white", edgecolor="none"),
                     )
                 t_right = _per_field_threshold(numbers, yf2)
                 if t_right is not None:
                     ax2.axhline(t_right, color=secondary_color, linestyle="--",
-                                linewidth=1.0, alpha=0.7, zorder=0)
-                    ax2.text(
-                        0, t_right,
-                        f"{_format_axis_value(t_right)}  ",
-                        va="center", ha="right", fontsize=8,
-                        color=secondary_color, fontweight="600",
+                                linewidth=1.0, alpha=0.4, zorder=0)
+                    ax2.annotate(
+                        f"{yf2}: {_format_axis_value(t_right)}",
+                        xy=(0, t_right),
+                        xytext=(-4, 4), textcoords="offset points",
+                        fontsize=9, color=secondary_color, zorder=5,
+                        ha="right",
+                        bbox=dict(boxstyle="round,pad=0.3",
+                                  facecolor="white", edgecolor="none"),
                     )
 
-            else:  # "share" — horizontal bar, single series only
+            elif kind == "share":
                 yf, (xs, ys) = extracted[0]
                 order = sorted(range(len(xs)), key=lambda i: ys[i], reverse=True)
                 xs_sorted = [xs[i] for i in order]
@@ -840,6 +848,68 @@ def render_chart(
                 )
                 # Pad right margin for the value labels.
                 ax.set_xlim(right=max_y * 1.18)
+
+            elif kind == "histogram":
+                yf, (_, ys) = extracted[0]
+                vals = [float(v) for v in ys if v is not None]
+                if vals:
+                    n_bins = min(30, max(10, len(vals) // 5))
+                    ax.hist(vals, bins=n_bins, color=_PALETTE[0],
+                            edgecolor="white", linewidth=0.5, alpha=0.85)
+                    ax.set_xlabel(yf)
+                    ax.set_ylabel("Frequency")
+                    ax.grid(True, axis="y", linestyle=":", linewidth=0.8,
+                            color="#dadce0", alpha=0.9)
+                    ax.grid(False, axis="x")
+
+            elif kind == "kde":
+                for i, (yf, (_, ys)) in enumerate(extracted):
+                    vals = sorted(float(v) for v in ys if v is not None)
+                    if len(vals) < 2:
+                        continue
+                    # Simple KDE using gaussian kernel
+                    import numpy as np
+                    xs_kde = np.linspace(min(vals), max(vals), 200)
+                    bw = (max(vals) - min(vals)) / max(10, len(vals) ** 0.5)
+                    if bw < 1e-9:
+                        continue
+                    density = np.zeros_like(xs_kde)
+                    for v in vals:
+                        density += np.exp(-0.5 * ((xs_kde - v) / bw) ** 2)
+                    density /= (len(vals) * bw * (2 * np.pi) ** 0.5)
+                    color = _PALETTE[i % len(_PALETTE)]
+                    ax.plot(xs_kde, density, color=color, linewidth=2,
+                            label=yf if len(extracted) > 1 else None)
+                    ax.fill_between(xs_kde, density, alpha=0.15, color=color)
+                ax.set_xlabel(x_field)
+                ax.set_ylabel("Density")
+                if len(extracted) > 1:
+                    ax.legend(loc="best", frameon=False, fontsize=9)
+                ax.grid(True, axis="y", linestyle=":", linewidth=0.8,
+                        color="#dadce0", alpha=0.9)
+
+            elif kind == "pie":
+                yf, (xs, ys) = extracted[0]
+                vals = [float(v) for v in ys if v is not None]
+                labels = [str(x) for x, v in zip(xs, ys) if v is not None]
+                if vals:
+                    # Sort by value descending
+                    order = sorted(range(len(vals)), key=lambda i: vals[i],
+                                   reverse=True)
+                    vals = [vals[i] for i in order]
+                    labels = [labels[i] for i in order]
+                    colors = [_PALETTE[i % len(_PALETTE)] for i in range(len(vals))]
+                    wedges, texts, autotexts = ax.pie(
+                        vals, labels=labels, colors=colors,
+                        autopct=lambda p: f"{p:.1f}%" if p > 3 else "",
+                        startangle=90, pctdistance=0.75,
+                    )
+                    for t in autotexts:
+                        t.set_fontsize(9)
+                        t.set_fontweight("bold")
+                    for t in texts:
+                        t.set_fontsize(9)
+                    ax.set_ylabel("")
 
             _apply_style(ax, fig)
             fig.tight_layout()
@@ -982,8 +1052,8 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
                 })
                 spec["layer"].append({
                     "mark": {"type": "text", "align": "right", "baseline": "bottom",
-                             "dx": -4, "dy": -2, "fontSize": 10,
-                             "fontWeight": 600, "color": "#3c4043"},
+                             "dx": -4, "dy": -6, "fontSize": 10,
+                             "color": "#3c4043"},
                     "encoding": {
                         "y": {"datum": t, "type": "quantitative"},
                         "text": {"value": f"threshold: {t}"},
@@ -992,7 +1062,8 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
     elif kind == "bar":
         y_value_field = "value" if is_multi else primary_y
         bar_enc: dict = {
-            "x": {"field": x_field, "type": "ordinal"},
+            "x": {"field": x_field, "type": "ordinal",
+                   "sort": None},  # preserve data order (pre-sorted by value desc)
             "y": {"field": y_value_field, "type": "quantitative"},
             "tooltip": [
                 {"field": x_field, "type": "ordinal"},
@@ -1076,7 +1147,7 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
                              "align": "right" if axis_orient == "right" else "left",
                              "baseline": "bottom",
                              "dx": -4 if axis_orient == "right" else 4,
-                             "dy": -2, "fontSize": 9, "fontWeight": 600},
+                             "dy": -6, "fontSize": 9},
                     "encoding": {
                         "y": {"datum": threshold, "type": "quantitative"},
                         "text": {"value": f"{y_field}: {threshold}"},
@@ -1126,7 +1197,7 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
             }
             for yf in y_fields
         ]
-    else:  # share — horizontal, single-series only
+    elif kind == "share":
         spec["layer"] = [
             {
                 "mark": "bar",
@@ -1156,6 +1227,41 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
                 },
             },
         ]
+    elif kind == "histogram":
+        spec["mark"] = "bar"
+        spec["encoding"] = {
+            "x": {"field": primary_y, "type": "quantitative", "bin": True},
+            "y": {"aggregate": "count", "type": "quantitative"},
+            "tooltip": [
+                {"field": primary_y, "type": "quantitative", "bin": True},
+                {"aggregate": "count", "type": "quantitative"},
+            ],
+        }
+    elif kind == "kde":
+        spec["transform"] = [
+            {"density": primary_y, "as": [primary_y, "density"]},
+        ]
+        spec["mark"] = {"type": "area", "opacity": 0.5}
+        spec["encoding"] = {
+            "x": {"field": primary_y, "type": "quantitative"},
+            "y": {"field": "density", "type": "quantitative"},
+            "tooltip": [
+                {"field": primary_y, "type": "quantitative", "format": _LABEL_FMT},
+                {"field": "density", "type": "quantitative", "format": ".4f"},
+            ],
+        }
+    elif kind == "pie":
+        spec["mark"] = {"type": "arc", "tooltip": True}
+        spec["encoding"] = {
+            "theta": {"field": primary_y, "type": "quantitative"},
+            "color": {"field": x_field, "type": "nominal",
+                      "sort": {"field": primary_y, "order": "descending"},
+                      "legend": {"orient": "right"}},
+            "tooltip": [
+                {"field": x_field, "type": "nominal"},
+                {"field": primary_y, "type": "quantitative", "format": _LABEL_FMT},
+            ],
+        }
 
     title = str(kp.get("topic") or "").replace("_", " ").strip()
     if title:

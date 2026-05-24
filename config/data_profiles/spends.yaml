@@ -1,6 +1,6 @@
 table: spends
-description: Transaction-level spend data — multiple rows per case. Each row is one
-  transaction (spend) with merchant details and risk scores.
+description: Transaction-level spend data — multiple rows per case. Each row is one transaction (spend) with merchant details
+  and risk scores.
 rows_per_case: 100
 one_row_per_case: false
 aliases:
@@ -76,8 +76,7 @@ columns:
       Professional Services: 0.04
       ? ''
       : 0.04
-    description: Merchant industry based on SIC4 code. Some rows may be empty — search
-      industry via merchant name if needed.
+    description: Merchant industry based on SIC4 code. Some rows may be empty — search industry via merchant name if needed.
     aliases:
     - Merchant Industry
   merchant_risk_score:
@@ -87,10 +86,11 @@ columns:
     std: 0.2
     min: 0.0
     max: 1.0
-    description: Risk score of the merchant (0-1). Values above 0.7 are considered
-      risky.
+    description: Risk score of the merchant (0-1). Values above 0.7 are considered risky.
     aliases:
     - Merchant Risk Score
+    risk_threshold: 0.7
+    risk_direction: above
   spend_concentration:
     dtype: float
     distribution: normal
@@ -98,10 +98,12 @@ columns:
     std: 0.8
     min: 0.0
     max: 10.0
-    description: One-way spend concentration risk rate of a customer at merchants
-      in last 30 days. Values above 2.4 are considered risky.
+    description: One-way spend concentration risk rate of a customer at merchants in last 30 days. Values above 2.4 are considered
+      risky.
     aliases:
     - Spend Concentration
+    risk_threshold: 2.4
+    risk_direction: above
   rnn_spend_score:
     dtype: float
     distribution: normal
@@ -109,10 +111,11 @@ columns:
     std: 0.005
     min: 0.0
     max: 0.1
-    description: RNN risk score for spend patterns. Values above 0.017 are considered
-      risky.
+    description: RNN risk score for spend patterns. Values above 0.017 are considered risky.
     aliases:
     - RNN Spend Score
+    risk_threshold: 0.017
+    risk_direction: above
   spend_divergence_index:
     dtype: float
     distribution: normal
@@ -120,10 +123,12 @@ columns:
     std: 1.5
     min: 0.0
     max: 10.0
-    description: Index for spend divergence from historical patterns. Values below
-      1.0 are considered risky (indicating abnormal deviation).
+    description: Index for spend divergence from historical patterns. Values below 1.0 are considered risky (indicating abnormal
+      deviation).
     aliases:
     - Spend Divergence Index
+    risk_threshold: 1
+    risk_direction: below
 correlations:
 - columns:
   - merchant_risk_score
