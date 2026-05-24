@@ -623,6 +623,9 @@ def _render_auto_charts(
                 "captured_at_turn": turn_id,
                 "confidence": "high",
             }
+            spec = kp_to_vega_spec(kp_dict)
+            if spec:
+                kp_dict["vega_spec"] = spec
             img_path = render_chart(kp_dict, charts_dir, turn_id=turn_id, logger=logger)
             if img_path:
                 kp_dict["image_path"] = img_path
@@ -669,6 +672,9 @@ def _render_auto_charts(
             "captured_at_turn": turn_id,
             "confidence": "high",
         }
+        spec = kp_to_vega_spec(kp_dict)
+        if spec:
+            kp_dict["vega_spec"] = spec
         img_path = render_chart(kp_dict, charts_dir, turn_id=turn_id, logger=logger)
         if img_path:
             kp_dict["image_path"] = img_path

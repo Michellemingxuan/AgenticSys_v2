@@ -1045,19 +1045,20 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
             if t is not None:
                 spec["layer"].append({
                     "mark": {"type": "rule", "strokeDash": [4, 3],
-                             "color": "#666666", "opacity": 0.85},
+                             "color": "#666666", "opacity": 0.5},
                     "encoding": {
                         "y": {"datum": t, "type": "quantitative"},
                     },
                 })
                 spec["layer"].append({
-                    "mark": {"type": "text", "align": "right",
-                             "baseline": "line-bottom",
-                             "dx": -4, "dy": -4, "fontSize": 11,
+                    "data": {"values": [{"label": f"threshold: {t}", "y": t}]},
+                    "mark": {"type": "text", "align": "left",
+                             "baseline": "bottom",
+                             "dx": 4, "dy": -4, "fontSize": 11,
                              "color": "#3c4043"},
                     "encoding": {
-                        "y": {"datum": t, "type": "quantitative"},
-                        "text": {"value": f"threshold: {t}"},
+                        "y": {"field": "y", "type": "quantitative"},
+                        "text": {"field": "label", "type": "nominal"},
                     },
                 })
     elif kind == "bar":
@@ -1144,14 +1145,16 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
                     },
                 })
                 inner.append({
+                    "data": {"values": [{"label": f"{y_field}: {threshold}", "y": threshold}]},
                     "mark": {"type": "text",
                              "align": "right" if axis_orient == "right" else "left",
-                             "baseline": "line-bottom",
+                             "baseline": "bottom",
                              "dx": -4 if axis_orient == "right" else 4,
                              "dy": -4, "fontSize": 10},
                     "encoding": {
-                        "y": {"datum": threshold, "type": "quantitative"},
-                        "text": {"value": f"{y_field}: {threshold}"},
+                        "y": {"field": "y", "type": "quantitative",
+                              "axis": {"orient": axis_orient}},
+                        "text": {"field": "label", "type": "nominal"},
                         "color": {"datum": y_field, "type": "nominal"},
                     },
                 })
