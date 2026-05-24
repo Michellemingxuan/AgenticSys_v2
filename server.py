@@ -30,6 +30,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+# Load `.env` from the project root BEFORE anything reads ``os.environ``.
+# Without this, vars like ``NODE_TRACE_DB``, ``LLM_BACKEND``, ``PILLAR``, …
+# defined in `.env` are silently ignored when running `python server.py`
+# directly. Standalone scripts (notebooks, datalayer.sync) already do
+# this — server.py was the missing one. Lazy/optional import so the
+# server still starts if python-dotenv isn't installed (e.g. private env).
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv()
+except ImportError:
+    pass
+
 from flask import Flask, Response, abort, jsonify, request, send_from_directory
 from flask_cors import CORS
 
@@ -47,6 +59,10 @@ from llm.factory import FirewalledChatShim, build_session_clients
 from llm.firewall_stack import FirewallStack, redact_payload
 from logger.event_logger import EventLogger
 from logger.process_timer import ProcessTimer
+from tools.node_trace import (
+    NodeTrace, NodeTraceRunHooks, NodeTraceStore, TURN_SCOPE, TurnScope,
+    _open_node, attach_io, attach_latency, attach_tag, attach_usage,
+)
 from main import _DATA_TABLES_DIR, _REPORTS_DIR, _resolve_data_source
 from models.types import FinalAnswer
 from orchestrator.orchestrator import Orchestrator
@@ -110,6 +126,33 @@ _SCREEN_TIMEOUT_S = float(os.environ.get("SCREEN_TIMEOUT_S", "30"))
 _PRIOR_QUESTIONS_FOR_SCREEN = int(
     os.environ.get("PRIOR_QUESTIONS_FOR_SCREEN", "12")
 )
+
+# NodeTrace SQLite store — one per process, shared across sessions.
+# Set NODE_TRACE_DISABLE=1 to turn the layer off entirely (escape hatch).
+# Expand both ``~`` and ``$VAR`` references so .env values like
+# ``NODE_TRACE_DB=$HOME/agenticsys-traces/node_traces.db`` or
+# ``NODE_TRACE_DB=~/agenticsys-traces/node_traces.db`` resolve to a real
+# absolute path. Without this, python-dotenv hands us the literal string
+# and SQLite cheerfully creates a ``$HOME`` directory next to CWD.
+_NODE_TRACE_DB_PATH = os.path.expanduser(os.path.expandvars(
+    os.environ.get("NODE_TRACE_DB", "logs/node_traces.db")
+))
+_NODE_TRACE_STORE: NodeTraceStore | None = (
+    NodeTraceStore(db_path=_NODE_TRACE_DB_PATH)
+    if os.environ.get("NODE_TRACE_DISABLE") != "1"
+    else None
+)
+if _NODE_TRACE_STORE is not None:
+    # Print the resolved path at import time so a mismatch between
+    # server and viewer DBs is immediately obvious. The viewer prints
+    # the same thing on startup — if they don't match, you'll see two
+    # different paths and know to align the NODE_TRACE_DB env var.
+    print(
+        f"[server] node_trace db: {Path(_NODE_TRACE_DB_PATH).resolve()}",
+        flush=True,
+    )
+else:
+    print("[server] node_trace disabled (NODE_TRACE_DISABLE=1)", flush=True)
 
 # Cap on how long a queued new turn waits for the prior turn's
 # `turn_lock` to release. Previously the queued runner did an
@@ -400,67 +443,8 @@ def _synthesize_fallback_answer(
     return "\n".join(lines), flags
 
 
-# Keep this many of the most recent reviewer turns intact in input_history.
-# Older turns get their tool-result payloads (the heavy SpecialistOutput JSON)
-# replaced by a small stub. The orchestrator still sees that the call happened
-# (call_id + tool name preserved), it just can't replay the raw findings from
-# the elided turn — by design, since those findings now live in the
-# specialists' KB and surface there on demand.
-_INPUT_HISTORY_KEEP_RECENT_TURNS = 2
-
-# Stub used to replace elided tool-result payloads. Kept terse so the
-# orchestrator doesn't waste tokens parsing it; the specialist KB digest
-# (passed into each specialist call) is the authoritative replay path.
-_ELIDED_TOOL_OUTPUT = (
-    "(elided — earlier-turn specialist output; see the specialist's KB "
-    "digest, which is prepended to each new sub-question.)"
-)
-
-
-def _prune_input_history(history: list, keep_recent_turns: int) -> tuple[list, dict]:
-    """Replace tool-result content in old turns with a small stub. Returns
-    (pruned_history, stats).
-
-    A "turn" is bounded by user messages: each `{"role": "user", ...}` entry
-    starts a new turn. We keep the last ``keep_recent_turns`` turns intact;
-    in older turns, any item that looks like a function_call_output has its
-    output content replaced by ``_ELIDED_TOOL_OUTPUT``. Function-call items
-    themselves (the call records) are preserved so the orchestrator's view
-    of "what tools were invoked" stays accurate.
-
-    Defensive: unknown item shapes are passed through unchanged. Returning
-    the input list untouched on any structural surprise is safer than
-    accidentally dropping content.
-    """
-    stats = {"items_total": len(history), "items_elided": 0, "bytes_saved": 0}
-    if not isinstance(history, list) or not history:
-        return history, stats
-
-    # Find user-message indices to identify turn boundaries.
-    user_idxs = [
-        i for i, item in enumerate(history)
-        if isinstance(item, dict) and item.get("role") == "user"
-    ]
-    if len(user_idxs) <= keep_recent_turns:
-        return history, stats  # All turns are recent — nothing to prune.
-
-    cutoff_idx = user_idxs[-keep_recent_turns]
-    pruned: list = []
-    for i, item in enumerate(history):
-        if i >= cutoff_idx:
-            pruned.append(item)
-            continue
-        if isinstance(item, dict) and item.get("type") == "function_call_output":
-            old_output = item.get("output", "")
-            if isinstance(old_output, str) and old_output != _ELIDED_TOOL_OUTPUT:
-                stub = dict(item)
-                stub["output"] = _ELIDED_TOOL_OUTPUT
-                pruned.append(stub)
-                stats["items_elided"] += 1
-                stats["bytes_saved"] += max(0, len(old_output) - len(_ELIDED_TOOL_OUTPUT))
-                continue
-        pruned.append(item)
-    return pruned, stats
+    # (input_history pruning removed — each turn now starts fresh.
+    #  Follow-up context lives in specialist_kb + KB warmth hint.)
 
 
 def _normalize_q(q: str) -> str:
@@ -773,6 +757,7 @@ def _get_or_create_session(case_id: str) -> CaseSession:
                 _CHAT_LLM, case_logger,
                 tools=_HELPER_TOOLS,
                 pillar_config=_PILLAR_YAML,
+                node_trace_store=_NODE_TRACE_STORE,
             ),
             logger=case_logger,
         )
@@ -802,6 +787,14 @@ async def _run_turn_streamed(
     """
     if started_at is None:
         started_at = int(time.time() * 1000)
+    # Set the per-turn scope contextvar so `_open_node()` calls anywhere
+    # downstream (chat_agent.screen, redacting_tool, orchestrator) can build
+    # a NodeTrace without passing chat/case/turn IDs through every call site.
+    TURN_SCOPE.set(TurnScope(
+        chat_id=sess.logger.session_id,
+        case_id=sess.case_id,
+        turn_id=turn_id,
+    ))
     turn_timer = ProcessTimer(
         sess.logger,
         "turn",
@@ -1059,6 +1052,8 @@ async def _run_turn_streamed(
         _distiller=getattr(orchestrator, "distiller_agent", None),
         _turn_id=turn_id,
         _emit_event=_emit_event,
+        _node_trace_store=_NODE_TRACE_STORE,
+        _catalog=sess.catalog,
     )
     turn_timer.record(
         "orchestrator_context_build",
@@ -1085,15 +1080,17 @@ async def _run_turn_streamed(
     else:
         framed_question = verdict.redacted_question
 
-    # Multi-turn memory: prepend prior input list, append this turn's question.
-    if sess.input_history:
-        run_input = sess.input_history + [{"role": "user", "content": framed_question}]
-    else:
-        run_input = framed_question
+    # Each turn starts fresh — no accumulated conversation history.
+    # Follow-up context is carried by:
+    #   - KB warmth hint (which specialists have cached data)
+    #   - specialist_kb (accessible via kb_lookup/kb_list_topics tools)
+    #   - qa_cache (exact-match replay for duplicate questions)
+    # This keeps input size constant across turns instead of growing.
+    run_input = framed_question
     turn_timer.record(
         "memory_framing",
         int((time.perf_counter() - timer_t0) * 1000),
-        input_history_len=len(sess.input_history),
+        input_history_len=0,
         warmth_hint_present=bool(warmth_hint),
     )
 
@@ -1189,90 +1186,123 @@ async def _run_turn_streamed(
             first_tool_call_logged = False
             specialist_errors_emitted = 0
             final_answer = None
-        streamed = Runner.run_streamed(orchestrator.orchestrator_agent, run_input, context=ctx)
-
         try:
-            async for event in streamed.stream_events():
-                if event.type != "run_item_stream_event":
-                    continue
-                item = event.item
-                raw = getattr(item, "raw_item", None)
+            async with _open_node(_NODE_TRACE_STORE, "orchestrator", depth=0) as orch_nt:
+                attach_tag("streaming")
+                # Stash the input on the wrapper row so clicking the
+                # `orchestrator` row in the viewer shows what was first
+                # asked. The per-LLM-call detail (round_1, round_2, …)
+                # is captured by NodeTraceRunHooks below.
+                if isinstance(run_input, list):
+                    attach_io(messages_json=json.dumps(run_input, default=str))
+                    attach_usage(prompt_excerpt=json.dumps(run_input, default=str)[:4000])
+                else:
+                    attach_io(messages_json=json.dumps(
+                        [{"role": "user", "content": str(run_input)}],
+                        default=str,
+                    ))
+                    attach_usage(prompt_excerpt=str(run_input))
+                # Per-LLM-round capture via SDK hooks. Replaces the
+                # contextvar-propagation path that doesn't reach the
+                # streamed Runner's background task. Hooks fire on the
+                # same task as the model call, so they always see the
+                # right parent.
+                trace_hooks = (
+                    NodeTraceRunHooks(_NODE_TRACE_STORE, orch_nt)
+                    if isinstance(orch_nt, NodeTrace) else None
+                )
+                streamed = Runner.run_streamed(
+                    orchestrator.orchestrator_agent, run_input, context=ctx,
+                    hooks=trace_hooks,
+                )
+                _orch_perf_t0 = time.perf_counter()
+                _ttft_recorded = False
+                async for event in streamed.stream_events():
+                    if not _ttft_recorded:
+                        attach_latency(
+                            ttft_ms=int((time.perf_counter() - _orch_perf_t0) * 1000),
+                        )
+                        _ttft_recorded = True
+                    if event.type != "run_item_stream_event":
+                        continue
+                    item = event.item
+                    raw = getattr(item, "raw_item", None)
 
-                if isinstance(item, ToolCallItem):
-                    name = (
-                        getattr(raw, "name", None)
-                        or (raw.get("name") if isinstance(raw, dict) else None)
-                        or "?"
-                    )
-                    call_id = (
-                        getattr(raw, "call_id", None)
-                        or (raw.get("call_id") if isinstance(raw, dict) else None)
-                        or str(uuid.uuid4())
-                    )
-                    args_str = (
-                        getattr(raw, "arguments", None)
-                        or (raw.get("arguments") if isinstance(raw, dict) else "{}")
-                    )
-                    try:
-                        args = json.loads(args_str) if isinstance(args_str, str) else (args_str or {})
-                    except json.JSONDecodeError:
-                        args = {"raw": args_str}
-                    sub_q = args.get("sub_question") or args.get("input") or json.dumps(args, default=str)
+                    if isinstance(item, ToolCallItem):
+                        name = (
+                            getattr(raw, "name", None)
+                            or (raw.get("name") if isinstance(raw, dict) else None)
+                            or "?"
+                        )
+                        call_id = (
+                            getattr(raw, "call_id", None)
+                            or (raw.get("call_id") if isinstance(raw, dict) else None)
+                            or str(uuid.uuid4())
+                        )
+                        args_str = (
+                            getattr(raw, "arguments", None)
+                            or (raw.get("arguments") if isinstance(raw, dict) else "{}")
+                        )
+                        try:
+                            args = json.loads(args_str) if isinstance(args_str, str) else (args_str or {})
+                        except json.JSONDecodeError:
+                            args = {"raw": args_str}
+                        sub_q = args.get("sub_question") or args.get("input") or json.dumps(args, default=str)
 
-                    call_index_by_id[call_id] = len(tool_calls)
-                    tool_calls.append({"call_id": call_id, "tool": name, "sub_question": sub_q})
-                    started_at_by_call[call_id] = int(time.time() * 1000)
+                        call_index_by_id[call_id] = len(tool_calls)
+                        tool_calls.append({"call_id": call_id, "tool": name, "sub_question": sub_q})
+                        started_at_by_call[call_id] = int(time.time() * 1000)
 
-                    # The first tool call IS team construction — this is the
-                    # gap the user reports as "time to team construction stage".
-                    if not first_tool_call_logged:
-                        sess.logger.log("turn_phase_first_tool_call", {
-                            "turn_id": turn_id,
-                            "duration_ms_since_orch_start":
-                                int((time.time() - orch_t0) * 1000),
-                            "first_tool": name,
+                        # The first tool call IS team construction — this is the
+                        # gap the user reports as "time to team construction stage".
+                        if not first_tool_call_logged:
+                            sess.logger.log("turn_phase_first_tool_call", {
+                                "turn_id": turn_id,
+                                "duration_ms_since_orch_start":
+                                    int((time.time() - orch_t0) * 1000),
+                                "first_tool": name,
+                            })
+                            first_tool_call_logged = True
+
+                        # First tool call → emit team_plan once (the orchestrator may add more
+                        # later; we send team_plan again on subsequent calls for incremental UX).
+                        team_plan_emitted = True
+                        sess.emit("team_plan", {"turn_id": turn_id, "tool_calls": list(tool_calls)})
+                        sess.emit("agent_started", {
+                            "turn_id": turn_id, "call_id": call_id, "tool": name,
+                            "started_at": started_at_by_call[call_id],
                         })
-                        first_tool_call_logged = True
 
-                    # First tool call → emit team_plan once (the orchestrator may add more
-                    # later; we send team_plan again on subsequent calls for incremental UX).
-                    team_plan_emitted = True
-                    sess.emit("team_plan", {"turn_id": turn_id, "tool_calls": list(tool_calls)})
-                    sess.emit("agent_started", {
-                        "turn_id": turn_id, "call_id": call_id, "tool": name,
-                        "started_at": started_at_by_call[call_id],
-                    })
+                    elif isinstance(item, ToolCallOutputItem):
+                        call_id = (raw.get("call_id") if isinstance(raw, dict) else None) or "?"
+                        tool = "?"
+                        if call_id in call_index_by_id:
+                            tool = tool_calls[call_index_by_id[call_id]]["tool"]
+                        payload = _safe_dump(item.output)
+                        started_ts = started_at_by_call.get(call_id, int(time.time() * 1000))
+                        duration_ms = int(time.time() * 1000) - started_ts
+                        # Stash the payload back onto `tool_calls` so a late-stage
+                        # orchestrator failure (ModelBehaviorError on FinalAnswer
+                        # parsing, etc.) can still synthesize a partial fallback
+                        # answer from the specialists' outputs the reviewer paid for.
+                        if call_id in call_index_by_id:
+                            tool_calls[call_index_by_id[call_id]]["payload"] = payload
+                            tool_calls[call_index_by_id[call_id]]["duration_ms"] = duration_ms
+                        sess.emit("agent_completed", {
+                            "turn_id": turn_id, "call_id": call_id, "tool": tool,
+                            "payload": payload, "duration_ms": duration_ms,
+                        })
+                        # If the redacting_tool wrapper recorded a failure for any
+                        # specialist this run, fan out typed `error` events now so
+                        # the UI can show the real cause beside the vague `[FAILED …]`
+                        # payload it just received.
+                        _drain_specialist_errors()
+                        # Stamp the time of the LAST agent_completed so we can
+                        # attribute the gap-to-end-of-stream to synthesis.
+                        last_agent_completed_at = time.time()
 
-                elif isinstance(item, ToolCallOutputItem):
-                    call_id = (raw.get("call_id") if isinstance(raw, dict) else None) or "?"
-                    tool = "?"
-                    if call_id in call_index_by_id:
-                        tool = tool_calls[call_index_by_id[call_id]]["tool"]
-                    payload = _safe_dump(item.output)
-                    started_ts = started_at_by_call.get(call_id, int(time.time() * 1000))
-                    duration_ms = int(time.time() * 1000) - started_ts
-                    # Stash the payload back onto `tool_calls` so a late-stage
-                    # orchestrator failure (ModelBehaviorError on FinalAnswer
-                    # parsing, etc.) can still synthesize a partial fallback
-                    # answer from the specialists' outputs the reviewer paid for.
-                    if call_id in call_index_by_id:
-                        tool_calls[call_index_by_id[call_id]]["payload"] = payload
-                        tool_calls[call_index_by_id[call_id]]["duration_ms"] = duration_ms
-                    sess.emit("agent_completed", {
-                        "turn_id": turn_id, "call_id": call_id, "tool": tool,
-                        "payload": payload, "duration_ms": duration_ms,
-                    })
-                    # If the redacting_tool wrapper recorded a failure for any
-                    # specialist this run, fan out typed `error` events now so
-                    # the UI can show the real cause beside the vague `[FAILED …]`
-                    # payload it just received.
-                    _drain_specialist_errors()
-                    # Stamp the time of the LAST agent_completed so we can
-                    # attribute the gap-to-end-of-stream to synthesis.
-                    last_agent_completed_at = time.time()
-
-                elif isinstance(item, MessageOutputItem):
-                    pass  # handled by .final_output below
+                    elif isinstance(item, MessageOutputItem):
+                        pass  # handled by .final_output below
 
             # Drain complete — pull the final structured output. The
             # gap between the last `agent_completed` and HERE is the
@@ -1298,35 +1328,14 @@ async def _run_turn_streamed(
                 final_answer = redact_payload(final_raw) if final_raw else None
             except Exception:
                 final_answer = final_raw
+            # NOTE: the orchestrator's per-LLM-round detail is captured
+            # by NodeTraceRunHooks (passed into Runner.run_streamed
+            # above). No need for synthetic team_construction / synthesis
+            # rows anymore — round_1 IS team-construction, the last
+            # round IS synthesis, both with real durations + full I/O.
 
-            # Persist conversation memory for the next turn. Prune older turns'
-            # tool-result payloads to keep input_history bounded — without this,
-            # each turn's full SpecialistOutput JSON accumulates and feeds back
-            # into every subsequent orchestrator call, dominating latency by
-            # turn 5+. The specialists' KB (populated by the distiller) is the
-            # replay path for elided content.
-            try:
-                timer_t0 = time.perf_counter()
-                raw_history = streamed.to_input_list()
-                pruned, prune_stats = _prune_input_history(
-                    raw_history, keep_recent_turns=_INPUT_HISTORY_KEEP_RECENT_TURNS,
-                )
-                sess.input_history = pruned
-                turn_timer.record(
-                    "input_history_prune",
-                    int((time.perf_counter() - timer_t0) * 1000),
-                    **prune_stats,
-                    history_len_after=len(pruned),
-                )
-                if prune_stats["items_elided"]:
-                    sess.logger.log("input_history_pruned", {
-                        "turn_id": turn_id,
-                        **prune_stats,
-                        "kept_recent_turns": _INPUT_HISTORY_KEEP_RECENT_TURNS,
-                        "history_len_after": len(pruned),
-                    })
-            except Exception:
-                pass  # SDK may not always support; degrade gracefully
+            # No conversation history accumulation — each turn starts
+            # fresh. Follow-up context lives in specialist_kb + warmth hint.
 
             # Successful attempt — exit the retry loop.
             break
@@ -1490,6 +1499,35 @@ async def _run_turn_streamed(
         timeline = getattr(final_answer, "timeline", [])
         data_pull = getattr(final_answer, "data_pull_request", None)
 
+    # Server-side provenance: extract report_coverage and specialists from
+    # tool_calls so the model doesn't waste tokens restating the full drafts.
+    # The FinalAnswer schema tells the model to leave report_draft/team_draft
+    # null; we populate provenance from the tool results.
+    _AUX_TOOLS_PROV = {"report_agent", "general_specialist"}
+    if hasattr(final_answer, "report_draft") and final_answer.report_draft is None:
+        for tc in tool_calls:
+            if tc.get("tool") == "report_agent" and tc.get("payload"):
+                try:
+                    import re as _re
+                    cov_match = _re.search(r'"coverage"\s*:\s*"(\w+)"', tc["payload"])
+                    if cov_match:
+                        from models.types import ReportDraft
+                        final_answer.report_draft = ReportDraft(
+                            coverage=cov_match.group(1),
+                            files_consulted=[],
+                        )
+                except Exception:
+                    pass
+    if hasattr(final_answer, "team_draft") and final_answer.team_draft is None:
+        consulted = sorted(
+            tc["tool"] for tc in tool_calls if tc["tool"] not in _AUX_TOOLS_PROV
+        )
+        if consulted:
+            from models.types import TeamDraft
+            final_answer.team_draft = TeamDraft(
+                answer="", specialists_consulted=consulted,
+            )
+
     # Specialist failure flags — make every wrapper-recorded failure visible
     # in the FinalAnswer so the reviewer sees, e.g., "specialist 'wcc' failed:
     # ModelBehaviorError: invalid JSON …" instead of the silent drop the SDK
@@ -1568,11 +1606,27 @@ async def _run_turn_streamed(
             "missing": missing_reanswers,
         })
 
-    # Drain any in-flight distiller tasks before reading the KB for chart
-    # collection / next-turn warmth. The redacting_tool fires distillation
-    # as fire-and-forget so specialists return to the orchestrator without
-    # the distiller round-trip on the critical path; here at end-of-turn
-    # we wait for them so the KB / charts reflect the full set.
+    # ── Emit final answer IMMEDIATELY — don't wait for distiller drain.
+    # The user sees the text answer now; charts arrive asynchronously.
+    timer_t0 = time.perf_counter()
+    ts = int(time.time() * 1000)
+    sess.emit("final", {
+        "turn_id": turn_id, "answer": answer_text, "flags": flags,
+        "timeline": timeline, "data_pull_request": _safe_dump(data_pull),
+    })
+    sess.emit("agent_message", {
+        "id": str(uuid.uuid4()), "role": "agent", "text": answer_text,
+        "timestamp": ts, "turn_id": turn_id,
+    })
+    turn_timer.record(
+        "final_sse_emit",
+        int((time.perf_counter() - timer_t0) * 1000),
+    )
+
+    # ── Drain distiller tasks, then emit charts. The text answer is
+    # already visible to the user; charts populate the trace panel
+    # asynchronously. If a new question arrives during the drain, the
+    # drain timeout (60s) ensures we don't block forever.
     pending = getattr(ctx, "_pending_distillers", None) or []
     timer_t0 = time.perf_counter()
     if pending:
@@ -1593,19 +1647,11 @@ async def _run_turn_streamed(
         n_pending_unfinished=sum(1 for t in pending if not t.done()) if pending else 0,
     )
 
-    # Phase 2 (revised) — surface charts in the reasoning-trace panel, NOT
-    # inline in the chat. Each chart this turn is emitted as a typed `chart`
-    # SSE event the frontend stores per-turn and renders alongside the
-    # specialist's findings. Keeps the chat clean (text answer only) while
-    # the trace gives reviewers click-to-open access to plots tied to the
-    # specific finding that produced them.
+    # Collect and emit charts from the KB (now populated by the drain).
     timer_t0 = time.perf_counter()
     turn_charts = _collect_turn_charts(sess.specialist_kb, turn_id, sess.case_id)
-    chart_payloads: list[dict] = []  # turn_id-less, reusable on cached replay
+    chart_payloads: list[dict] = []
     if turn_charts:
-        # Match each chart back to its KP for richer payload (claim,
-        # source_call, vega_spec). The KB has the full record; we already
-        # collected the chart URL/topic/specialist in `_collect_turn_charts`.
         for c in turn_charts:
             kp = _find_kp(sess.specialist_kb, c["specialist"], c["topic"], turn_id)
             viz = (kp or {}).get("viz") or {}
@@ -1618,11 +1664,6 @@ async def _run_turn_streamed(
                 "kind": viz.get("kind", "") if isinstance(viz, dict) else "",
                 "vega_spec": (kp or {}).get("vega_spec"),
             }
-            # Table KPs carry the row data (`numbers`) + the x/y field
-            # names so the frontend can render a proper HTML table. The
-            # row order is whatever the specialist passed in — already
-            # sorted upstream (e.g. by `_sort_points` for plot kinds), so
-            # the frontend renders them as-is.
             if payload["kind"] == "table":
                 payload["numbers"] = (kp or {}).get("numbers") or []
                 payload["x_field"] = viz.get("x_field", "") if isinstance(viz, dict) else ""
@@ -1643,24 +1684,12 @@ async def _run_turn_streamed(
         n_charts=len(chart_payloads),
     )
 
-    timer_t0 = time.perf_counter()
+    # ── turn_done after charts are emitted.
     ts = int(time.time() * 1000)
-    sess.emit("final", {
-        "turn_id": turn_id, "answer": answer_text, "flags": flags,
-        "timeline": timeline, "data_pull_request": _safe_dump(data_pull),
-    })
-    sess.emit("agent_message", {
-        "id": str(uuid.uuid4()), "role": "agent", "text": answer_text,
-        "timestamp": ts, "turn_id": turn_id,
-    })
     sess.emit("turn_done", {
         "turn_id": turn_id, "ended_at": ts,
         "duration_ms": ts - started_at, "outcome": "ok",
     })
-    turn_timer.record(
-        "final_sse_emit",
-        int((time.perf_counter() - timer_t0) * 1000),
-    )
 
     # Cache the answer for exact-match replay on identical follow-up
     # questions in this session. Skip when the run produced no real answer
@@ -1702,6 +1731,19 @@ async def _run_turn_streamed(
                          "answer_len": len(answer_text),
                          "entries_now": len(sess.qa_cache),
                          "entries_evicted": evicted_cache_entries})
+        # Snapshot CaseSession's cross-turn state to the trace DB so the
+        # viewer can show what the conversation "remembers" at end of turn:
+        # qa_cache, specialist_kb (with all KnowledgePoints), input_history.
+        # Failures are swallowed by the store; never breaks the turn.
+        if _NODE_TRACE_STORE is not None:
+            _NODE_TRACE_STORE.snapshot_session(
+                chat_id=sess.logger.session_id,
+                case_id=sess.case_id,
+                turn_id=turn_id,
+                qa_cache=sess.qa_cache,
+                specialist_kb=sess.specialist_kb,
+                input_history=sess.input_history,
+            )
         turn_timer.record(
             "qa_cache_store",
             int((time.perf_counter() - timer_t0) * 1000),
@@ -1983,20 +2025,12 @@ def _start_turn(case_id: str):
 
 @app.post("/api/cases/<case_id>/cancel-turn")
 def post_cancel_turn(case_id: str):
-    """Interrupt the currently in-flight turn without clearing session
-    history.
+    """Interrupt the in-flight turn AND fully rewind — as if the
+    stopped question was never asked.
 
-    Distinct from `/rewind` (which also wipes `qa_cache`, `input_history`,
-    `specialist_kb`): this endpoint is for the user who explicitly
-    pressed a Stop button while the system was still answering — they
-    want to abort the current LLM round and re-ask, but keep their
-    accumulated context. The cancellation uses the same aggressive
-    `loop.call_soon_threadsafe(task.cancel)` path as rewind, so an
-    in-flight LLM await is interrupted directly (typically sub-second).
-
-    Returns 200 with `{"status": "cancelled" | "no_turn_in_flight",
-    "task_cancel_dispatched": bool}` so the frontend can show the user
-    whether anything was actually interrupted.
+    Clears: specialist_kb (current turn's KPs), qa_cache (so re-asking
+    doesn't replay), input_history. Cancels the running task via
+    aggressive task.cancel() + cooperative signal.
     """
     try:
         sess = _get_or_create_session(case_id)
@@ -2004,15 +2038,13 @@ def post_cancel_turn(case_id: str):
         return jsonify({"error": str(exc)}), 404
 
     if not sess.turn_lock.locked():
-        # No turn in flight — nothing to cancel. Return 200 so the
-        # frontend doesn't surface a spurious error when the user
-        # double-clicks Stop after a turn just finished.
         sess.logger.log("cancel_turn_noop", {"case_id": case_id})
         return jsonify({
             "status": "no_turn_in_flight",
             "task_cancel_dispatched": False,
         }), 200
 
+    # Aggressive cancellation: inject CancelledError into the task
     cancelled_task = False
     inflight = sess.current_inflight
     if isinstance(inflight, tuple) and len(inflight) == 2:
@@ -2021,16 +2053,37 @@ def post_cancel_turn(case_id: str):
             loop.call_soon_threadsafe(task.cancel)
             cancelled_task = True
         except Exception:
-            # Loop already closed / task already done. The cooperative
-            # event is still our fallback path.
             pass
     sess.cancel_in_flight.set()
-    sess.logger.log("turn_cancelled_by_user", {
+
+    # Full rewind: clear all session state from the stopped turn
+    n_cached = len(sess.qa_cache)
+    sess.qa_cache.clear()
+    n_kb_total = sum(len(v) for v in sess.specialist_kb.values())
+    sess.specialist_kb.clear()
+    sess.input_history = []
+
+    # Clear rendered chart files
+    n_charts_cleared = 0
+    charts_dir = _REPORTS_DIR / case_id / "charts"
+    if charts_dir.exists():
+        for f in charts_dir.iterdir():
+            if f.is_file() and f.suffix in (".svg", ".png"):
+                try:
+                    f.unlink()
+                    n_charts_cleared += 1
+                except Exception:
+                    pass
+
+    sess.logger.log("turn_cancelled_and_rewound", {
         "case_id": case_id,
         "task_cancel_dispatched": cancelled_task,
+        "qa_cache_cleared": n_cached,
+        "kb_entries_cleared": n_kb_total,
+        "charts_cleared": n_charts_cleared,
     })
     return jsonify({
-        "status": "cancelled",
+        "status": "cancelled_and_rewound",
         "task_cancel_dispatched": cancelled_task,
     }), 200
 
@@ -2055,6 +2108,15 @@ def post_rewind(case_id: str):
     n_kb_specialists = len(sess.specialist_kb)
     n_kb_total = sum(len(v) for v in sess.specialist_kb.values())
     sess.specialist_kb.clear()
+    # Clear rendered chart files
+    charts_dir = _REPORTS_DIR / case_id / "charts"
+    if charts_dir.exists():
+        for f in charts_dir.iterdir():
+            if f.is_file() and f.suffix in (".svg", ".png"):
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
     # If a turn is in flight when the user rewinds, abort it on two
     # tracks (defense in depth):
     #   1. Aggressive: `loop.call_soon_threadsafe(task.cancel)`
@@ -2087,11 +2149,21 @@ def post_rewind(case_id: str):
                 # plausible cause.
                 pass
         sess.cancel_in_flight.set()
+    # Drop the trace rows for this CASE so the trace DB stays in sync
+    # with the conversation. Wipe by case_id (not chat_id) — each server
+    # process generates a fresh session_id, so clearing only the current
+    # session would leave prior-process traces stranded under old chat
+    # ids and the viewer would still show them. "Clear means clear" =
+    # this case's full history is gone.
+    trace_rows_cleared = 0
+    if _NODE_TRACE_STORE is not None:
+        trace_rows_cleared = _NODE_TRACE_STORE.delete_case(case_id)
     sess.logger.log("rewind", {
         "message_id": msg_id, "case_id": case_id,
         "qa_cache_entries_cleared": n_cached,
         "kb_specialists_cleared": n_kb_specialists,
         "kb_kps_cleared": n_kb_total,
+        "trace_rows_cleared": trace_rows_cleared,
         "aborted_in_flight_turn": aborted_in_flight,
         "task_cancel_dispatched": cancelled_task,
     })
@@ -2115,7 +2187,8 @@ def get_chart(case_id: str, filename: str):
     charts_dir = (_REPORTS_DIR / case_id / "charts").resolve()
     if not charts_dir.exists():
         abort(404)
-    return send_from_directory(charts_dir, filename, mimetype="image/png")
+    mimetype = "image/svg+xml" if filename.endswith(".svg") else "image/png"
+    return send_from_directory(charts_dir, filename, mimetype=mimetype)
 
 
 @app.get("/api/cases/<case_id>/stream")
@@ -2155,7 +2228,36 @@ def stream(case_id: str):
                              "Connection": "keep-alive"})
 
 
+def _start_trace_viewer() -> None:
+    """Launch the node-trace viewer on a background thread.
+
+    Shares the same NODE_TRACE_DB as the main server so traces appear
+    in real time without a separate ``python -m tools.node_trace.viewer``
+    process. Runs on port 3002 by default (override with TRACE_VIEWER_PORT).
+    Disable with TRACE_VIEWER_DISABLE=1.
+    """
+    if os.environ.get("TRACE_VIEWER_DISABLE") == "1":
+        return
+    if _NODE_TRACE_STORE is None:
+        return
+    try:
+        from tools.node_trace.viewer import app as viewer_app
+        viewer_port = int(os.environ.get("TRACE_VIEWER_PORT", "3002"))
+        viewer_app.config["NODE_TRACE_DB"] = _NODE_TRACE_DB_PATH
+        import threading
+        t = threading.Thread(
+            target=viewer_app.run,
+            kwargs=dict(host=HOST, port=viewer_port, debug=False),
+            daemon=True,
+        )
+        t.start()
+        print(f"[trace viewer] http://{HOST}:{viewer_port}  db={_NODE_TRACE_DB_PATH}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[trace viewer] failed to start: {exc}")
+
+
 if __name__ == "__main__":
+    _start_trace_viewer()
     print(f"[server] listening on http://{HOST}:{PORT}")
     # threaded=True so SSE streams + POST handlers don't block each other.
     # use_reloader=False because the bootstrap above is heavy and reloads cause double-init.

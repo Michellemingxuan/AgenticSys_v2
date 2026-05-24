@@ -188,7 +188,7 @@ def _render_specialist_output(payload):
     lines = []
     findings = payload.get("findings") or ""
     evidence = payload.get("evidence") or []
-    implications = payload.get("implications") or []
+    implications = payload.get("implications") or []  # legacy field, may be absent
     data_gaps = payload.get("data_gaps") or []
     raw_data = payload.get("raw_data") or {}
 

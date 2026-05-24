@@ -36,7 +36,7 @@ Notes:
 1. **ONE `summarize_trend` on the relevant output score** to spot the inflection. Default: `summarize_trend('model_scores', 'credit_loss_prob', 'trans_month', period='month', op='max')` (the CDSS column) or `tot_struct_risk_score` (TSR). The inflection month where the score steepens marks the ramp-up start; the latest month of the series is the end. Quote both dates in `evidence`. **One call. Don't loop multiple scores "to confirm."**
 2. **Use those dates as your window** on the spend / payment side via `start_date` / `end_date` on `summarize_*` calls.
 
-What NOT to do (this is what cost 210s on case-aefd66 turn `8dd591b465ef`):
+What NOT to do (this is what cost much time):
 - ❌ Probing `score_drivers` schema when you only need `model_scores`.
 - ❌ Trending two or three different output scores in sequence to "triangulate" the window — pick one, commit, move on.
 - ❌ Querying `model_scores` row-by-row via `query_table` to read individual score values.
