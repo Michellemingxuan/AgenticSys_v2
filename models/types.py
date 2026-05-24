@@ -45,14 +45,44 @@ class AnswerResult(BaseModel):
 
 
 class SpecialistOutput(BaseModel):
-    domain: str
-    question: str
-    mode: str  # "report" or "chat"
-    findings: str
-    evidence: list[str] = Field(default_factory=list)
-    implications: list[str] = Field(default_factory=list)
-    data_gaps: list[str] = Field(default_factory=list)
-    raw_data: dict = Field(default_factory=dict)
+    """Specialist's structured answer. Field descriptions are reflected
+    into the OpenAI structured-output schema, so they directly shape how
+    much the model emits per field. Every extra token = ~20ms of
+    generation wall-clock — keep brevity targets aggressive."""
+
+    domain: str = Field(description="Domain key (one word, e.g. 'spend_payments').")
+    mode: str = Field(description='"report" or "chat". Pick one word.')
+    findings: str = Field(
+        description=(
+            "The answer in ≤50 words (≤2 sentences). State the concrete "
+            "number, fact, or conclusion. NO restating the question, NO "
+            "'I observed', NO methodology preamble. Numbers > prose."
+        ),
+    )
+    evidence: list[str] = Field(
+        default_factory=list,
+        description=(
+            "≤3 bullets, ≤15 words each. Specific numbers / dates / "
+            "row counts that back the finding. Skip the list entirely if "
+            "findings already contains the key data points."
+        ),
+    )
+    data_gaps: list[str] = Field(
+        default_factory=list,
+        description=(
+            "≤1 bullet, ≤15 words. Flag only a gap that materially affects "
+            "THIS answer. Skip otherwise — do NOT enumerate generic "
+            "data-quality concerns."
+        ),
+    )
+    raw_data: dict = Field(
+        default_factory=dict,
+        description=(
+            "DO NOT POPULATE. Leave as the empty dict. This field exists "
+            "only for the rare audit case where raw rows are essential AND "
+            "not already in evidence — for normal questions, omit content."
+        ),
+    )
 
 
 class KnowledgePoint(BaseModel):
@@ -287,8 +317,14 @@ class FinalAnswer(BaseModel):
 
     answer: str
     flags: list[str] = Field(default_factory=list)
-    report_draft: ReportDraft | None = None
-    team_draft: TeamDraft | None = None
+    report_draft: ReportDraft | None = Field(
+        default=None,
+        description="DO NOT POPULATE — leave null. Provenance is extracted server-side.",
+    )
+    team_draft: TeamDraft | None = Field(
+        default=None,
+        description="DO NOT POPULATE — leave null. Provenance is extracted server-side.",
+    )
     timeline: list[dict] = Field(default_factory=list)
     data_pull_request: DataPullRequest | None = None
 

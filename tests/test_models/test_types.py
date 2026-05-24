@@ -21,11 +21,9 @@ def test_domain_skill_creation():
 def test_specialist_output_creation():
     output = SpecialistOutput(
         domain="bureau",
-        question="What is the delinquency trajectory?",
         mode="chat",
         findings="3 derog marks in last 12 months, score declining.",
         evidence=["bureau_full.derog_count = 3", "score dropped 680 → 620"],
-        implications=["Delinquency risk is elevated and worsening."],
         data_gaps=[],
         raw_data={"bureau_full": [{"score": 620, "derog_count": 3}]},
     )

@@ -34,9 +34,9 @@ async def test_balance_fallback_recovers_partial_drafts(tmp_path):
         evidence_excerpts=[], files_consulted=["report.md"],
     )
     specialist_output = SpecialistOutput(
-        domain="credit", question="Is this case high risk?", mode="chat",
+        domain="credit", mode="chat",
         findings="Risk score is elevated", evidence=["FICO 540"],
-        implications=["high default likelihood"], data_gaps=[],
+        data_gaps=[],
     )
 
     # Build mock ToolCallOutputItems. The agent.name links them to which tool fired.
