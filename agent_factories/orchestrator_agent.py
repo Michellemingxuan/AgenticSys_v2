@@ -65,57 +65,35 @@ def _compose_orchestrator_instructions(
     pillar_config: dict | None = None,
 ) -> str:
     parts = [
-        # Lead with the HARD GATE. Tight enough that no downstream reminder
-        # is needed; every load-bearing rule (count basis, both sides of
-        # the conditional, Round 2.5 re-answer on `corrected_specialist`,
-        # multi-correction collapse) is here.
+        # ── § PROTOCOL (applies to all rounds) ──────────────────────
         (
-            "★ HARD GATE — `general_specialist` is MANDATORY on 2+ domain "
-            "specialist turns, FORBIDDEN on 1-specialist turns ★\n"
-            "\n"
-            "Before FinalAnswer: count UNIQUE DOMAIN specialists called this "
-            "turn (exclude `report_agent` and `general_specialist`).\n"
-            "  • count = 1 → MUST NOT call `general_specialist` (adds 30-60s "
-            "for zero content — one specialist can't disagree with itself). "
-            "Finalize from the lone specialist + report_agent.\n"
-            "  • count ≥ 2 → MUST call `general_specialist` after Round 1. "
-            "Then scan its `resolved` entries: every entry with a non-null "
-            "`corrected_specialist` triggers a Round 2.5 re-invocation of "
-            "THAT specialist with the canonical value folded in. Multiple "
-            "corrections for the same specialist → ONE combined re-call. "
-            "THEN FinalAnswer using the post-correction outputs.\n"
-            "\n"
-            "Round protocol when count ≥ 2:\n"
-            "  R1 (parallel): domain specialists + report_agent in one "
-            "response. R2: general_specialist. R2.5 (conditional): "
-            "re-invoke specialists named in `resolved.corrected_specialist`. "
-            "R3: FinalAnswer.\n"
-            "\n"
-            "Round-2.5 sub-question shape: *\"Re-answer your earlier "
-            "question. General specialist verified <corrected_value> for "
-            "<what was checked> (canonical aggregate). Revise your "
-            "`findings` / `evidence` / `implications` against this canonical "
-            "value.\"*\n"
-            "\n"
-            "Emitting FinalAnswer without `general_specialist` on a 2+ turn, "
-            "or skipping a required Round 2.5, is a protocol violation."
-        ),
-        _load_skill(_WORKFLOW_DIR / "team_construction.md").body,
-        _load_skill(_WORKFLOW_DIR / "data_catalog.md").body,
-        _load_skill(_WORKFLOW_DIR / "synthesis.md").body,
-        (
-            "TOOL-USE DISCIPLINE (unconditional): Before emitting a "
-            "FinalAnswer you MUST have called BOTH (1) report_agent and "
-            "(2) at least one domain specialist tool. No loopholes — "
-            "report_agent text alone is never sufficient grounding, even "
-            "with coverage='explicit'. If no specialist seems directly "
-            "relevant, pick the closest one and let it return a data_gap. "
-            "Every FinalAnswer claim must trace to a tool result this run "
-            "produced; never answer from schema inference or general "
-            "knowledge.\n\n"
+            "§ PROTOCOL\n\n"
+            "★ HARD GATE — `general_specialist` rules ★\n"
+            "Count UNIQUE DOMAIN specialists called this turn "
+            "(exclude `report_agent` and `general_specialist`).\n\n"
+            "  • count = 1 → DO NOT call `general_specialist`. Go directly "
+            "to FinalAnswer after R1. Report-vs-specialist conflicts are "
+            "resolved by YOU in synthesis, NOT by general_specialist.\n"
+            "  • count ≥ 2 → MUST call `general_specialist` after R1 to "
+            "compare DOMAIN specialists against each other (NOT against "
+            "report_agent). Then scan `resolved.corrected_specialist` → "
+            "re-invoke.\n\n"
+            "Round protocol:\n"
+            "  1 specialist:  R1 → specialist + report_agent → R2 → FinalAnswer\n"
+            "  2+ specialists: R1 → specialists + report_agent → R2 → "
+            "general_specialist → R3 → FinalAnswer\n\n"
+            "TOOL-USE DISCIPLINE: Before FinalAnswer, MUST have called "
+            "BOTH (1) report_agent and (2) at least one domain specialist. "
             "PARALLEL EXECUTION: Emit report_agent + every domain "
             "specialist in a SINGLE response so they run in parallel."
         ),
+        # ── § SYNTHESIS (how to produce FinalAnswer — read every round) ─
+        "§ SYNTHESIS\n\n" + _load_skill(_WORKFLOW_DIR / "synthesis.md").body,
+        # ── § R1 REFERENCE (routing + catalog — skip when synthesizing) ─
+        "§ R1 REFERENCE (team selection + data catalog — skip when synthesizing)\n\n"
+        + _load_skill(_WORKFLOW_DIR / "team_construction.md").body
+        + "\n\n---\n\n"
+        + _load_skill(_WORKFLOW_DIR / "data_catalog.md").body,
     ]
     # Pillar-wide concept glossary (consumer/commercial, balance/spend, etc.)
     # — same content the specialists see, so orchestrator routing decisions
@@ -124,7 +102,7 @@ def _compose_orchestrator_instructions(
         parts.append(str(pillar_config["concept_glossary"]).strip())
     if specialists:
         parts.append(_render_team_roster(specialists, catalog=catalog))
-    return "\n\n---\n\n".join(parts)
+    return "\n\n────────────────────────────────────────\n\n".join(parts)
 
 
 def _describe_specialist(agent: Agent) -> str:
@@ -175,11 +153,29 @@ def build_orchestrator_agent(
         description="Compare specialist outputs and surface contradictions.",
     ))
 
+    full_prompt = _compose_orchestrator_instructions(
+        specialists=specialists, catalog=catalog, pillar_config=pillar_config
+    )
+    # Build a lean synthesis-only prompt for R2+ (drops the 9687-char
+    # R1 REFERENCE section). The SDK calls get_system_prompt per-round,
+    # so we detect round via _domain_specialists_called on AppContext.
+    sep = "\n\n────────────────────────────────────────\n\n"
+    sections = full_prompt.split(sep)
+    synthesis_prompt = sep.join(
+        s for s in sections
+        if not s.strip().startswith("§ R1 REFERENCE")
+    )
+
+    def _dynamic_instructions(ctx, agent):
+        app_ctx = ctx.context if ctx else None
+        called = getattr(app_ctx, "_domain_specialists_called", None)
+        if isinstance(called, set) and len(called) > 0:
+            return synthesis_prompt
+        return full_prompt
+
     return Agent(
         name="orchestrator",
-        instructions=_compose_orchestrator_instructions(
-            specialists=specialists, catalog=catalog, pillar_config=pillar_config
-        ),
+        instructions=_dynamic_instructions,
         tools=tools,
         # FinalAnswer has Optional fields (report_draft, team_draft, etc.)
         # which OpenAI's strict JSON schema rejects. Disable strict mode.
@@ -193,32 +189,20 @@ def build_orchestrator_agent(
         # SDK default, so after the first tool call this auto-flips back to
         # ``"auto"`` and the agent can synthesize the FinalAnswer normally.
         #
-        # ``max_tokens=4096``: the orchestrator's FinalAnswer carries the
-        # narrative answer + flags. Previously 8192 to avoid truncation,
-        # but on simple 1-specialist questions ("how many successful
-        # payments") the synthesis step was taking 20+s — the model was
-        # using most of the budget. The synthesis skill targets 6-12
-        # lines of markdown which fits comfortably in 4096 tokens; the
-        # Pydantic schema-validation failure mode (a long FinalAnswer
-        # JSON truncated mid-emit) is also caught by the orchestrator
-        # retry loop in server.py, so this cap is safe.
-        # 4096 keeps p95 synthesis time well under 10s on typical
-        # 1-specialist turns while leaving headroom for multi-specialist
-        # synthesis with `flags` / `cross_domain_insights` lists.
+        # ``max_tokens=2000``: FinalAnswer = answer (6-12 lines markdown,
+        # ~200-600 tokens) + flags (0-3 bullets) + data_pull_request
+        # (optional, ~50 tokens). Fast-path 1-specialist answers are
+        # 30-50 tokens. 2000 covers the p99 multi-specialist synthesis
+        # while cutting generation time on simple questions (~40% faster
+        # than 4096 at 50 tok/s). Truncation is caught by the server
+        # retry loop.
         #
         # ``parallel_tool_calls=True``: opts into OpenAI's parallel function
         # calling — the model may emit multiple ``function_call`` items in a
-        # SINGLE assistant message, and the SDK runs them concurrently. The
-        # ROUND 1 protocol above explicitly relies on this (report_agent +
-        # all domain specialists on the same turn). Without the explicit
-        # flag the default is model-defined and we observed gpt-4.1 sometimes
-        # serializing calls one-per-turn — case 366132845011 spent 31s + 106s
-        # on spend_payments → modeling in strict cascade rather than max(31,
-        # 106) in parallel. tool_choice="required" doesn't block
-        # parallelism; it requires AT LEAST one tool call, not exactly one.
+        # SINGLE assistant message, and the SDK runs them concurrently.
         model_settings=ModelSettings(
             tool_choice="required",
             parallel_tool_calls=True,
-            max_tokens=4096,
+            max_tokens=2000,
         ),
     )

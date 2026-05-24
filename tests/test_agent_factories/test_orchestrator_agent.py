@@ -23,6 +23,12 @@ def test_build_orchestrator_agent_wires_all_tools():
     assert agent.output_type.output_type is FinalAnswer
     # 2 specialists + report_agent + general_specialist = 4 tools
     assert len(agent.tools) == 4
-    # Instructions absorb the four workflow skills
-    for keyword in ["specialist", "synthes", "balanc"]:
-        assert keyword in agent.instructions.lower()
+    # Instructions is now a dynamic callable — test that it returns a string
+    assert callable(agent.instructions)
+    from unittest.mock import MagicMock
+    mock_ctx = MagicMock()
+    mock_ctx.context = MagicMock()
+    mock_ctx.context._domain_specialists_called = set()
+    prompt = agent.instructions(mock_ctx, agent)
+    for keyword in ["specialist", "synthes"]:
+        assert keyword in prompt.lower()

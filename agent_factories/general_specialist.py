@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agents import Agent, AgentOutputSchema
+from agents import Agent, AgentOutputSchema, ModelSettings
 from models.types import ReviewReport
 from skills.loader import load_skill as _load_skill
 from tools.data_tools import (
@@ -13,19 +13,17 @@ from tools.data_tools import (
     get_table_schema,
     list_available_tables,
 )
-from tools.data_viz_tools import build_make_chart_tool
+from tools.data_viz_tools import build_make_chart_tool, get_chart_guidance
 
 
 _WORKFLOW_DIR = Path(__file__).parent.parent / "skills" / "workflow"
 
 
 COMPARE_SYSTEM_PROMPT = _load_skill(_WORKFLOW_DIR / "comparison.md").body
-# Shared chart-construction rules — same skill the domain specialists
-# read. Composed AFTER comparison.md so the comparison-skill's
-# cross-domain pointer is followed by the kind-picking / multi-series /
-# threshold rules without duplication.
-_DATA_VIZ_INSTRUCTIONS = _load_skill(_WORKFLOW_DIR / "data_viz.md").body
-_FULL_INSTRUCTIONS = COMPARE_SYSTEM_PROMPT + "\n\n" + _DATA_VIZ_INSTRUCTIONS
+# data_viz.md is NOT composed here. The agent calls `get_chart_guidance`
+# (a function-tool) on demand when it decides to plot — keeps the default
+# system prompt ~7.9 KB lighter for the common case (no chart).
+_FULL_INSTRUCTIONS = COMPARE_SYSTEM_PROMPT
 
 
 def build_general_specialist(model) -> Agent:
@@ -52,7 +50,12 @@ def build_general_specialist(model) -> Agent:
             aggregate_column,
             batch_aggregate,
             make_chart,
+            get_chart_guidance,
         ],
         output_type=AgentOutputSchema(ReviewReport, strict_json_schema=False),
         model=model,
+        # Cap output to keep cross-domain reviewer responses focused.
+        # ReviewReport is a single answer + evidence list — fits in 1200
+        # tokens comfortably; cap prevents over-thinking on simple cases.
+        model_settings=ModelSettings(max_tokens=1200),
     )

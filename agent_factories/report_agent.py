@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agents import Agent, AgentOutputSchema
+from agents import Agent, AgentOutputSchema, ModelSettings
 from models.types import ReportDraft
 from skills.loader import load_skill as _load_skill
 from tools.fs_tools import fs_list_files, fs_read_file
@@ -39,17 +39,18 @@ You are the Report Agent. Your job is to scan a case folder for prior curated
 reports (markdown files), decide which are relevant to the question, read
 them, and produce a ReportDraft.
 
-You have two tools:
-- fs_list_files() — list files in the case folder
-- fs_read_file(filename) — read a named file
+You have two tools: fs_list_files, fs_read_file.
 
 Workflow:
-1. Call fs_list_files to see what's available.
-2. Decide coverage and which files are relevant per the rubric below.
-3. Read the relevant files via fs_read_file.
-4. Produce a ReportDraft with: answer (synthesized), coverage (explicit |
-   implicit | not_mentioned), evidence_excerpts (verbatim quotes),
-   files_consulted (list of filenames you actually read).
+1. Your input includes a file list (`[Case folder files: ...]`). Use the
+   Coverage rubric's **Concept → file** table below to pick the 1-2 files
+   most relevant to the question. Skip fs_list_files — you already have
+   the list.
+2. Call fs_read_file on the relevant file(s) — batch them in ONE round.
+   Read at most 2 files. If unsure, include `executive_summary_exp_0.md`
+   as one of the two.
+3. Emit ReportDraft immediately from what you read. Do NOT read more files
+   "for context."
 
 If the folder is empty or no file is relevant, return
 coverage="not_mentioned" with an empty answer and empty files_consulted.
@@ -84,4 +85,8 @@ def build_report_agent(model) -> Agent:
         tools=[fs_list_files, fs_read_file],
         output_type=AgentOutputSchema(ReportDraft, strict_json_schema=False),
         model=model,
+        # Report drafts are narrative + evidence excerpts — slightly more
+        # room than the data specialists (1200) but still well below the
+        # default. A typical ReportDraft is ~600-1500 tokens.
+        model_settings=ModelSettings(max_tokens=2000, parallel_tool_calls=True),
     )

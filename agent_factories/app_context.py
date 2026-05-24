@@ -27,6 +27,10 @@ class AppContext:
     # to append failure flags to the FinalAnswer so the reviewer sees the
     # actual cause instead of a silent "specialist did not return".
     _specialist_errors: list[dict] = field(default_factory=list)
+    # Names of domain specialists that have been called this turn. Used by
+    # the redacting_tool guard to block general_specialist when < 2 domain
+    # specialists ran (programmatic enforcement of the HARD GATE).
+    _domain_specialists_called: set = field(default_factory=set)
     # Per-specialist KNOWLEDGE BASE — survives across turns within a case
     # session. Keyed by specialist name; each value is a chronological list of
     # KnowledgePoint dicts (Pydantic-dumped). The list is owned by
@@ -61,3 +65,11 @@ class AppContext:
     # active session (tests, notebooks); tools must guard the call.
     # Signature: `_emit_event(event_name: str, payload: dict) -> None`.
     _emit_event: Callable[[str, dict], None] | None = None
+    # NodeTraceStore handle threaded through so redacting_tool wrappers can
+    # open per-specialist + per-distiller NodeTrace blocks without reaching
+    # for a global. None outside an active server session.
+    _node_trace_store: Any = None
+    # Data catalog reference — used by the post-distillation fill step to
+    # auto-inject risk_threshold values into KP numbers from structured
+    # profile metadata (no LLM extraction needed).
+    _catalog: Any = None
