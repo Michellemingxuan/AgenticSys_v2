@@ -411,8 +411,7 @@ def test_format_kb_digest_empty_when_no_kps():
 
 
 def test_format_kb_digest_renders_active_set_only():
-    """The digest must reflect the active set (latest per topic), not the
-    raw audit log. Confidence levels appear as bracketed tags."""
+    """The digest lists active topic names and points to kb_lookup tools."""
     kps = [
         {"topic": "fico_trajectory", "claim": "FICO 720→680 over 6 months",
          "confidence": "high", "source_call": "summarize_trend('bureau','fico_score',...)"},
@@ -420,10 +419,9 @@ def test_format_kb_digest_renders_active_set_only():
          "confidence": "medium"},
     ]
     digest = _format_kb_digest(kps)
-    assert "fico_trajectory" in digest
-    assert "(revised)" in digest          # the active claim is the newer one
-    assert "FICO 720→680" not in digest   # the older claim is hidden
-    assert "[medium]" in digest
+    assert "fico_trajectory" in digest    # topic name shown
+    assert "kb_lookup" in digest          # points to lookup tool
+    assert "1 cached" in digest           # deduped to 1 active topic
 
 
 def test_compact_specialist_history_elides_old_tool_outputs_only():
@@ -484,7 +482,7 @@ async def test_redacting_tool_prepends_kb_digest_when_no_intra_turn_history():
     forwarded = captured_inputs[0]
     assert isinstance(forwarded, str)
     # The KB preface must be present along with the new question.
-    assert "YOUR KNOWLEDGE BASE" in forwarded
+    assert "[KB:" in forwarded
     assert "delinquency_breaches" in forwarded
     assert "show me the delinquency trajectory" in forwarded
     # Section divider keeps the digest distinguishable from the question.

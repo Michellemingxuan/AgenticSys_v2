@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import hashlib
 import json
 import time
 import traceback
@@ -12,19 +14,19 @@ from agents.exceptions import AgentsException, MaxTurnsExceeded
 
 from logger.process_timer import ProcessTimer
 from llm.firewall_stack import LLM_CALL_KIND, redact_payload, sanitize_message
+from tools.node_trace import _open_node, attach_extra, attach_tag
 from tools.viz_renderer import kp_to_vega_spec, render_chart
 
 
-# Inner-specialist turn budget. SDK default is 10. 25 was previously
-# used to cover data-heavy questions, but in practice the model uses
-# the full budget even on narrow count-type questions ("how many
-# successful payments"), driving 90-180s specialist runtime. 15 is
-# the sweet spot: data-heavy questions still get schema probe + 3-4
-# month-by-month aggregates + 1-2 charts (≈ 8-12 turns), while
-# runaway exploration is capped at ~45s wall-clock instead of 150s.
-# Specialist prompt (`data_query.md`) was updated alongside this to
-# explicitly encourage tool-call frugality.
-_SPECIALIST_MAX_TURNS = 15
+# Inner-specialist turn budget. SDK default is 10. Lowered from 15 → 6
+# after measuring real traces: data specialists were consistently using
+# 2-3 rounds with the system_prompt batching guidance, and the rare
+# 4th round was almost always over-exploration that didn't improve the
+# answer. 6 gives a small safety margin for genuinely hard questions
+# while shaving ~25-30s off the wall-clock outliers. Pair with the
+# "emit final output ASAP" rule in data_query.md — together they
+# discourage the model from looping past a clear answer.
+_SPECIALIST_MAX_TURNS = 6
 
 # Wall-clock budget per specialist call. Bounds hangs from stalled LLM /
 # transport layers that ``max_turns`` alone can't catch. 240s is generous
@@ -71,32 +73,60 @@ def _active_kps(kps: list[dict]) -> list[dict]:
 
 
 def _format_kb_digest(kps: list[dict]) -> str:
-    """Render the active KP set as a preface the specialist reads before
-    answering. Empty string when there's nothing to surface.
+    """Render a short KB hint pointing to the lookup tools.
 
-    The digest is intentionally short (one line per active KP) — its job is
-    to keep the specialist from re-running the same `summarize_trend` call
-    when the answer is already on file, NOT to replay every detail. The
-    specialist can still re-query when verification is needed.
+    Instead of dumping all KP claims into the input (which inflates token
+    count on follow-up turns), we list topic names only and tell the
+    specialist to use kb_lookup(topic) for details.
     """
     active = _active_kps(kps)
     if not active:
         return ""
-    lines = [
-        "[YOUR KNOWLEDGE BASE — facts established earlier this session.",
-        "Refer to these BEFORE re-running queries; only re-query when the new",
-        "question goes beyond what's recorded here, or when a value needs",
-        "verification.]",
-        "",
-    ]
-    for kp in active:
-        confidence = kp.get("confidence") or "medium"
-        line = f"- **{kp['topic']}** [{confidence}]: {kp['claim']}"
-        src = kp.get("source_call")
-        if src:
-            line += f"  _via `{src}`_"
-        lines.append(line)
-    return "\n".join(lines)
+    topics = [kp.get("topic", "?") for kp in active]
+    return (
+        f"[KB: {len(active)} cached topics from earlier turns: "
+        f"{', '.join(topics)}. "
+        f"Call kb_lookup(topic) to get cached data before re-querying. "
+        f"Call kb_list_topics() to see all cached claims.]"
+    )
+
+
+# Keywords that signal series/trend/concentration data — the kind the
+# distiller actually extracts into chartable KPs. These come from tool
+# outputs (summarize_trend summary block, summarize_by_group concentration
+# block) and are reliable markers that the output is worth distilling.
+# Without these, the specialist used scalar tools (aggregate_column) or
+# query_table row dumps — in either case the distiller consistently
+# returns empty knowledge_points and wastes 10-20s.
+_SERIES_KEYWORDS = frozenset({
+    "slope", "peak", "trough", "pct_change", "coefficient",
+    "hhi", "top1_share", "top3_share", "concentration",
+    "trend", "trajectory", "missing_periods",
+})
+
+
+def _is_narrow_output(specialist_output, sub_question: str = "") -> bool:
+    """Detect narrow specialist outputs (simple counts, yes/no) where
+    distillation costs 10-20s LLM round-trip but yields 0 knowledge points.
+
+    Two-gate check:
+    1. Series keywords in findings+evidence → always distill (the
+       distiller extracts chartable KPs from these)
+    2. No series keywords + short findings → narrow, skip distiller
+    """
+    if not hasattr(specialist_output, "findings"):
+        return False
+    findings = getattr(specialist_output, "findings", "") or ""
+    evidence = getattr(specialist_output, "evidence", None) or []
+
+    all_text = (findings + " " + " ".join(
+        e for e in evidence if isinstance(e, str)
+    )).lower()
+
+    if any(kw in all_text for kw in _SERIES_KEYWORDS):
+        return False
+
+    return len(findings) <= 150
 
 
 def _compact_specialist_history(
@@ -143,8 +173,542 @@ def _compact_specialist_history(
     return compacted, stats
 
 
+@dataclasses.dataclass
+class _ParsedSeries:
+    """A parsed data series with optional column-name metadata."""
+    lookup: dict  # {period_or_group: value}
+    column_name: str  # from batch_summarize_trend's value_column, or ""
+    key_field: str  # "period" or "group" or "merchant"
+
+
+def _parse_series_from_tool_outputs(tool_outputs_text: str) -> list[_ParsedSeries]:
+    """Parse JSON tool outputs and extract data series with metadata.
+
+    Returns a list of _ParsedSeries, each with:
+    - lookup: {period_or_group: value} for fast point access
+    - column_name: the value_column from batch_summarize_trend (for
+      matching to y_fields), or "" if unknown
+    - key_field: "period" or "group"
+    """
+    results: list[_ParsedSeries] = []
+    if not tool_outputs_text:
+        return results
+
+    def _extract_json_objects(text: str):
+        decoder = json.JSONDecoder()
+        idx = 0
+        while idx < len(text):
+            pos = text.find("{", idx)
+            if pos == -1:
+                break
+            try:
+                obj, end = decoder.raw_decode(text, pos)
+                if isinstance(obj, dict):
+                    yield obj
+                idx = end
+            except json.JSONDecodeError:
+                idx = pos + 1
+
+    def _series_to_parsed(series: list[dict], column_name: str = "") -> _ParsedSeries | None:
+        if not series or not isinstance(series[0], dict):
+            return None
+        key_field = None
+        for candidate in ("period", "group", "merchant"):
+            if series[0].get(candidate) is not None:
+                key_field = candidate
+                break
+        if not key_field:
+            return None
+        lookup = {}
+        for row in series:
+            k = row.get(key_field)
+            # Prefer raw_value (numeric) over value (formatted string)
+            v = row.get("raw_value") or row.get("value")
+            if k is not None and v is not None:
+                lookup[k] = v
+        return _ParsedSeries(lookup=lookup, column_name=column_name,
+                             key_field=key_field) if lookup else None
+
+    for parsed in _extract_json_objects(tool_outputs_text):
+        # summarize_trend: {series: [...], summary: {...}}
+        s = parsed.get("series")
+        if isinstance(s, list) and len(s) >= 2:
+            ps = _series_to_parsed(s)
+            if ps:
+                results.append(ps)
+
+        # batch_summarize_trend: {results: [{value_column, result: "<json>"}, ...]}
+        # Note: each result's "result" field is a JSON STRING (from
+        # _summarize_trend_impl), not a nested dict. Must parse it.
+        batch = parsed.get("results")
+        if isinstance(batch, list):
+            for r in batch:
+                if not isinstance(r, dict):
+                    continue
+                col = r.get("value_column", "")
+                # Try direct "series" key first (future-proofing)
+                s = r.get("series")
+                # If not found, parse the "result" string
+                if s is None and isinstance(r.get("result"), str):
+                    try:
+                        inner = json.loads(r["result"])
+                        s = inner.get("series") if isinstance(inner, dict) else None
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+                if isinstance(s, list) and len(s) >= 2:
+                    ps = _series_to_parsed(s, column_name=str(col))
+                    if ps:
+                        results.append(ps)
+
+        # summarize_by_group: {groups: [...], concentration: {...}}
+        g = parsed.get("groups")
+        if isinstance(g, list) and len(g) >= 2:
+            ps = _series_to_parsed(g)
+            if ps:
+                results.append(ps)
+
+    return results
+
+
+def _values_match(a: float, b: float) -> bool:
+    """Compare two numeric values with relative + absolute tolerance."""
+    try:
+        a, b = float(a), float(b)
+    except (TypeError, ValueError):
+        return False
+    if a == b:
+        return True
+    denom = max(abs(a), abs(b), 1e-9)
+    return abs(a - b) / denom < 0.001  # 0.1% relative tolerance
+
+
+def _fill_kp_numbers(kp_dict: dict, parsed_series: list[_ParsedSeries]) -> None:
+    """Fill or construct KP numbers from parsed tool output series.
+
+    Three modes:
+    1. **numbers is empty** + viz has y_fields → construct full array.
+    2. **numbers has rows with nulls** → fill from matched series.
+    3. **numbers is complete** → no-op.
+
+    Matching priority for assigning a parsed series to a y_field:
+    1. column_name match (from batch_summarize_trend's value_column)
+    2. Anchor-value match (compare known non-null values at same periods)
+    3. Order fallback (assign remaining unmatched series in order)
+    """
+    numbers = kp_dict.get("numbers")
+    viz = kp_dict.get("viz") or {}
+    y_fields = viz.get("y_fields") or []
+
+    if not parsed_series:
+        return
+
+    # Determine the key field
+    key_field = None
+    source = numbers[0] if numbers and isinstance(numbers[0], dict) else None
+    if source is None and parsed_series:
+        key_field = parsed_series[0].key_field
+    else:
+        for candidate in ("period", "group", "merchant"):
+            if source and source.get(candidate) is not None:
+                key_field = candidate
+                break
+    if not key_field:
+        return
+
+    # Filter to series with matching key_field
+    matching = [ps for ps in parsed_series if ps.key_field == key_field]
+    if not matching:
+        return
+
+    def _match_series_to_fields(
+        fields: list[str],
+        series: list[_ParsedSeries],
+        anchor_data: dict[str, dict] | None = None,
+    ) -> dict[str, _ParsedSeries]:
+        """Assign each y_field to a parsed series. Priority:
+        1. column_name exact match
+        2. Anchor-value match (if anchor_data provided)
+        3. Order fallback
+        """
+        result: dict[str, _ParsedSeries] = {}
+        used: set[int] = set()
+
+        # Pass 1: column_name match
+        for f in fields:
+            for i, ps in enumerate(series):
+                if i in used:
+                    continue
+                if ps.column_name and ps.column_name == f:
+                    result[f] = ps
+                    used.add(i)
+                    break
+
+        # Pass 2: anchor-value match
+        if anchor_data:
+            for f in fields:
+                if f in result:
+                    continue
+                known = anchor_data.get(f, {})
+                if not known:
+                    continue
+                best_ps = None
+                best_matches = 0
+                for i, ps in enumerate(series):
+                    if i in used:
+                        continue
+                    matches = sum(
+                        1 for k, v in known.items()
+                        if k in ps.lookup and _values_match(ps.lookup[k], v)
+                    )
+                    if matches > best_matches:
+                        best_matches = matches
+                        best_ps = ps
+                        best_idx = i
+                if best_ps and best_matches > 0:
+                    result[f] = best_ps
+                    used.add(best_idx)
+
+        # Pass 3: order fallback for remaining unmatched fields
+        remaining_series = [ps for i, ps in enumerate(series) if i not in used]
+        remaining_fields = [f for f in fields if f not in result]
+        for f, ps in zip(remaining_fields, remaining_series):
+            result[f] = ps
+
+        return result
+
+    # ── Mode 1: construct numbers from scratch ──
+    if not numbers and y_fields:
+        field_map = _match_series_to_fields(y_fields, matching)
+        if not field_map:
+            return
+
+        # Collect all unique keys in temporal/natural order
+        all_keys: list = []
+        seen: set = set()
+        for ps in field_map.values():
+            for k in ps.lookup:
+                if k not in seen:
+                    all_keys.append(k)
+                    seen.add(k)
+
+        built = []
+        for k in all_keys:
+            row: dict = {key_field: k}
+            for yf in y_fields:
+                ps = field_map.get(yf)
+                row[yf] = ps.lookup.get(k) if ps else None
+            built.append(row)
+        kp_dict["numbers"] = built
+        return
+
+    if not numbers:
+        return
+
+    # ── Mode 2: fill nulls in existing numbers ──
+    value_fields = y_fields or [
+        k for k in numbers[0]
+        if k != key_field and not k.startswith("threshold")
+    ]
+
+    has_nulls = any(
+        row.get(f) is None
+        for row in numbers if isinstance(row, dict)
+        for f in value_fields
+    )
+    if not has_nulls:
+        return
+
+    # Build anchor data for matching
+    anchor_data: dict[str, dict] = {}
+    for field in value_fields:
+        known = {}
+        for row in numbers:
+            if isinstance(row, dict) and row.get(field) is not None:
+                known[row[key_field]] = row[field]
+        if known:
+            anchor_data[field] = known
+
+    field_map = _match_series_to_fields(value_fields, matching, anchor_data)
+
+    # Fill nulls
+    for row in numbers:
+        if not isinstance(row, dict):
+            continue
+        k = row.get(key_field)
+        if k is None:
+            continue
+        for field in value_fields:
+            if row.get(field) is not None:
+                continue
+            ps = field_map.get(field)
+            if ps and k in ps.lookup:
+                row[field] = ps.lookup[k]
+
+
+async def _auto_chart_from_tool_outputs(
+    app_ctx, name: str, tool_outputs: str,
+) -> int:
+    """Render charts from specialist tool outputs — no LLM needed.
+
+    Parses summarize_trend / batch_summarize_trend / summarize_by_group
+    results, determines the chart kind from the data shape, injects
+    thresholds from the catalog, and renders. Runs as a fire-and-forget
+    task in parallel with the distiller.
+    """
+    from tools.viz_renderer import kp_to_vega_spec, render_chart
+
+    logger = getattr(app_ctx, "logger", None)
+    kb = getattr(app_ctx, "_specialist_kb", None)
+    case_folder = getattr(app_ctx, "case_folder", None)
+    turn_id = getattr(app_ctx, "_turn_id", None)
+    catalog = getattr(app_ctx, "_catalog", None)
+
+    if kb is None or case_folder is None:
+        if logger:
+            logger.log("auto_chart_skipped", {
+                "specialist": name, "reason": "no_kb_or_case_folder"})
+        return 0
+
+    try:
+        parsed = _parse_series_from_tool_outputs(tool_outputs)
+    except Exception as exc:
+        if logger:
+            logger.log("auto_chart_parse_failed", {
+                "specialist": name, "error": str(exc)[:200]})
+        return 0
+
+    if not parsed:
+        if logger:
+            logger.log("auto_chart_skipped", {
+                "specialist": name, "reason": "no_series_parsed",
+                "tool_outputs_chars": len(tool_outputs)})
+        return 0
+
+    # Group series by key_field type (period vs group)
+    trend_series = [ps for ps in parsed if ps.key_field == "period"]
+    group_series = [ps for ps in parsed if ps.key_field in ("group", "merchant")]
+
+    if logger:
+        logger.log("auto_chart_series_parsed", {
+            "specialist": name,
+            "n_trend_series": len(trend_series),
+            "n_group_series": len(group_series),
+            "column_names": [ps.column_name for ps in parsed],
+            "series_sizes": [len(ps.lookup) for ps in parsed],
+        })
+
+    charts_rendered = 0
+    charts_dir = Path(case_folder) / "charts"
+
+    try:
+        charts_rendered = _render_auto_charts(
+            trend_series, group_series, name, charts_dir,
+            kb, turn_id, catalog, logger,
+        )
+    except Exception as exc:  # noqa: BLE001
+        if logger:
+            logger.log("auto_chart_failed", {
+                "specialist": name,
+                "error_type": type(exc).__name__,
+                "error": str(exc)[:300],
+            })
+
+    if charts_rendered and logger:
+        logger.log("auto_chart_rendered", {
+            "specialist": name,
+            "n_charts": charts_rendered,
+            "turn_id": turn_id,
+        })
+    return charts_rendered
+
+
+def _render_auto_charts(
+    trend_series, group_series, name, charts_dir,
+    kb, turn_id, catalog, logger,
+) -> int:
+    from tools.viz_renderer import kp_to_vega_spec, render_chart
+
+    charts_rendered = 0
+
+    # ── Trend charts ──
+    # Build chart groups:
+    #   1 series → single "trend" chart
+    #   2 series → "trend_dual" (side-by-side comparison)
+    #   3+ series → individual "trend" charts (separate tabs in the UI)
+    if trend_series:
+        if len(trend_series) == 2:
+            # Dual-axis: combine into one chart
+            chart_groups = [("trend_dual", trend_series)]
+        elif len(trend_series) >= 3:
+            # Individual charts — each series gets its own plot/tab
+            chart_groups = [("trend", [ps]) for ps in trend_series]
+        else:
+            chart_groups = [("trend", trend_series)]
+
+        for kind, group in chart_groups:
+            y_fields = []
+            for i, ps in enumerate(group):
+                y_fields.append(ps.column_name or (
+                    "value" if len(group) == 1 else f"series_{i}"))
+
+            if len(group) == 1 and group[0].column_name:
+                topic = f"{name}_{group[0].column_name}_trend"
+            elif len(group) == 2:
+                cols = "_".join(ps.column_name for ps in group if ps.column_name)
+                topic = f"{name}_{cols}_trajectory" if cols else f"{name}_dual_trend"
+            else:
+                topic = f"{name}_trend"
+
+            # Build points array
+            all_periods: list = []
+            seen: set = set()
+            for ps in group:
+                for k in ps.lookup:
+                    if k not in seen:
+                        all_periods.append(k)
+                        seen.add(k)
+
+            points = []
+            for period in all_periods:
+                row: dict = {"period": period}
+                for i, ps in enumerate(group):
+                    row[y_fields[i]] = ps.lookup.get(period)
+                points.append(row)
+
+            if len(points) < 4:
+                continue
+
+            # Inject thresholds from catalog
+            if catalog and hasattr(catalog, "get_thresholds"):
+                for table_name in catalog.list_tables():
+                    thresholds = catalog.get_thresholds(table_name)
+                    for yf in y_fields:
+                        th_key = f"threshold_{yf}" if len(y_fields) > 1 else "threshold"
+                        if yf in thresholds and not any(
+                            p.get(th_key) is not None for p in points
+                        ):
+                            for p in points:
+                                p[th_key] = thresholds[yf]["value"]
+
+            # Build informative claim + source_call from data
+            first_period = points[0]["period"] if points else "?"
+            last_period = points[-1]["period"] if points else "?"
+            claim_parts = []
+            source_parts = []
+            for yf in y_fields:
+                vals = [p.get(yf) for p in points if p.get(yf) is not None]
+                if vals:
+                    first_v = vals[0]
+                    last_v = vals[-1]
+                    peak_v = max(vals)
+                    trough_v = min(vals)
+                    claim_parts.append(
+                        f"{yf}: {first_v} → {last_v} "
+                        f"(peak {peak_v}, trough {trough_v})"
+                    )
+                source_parts.append(
+                    f"summarize_trend('{yf}', period='month')"
+                )
+            claim = (
+                f"{first_period} to {last_period}: "
+                + "; ".join(claim_parts)
+            ) if claim_parts else f"{name} trend over {len(points)} periods"
+
+            kp_dict = {
+                "topic": topic,
+                "claim": claim,
+                "numbers": points,
+                "viz": {"kind": kind, "x_field": "period", "y_fields": y_fields},
+                "source_call": ", ".join(source_parts),
+                "captured_at_turn": turn_id,
+                "confidence": "high",
+            }
+            spec = kp_to_vega_spec(kp_dict)
+            if spec:
+                kp_dict["vega_spec"] = spec
+            img_path = render_chart(kp_dict, charts_dir, turn_id=turn_id, logger=logger)
+            if img_path:
+                kp_dict["image_path"] = img_path
+                kb.setdefault(name, []).append(kp_dict)
+                charts_rendered += 1
+
+    # ── Group/bar charts ──
+    for ps in group_series:
+        if len(ps.lookup) < 4:
+            continue
+
+        def _to_num(v):
+            if isinstance(v, (int, float)):
+                return v
+            try:
+                s = str(v).replace(",", "").replace("$", "").strip()
+                return float(s) if s else 0
+            except (ValueError, TypeError):
+                return 0
+
+        points = [
+            {ps.key_field: k, "value": _to_num(v)}
+            for k, v in ps.lookup.items()
+        ]
+        topic_slug = ps.column_name or f"{name}_breakdown"
+        # Build informative claim from data
+        sorted_items = sorted(points, key=lambda x: x["value"], reverse=True)
+        top_item = sorted_items[0] if sorted_items else {}
+        top_label = top_item.get(ps.key_field, "?")
+        top_val = top_item.get("value", 0)
+        total = sum(p["value"] for p in points)
+        top_share = (top_val / total * 100) if total else 0
+        bar_claim = (
+            f"Top {ps.key_field}: {top_label} ({top_val:,.0f}, "
+            f"{top_share:.0f}% of total) across {len(points)} groups"
+        )
+        # Use horizontal bars (share) for readable long category names
+        kp_dict = {
+            "topic": topic_slug,
+            "claim": bar_claim,
+            "numbers": points,
+            "viz": {"kind": "share", "x_field": ps.key_field, "y_fields": ["value"]},
+            "source_call": f"summarize_by_group('{ps.key_field}', op='sum')",
+            "captured_at_turn": turn_id,
+            "confidence": "high",
+        }
+        spec = kp_to_vega_spec(kp_dict)
+        if spec:
+            kp_dict["vega_spec"] = spec
+        img_path = render_chart(kp_dict, charts_dir, turn_id=turn_id, logger=logger)
+        if img_path:
+            kp_dict["image_path"] = img_path
+            kb.setdefault(name, []).append(kp_dict)
+            charts_rendered += 1
+
+    return charts_rendered
+
+
+def _extract_data_tool_outputs(result) -> str:
+    """Extract raw tool outputs from the specialist's conversation.
+
+    The distiller needs the full series data from summarize_trend /
+    summarize_by_group to populate `numbers` faithfully (all data points,
+    not just the anchor values mentioned in the claim). Without these,
+    the distiller sees only the SpecialistOutput summary and fills most
+    periods with null.
+    """
+    if not hasattr(result, "to_input_list"):
+        return ""
+    outputs = []
+    for item in result.to_input_list():
+        if isinstance(item, dict) and item.get("type") == "function_call_output":
+            text = item.get("output", "")
+            if text and len(text) > 50:
+                outputs.append(text)
+    if not outputs:
+        return ""
+    return "\n\n".join(outputs)
+
+
 async def _distill_and_persist(
     app_ctx, name: str, sub_question: str, specialist_output,
+    tool_outputs: str = "",
 ) -> int:
     """Run the distiller agent on a successful SpecialistOutput, append any
     extracted KnowledgePoints to the session KB. Returns count added.
@@ -156,21 +720,19 @@ async def _distill_and_persist(
     """
     distiller = getattr(app_ctx, "_distiller", None)
     kb = getattr(app_ctx, "_specialist_kb", None)
-    if distiller is None or kb is None:
-        return 0  # Not wired — tests / legacy paths skip distillation entirely.
-
     logger = getattr(app_ctx, "logger", None)
+    node_store = getattr(app_ctx, "_node_trace_store", None)
 
-    # Skip distillation for non-data specialists. report_agent returns a
-    # ReportDraft (narrative `coverage` / `answer` / `evidence_excerpts` /
-    # `files_consulted`), NOT a SpecialistOutput with quantitative
-    # `findings` / `numbers`. The distiller's prompt is tuned for
-    # SpecialistOutput shape — running it on a ReportDraft costs ~20s for
-    # an LLM round-trip on a mismatched input that produces trivial KPs
-    # (see case-366132845011-aefd66 turn 28fef28354b0: distiller_runner =
-    # 22.8s, n_added = 1 KP). Off the critical path most turns, but it
-    # gates end-of-turn drain when synthesis is fast. Drop it for the
-    # report_agent specialist explicitly so the cost is gone.
+    if distiller is None or kb is None:
+        if logger is not None:
+            logger.log("distiller_skipped", {
+                "specialist": name,
+                "reason": "not_wired",
+                "distiller_none": distiller is None,
+                "kb_none": kb is None,
+            })
+        return 0
+
     if name == "report_agent":
         if logger is not None:
             logger.log("distiller_skipped", {
@@ -178,6 +740,42 @@ async def _distill_and_persist(
                 "reason": "non_specialist_output_shape",
             })
         return 0
+
+    # Narrow outputs → direct KB insertion with a node trace entry
+    # so it's visible in the trace viewer.
+    if _is_narrow_output(specialist_output, sub_question):
+        findings = getattr(specialist_output, "findings", "") or ""
+        sq_hash = hashlib.md5(sub_question.encode()).hexdigest()[:8]
+        kp_dict = {
+            "topic": f"{name}_q_{sq_hash}",
+            "claim": findings,
+            "numbers": [],
+            "source_call": "",
+            "confidence": "high",
+        }
+        turn_id = getattr(app_ctx, "_turn_id", None)
+        if turn_id is not None:
+            kp_dict["captured_at_turn"] = turn_id
+        sess_list = kb.setdefault(name, [])
+        sess_list.append(kp_dict)
+        if logger is not None:
+            logger.log("distiller_direct_kp", {
+                "specialist": name,
+                "reason": "narrow_output_direct_insert",
+                "topic": kp_dict["topic"],
+                "claim": findings[:200],
+                "turn_id": turn_id,
+            })
+        # Create a node trace entry so the viewer shows it
+        async with _open_node(node_store, f"distiller.{name}", depth=0):
+            attach_tag("direct_insert")
+            attach_extra(
+                topic=kp_dict["topic"],
+                claim=findings[:100],
+                outcome="direct_insert",
+                n_added=1,
+            )
+        return 1
 
     timer = ProcessTimer(
         logger,
@@ -211,13 +809,29 @@ async def _distill_and_persist(
         f"Sub-question: {sub_question}\n\n"
         f"--- SpecialistOutput (JSON) ---\n{output_payload}"
     )
+    # Raw tool outputs are NOT included in the distiller input — they
+    # inflate it by 5-10K tokens and add 10-15s TTFT. Instead, the
+    # post-fill step (`_fill_kp_numbers`) programmatically fills the
+    # `numbers` array from parsed tool outputs after the distiller runs.
+    # The distiller only needs the SpecialistOutput to decide topic,
+    # claim, viz kind, and confidence.
 
     try:
         t0 = time.perf_counter()
-        result = await asyncio.wait_for(
-            Runner.run(distiller, distiller_input, context=app_ctx, max_turns=2),
-            timeout=_DISTILLER_TIMEOUT_S,
-        )
+        # Route distiller LLM calls to the SPECIALIST semaphore pool
+        # (12 slots) instead of the orchestrator pool (2 slots). Without
+        # this, the distiller and orchestrator synthesis compete for the
+        # same 2 slots — serializing what should run in parallel.
+        kind_token = LLM_CALL_KIND.set("specialist")
+        node_store = getattr(app_ctx, "_node_trace_store", None)
+        try:
+            async with _open_node(node_store, f"distiller.{name}", depth=0):
+                result = await asyncio.wait_for(
+                    Runner.run(distiller, distiller_input, context=app_ctx, max_turns=1),
+                    timeout=_DISTILLER_TIMEOUT_S,
+                )
+        finally:
+            LLM_CALL_KIND.reset(kind_token)
         timer.record(
             "distiller_runner",
             int((time.perf_counter() - t0) * 1000),
@@ -238,11 +852,16 @@ async def _distill_and_persist(
         timer.summary(outcome="no_kps", n_added=0)
         return 0
 
+    # Pre-parse series from tool outputs for post-fill (fills null values
+    # the distiller left in `numbers` with real data from tool results).
+    parsed_series = _parse_series_from_tool_outputs(tool_outputs)
+
     turn_id = getattr(app_ctx, "_turn_id", None)
     case_folder = getattr(app_ctx, "case_folder", None)
     sess_list = kb.setdefault(name, [])
     added_topics: list[str] = []
     n_with_charts = 0
+    n_nulls_filled = 0
     render_total_ms = 0
     t0 = time.perf_counter()
     for kp in new_kps:
@@ -253,25 +872,35 @@ async def _distill_and_persist(
         if turn_id is not None and not kp_dict.get("captured_at_turn"):
             kp_dict["captured_at_turn"] = turn_id
 
-        # Phase 2: render chart + Vega-Lite spec when the KP carries a viz
-        # spec with usable numbers. Failures are silent (renderer logs +
-        # returns None) so the KP still lands in the KB; the chart just
-        # doesn't appear in the agent's answer this turn.
-        if isinstance(kp_dict.get("viz"), dict) and kp_dict.get("numbers"):
-            spec = kp_to_vega_spec(kp_dict)
-            if spec is not None:
-                kp_dict["vega_spec"] = spec
-            if case_folder is not None:
-                charts_dir = Path(case_folder) / "charts"
-                render_t0 = time.perf_counter()
-                img_path = render_chart(
-                    kp_dict, charts_dir,
-                    turn_id=turn_id, logger=logger,
-                )
-                render_total_ms += int((time.perf_counter() - render_t0) * 1000)
-                if img_path is not None:
-                    kp_dict["image_path"] = img_path
-                    n_with_charts += 1
+        # Post-fill: fill/construct numbers from parsed tool outputs.
+        # Mode 1: numbers is empty → construct full array from series.
+        # Mode 2: numbers has nulls → fill from matched series.
+        has_viz = isinstance(kp_dict.get("viz"), dict) and kp_dict["viz"].get("y_fields")
+        if parsed_series and (kp_dict.get("numbers") or has_viz):
+            before_len = len(kp_dict.get("numbers") or [])
+            before = sum(
+                1 for row in kp_dict["numbers"] if isinstance(row, dict)
+                for v in row.values() if v is None
+            ) if kp_dict.get("numbers") else 0
+            _fill_kp_numbers(kp_dict, parsed_series)
+            after_len = len(kp_dict.get("numbers") or [])
+            after = sum(
+                1 for row in kp_dict["numbers"] if isinstance(row, dict)
+                for v in row.values() if v is None
+            ) if kp_dict.get("numbers") else 0
+            n_nulls_filled += (before - after) + (after_len - before_len)
+        elif has_viz and not kp_dict.get("numbers") and logger is not None:
+            logger.log("distiller_kp_no_numbers", {
+                "specialist": name,
+                "topic": kp_dict.get("topic", ""),
+                "has_parsed_series": bool(parsed_series),
+                "n_parsed_series": len(parsed_series),
+                "tool_outputs_chars": len(tool_outputs),
+            })
+
+        # Charts are now the SPECIALIST's responsibility (via make_chart
+        # tool call with real data). The distiller only handles KB warmth
+        # (claims/topics for follow-up questions). No chart rendering here.
 
         sess_list.append(kp_dict)
         if kp_dict.get("topic"):
@@ -298,6 +927,7 @@ async def _distill_and_persist(
         outcome="ok",
         n_added=len(added_topics),
         n_with_charts=n_with_charts,
+        n_nulls_filled=n_nulls_filled,
     )
     return len(added_topics)
 
@@ -414,6 +1044,9 @@ def redacting_tool(agent: Agent, name: str, description: str):
                 logger.log("specialist_call_dedup_hit",
                            {"specialist": name,
                             "sub_question_norm": cache_key[1]})
+            # Tag the active (parent / orchestrator) node so optimization
+            # reports can surface dedup hit-rate without re-deriving it.
+            attach_tag("specialist_dedup_hit")
             timer.summary(
                 outcome="dedup_hit",
                 total_ms=int((time.perf_counter() - runner_started) * 1000),
@@ -421,19 +1054,66 @@ def redacting_tool(agent: Agent, name: str, description: str):
             )
             return cached
 
+        # Programmatic HARD GATE: block general_specialist when < 2 domain
+        # specialists ran this turn. The orchestrator prompt says this but
+        # the model sometimes ignores it; this enforces it server-side.
+        _NON_DOMAIN = {"report_agent", "general_specialist"}
+        domain_called = getattr(app_ctx, "_domain_specialists_called", None)
+        if name not in _NON_DOMAIN:
+            if isinstance(domain_called, set):
+                domain_called.add(name)
+        elif name == "general_specialist":
+            n_domain = len(domain_called) if isinstance(domain_called, set) else 0
+            if n_domain < 2:
+                if logger is not None:
+                    logger.log("general_specialist_blocked", {
+                        "reason": "fewer_than_2_domain_specialists",
+                        "domain_specialists_called": sorted(domain_called)
+                        if isinstance(domain_called, set) else [],
+                    })
+                timer.summary(
+                    outcome="blocked",
+                    total_ms=int((time.perf_counter() - runner_started) * 1000),
+                )
+                return (
+                    "[SKIPPED — only 1 domain specialist called. "
+                    "Emit FinalAnswer NOW from the specialist + report_agent outputs.]"
+                )
+
         # KB digest preface — the specialist's accumulated knowledge from
         # earlier turns. Only prepend on the FIRST call within this turn (no
         # intra-turn `prior` exists yet); on subsequent within-turn calls the
         # `prior` transcript already carries the digest from the first call's
         # input message, so re-prepending would duplicate it.
         contextual_in = redacted_in
+        kb_digest_n_kps = 0
         if not prior:
             kb_obj = getattr(app_ctx, "_specialist_kb", None)
             if isinstance(kb_obj, dict):
-                kb_digest = _format_kb_digest(kb_obj.get(name, []))
+                kps_for_name = kb_obj.get(name, [])
+                kb_digest = _format_kb_digest(kps_for_name)
                 if kb_digest:
                     contextual_in = (
                         f"{kb_digest}\n\n--- New question ---\n{redacted_in}"
+                    )
+                    kb_digest_n_kps = len(_active_kps(kps_for_name))
+
+        # Inject the case folder file list for report_agent so it can
+        # use the report_needle skill's concept→file routing table to
+        # pick relevant files by topic. The model calls fs_read_file on
+        # 1-2 relevant files (batched) rather than reading everything.
+        if name == "report_agent" and not prior:
+            case_folder = getattr(app_ctx, "case_folder", None)
+            if (case_folder is not None
+                    and hasattr(case_folder, "exists") and case_folder.exists()):
+                files = sorted(
+                    p.name for p in case_folder.iterdir()
+                    if p.is_file() and p.suffix in (".md", ".txt", ".csv")
+                )
+                if files:
+                    contextual_in = (
+                        f"[Case folder files: {', '.join(files)}]\n\n"
+                        f"{contextual_in}"
                     )
 
         if prior:
@@ -470,14 +1150,22 @@ def redacting_tool(agent: Agent, name: str, description: str):
             # behind a single 3-slot semaphore, serializing work that
             # should be parallel.
             kind_token = LLM_CALL_KIND.set("specialist")
+            node_store = getattr(app_ctx, "_node_trace_store", None)
             try:
-                result = await asyncio.wait_for(
-                    Runner.run(
-                        inner, run_input, context=app_ctx,
-                        max_turns=_SPECIALIST_MAX_TURNS,
-                    ),
-                    timeout=_SPECIALIST_TIMEOUT_S,
-                )
+                node_label = name if name == "report_agent" else f"specialist.{name}"
+                async with _open_node(node_store, node_label, depth=0):
+                    if kb_digest_n_kps:
+                        attach_tag("kb_digest_present")
+                        attach_extra(n_kps_in_digest=kb_digest_n_kps)
+                    if prior:
+                        attach_tag("warm_specialist")
+                    result = await asyncio.wait_for(
+                        Runner.run(
+                            inner, run_input, context=app_ctx,
+                            max_turns=_SPECIALIST_MAX_TURNS,
+                        ),
+                        timeout=_SPECIALIST_TIMEOUT_S,
+                    )
             finally:
                 LLM_CALL_KIND.reset(kind_token)
             timer.record(
@@ -580,6 +1268,14 @@ def redacting_tool(agent: Agent, name: str, description: str):
                 f"output redaction failed: {exc}",
                 exc,
             )
+        # Inject the sub-question into the payload so the orchestrator
+        # (and general_specialist reading the outputs) knows what each
+        # specialist was answering — without the specialist wasting output
+        # tokens to echo it. Replaces the removed SpecialistOutput.question
+        # field with a zero-cost server-side injection.
+        if isinstance(payload, str) and name != "report_agent":
+            payload = f"[Sub-question: {redacted_in}]\n{payload}"
+
         timer.record(
             "specialist_output_redact",
             int((time.perf_counter() - t0) * 1000),
@@ -595,14 +1291,35 @@ def redacting_tool(agent: Agent, name: str, description: str):
         pending = getattr(app_ctx, "_pending_distillers", None)
         t0 = time.perf_counter()
         try:
+            tool_outputs = _extract_data_tool_outputs(result)
+            if logger is not None and name != "report_agent":
+                logger.log("distiller_tool_outputs_extracted", {
+                    "specialist": name,
+                    "tool_outputs_chars": len(tool_outputs),
+                    "n_items": len(result.to_input_list()) if hasattr(result, "to_input_list") else -1,
+                })
+            # Fire TWO parallel async tasks:
+            # 1. Distiller: extract claims into KB for follow-ups
+            # 2. Auto-chart: render charts from tool outputs (no LLM needed)
             task = asyncio.create_task(
                 _distill_and_persist(
                     app_ctx, name, redacted_in, result.final_output,
+                    tool_outputs=tool_outputs,
                 ),
                 name=f"distill-{name}",
             )
             if isinstance(pending, list):
                 pending.append(task)
+            # Auto-chart: parse tool outputs for series data, render charts
+            if name != "report_agent" and tool_outputs:
+                chart_task = asyncio.create_task(
+                    _auto_chart_from_tool_outputs(
+                        app_ctx, name, tool_outputs,
+                    ),
+                    name=f"autochart-{name}",
+                )
+                if isinstance(pending, list):
+                    pending.append(chart_task)
         except Exception as exc:  # noqa: BLE001 - belt-and-suspenders
             if logger is not None:
                 logger.log("distiller_outer_failure", {
