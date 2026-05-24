@@ -89,6 +89,22 @@ _ROLE_LABELS = {
 }
 
 
+def _estimate_tokens(text: str, model: str) -> int:
+    """tiktoken estimate with a robust fallback. Safechain doesn't return
+    usage objects, so this is the only token signal we have on that path."""
+    if not text:
+        return 0
+    try:
+        import tiktoken
+        try:
+            enc = tiktoken.encoding_for_model(model)
+        except KeyError:
+            enc = tiktoken.get_encoding("cl100k_base")
+        return len(enc.encode(text))
+    except Exception:
+        return max(1, len(text) // 4)
+
+
 class SafeChainAsyncOpenAI:
     """Drop-in for ``openai.AsyncOpenAI`` that calls SafeChain underneath."""
 
@@ -171,6 +187,10 @@ class _SafeChainChatCompletions:
         **kw: Any,
     ) -> Any:
         del kw  # absorbs SDK extras (temperature, max_tokens, …) we don't forward
+        from tools.node_trace import (
+            ACTIVE_NODE, NodeTrace, attach_io, attach_latency, attach_usage,
+        )
+        from tools.node_trace.pricing import compute_cost
         firewall = self._parent._firewall
         attempt = 0
         # Pre-redact every outbound message (mirrors FirewalledAsyncOpenAI).
@@ -178,13 +198,60 @@ class _SafeChainChatCompletions:
         while True:
             try:
                 async with firewall.gate():
-                    return await self._invoke(
-                        model=model,
-                        messages=messages,
-                        tools=tools,
-                        response_format=response_format,
-                        stream=stream,
-                    )
+                    parent = ACTIVE_NODE.get()
+                    if parent is None or parent.row_id <= 0:
+                        return await self._invoke(
+                            model=model, messages=messages, tools=tools,
+                            response_format=response_format, stream=stream,
+                        )
+                    round_idx = parent.next_round_index()
+                    async with NodeTrace(
+                        store=parent._store,
+                        chat_id=parent.chat_id,
+                        case_id=parent.case_id,
+                        turn_id=parent.turn_id,
+                        node=f"{parent.node}.round_{round_idx}",
+                        depth=parent.depth + 1,
+                    ):
+                        combined = _combine_messages(messages, tools, response_format)
+                        sys_chars = sum(
+                            len(m.get("content") or "")
+                            for m in messages if m.get("role") == "system"
+                        )
+                        p_tok = _estimate_tokens(combined, model)
+                        attach_usage(
+                            prompt_excerpt=combined,
+                            prompt_tokens=p_tok,
+                            system_prompt_chars=sys_chars or None,
+                            model=model,
+                        )
+                        attach_io(messages_json=json.dumps(messages, default=str))
+                        _llm_t0 = time.perf_counter()
+                        resp = await self._invoke(
+                            model=model, messages=messages, tools=tools,
+                            response_format=response_format, stream=stream,
+                        )
+                        attach_latency(
+                            llm_call_ms=int((time.perf_counter() - _llm_t0) * 1000),
+                        )
+                        try:
+                            if hasattr(resp, "choices") and resp.choices:
+                                completion_text = resp.choices[0].message.content or ""
+                            else:
+                                completion_text = ""
+                        except Exception:
+                            completion_text = ""
+                        c_tok = _estimate_tokens(completion_text, model)
+                        attach_usage(
+                            completion_excerpt=completion_text,
+                            completion_tokens=c_tok,
+                            cost_usd=compute_cost(
+                                model=model,
+                                prompt_tokens=p_tok,
+                                completion_tokens=c_tok,
+                            ),
+                        )
+                        return resp
             except FirewallRejection as e:
                 firewall.logger.log(
                     "firewall_rejection",

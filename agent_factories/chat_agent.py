@@ -13,6 +13,7 @@ from typing import Any
 from logger.event_logger import EventLogger
 from models.types import ClarifyResult, FinalAnswer, ScreenVerdict
 from skills.loader import load_skill as _load_skill
+from tools.node_trace import _open_node, NodeTraceStore
 
 
 _WORKFLOW_DIR = Path(__file__).parent.parent / "skills" / "workflow"
@@ -69,10 +70,12 @@ class ChatAgent:
         logger: EventLogger,
         tools: list | None = None,
         pillar_config: dict | None = None,
+        node_trace_store: NodeTraceStore | None = None,
     ):
         self.llm = llm
         self.logger = logger
         self.tools = tools
+        self._node_trace_store = node_trace_store
         # `concept_glossary` is the pillar's domain-vocabulary block (e.g.
         # "'CPS' ≈ consumer, 'SBS' ≈ commercial" for credit-risk). Surfacing
         # it inside relevance_check lets the LLM recognise that two questions
@@ -148,20 +151,21 @@ class ChatAgent:
         On firewall block, returns the input unchanged (logged) so callers
         don't have to handle a None / exception path.
         """
-        result = await self.llm.ainvoke(
-            system_prompt=self._redact_prompt,
-            user_message=(
-                f"Text to redact:\n\n{text}\n\n"
-                "Return JSON with redacted + masked_spans."
-            ),
-            json_mode=True,
-        )
+        async with _open_node(self._node_trace_store, "chat.redact"):
+            result = await self.llm.ainvoke(
+                system_prompt=self._redact_prompt,
+                user_message=(
+                    f"Text to redact:\n\n{text}\n\n"
+                    "Return JSON with redacted + masked_spans."
+                ),
+                json_mode=True,
+            )
 
-        if result.status == "blocked" or result.data is None:
-            self.logger.log("chat_redact_fallback", {"reason": "blocked"})
-            return text
+            if result.status == "blocked" or result.data is None:
+                self.logger.log("chat_redact_fallback", {"reason": "blocked"})
+                return text
 
-        return str(result.data.get("redacted", text)) or text
+            return str(result.data.get("redacted", text)) or text
 
     async def relevance_check(
         self,
@@ -190,25 +194,26 @@ class ChatAgent:
             + "\n"
             if self._concept_glossary else ""
         )
-        result = await self.llm.ainvoke(
-            system_prompt=self._relevance_prompt,
-            user_message=(
-                f"Reviewer question: {question}\n"
-                f"{prior_block}"
-                f"{glossary_block}\n"
-                "Decide whether this is in-scope for case review AND, if "
-                "in-scope, whether it is a near-duplicate of one of the "
-                "prior questions (matched on subject + time-range + scope, "
-                "applying the domain-vocabulary synonyms above when judging "
-                "subject equivalence). Return JSON with passed + reason + "
-                "near_duplicate_of + near_duplicate_reason."
-            ),
-            json_mode=True,
-        )
+        async with _open_node(self._node_trace_store, "chat.relevance_check"):
+            result = await self.llm.ainvoke(
+                system_prompt=self._relevance_prompt,
+                user_message=(
+                    f"Reviewer question: {question}\n"
+                    f"{prior_block}"
+                    f"{glossary_block}\n"
+                    "Decide whether this is in-scope for case review AND, if "
+                    "in-scope, whether it is a near-duplicate of one of the "
+                    "prior questions (matched on subject + time-range + scope, "
+                    "applying the domain-vocabulary synonyms above when judging "
+                    "subject equivalence). Return JSON with passed + reason + "
+                    "near_duplicate_of + near_duplicate_reason."
+                ),
+                json_mode=True,
+            )
 
-        if result.status == "blocked" or result.data is None:
-            self.logger.log("chat_relevance_fallback", {"reason": "blocked — fail-open"})
-            return True, "", "", ""
+            if result.status == "blocked" or result.data is None:
+                self.logger.log("chat_relevance_fallback", {"reason": "blocked — fail-open"})
+                return True, "", "", ""
 
         data = result.data
         # If JSON parse failed in the shim, the data dict carries
@@ -247,18 +252,19 @@ class ChatAgent:
         so the pipeline still progresses.
         """
         self.logger.log("chat_clarify_start", {"question_len": len(question)})
-        result = await self.llm.ainvoke(
-            system_prompt=self._clarify_prompt,
-            user_message=(
-                f"Reviewer question: {question}\n\n"
-                "Decide whether clarification is needed. Return JSON with "
-                "needs_clarification + options + reason per the schema."
-            ),
-            json_mode=True,
-        )
-        if result.status == "blocked" or result.data is None:
-            self.logger.log("chat_clarify_fallback", {"reason": "blocked — fail-open"})
-            return ClarifyResult(needs_clarification=False, options=[], reason="")
+        async with _open_node(self._node_trace_store, "chat.clarify_intent"):
+            result = await self.llm.ainvoke(
+                system_prompt=self._clarify_prompt,
+                user_message=(
+                    f"Reviewer question: {question}\n\n"
+                    "Decide whether clarification is needed. Return JSON with "
+                    "needs_clarification + options + reason per the schema."
+                ),
+                json_mode=True,
+            )
+            if result.status == "blocked" or result.data is None:
+                self.logger.log("chat_clarify_fallback", {"reason": "blocked — fail-open"})
+                return ClarifyResult(needs_clarification=False, options=[], reason="")
 
         data = result.data
         needs = bool(data.get("needs_clarification", False))

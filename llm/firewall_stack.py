@@ -174,6 +174,13 @@ class FirewallStack:
         t0 = time.perf_counter()
         async with sem:
             waited_ms = int((time.perf_counter() - t0) * 1000)
+            # Record onto the active node-trace if one is set. Telemetry
+            # failures must never break an LLM call.
+            try:
+                from tools.node_trace import attach_latency
+                attach_latency(queue_wait_ms=waited_ms)
+            except Exception:
+                pass
             # Log only meaningful waits — under load this surfaces
             # whether the cap is the binding constraint. A typical
             # acquire is sub-millisecond when slots are free.
@@ -188,6 +195,5 @@ class FirewallStack:
                         ),
                     })
                 except Exception:
-                    # Logger failure must never break an LLM call.
                     pass
             yield
