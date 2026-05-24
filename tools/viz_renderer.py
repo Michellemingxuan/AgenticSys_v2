@@ -1051,12 +1051,10 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
                     },
                 })
                 spec["layer"].append({
-                    "mark": {"type": "text", "align": "right", "baseline": "bottom",
-                             "dx": -4, "dy": -8, "fontSize": 11,
-                             "color": "#3c4043",
-                             "fill": "#3c4043",
-                             "stroke": "white", "strokeWidth": 3,
-                             "paintOrder": "stroke"},
+                    "mark": {"type": "text", "align": "right",
+                             "baseline": "line-bottom",
+                             "dx": -4, "dy": -4, "fontSize": 11,
+                             "color": "#3c4043"},
                     "encoding": {
                         "y": {"datum": t, "type": "quantitative"},
                         "text": {"value": f"threshold: {t}"},
@@ -1148,11 +1146,9 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
                 inner.append({
                     "mark": {"type": "text",
                              "align": "right" if axis_orient == "right" else "left",
-                             "baseline": "bottom",
+                             "baseline": "line-bottom",
                              "dx": -4 if axis_orient == "right" else 4,
-                             "dy": -8, "fontSize": 10,
-                             "stroke": "white", "strokeWidth": 3,
-                             "paintOrder": "stroke"},
+                             "dy": -4, "fontSize": 10},
                     "encoding": {
                         "y": {"datum": threshold, "type": "quantitative"},
                         "text": {"value": f"{y_field}: {threshold}"},
