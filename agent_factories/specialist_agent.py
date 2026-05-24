@@ -17,50 +17,61 @@ from tools.data_tools import (
     summarize_by_group,
     summarize_trend,
 )
-from tools.data_viz_tools import build_make_chart_tool
+from tools.data_viz_tools import build_make_chart_tool, get_chart_guidance
+from tools.kb_tools import kb_list_topics, kb_lookup
 
 _WORKFLOW_DIR = Path(__file__).parent.parent / "skills" / "workflow"
 _BASE_INSTRUCTIONS = _load_skill(_WORKFLOW_DIR / "data_query.md").body
+
+# NOTE: data_viz.md is NOT composed here anymore. Its ~7.9 KB of chart-
+# construction guidance is loaded on-demand via the `get_chart_guidance`
+# tool — specialists call it only when they've decided to plot, which
+# keeps the default system prompt ~8 KB lighter for the majority of
+# questions that never produce a chart.
 # Shared chart-construction rules — read by every specialist that has
 # `make_chart` in its tool list. Composed AFTER the data_query body so
 # the data_query "Charting" pointer is followed by the actual rules.
 # Same skill is composed into general_specialist; keeps chart rules
 # from drifting between callers.
-_DATA_VIZ_INSTRUCTIONS = _load_skill(_WORKFLOW_DIR / "data_viz.md").body
 
 
 def _compose_instructions(skill: DomainSkill, pillar: dict) -> str:
-    parts = [_BASE_INSTRUCTIONS,
-             _DATA_VIZ_INSTRUCTIONS,
-             f"Domain: {skill.name}",
-             f"Expertise: {skill.system_prompt}"]
+    # Domain identity block — compact, always relevant
+    domain_lines = [f"Domain: {skill.name}"]
     if skill.data_hints:
-        parts.append(f"Data hints: {', '.join(skill.data_hints)}")
+        domain_lines.append(f"Tables: {', '.join(skill.data_hints)}")
     if skill.interpretation_guide:
-        parts.append(f"Interpretation guide: {skill.interpretation_guide}")
+        domain_lines.append(f"Guide: {skill.interpretation_guide}")
     if skill.risk_signals:
-        parts.append(f"Risk signals: {', '.join(skill.risk_signals)}")
+        domain_lines.append(f"Risk signals: {'; '.join(skill.risk_signals)}")
+    domain_block = "§ DOMAIN IDENTITY\n\n" + "\n".join(domain_lines)
+
+    # Domain expertise (the full domain skill body)
+    expertise_block = f"§ DOMAIN EXPERTISE\n\n{skill.system_prompt}"
+
+    # Pillar context
+    pillar_parts = []
     if pillar:
-        if "concept_glossary" in pillar and pillar["concept_glossary"]:
-            parts.append(str(pillar["concept_glossary"]).strip())
-        if "focus" in pillar:
-            parts.append(f"Pillar focus: {pillar['focus']}")
-        if "overlay" in pillar:
-            parts.append(f"Pillar overlay: {pillar['overlay']}")
         if "cut_off_date" in pillar:
             cutoff = pillar["cut_off_date"]
-            parts.append(
-                f"DATA CUT-OFF DATE: {cutoff}.\n"
-                f"CRITICAL — Interpret ALL time-window language ('recent', 'current', "
-                f"'last N months', 'this year') relative to the cut-off, NEVER relative "
-                f"to today's calendar date. 'Recent N months' = the N months ending on "
-                f"{cutoff}. No data exists beyond {cutoff}.\n"
-                f"For 'ramp-up' / 'ramp-up period', see the concept-glossary "
-                f"definition — it is a DATA-DERIVED rising-then-stabilizing phase, "
-                f"not a fixed-length window. Identify it from the relevant time "
-                f"series before answering."
+            pillar_parts.append(
+                f"DATA CUT-OFF DATE: {cutoff}. "
+                f"Interpret ALL time-window language relative to this date, "
+                f"NEVER today's calendar."
             )
-    return "\n\n".join(parts)
+        if "concept_glossary" in pillar and pillar["concept_glossary"]:
+            pillar_parts.append(str(pillar["concept_glossary"]).strip())
+        if "focus" in pillar:
+            pillar_parts.append(f"Pillar focus: {pillar['focus']}")
+        if "overlay" in pillar:
+            pillar_parts.append(f"Pillar overlay: {pillar['overlay']}")
+
+    sep = "\n\n────────────────────────────────────────\n\n"
+    sections = [domain_block, expertise_block]
+    if pillar_parts:
+        sections.append("§ PILLAR CONTEXT\n\n" + "\n\n".join(pillar_parts))
+    sections.append("§ WORKFLOW\n\n" + _BASE_INSTRUCTIONS)
+    return sep.join(sections)
 
 
 def build_specialist_agent(skill: DomainSkill, pillar: dict, model) -> Agent:
@@ -69,13 +80,41 @@ def build_specialist_agent(skill: DomainSkill, pillar: dict, model) -> Agent:
     # tool are stored on the same KB the auto-distiller writes to and are
     # surfaced via the same `_collect_turn_charts` path in server.py.
     make_chart = build_make_chart_tool(skill.name)
+
+    full_prompt = _compose_instructions(skill, pillar)
+    # Build a lean synthesis prompt: drop § PLAN, § QUERY, § CROSS-DOMAIN
+    # sections (only needed for tool-calling rounds). The SDK calls
+    # get_system_prompt per-round, so R2 (synthesis) gets the shorter
+    # prompt. Detection: tool_choice flips from "required" to "auto"
+    # after the first tool call, which means R2+ has tools available but
+    # the model has already queried — it just needs to emit output.
+    sep = "\n\n────────────────────────────────────────\n\n"
+    sections = full_prompt.split(sep)
+    synthesis_prompt = sep.join(
+        s for s in sections
+        if not any(s.strip().startswith(tag) for tag in (
+            "# § DATA QUERY", "# § CROSS-DOMAIN",
+        ))
+    )
+
+    _call_count: dict[str, int] = {}
+
+    def _dynamic_instructions(ctx, agent):
+        key = id(ctx)
+        count = _call_count.get(key, 0) + 1
+        _call_count[key] = count
+        if count > 1:
+            return synthesis_prompt
+        return full_prompt
+
     return Agent(
         name=skill.name,
-        instructions=_compose_instructions(skill, pillar),
+        instructions=_dynamic_instructions,
         tools=[list_available_tables, get_table_schema, query_table,
                aggregate_column, batch_aggregate,
                summarize_trend, batch_summarize_trend, summarize_by_group,
-               make_chart],
+               make_chart, get_chart_guidance,
+               kb_list_topics, kb_lookup],
         output_type=AgentOutputSchema(SpecialistOutput, strict_json_schema=False),
         model=model,
         # Force the specialist to actually query the data on each invocation.
@@ -87,6 +126,12 @@ def build_specialist_agent(skill: DomainSkill, pillar: dict, model) -> Agent:
         model_settings=ModelSettings(
             tool_choice="required",
             parallel_tool_calls=True,
-            max_tokens=4096,
+            # Cap output at 500 tokens (was 800). With question and
+            # implications removed, SpecialistOutput is: domain (1 word)
+            # + mode (1 word) + findings (≤50 words) + evidence (≤3×15
+            # words) + data_gaps (≤1×15 words) + raw_data ({}) ≈ 100-200
+            # tokens. 500 gives 2.5x headroom while cutting generation
+            # time on the synthesis round (~5s saved at 50 tok/s).
+            max_tokens=500,
         ),
     )

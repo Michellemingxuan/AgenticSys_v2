@@ -17,20 +17,24 @@ def test_build_specialist_agent_returns_agent():
     assert isinstance(agent, Agent)
     assert agent.name == "creditrisk"
     assert agent.output_type.output_type is SpecialistOutput
-    assert "You analyze credit risk." in agent.instructions
-    assert "2025-12-01" in agent.instructions  # pillar overlay rendered
-    # 8 data tools + make_chart (per-specialist factory binding for charting)
-    assert len(agent.tools) == 9
+    # Instructions is now a dynamic callable
+    assert callable(agent.instructions)
+    from unittest.mock import MagicMock
+    mock_ctx = MagicMock()
+    prompt = agent.instructions(mock_ctx, agent)
+    assert "You analyze credit risk." in prompt
+    assert "2025-12-01" in prompt
+    # 8 data tools + make_chart + get_chart_guidance + kb_list_topics + kb_lookup
+    assert len(agent.tools) == 12
     assert {t.name for t in agent.tools} == {
         "list_available_tables", "get_table_schema", "query_table",
         "aggregate_column", "batch_aggregate",
         "summarize_trend", "batch_summarize_trend", "summarize_by_group",
-        "make_chart",
+        "make_chart", "get_chart_guidance",
+        "kb_list_topics", "kb_lookup",
     }
     assert agent.model_settings.parallel_tool_calls is True
-    # The shared data_viz skill is composed in alongside data_query so chart
-    # rules don't drift between callers. Sentinel phrases from the body
-    # confirm the skill content (not just an empty include).
-    assert "trend_dual" in agent.instructions
-    assert "trend_grid" in agent.instructions
-    assert "threshold_<y_field>" in agent.instructions
+    # data_viz.md is NOT composed inline anymore — its content lives
+    # behind the `get_chart_guidance` tool, lazy-loaded.
+    # Charting guidance is now inline (specialist produces charts directly)
+    assert "make_chart" in prompt

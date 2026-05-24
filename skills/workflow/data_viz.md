@@ -1,24 +1,23 @@
 ---
 name: Data Viz
-description: Shared chart-construction rules — when to call `make_chart` vs. trust the auto-distiller; how to pick the right kind; multi-series alignment; threshold reference lines.
+description: Shared chart-construction rules — how to pick the right kind; multi-series alignment; threshold reference lines.
 type: workflow
 owner: [base_specialist, general_specialist]
 mode: inline
 tools: [make_chart]
 ---
 
-Centralized rules for any agent that may call `make_chart`. Composed into the specialist instructions (after `data_query.md`) and the general specialist instructions (after `comparison.md`) so the chart rules don't drift between callers.
+Chart-construction rules for `make_chart`. Loaded on demand via
+`get_chart_guidance()` when you need detailed guidance beyond the basics
+in § DATA VIZ.
 
-## Default: trust the auto-distiller
+## When to chart
 
-Don't call `make_chart` for routine findings. The auto-distiller post-processes your `findings` after the answer returns and renders the chartable claims automatically. Calling `make_chart` yourself costs an extra LLM round-trip (~3-6s) on the critical path.
+Call `make_chart` after data tools (`summarize_trend`, `batch_summarize_trend`,
+`summarize_by_group`) return **≥ 4 data points**. Pass the COMPLETE series.
+Thresholds are auto-injected from the catalog.
 
-Call `make_chart` **only when ALL hold**:
-1. The visual conveys what numbers alone can't — slope, peak, divergence, threshold breach over time.
-2. You're merging data from MULTIPLE tool calls / tables into one chart the distiller can't reconstruct (e.g. spend trend + payment trend on one chart, or `modeling`'s indicator + `spend_payments`'s returned-payments).
-3. The reviewer explicitly asked for a chart/table.
-
-Hard cap: **1-2 charts per turn**. Skip charting for single scalars, qualitative findings, and data-gap reports.
+**Skip charting** for: single scalars, counts, yes/no, 1-3 data points.
 
 ## Pick the kind
 
