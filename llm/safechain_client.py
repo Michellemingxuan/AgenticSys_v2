@@ -188,7 +188,8 @@ class _SafeChainChatCompletions:
     ) -> Any:
         del kw  # absorbs SDK extras (temperature, max_tokens, …) we don't forward
         from tools.node_trace import (
-            ACTIVE_NODE, NodeTrace, attach_io, attach_latency, attach_usage,
+            ACTIVE_NODE, NodeTrace, _hooks_own_rounds,
+            attach_io, attach_latency, attach_usage,
         )
         from tools.node_trace.pricing import compute_cost
         firewall = self._parent._firewall
@@ -200,6 +201,11 @@ class _SafeChainChatCompletions:
                 async with firewall.gate():
                     parent = ACTIVE_NODE.get()
                     if parent is None or parent.row_id <= 0:
+                        return await self._invoke(
+                            model=model, messages=messages, tools=tools,
+                            response_format=response_format, stream=stream,
+                        )
+                    if _hooks_own_rounds(parent):
                         return await self._invoke(
                             model=model, messages=messages, tools=tools,
                             response_format=response_format, stream=stream,
@@ -251,6 +257,13 @@ class _SafeChainChatCompletions:
                                 completion_tokens=c_tok,
                             ),
                         )
+                        # Store output for trace viewer (mirrors OpenAI path)
+                        try:
+                            out_json = resp.model_dump_json() if hasattr(resp, "model_dump_json") else None
+                        except Exception:
+                            out_json = None
+                        if out_json is not None:
+                            attach_io(output_json=out_json)
                         return resp
             except FirewallRejection as e:
                 firewall.logger.log(
