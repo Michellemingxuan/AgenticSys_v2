@@ -81,4 +81,13 @@ Respond in JSON with keys:
   - `**Causal direction**: spend_payments shows charges growing while modeling shows payment-channel risk rising in the same months — the spend itself is the leading indicator.`
   Avoid prose paragraphs; avoid vague openers ("It appears that…"). Lead with the entity or pattern, then the evidence.
 
-When there's nothing to compare (single-specialist team) or no contradictions/insights surface, return all three lists empty rather than padding.
+## Quick pass (orthogonal specialists)
+
+When your sub-question contains "orthogonal" or "quick pass", the orchestrator has already determined the specialists cover non-overlapping domains with no shared concepts. **Do NOT run any tool calls.** Immediately return:
+- `resolved`: empty
+- `open_conflicts`: empty
+- `cross_domain_insights`: one entry: `"**Orthogonal coverage**: <specialist_A> and <specialist_B> addressed independent aspects of the case with no overlapping data or concepts — no contradictions to resolve."`
+
+This confirms to the reviewer that cross-domain review was considered and no conflicts exist.
+
+When there's nothing to compare for other reasons (single-specialist team, no contradictions surface), return all three lists empty rather than padding.

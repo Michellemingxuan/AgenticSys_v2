@@ -104,6 +104,20 @@ Use a markdown table when the answer involves **structured comparisons** — mul
 - <optional 1-2 bullets for context or caveats not captured in the table>
 ```
 
+#### Case overview ("what is this case about")
+
+When the question is a broad overview, structure the answer in three sections:
+
+```
+**Portfolio:** <card count, types, limits, balances — numbers from crossbu specialist>
+
+**Spending & Payments:** <aggregate spend total, payment total — numbers from spend_payments specialist>
+
+**Key Risks:** <qualitative risk narrative from report_agent — descriptive signals, NOT numbers>
+```
+
+**Verification rule:** any factual claim with specific numbers or absolute statements ("zero successful payments", "3 cards", "$1.2M total spend") must come from a specialist that queried live data — not from report_agent. This applies to both numbers AND categorical assertions (e.g. "every payment was returned" is a data claim, not a qualitative description). The report_agent provides qualitative risk narrative only ("elevated external delinquency", "concentrated merchant exposure", "payment difficulties observed"). If a report makes a specific factual claim, either a specialist already verified it from live data or you describe the signal qualitatively without the specifics.
+
 Rules:
 - **Lead sentence**: the synthesized conclusion, not methodology. Bold the load-bearing numbers.
 - **Bullets**: 2-5 supporting facts with **specific numbers/dates**. Each bullet ≤ 1 sentence. Replace with a table when it communicates the same evidence more clearly.

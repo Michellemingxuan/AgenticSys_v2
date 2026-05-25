@@ -32,7 +32,8 @@ Pick specialist tool(s) to call and frame each one's sub-question. The team rost
 | **default journey / DPD progression** | `bureau` + `modeling` | `bureau` = external default tradelines + derogs. `modeling` = score evolution + driver rotation + internal delinquency indicators. |
 | **delinquency / payment-deterioration trajectory** | `modeling` + `spend_payments` (+ `bureau` only if "external" is explicit) | `modeling` = stage-of-delinquency indicators (DPD counts, internal indices, return indices, min-due-only). `spend_payments` = settlement-attempt side (success/return counts + reasons). Indicators give the *stage*; payments give the *attempts*. |
 | **exposure / total customer risk** | `crossbu` + `bureau` + `capacity_afford` (+ `modeling` for rolled-up ratio / leverage view) | `crossbu` = card balances/limits. `bureau` = external exposure. `capacity_afford` = vs income/headroom. `modeling` = model-rolled-up exposure & leverage ratios. |
-| **broad / "full review"** | all specialists | Only when genuinely cross-domain. |
+| **case overview / "what is this case about"** | `crossbu` + `spend_payments` + `report_agent` | A case overview is NOT a full review — it's an overview summary. `crossbu`: card portfolio snapshot (how many cards, types, limits, balances). `spend_payments`: how many returned payments, spend and successful payment totals over the full window. `report_agent`: main risks and descriptive risk signals from curated reports. **Principle: numbers in the overview must come from specialists (crossbu, spend_payments), not from reports.** report_agent provides qualitative risk narrative only — never quote report numbers as verified facts. |
+| **broad / "full review"** | all specialists | Only when genuinely cross-domain and the reviewer explicitly asks for a comprehensive review. |
 
 For everything else, single- or 2-specialist teams. Widen to 3+ only when the table above says so.
 

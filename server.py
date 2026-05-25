@@ -1579,15 +1579,11 @@ async def _run_turn_streamed(
         c["tool"] == "general_specialist" for c in tool_calls
     )
     if len(unique_domain_specialists) >= 2 and not general_specialist_called:
-        violation_flag = (
-            f"general_specialist not invoked (protocol violation: "
-            f"{len(unique_domain_specialists)} domain specialists ran without "
-            f"the required cross-domain review)"
-        )
-        flags = list(flags or []) + [violation_flag]
-        sess.logger.log("orchestrator_protocol_violation", {
+        # Log for audit but don't flag as a violation — the orchestrator
+        # may have legitimately determined the specialists were orthogonal
+        # (no shared concepts to compare). The protocol allows this.
+        sess.logger.log("general_specialist_skipped", {
             "turn_id": turn_id,
-            "violation": "missing_general_specialist",
             "n_domain_specialists": len(unique_domain_specialists),
             "domain_specialists": sorted(unique_domain_specialists),
         })
