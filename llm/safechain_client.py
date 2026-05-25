@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
 import uuid
@@ -363,8 +364,8 @@ class _SafeChainChatCompletions:
         # way it would a real OpenAI SSE stream — the underlying safechain
         # call is non-streaming but we already have the full text in hand.
         if stream:
-            return _FakeAsyncStream(text=text, model=model)
-        return _synthesize_chat_completion(text=text, model=model)
+            return _FakeAsyncStream(text=text, model=model, tools=tools)
+        return _synthesize_chat_completion(text=text, model=model, tools=tools)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────
@@ -478,11 +479,13 @@ def _build_tool_schema_block(tools: list[dict]) -> str:
         "",
         "Available tools:",
     ]
+    tool_names: list[str] = []
     for t in tools:
         if not isinstance(t, dict):
             continue
         fn = t.get("function") or t
         name = fn.get("name", "?")
+        tool_names.append(name)
         desc = (fn.get("description") or "").splitlines()[0] if fn.get("description") else ""
         params = fn.get("parameters") or {}
         try:
@@ -493,6 +496,13 @@ def _build_tool_schema_block(tools: list[dict]) -> str:
         if desc:
             lines.append(f"      description: {desc}")
         lines.append(f"      parameters: {params_repr}")
+    lines.append("")
+    lines.append(
+        "IMPORTANT: The ONLY valid tool names are: "
+        + ", ".join(tool_names)
+        + ". Filenames, column names, and other data values are ARGUMENTS "
+        "to these tools, never tool names."
+    )
     return "\n".join(lines)
 
 
@@ -512,7 +522,9 @@ def _build_response_format_hint(response_format: Any) -> str:
     return 'Respond with ONLY this JSON: {"output": {<your structured answer>}}'
 
 
-def _synthesize_chat_completion(*, text: str, model: str) -> ChatCompletion:
+def _synthesize_chat_completion(
+    *, text: str, model: str, tools: list[dict] | None = None,
+) -> ChatCompletion:
     """Translate SafeChain's text response into an OpenAI ``ChatCompletion``.
 
     Three cases:
@@ -524,6 +536,12 @@ def _synthesize_chat_completion(*, text: str, model: str) -> ChatCompletion:
     - otherwise → return text as ``content`` verbatim.
     """
     tool_calls, content, finish_reason = _extract_tool_calls_and_content(text)
+
+    if tool_calls:
+        tool_calls = _validate_and_repair_tool_calls(tool_calls, tools)
+        if not tool_calls:
+            content = text
+            finish_reason = "stop"
 
     sdk_tool_calls: list[ChatCompletionMessageToolCall] | None = None
     if tool_calls:
@@ -652,6 +670,63 @@ def _dedupe_tool_calls(calls: list[dict]) -> list[dict]:
     return out
 
 
+_log = logging.getLogger(__name__)
+
+
+def _validate_and_repair_tool_calls(
+    tool_calls: list[dict] | None,
+    tools: list[dict] | None,
+) -> list[dict] | None:
+    """Validate tool-call names against the known tool set and auto-correct.
+
+    SafeChain's text-based tool schema sometimes confuses the model into using
+    argument values (e.g. filenames like ``modeling_exp_0.md``) as tool names.
+    When a name doesn't match any known tool, we try to find the correct one
+    by matching the call's argument keys against each tool's parameter schema.
+    """
+    if not tool_calls or not tools:
+        return tool_calls
+
+    known_params: dict[str, set[str]] = {}
+    for t in tools:
+        if not isinstance(t, dict):
+            continue
+        fn = t.get("function") or t
+        tname = fn.get("name", "")
+        props = (fn.get("parameters") or {}).get("properties") or {}
+        known_params[tname] = set(props.keys())
+
+    known_names = set(known_params.keys())
+    repaired: list[dict] = []
+
+    for tc in tool_calls:
+        if tc["name"] in known_names:
+            repaired.append(tc)
+            continue
+
+        try:
+            arg_keys = set(json.loads(tc.get("arguments", "{}") or "{}").keys())
+        except (json.JSONDecodeError, ValueError, AttributeError):
+            continue
+
+        best_match = None
+        best_overlap = 0
+        for tname, tparams in known_params.items():
+            overlap = len(arg_keys & tparams)
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_match = tname
+
+        if best_match and best_overlap > 0:
+            _log.warning(
+                "safechain tool-name repair: %r → %r (matched on arg keys %s)",
+                tc["name"], best_match, arg_keys & known_params[best_match],
+            )
+            repaired.append({**tc, "name": best_match})
+
+    return repaired if repaired else None
+
+
 def _to_tool_call_dict(tc: dict) -> dict:
     """Normalise one tool-call dict into the shape both synth functions expect."""
     args = tc.get("arguments", tc.get("args", {}))
@@ -712,7 +787,9 @@ def _parse_concatenated_tool_calls(text: str) -> list[dict]:
     return out
 
 
-def _synthesize_chat_chunks(*, text: str, model: str) -> list[ChatCompletionChunk]:
+def _synthesize_chat_chunks(
+    *, text: str, model: str, tools: list[dict] | None = None,
+) -> list[ChatCompletionChunk]:
     """Translate SafeChain's full text response into ChatCompletionChunks.
 
     The openai-agents SDK's ``ChatCmplStreamHandler.handle_stream`` iterates
@@ -726,6 +803,12 @@ def _synthesize_chat_chunks(*, text: str, model: str) -> list[ChatCompletionChun
     3. finish chunk         — finish_reason terminator
     """
     tool_calls, content, finish_reason = _extract_tool_calls_and_content(text)
+
+    if tool_calls:
+        tool_calls = _validate_and_repair_tool_calls(tool_calls, tools)
+        if not tool_calls:
+            content = text
+            finish_reason = "stop"
 
     chunk_id = f"chatcmpl_{uuid.uuid4().hex[:24]}"
     created = int(time.time())
@@ -775,8 +858,8 @@ class _FakeAsyncStream:
     is async-iterable is treated as a stream by the SDK's handler.
     """
 
-    def __init__(self, *, text: str, model: str) -> None:
-        self._chunks = _synthesize_chat_chunks(text=text, model=model)
+    def __init__(self, *, text: str, model: str, tools: list[dict] | None = None) -> None:
+        self._chunks = _synthesize_chat_chunks(text=text, model=model, tools=tools)
         self._idx = 0
 
     def __aiter__(self) -> "_FakeAsyncStream":

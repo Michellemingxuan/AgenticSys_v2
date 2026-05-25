@@ -1111,10 +1111,11 @@ def redacting_tool(agent: Agent, name: str, description: str):
                     if p.is_file() and p.suffix in (".md", ".txt", ".csv")
                 )
                 if files:
-                    file_list = "\n".join(f"  - {f}" for f in files)
+                    file_list = ", ".join(files)
                     contextual_in = (
-                        f"[Report files available — call fs_read_file(filename) "
-                        f"to read the relevant one(s):\n{file_list}]\n\n"
+                        f"[Report files in case folder: {file_list}. "
+                        f"To read a file, call the fs_read_file tool with "
+                        f'filename="<name>".]\n\n'
                         f"{contextual_in}"
                     )
 
@@ -1253,6 +1254,27 @@ def redacting_tool(agent: Agent, name: str, description: str):
                         "kept_recent_user_messages":
                             _SPECIALIST_HISTORY_KEEP_RECENT_USER_MESSAGES,
                     })
+
+        # Guard: Runner.run can complete without exception yet leave
+        # final_output=None when the SDK's output-type parser silently
+        # fails (observed on the SafeChain path where truncated JSON
+        # repairs into valid-but-schemeless content). Without this check
+        # the tool returns None → UI shows "no result" and the
+        # orchestrator synthesizes from incomplete specialist data.
+        if result is None or getattr(result, "final_output", None) is None:
+            timer.summary(
+                outcome="failed",
+                error_type="empty_final_output",
+                total_ms=int((time.perf_counter() - runner_started) * 1000),
+            )
+            return _record_failure(
+                app_ctx, name, redacted_in,
+                "empty_final_output",
+                "Runner.run completed but final_output is None — "
+                "the model likely produced content that did not match "
+                "the SpecialistOutput schema.",
+                last_exc,
+            )
 
         t0 = time.perf_counter()
         try:

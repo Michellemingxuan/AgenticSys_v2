@@ -1274,7 +1274,11 @@ async def _run_turn_streamed(
                         })
 
                     elif isinstance(item, ToolCallOutputItem):
-                        call_id = (raw.get("call_id") if isinstance(raw, dict) else None) or "?"
+                        call_id = (
+                            getattr(raw, "call_id", None)
+                            or (raw.get("call_id") if isinstance(raw, dict) else None)
+                            or "?"
+                        )
                         tool = "?"
                         if call_id in call_index_by_id:
                             tool = tool_calls[call_index_by_id[call_id]]["tool"]
