@@ -62,17 +62,19 @@ If driver columns are empty, probe `get_table_schema('score_drivers')` for actua
 
 # § CONCEPT QUESTIONS — layered approach (≤ 2 rounds)
 
-For vague questions ("spending features?", "delinquency signals?", "risk indicators?"):
+For concept-scoped questions ("spending features?", "delinquency signals?", "risk indicators?"):
 
 **R1:** Probe schema + batch query in ONE round:
 1. `get_table_schema('model_scores')` — read descriptions to find matching columns
 2. Map concept → columns using the vocabulary table below
-3. Pick 3-6 MOST RELEVANT columns
+3. Pick 3-6 MOST RELEVANT columns **for the asked concept**
 4. `batch_summarize_trend(...)` with all selected columns
 
 **R2:** Emit SpecialistOutput. Charts render automatically.
 
 **Total: 2 rounds.** Do NOT schema in R1 → trend in R2 → query_table in R3.
+
+**KB relevance filter.** When the KB holds cached data from a prior turn (e.g. TSR/CDSS trajectories), only reference it if it directly answers the current concept question. 
 
 ## Concept → vocabulary lookup
 
