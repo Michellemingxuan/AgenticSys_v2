@@ -502,27 +502,48 @@ def _store_cached_qa(sess: CaseSession, cache_key: str | None, value: dict) -> i
 
 
 def _format_kb_warmth_hint(specialist_kb: dict) -> str:
-    """Build the one-line `[KB-warmth: …]` preface the orchestrator sees on
-    every turn after the first one.
+    """Build the `[KB-warmth: …]` preface the orchestrator sees on every turn
+    after the first one.
 
-    Lists each specialist with non-empty KB and how many KPs it carries —
-    the orchestrator uses this as a routing signal under `team_construction`'s
-    follow-up rule (reuse warm specialists for in-domain follow-ups).
+    Lists each specialist with non-empty KB, its topic names, and one-line
+    claims — the orchestrator uses this for:
+      1. Routing: reuse warm specialists for in-domain follow-ups.
+      2. Sub-question framing: reference cached data in the sub-question so
+         the specialist (or the orchestrator itself) can skip re-querying.
+         E.g. "TSR breached threshold in 2024-08..2024-10 (per KB). What
+         strategy actions coincided with those months?"
 
-    Returns "" when no specialist has any KPs (e.g. first turn). The
-    orchestrator never sees an empty hint — keeps prompts uncluttered when
-    there's nothing to convey.
+    Returns "" when no specialist has any KPs (e.g. first turn).
     """
     if not isinstance(specialist_kb, dict) or not specialist_kb:
         return ""
-    warm = [(name, len(kps)) for name, kps in specialist_kb.items() if kps]
-    if not warm:
+    lines: list[str] = []
+    for name in sorted(specialist_kb):
+        kps = specialist_kb[name]
+        if not kps:
+            continue
+        active: dict[str, dict] = {}
+        for kp in kps:
+            topic = kp.get("topic")
+            if topic:
+                active[topic] = kp
+        if not active:
+            continue
+        topic_lines = []
+        for topic, kp in active.items():
+            claim = (kp.get("claim") or "")[:120]
+            topic_lines.append(f"    - {topic}: {claim}")
+        lines.append(f"  {name} ({len(active)} KPs):")
+        lines.extend(topic_lines)
+    if not lines:
         return ""
-    warm.sort(key=lambda x: -x[1])
-    parts = ", ".join(f"{name} ({n} KP{'s' if n != 1 else ''})" for name, n in warm)
     return (
-        f"[KB-warmth: {parts}. "
-        f"Strongly consider reusing warm specialists for in-domain follow-ups.]"
+        "[KB-warmth — cached specialist knowledge from prior turns. "
+        "Use topic details to anchor sub-questions and avoid redundant queries:\n"
+        + "\n".join(lines)
+        + "\n"
+        + "Reuse warm specialists for in-domain follow-ups. "
+        + "Reference specific cached findings in sub-questions when relevant.]"
     )
 
 
@@ -824,19 +845,15 @@ async def _run_turn_streamed(
     )
     screen_t0 = time.time()
     try:
-        # Tight wall-clock fence around the screen LLM calls. Normal
-        # screen is <5s (one redact + one relevance_check, both small
-        # prompts). A hang here used to wait for the 360s turn-level
-        # fence to fire — user-visible as a stuck "question check"
-        # spinner indistinguishable from a crashed server. The 30s
-        # ceiling is well above the legitimate p99 and well below the
-        # "I'll restart the server" patience threshold. See the
-        # `_SCREEN_TIMEOUT_S` block at the top of this file for the
-        # failure-mode reasoning (safechain backend HTTP-pool exhaust).
-        verdict = await asyncio.wait_for(
-            sess.chat_agent.screen(question, prior_questions=prior_questions),
-            timeout=_SCREEN_TIMEOUT_S,
-        )
+        # Wrap the screen phase in a node trace so it appears in the
+        # trace DB alongside the orchestrator/specialist nodes. The
+        # chat_agent creates child nodes (chat.redact, chat.relevance_check)
+        # inside; this parent groups them under one "screen" row.
+        async with _open_node(_NODE_TRACE_STORE, "screen", depth=0):
+            verdict = await asyncio.wait_for(
+                sess.chat_agent.screen(question, prior_questions=prior_questions),
+                timeout=_SCREEN_TIMEOUT_S,
+            )
     except asyncio.TimeoutError:
         sess.logger.log("screen_timeout", {
             "turn_id": turn_id,
@@ -946,6 +963,10 @@ async def _run_turn_streamed(
             "origin_turn_id": cached.get("turn_id_origin"),
             "kind": cache_hit_kind,
         })
+        # Record a trace entry for cache-hit turns so the trace DB
+        # has a row for every turn the frontend shows.
+        async with _open_node(_NODE_TRACE_STORE, "cache_replay", depth=0):
+            attach_tag("cache_hit", cache_hit_kind or "exact")
         cached_text = cached["answer"]
         # Annotate so the reviewer sees that this is a replay, not a
         # fresh run — keeps the answer faithful to the original (no
@@ -2153,12 +2174,12 @@ def post_rewind(case_id: str):
                 # plausible cause.
                 pass
         sess.cancel_in_flight.set()
-    # Drop the trace rows for this CASE so the trace DB stays in sync
-    # with the conversation. Wipe by case_id (not chat_id) — each server
-    # process generates a fresh session_id, so clearing only the current
-    # session would leave prior-process traces stranded under old chat
-    # ids and the viewer would still show them. "Clear means clear" =
-    # this case's full history is gone.
+    # Wipe node trace rows so the trace DB stays in sync with the
+    # frontend. Both clear-history and rewind-to-point reset all server
+    # state (qa_cache, specialist_kb, input_history), so the trace DB
+    # should match. Delete by case_id (not chat_id) — each server
+    # process gets a fresh session_id, so a chat-id-scoped delete would
+    # leave prior-process rows stranded.
     trace_rows_cleared = 0
     if _NODE_TRACE_STORE is not None:
         trace_rows_cleared = _NODE_TRACE_STORE.delete_case(case_id)

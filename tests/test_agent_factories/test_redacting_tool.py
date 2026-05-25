@@ -421,7 +421,23 @@ def test_format_kb_digest_renders_active_set_only():
     digest = _format_kb_digest(kps)
     assert "fico_trajectory" in digest    # topic name shown
     assert "kb_lookup" in digest          # points to lookup tool
-    assert "1 cached" in digest           # deduped to 1 active topic
+    assert "(1)" in digest                # deduped to 1 active topic
+
+
+def test_format_kb_digest_shows_cross_specialist_topics():
+    """When full_kb is provided, digest includes other specialists' topics."""
+    own_kps = [{"topic": "gl_reductions", "claim": "Two GL cuts"}]
+    full_kb = {
+        "strategy": own_kps,
+        "modeling": [{"topic": "tsr_trend", "claim": "TSR rose from 12 to 39"}],
+        "bureau": [{"topic": "fico_trend", "claim": "FICO dropped to 680"}],
+    }
+    digest = _format_kb_digest(own_kps, full_kb=full_kb, self_name="strategy")
+    assert "gl_reductions" in digest       # own topic shown
+    assert "tsr_trend" in digest           # cross-specialist topic shown
+    assert "fico_trend" in digest          # cross-specialist topic shown
+    assert "modeling" in digest            # specialist name shown
+    assert "strategy" not in digest.split("other specialists")[1]  # self excluded from "other"
 
 
 def test_compact_specialist_history_elides_old_tool_outputs_only():
@@ -482,7 +498,7 @@ async def test_redacting_tool_prepends_kb_digest_when_no_intra_turn_history():
     forwarded = captured_inputs[0]
     assert isinstance(forwarded, str)
     # The KB preface must be present along with the new question.
-    assert "[KB:" in forwarded
+    assert "[KB" in forwarded
     assert "delinquency_breaches" in forwarded
     assert "show me the delinquency trajectory" in forwarded
     # Section divider keeps the digest distinguishable from the question.

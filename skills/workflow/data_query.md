@@ -57,10 +57,16 @@ into one overlay). This is rare.
 
 ## 1.0 Check KB first (follow-up turns)
 
-If your input mentions `[KB: N cached topics...]`, call `kb_lookup(topic)`
-for any topic matching the current question BEFORE querying fresh data.
-If the cached data answers the question, skip directly to § DATA ANALYSIS.
-This saves a full `summarize_trend` round-trip (~10-20s).
+If your input mentions `[KB — ...]`, call `kb_lookup(topic)` for any topic
+matching the current question BEFORE querying fresh data. This includes
+topics cached by **other specialists** — if the modeling specialist already
+trended TSR, you can `kb_lookup("tsr_trend")` instead of re-running
+`summarize_trend` yourself. The KB is shared across all specialists in
+the session.
+
+If the cached data answers the question (or provides a data point you
+need as context), skip the query and go straight to § DATA ANALYSIS.
+Each skipped query saves ~10-20s wall-clock.
 
 Only re-query when:
 - The question asks about a different time window or filter than the cached data

@@ -72,23 +72,48 @@ def _active_kps(kps: list[dict]) -> list[dict]:
     return list(active.values())
 
 
-def _format_kb_digest(kps: list[dict]) -> str:
+def _format_kb_digest(kps: list[dict], full_kb: dict | None = None,
+                      self_name: str | None = None) -> str:
     """Render a short KB hint pointing to the lookup tools.
 
     Instead of dumping all KP claims into the input (which inflates token
     count on follow-up turns), we list topic names only and tell the
     specialist to use kb_lookup(topic) for details.
+
+    When *full_kb* and *self_name* are provided, also lists topic counts
+    from OTHER specialists so this specialist knows cross-domain data is
+    available via kb_lookup / kb_list_topics without re-querying.
     """
     active = _active_kps(kps)
-    if not active:
+    parts: list[str] = []
+    if active:
+        topics = [kp.get("topic", "?") for kp in active]
+        parts.append(
+            f"[KB — your cached topics ({len(active)}): "
+            f"{', '.join(topics)}.]"
+        )
+    other_lines: list[str] = []
+    if full_kb and self_name:
+        for spec, spec_kps in sorted(full_kb.items()):
+            if spec == self_name:
+                continue
+            other_active = _active_kps(spec_kps)
+            if other_active:
+                other_topics = [kp.get("topic", "?") for kp in other_active]
+                other_lines.append(f"  {spec}: {', '.join(other_topics)}")
+    if other_lines:
+        parts.append(
+            "[KB — other specialists' cached topics "
+            "(use kb_lookup(topic) to retrieve without re-querying):\n"
+            + "\n".join(other_lines) + "]"
+        )
+    if not parts:
         return ""
-    topics = [kp.get("topic", "?") for kp in active]
-    return (
-        f"[KB: {len(active)} cached topics from earlier turns: "
-        f"{', '.join(topics)}. "
-        f"Call kb_lookup(topic) to get cached data before re-querying. "
-        f"Call kb_list_topics() to see all cached claims.]"
+    parts.append(
+        "Call kb_lookup(topic) to get cached data before re-querying. "
+        "Call kb_list_topics() to see all cached claims."
     )
+    return "\n".join(parts)
 
 
 # Keywords that signal series/trend/concentration data — the kind the
@@ -179,6 +204,7 @@ class _ParsedSeries:
     lookup: dict  # {period_or_group: value}
     column_name: str  # from batch_summarize_trend's value_column, or ""
     key_field: str  # "period" or "group" or "merchant"
+    table_name: str = ""  # source table for disambiguation
 
 
 def _parse_series_from_tool_outputs(tool_outputs_text: str) -> list[_ParsedSeries]:
@@ -209,7 +235,8 @@ def _parse_series_from_tool_outputs(tool_outputs_text: str) -> list[_ParsedSerie
             except json.JSONDecodeError:
                 idx = pos + 1
 
-    def _series_to_parsed(series: list[dict], column_name: str = "") -> _ParsedSeries | None:
+    def _series_to_parsed(series: list[dict], column_name: str = "",
+                          table_name: str = "") -> _ParsedSeries | None:
         if not series or not isinstance(series[0], dict):
             return None
         key_field = None
@@ -227,13 +254,16 @@ def _parse_series_from_tool_outputs(tool_outputs_text: str) -> list[_ParsedSerie
             if k is not None and v is not None:
                 lookup[k] = v
         return _ParsedSeries(lookup=lookup, column_name=column_name,
-                             key_field=key_field) if lookup else None
+                             key_field=key_field,
+                             table_name=table_name) if lookup else None
 
     for parsed in _extract_json_objects(tool_outputs_text):
-        # summarize_trend: {series: [...], summary: {...}}
+        # summarize_trend: {series: [...], summary: {...}, value_column: "...", table: "..."}
         s = parsed.get("series")
         if isinstance(s, list) and len(s) >= 2:
-            ps = _series_to_parsed(s)
+            col = str(parsed.get("value_column") or "")
+            tbl = str(parsed.get("table") or "")
+            ps = _series_to_parsed(s, column_name=col, table_name=tbl)
             if ps:
                 results.append(ps)
 
@@ -246,24 +276,34 @@ def _parse_series_from_tool_outputs(tool_outputs_text: str) -> list[_ParsedSerie
                 if not isinstance(r, dict):
                     continue
                 col = r.get("value_column", "")
+                tbl = ""
                 # Try direct "series" key first (future-proofing)
                 s = r.get("series")
                 # If not found, parse the "result" string
                 if s is None and isinstance(r.get("result"), str):
                     try:
                         inner = json.loads(r["result"])
-                        s = inner.get("series") if isinstance(inner, dict) else None
+                        if isinstance(inner, dict):
+                            s = inner.get("series")
+                            tbl = str(inner.get("table") or "")
                     except (json.JSONDecodeError, ValueError):
                         pass
                 if isinstance(s, list) and len(s) >= 2:
-                    ps = _series_to_parsed(s, column_name=str(col))
+                    ps = _series_to_parsed(s, column_name=str(col),
+                                           table_name=tbl)
                     if ps:
                         results.append(ps)
 
-        # summarize_by_group: {groups: [...], concentration: {...}}
+        # summarize_by_group: {groups: [...], concentration: {...},
+        #   group_column: "...", value_column: "..."}
         g = parsed.get("groups")
         if isinstance(g, list) and len(g) >= 2:
-            ps = _series_to_parsed(g)
+            tbl = str(parsed.get("table") or "")
+            grp_col = str(parsed.get("group_column") or "")
+            val_col = str(parsed.get("value_column") or "")
+            col_label = f"{val_col}_by_{grp_col}" if grp_col else val_col
+            ps = _series_to_parsed(g, column_name=col_label,
+                                   table_name=tbl)
             if ps:
                 results.append(ps)
 
@@ -531,16 +571,65 @@ def _render_auto_charts(
     charts_rendered = 0
 
     # ── Trend charts ──
+    # Dedup: drop series that are identical (same column + same data).
+    # This catches the case where the specialist calls summarize_trend
+    # twice on the same table/column, producing two copies of the same
+    # data that would otherwise render as a misleading dual-axis chart.
+    deduped_trend: list[_ParsedSeries] = []
+    seen_signatures: set[tuple] = set()
+    for ps in trend_series:
+        sig = (ps.column_name, ps.table_name,
+               tuple(sorted(ps.lookup.items())))
+        if sig not in seen_signatures:
+            seen_signatures.add(sig)
+            deduped_trend.append(ps)
+    trend_series = deduped_trend
+
+    # Disambiguate column names so chart legends are clear.
+    # 1. Generic names ("Amount") get prefixed with table context
+    #    when multiple trend series are present.
+    # 2. Same column_name from different tables gets table-prefixed.
+    # Preserve original column names before disambiguation (for
+    # threshold lookup against catalog keys).
+    orig_col_names: dict[int, str] = {
+        id(ps): ps.column_name for ps in trend_series
+    }
+    _GENERIC_COLS = {"amount", "value", "balance", "total", "count"}
+    _TABLE_LABEL = {"spends": "Spend", "payments": "Payment",
+                    "spends_data": "Spend"}
+    if len(trend_series) > 1:
+        for ps in trend_series:
+            if (ps.column_name
+                    and ps.column_name.lower() in _GENERIC_COLS
+                    and ps.table_name):
+                prefix = _TABLE_LABEL.get(ps.table_name, ps.table_name)
+                ps.column_name = f"{prefix} {ps.column_name}"
+    col_counts: dict[str, int] = {}
+    for ps in trend_series:
+        c = ps.column_name or ""
+        col_counts[c] = col_counts.get(c, 0) + 1
+    for ps in trend_series:
+        if ps.column_name and col_counts.get(ps.column_name, 0) > 1:
+            if ps.table_name:
+                ps.column_name = f"{ps.table_name} {ps.column_name}"
+
     # Build chart groups:
     #   1 series → single "trend" chart
-    #   2 series → "trend_dual" (side-by-side comparison)
+    #   2 series, same unit → "trend" with legend (shared y-axis)
+    #   2 series, different units → "trend_dual" (dual y-axes)
     #   3+ series → individual "trend" charts (separate tabs in the UI)
+    from tools.viz_renderer import _infer_unit
     if trend_series:
         if len(trend_series) == 2:
-            # Dual-axis: combine into one chart
-            chart_groups = [("trend_dual", trend_series)]
+            u0 = _infer_unit(orig_col_names.get(id(trend_series[0]),
+                             trend_series[0].column_name))
+            u1 = _infer_unit(orig_col_names.get(id(trend_series[1]),
+                             trend_series[1].column_name))
+            if u0 and u1 and u0 == u1:
+                chart_groups = [("trend", trend_series)]
+            else:
+                chart_groups = [("trend_dual", trend_series)]
         elif len(trend_series) >= 3:
-            # Individual charts — each series gets its own plot/tab
             chart_groups = [("trend", [ps]) for ps in trend_series]
         else:
             chart_groups = [("trend", trend_series)]
@@ -554,8 +643,12 @@ def _render_auto_charts(
             if len(group) == 1 and group[0].column_name:
                 topic = f"{name}_{group[0].column_name}_trend"
             elif len(group) == 2:
-                cols = "_".join(ps.column_name for ps in group if ps.column_name)
-                topic = f"{name}_{cols}_trajectory" if cols else f"{name}_dual_trend"
+                seen_cols: list[str] = []
+                for ps in group:
+                    if ps.column_name and ps.column_name not in seen_cols:
+                        seen_cols.append(ps.column_name)
+                cols = "_and_".join(seen_cols)
+                topic = f"{cols}_trajectory"
             else:
                 topic = f"{name}_trend"
 
@@ -578,17 +671,43 @@ def _render_auto_charts(
             if len(points) < 4:
                 continue
 
-            # Inject thresholds from catalog
+            # Inject thresholds from catalog. The y_field may have been
+            # prefixed (e.g. "Spend Amount") so also try the original
+            # column_name from the parsed series and catalog aliases.
             if catalog and hasattr(catalog, "get_thresholds"):
-                for table_name in catalog.list_tables():
-                    thresholds = catalog.get_thresholds(table_name)
+                # Build a map: y_field → original column_name for fallback
+                yf_to_orig: dict[str, str] = {}
+                for i, ps in enumerate(group):
+                    yf_to_orig[y_fields[i]] = orig_col_names.get(
+                        id(ps), ps.column_name or "")
+
+                for cat_table in catalog.list_tables():
+                    thresholds = catalog.get_thresholds(cat_table)
+                    if not thresholds:
+                        continue
+                    aliases = catalog.column_aliases(cat_table)
                     for yf in y_fields:
-                        th_key = f"threshold_{yf}" if len(y_fields) > 1 else "threshold"
-                        if yf in thresholds and not any(
-                            p.get(th_key) is not None for p in points
-                        ):
+                        th_key = (f"threshold_{yf}"
+                                  if len(y_fields) > 1 else "threshold")
+                        if any(p.get(th_key) is not None for p in points):
+                            continue
+                        # Try: exact match, original column_name, alias
+                        match_val = None
+                        for candidate in (yf, yf_to_orig.get(yf, "")):
+                            if candidate in thresholds:
+                                match_val = thresholds[candidate]["value"]
+                                break
+                            # Check if candidate is an alias
+                            for canon, alias_list in aliases.items():
+                                if (candidate in alias_list
+                                        and canon in thresholds):
+                                    match_val = thresholds[canon]["value"]
+                                    break
+                            if match_val is not None:
+                                break
+                        if match_val is not None:
                             for p in points:
-                                p[th_key] = thresholds[yf]["value"]
+                                p[th_key] = match_val
 
             # Build informative claim + source_call from data
             first_period = points[0]["period"] if points else "?"
@@ -668,7 +787,7 @@ def _render_auto_charts(
             "claim": bar_claim,
             "numbers": points,
             "viz": {"kind": "share", "x_field": ps.key_field, "y_fields": ["value"]},
-            "source_call": f"summarize_by_group('{ps.key_field}', op='sum')",
+            "source_call": f"summarize_by_group('{ps.table_name}', '{ps.key_field}', '{ps.column_name}', op='sum')",
             "captured_at_turn": turn_id,
             "confidence": "high",
         }
@@ -1091,7 +1210,9 @@ def redacting_tool(agent: Agent, name: str, description: str):
             kb_obj = getattr(app_ctx, "_specialist_kb", None)
             if isinstance(kb_obj, dict):
                 kps_for_name = kb_obj.get(name, [])
-                kb_digest = _format_kb_digest(kps_for_name)
+                kb_digest = _format_kb_digest(
+                    kps_for_name, full_kb=kb_obj, self_name=name,
+                )
                 if kb_digest:
                     contextual_in = (
                         f"{kb_digest}\n\n--- New question ---\n{redacted_in}"
