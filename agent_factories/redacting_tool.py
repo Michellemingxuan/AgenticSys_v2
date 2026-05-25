@@ -1350,6 +1350,12 @@ def redacting_tool(agent: Agent, name: str, description: str):
                     f"{_SPECIALIST_TIMEOUT_S:.0f}s wall-clock budget.",
                     exc,
                 )
+            except asyncio.CancelledError:
+                timer.summary(
+                    outcome="cancelled",
+                    total_ms=int((time.perf_counter() - runner_started) * 1000),
+                )
+                raise  # let the turn-level cancellation propagate
             except AgentsException as exc:
                 last_exc = exc
                 if _attempt + 1 < _MAX_SPECIALIST_ATTEMPTS:
