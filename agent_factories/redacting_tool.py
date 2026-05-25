@@ -1111,8 +1111,10 @@ def redacting_tool(agent: Agent, name: str, description: str):
                     if p.is_file() and p.suffix in (".md", ".txt", ".csv")
                 )
                 if files:
+                    file_list = "\n".join(f"  - {f}" for f in files)
                     contextual_in = (
-                        f"[Case folder files: {', '.join(files)}]\n\n"
+                        f"[Report files available — call fs_read_file(filename) "
+                        f"to read the relevant one(s):\n{file_list}]\n\n"
                         f"{contextual_in}"
                     )
 

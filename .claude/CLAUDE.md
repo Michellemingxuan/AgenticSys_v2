@@ -15,6 +15,8 @@ Project-scoped, version-controlled memory store. Travels with this repo. Consult
 - [`.claude/memory/feedback_alternate_paths_must_replay_full_sse.md`](memory/feedback_alternate_paths_must_replay_full_sse.md) — every branch in `server.py` that emits `final` (cache hit, fallback, retry, error short-circuit) MUST also emit `team_plan` + `agent_started` + `agent_completed` + `chart`; otherwise UI panels stay empty and the user reads it as a silent failure. Recurring class of bug.
 - [`.claude/memory/feedback_performance_targets.md`](memory/feedback_performance_targets.md) — user-named wall-clock budgets: screen-rejection < 5s, single-specialist answer ≤ 20s. Treat as failing thresholds, not aspirations; root-cause when exceeded.
 - [`.claude/memory/feedback_plots_preference.md`](memory/feedback_plots_preference.md) — horizontal `share` bars for category breakdowns (readable labels); sort by rank/temporal; uniform time intervals for unwindowed questions.
+- [`.claude/memory/feedback_vegalite_text_labels.md`](memory/feedback_vegalite_text_labels.md) — Vega-Lite positioned text labels must use inline `data.values` + field encoding; `stroke`/`paintOrder`/`fontWeight:600` all fail.
+- [`.claude/memory/feedback_openai_safechain_parity.md`](memory/feedback_openai_safechain_parity.md) — any change to `firewall_client.py` (OpenAI path) must be mirrored in `safechain_client.py` (SafeChain/prod path). They are parallel implementations.
 
 When adding a new entry: create the file in `.claude/memory/`, then add a one-line index entry above. Keep file bodies focused (one concern per file).
 
