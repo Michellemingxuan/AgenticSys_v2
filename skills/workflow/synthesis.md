@@ -78,7 +78,9 @@ Fields: `needed: bool`, `reason: str` (1 sentence), `would_pull: [str]` (kinds o
 
 ### `answer` formatting (REQUIRED)
 
-Format: **key answer + bullet points of main evidence/reasons**.
+Format: **key answer + bullet points of main evidence/reasons**. Use a **table** when the data is naturally comparative or multi-dimensional (e.g. scores across time, side-by-side metrics, threshold comparisons).
+
+#### Default: headline + bullets
 
 ```
 <1-2 sentence direct answer — the headline conclusion with key numbers bolded>
@@ -88,9 +90,23 @@ Format: **key answer + bullet points of main evidence/reasons**.
 - <evidence bullet 3 (if needed)>
 ```
 
+#### When to use a table
+
+Use a markdown table when the answer involves **structured comparisons** — multiple scores, time periods, categories, or threshold checks that are easier to scan in rows/columns than as prose bullets.
+
+```
+<1-2 sentence direct answer — the headline conclusion>
+
+| Column A | Column B | Column C |
+|---|---|---|
+| ... | ... | ... |
+
+- <optional 1-2 bullets for context or caveats not captured in the table>
+```
+
 Rules:
 - **Lead sentence**: the synthesized conclusion, not methodology. Bold the load-bearing numbers.
-- **Bullets**: 2-5 supporting facts with **specific numbers/dates**. Each bullet ≤ 1 sentence.
+- **Bullets**: 2-5 supporting facts with **specific numbers/dates**. Each bullet ≤ 1 sentence. Replace with a table when it communicates the same evidence more clearly.
 - **Don't prefix with "The specialist found..."** — just state the facts.
 - **No hedges, no question repetition.**
 - A reviewer who reads only this answer (not the trace) should understand the key findings.
