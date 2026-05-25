@@ -17,6 +17,7 @@ Project-scoped, version-controlled memory store. Travels with this repo. Consult
 - [`.claude/memory/feedback_plots_preference.md`](memory/feedback_plots_preference.md) — horizontal `share` bars for category breakdowns (readable labels); sort by rank/temporal; uniform time intervals for unwindowed questions.
 - [`.claude/memory/feedback_vegalite_text_labels.md`](memory/feedback_vegalite_text_labels.md) — Vega-Lite positioned text labels must use inline `data.values` + field encoding; `stroke`/`paintOrder`/`fontWeight:600` all fail.
 - [`.claude/memory/feedback_openai_safechain_parity.md`](memory/feedback_openai_safechain_parity.md) — any change to `firewall_client.py` (OpenAI path) must be mirrored in `safechain_client.py` (SafeChain/prod path). They are parallel implementations.
+- [`.claude/memory/project_bureau_credit_scores.md`](memory/project_bureau_credit_scores.md) — FICO (v7/v8, unsecured-focused) is the primary consumer credit score; LN (LexisNexis) is supplementary. FSS/CSS/Paydex/LN-Business are commercial-entity scores. For small-biz owners, consumer + business scores are treated together.
 
 When adding a new entry: create the file in `.claude/memory/`, then add a one-line index entry above. Keep file bodies focused (one concern per file).
 
