@@ -86,6 +86,113 @@ def _slugify(text: str, max_len: int = 60) -> str:
     return (cleaned or "kp")[:max_len]
 
 
+_SOURCE_CALL_RE = re.compile(
+    r"""(?:batch_)?summarize_trend\(\s*['"]([^'"]+)['"]"""  # table name
+    r"""\s*,\s*['"]([^'"]+)['"]"""                          # value column
+    r"""(?:\s*,\s*['"]([^'"]+)['"])?"""                     # time column (optional)
+)
+
+_GROUP_CALL_RE = re.compile(
+    r"""summarize_by_group\(\s*['"]([^'"]+)['"]"""  # table
+    r"""\s*,\s*['"]([^'"]+)['"]"""                  # group column
+    r"""\s*,\s*['"]([^'"]+)['"]"""                  # value column
+)
+
+
+def _humanize(slug: str) -> str:
+    """Turn a snake_case or camelCase slug into a readable label."""
+    return slug.replace("_", " ").replace("-", " ").strip()
+
+
+_MONEY_KEYWORDS = {"balance", "amount", "limit", "spend", "payment",
+                   "exposure", "income", "remit"}
+_SCORE_KEYWORDS = {"score", "prob", "index", "idx", "ratio", "share",
+                   "pct", "rate", "indicator"}
+_COUNT_KEYWORDS = {"count", "trades", "tradelines", "days", "months",
+                   "dpd", "times"}
+
+
+def _infer_unit(column: str, op: str = "") -> str:
+    """Best-effort unit string from column name and aggregation op."""
+    c = column.lower()
+    if op == "count":
+        return "count"
+    if any(k in c for k in _MONEY_KEYWORDS):
+        return "USD"
+    if any(k in c for k in _SCORE_KEYWORDS):
+        return "score"
+    if any(k in c for k in _COUNT_KEYWORDS):
+        return "count"
+    return ""
+
+
+_MAX_YLABEL_LEN = 25
+
+
+def _label_with_unit(col: str, op: str = "") -> str:
+    """Humanize a column name and append its inferred unit.
+
+    When the label is too long for a y-axis (rotated vertically),
+    fall back to just the unit to avoid squeezing the chart body.
+    """
+    if not col:
+        return ""
+    label = _humanize(col)
+    unit = _infer_unit(col, op)
+    full = f"{label} ({unit})" if unit else label
+    if len(full) <= _MAX_YLABEL_LEN:
+        return full
+    if unit:
+        return unit
+    return label[:_MAX_YLABEL_LEN]
+
+
+def _chart_labels(kp: dict) -> dict:
+    """Derive descriptive title, x_label, y_label from KP metadata.
+
+    Returns ``{"title": ..., "x_label": ..., "y_label": ...}`` with
+    best-effort strings; any key may be empty if metadata is absent.
+    """
+    topic = str(kp.get("topic") or "")
+    source = str(kp.get("source_call") or "")
+    table = ""
+    value_col = ""
+    time_col = ""
+    group_col = ""
+    op = ""
+
+    m = _SOURCE_CALL_RE.search(source)
+    if m:
+        table = m.group(1) or ""
+        value_col = m.group(2) or ""
+        time_col = m.group(3) or ""
+    else:
+        mg = _GROUP_CALL_RE.search(source)
+        if mg:
+            table = mg.group(1) or ""
+            group_col = mg.group(2) or ""
+            value_col = mg.group(3) or ""
+
+    op_m = re.search(r"op=['\"](\w+)['\"]", source)
+    if op_m:
+        op = op_m.group(1)
+
+    title = _humanize(topic) if topic else ""
+    if table and not title:
+        title = _humanize(table)
+    elif table and title and len(title) < 30:
+        title = f"{title} ({table})"
+
+    y_label = _label_with_unit(value_col, op)
+    x_label = (
+        _humanize(group_col) if group_col
+        else _humanize(time_col) if time_col
+        else ""
+    )
+
+    return {"title": title, "x_label": x_label, "y_label": y_label}
+
+
 def _coerce_numbers(numbers: Any) -> list[dict] | None:
     """Validate the numbers array. Each entry must be a dict; non-dict
     entries skip the whole render (we won't render a half-bad series).
@@ -583,11 +690,14 @@ def render_chart(
 
     out_path = out_dir / filename
     is_multi = len(extracted) > 1
-    # No title baked into the PNG — the surrounding UI (chart-button label
-    # + lightbox header) already shows the topic, so a chart title would be
-    # redundant ("double titles" the user flagged). Keep the chart visually
-    # clean and let the UI provide the framing.
-    y_label = ", ".join(yf for yf, _ in extracted) if is_multi else extracted[0][0]
+
+    axis_labels = _chart_labels(kp)
+    chart_title = axis_labels["title"]
+    if is_multi:
+        y_label = axis_labels["y_label"] or ", ".join(yf for yf, _ in extracted)
+    else:
+        y_label = axis_labels["y_label"] or _humanize(extracted[0][0])
+    x_label = axis_labels["x_label"] or _humanize(x_field)
 
     try:
         if kind == "trend_grid":
@@ -617,7 +727,7 @@ def render_chart(
                 panel_ax.plot(indices, ys, marker="o", linewidth=2.0,
                               markersize=5.0, color=color)
                 _annotate_points(panel_ax, indices, ys, color)
-                panel_ax.set_ylabel(yf)
+                panel_ax.set_ylabel(_label_with_unit(yf))
                 panel_ax.yaxis.set_major_formatter(
                     plt.FuncFormatter(lambda v, _p: _format_axis_value(v)))
                 _apply_style(panel_ax, fig)
@@ -631,7 +741,10 @@ def render_chart(
             bottom_ax.set_xticks(indices)
             bottom_ax.set_xticklabels(visible_xticklabels, rotation=30,
                                       ha="right", fontsize=9)
-            bottom_ax.set_xlabel(x_field)
+            bottom_ax.set_xlabel(x_label)
+            if chart_title:
+                fig.suptitle(chart_title, fontsize=12, fontweight="bold",
+                             color="#3c4043", y=1.02)
 
             # Keep panels visually distinct but tight.
             fig.tight_layout(h_pad=0.6)
@@ -685,8 +798,15 @@ def render_chart(
                 visible = [str(xs_first[i]) if (i % stride == 0 or i == n - 1) else ""
                            for i in indices]
                 ax.set_xticklabels(visible, rotation=30, ha="right", fontsize=9)
-                ax.set_xlabel(x_field)
-                ax.set_ylabel(y_label)
+                ax.set_xlabel(x_label)
+                if is_multi:
+                    unit = _infer_unit(extracted[0][0])
+                    ax.set_ylabel(unit or y_label)
+                else:
+                    ax.set_ylabel(y_label)
+                if chart_title:
+                    ax.set_title(chart_title, fontsize=12, fontweight="bold",
+                                 color="#3c4043", pad=12)
                 if is_multi:
                     ax.legend(loc="best", frameon=False, fontsize=9)
                 ax.yaxis.set_major_formatter(
@@ -715,8 +835,11 @@ def render_chart(
                 ax.set_xticks(indices)
                 ax.set_xticklabels([str(x) for x in xs_first], rotation=30,
                                    ha="right", fontsize=9)
-                ax.set_xlabel(x_field)
+                ax.set_xlabel(x_label)
                 ax.set_ylabel(y_label)
+                if chart_title:
+                    ax.set_title(chart_title, fontsize=12, fontweight="bold",
+                                 color="#3c4043", pad=12)
                 ax.grid(True, axis="y", linestyle=":", linewidth=0.8,
                         color="#dadce0", alpha=0.9)
                 ax.grid(False, axis="x")
@@ -763,12 +886,19 @@ def render_chart(
                 visible = [str(xs_first[i]) if (i % stride == 0 or i == n - 1) else ""
                            for i in indices]
                 ax.set_xticklabels(visible, rotation=30, ha="right", fontsize=9)
-                ax.set_xlabel(x_field)
+                ax.set_xlabel(x_label)
+                if chart_title:
+                    ax.set_title(chart_title, fontsize=12, fontweight="bold",
+                                 color="#3c4043", pad=12)
 
-                # Label each y-axis with its field name, color-matched to the
-                # corresponding line so the reader maps line→axis at a glance.
-                ax.set_ylabel(yf1, color=primary_color)
-                ax2.set_ylabel(yf2, color=secondary_color)
+                # The legend names each line; y-axis labels add the unit only
+                # so the reader knows the scale without redundant long text.
+                unit1 = _infer_unit(yf1)
+                unit2 = _infer_unit(yf2)
+                ax.set_ylabel(unit1 or _label_with_unit(yf1),
+                              color=primary_color)
+                ax2.set_ylabel(unit2 or _label_with_unit(yf2),
+                               color=secondary_color)
                 ax.tick_params(axis="y", colors=primary_color)
                 ax2.tick_params(axis="y", colors=secondary_color)
 
@@ -838,8 +968,11 @@ def render_chart(
                 ax.set_yticks(range(len(xs_sorted)))
                 ax.set_yticklabels([str(x) for x in xs_sorted], fontsize=9)
                 ax.invert_yaxis()
-                ax.set_xlabel(yf)
-                ax.set_ylabel("")
+                ax.set_xlabel(y_label or _label_with_unit(yf))
+                ax.set_ylabel(x_label or "")
+                if chart_title:
+                    ax.set_title(chart_title, fontsize=12, fontweight="bold",
+                                 color="#3c4043", pad=12)
                 ax.grid(True, axis="x", linestyle=":", linewidth=0.8,
                         color="#dadce0", alpha=0.9)
                 ax.grid(False, axis="y")
@@ -856,8 +989,12 @@ def render_chart(
                     n_bins = min(30, max(10, len(vals) // 5))
                     ax.hist(vals, bins=n_bins, color=_PALETTE[0],
                             edgecolor="white", linewidth=0.5, alpha=0.85)
-                    ax.set_xlabel(yf)
+                    ax.set_xlabel(y_label or _label_with_unit(yf))
                     ax.set_ylabel("Frequency")
+                    if chart_title:
+                        ax.set_title(chart_title, fontsize=12,
+                                     fontweight="bold", color="#3c4043",
+                                     pad=12)
                     ax.grid(True, axis="y", linestyle=":", linewidth=0.8,
                             color="#dadce0", alpha=0.9)
                     ax.grid(False, axis="x")
@@ -881,8 +1018,11 @@ def render_chart(
                     ax.plot(xs_kde, density, color=color, linewidth=2,
                             label=yf if len(extracted) > 1 else None)
                     ax.fill_between(xs_kde, density, alpha=0.15, color=color)
-                ax.set_xlabel(x_field)
+                ax.set_xlabel(x_label)
                 ax.set_ylabel("Density")
+                if chart_title:
+                    ax.set_title(chart_title, fontsize=12, fontweight="bold",
+                                 color="#3c4043", pad=12)
                 if len(extracted) > 1:
                     ax.legend(loc="best", frameon=False, fontsize=9)
                 ax.grid(True, axis="y", linestyle=":", linewidth=0.8,
@@ -1003,9 +1143,11 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
     # instead of giving 20% of horizontal real estate to a sidebar.
     if kind == "trend":
         y_value_field = "value" if is_multi else primary_y
+        y_title = _label_with_unit(primary_y)
         line_enc: dict = {
             "x": {"field": x_field, "type": "ordinal"},
-            "y": {"field": y_value_field, "type": "quantitative"},
+            "y": {"field": y_value_field, "type": "quantitative",
+                   "title": y_title},
             "tooltip": [
                 {"field": x_field, "type": "ordinal"},
                 {"field": y_value_field, "type": "quantitative",
@@ -1066,7 +1208,8 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
         bar_enc: dict = {
             "x": {"field": x_field, "type": "ordinal",
                    "sort": None},  # preserve data order (pre-sorted by value desc)
-            "y": {"field": y_value_field, "type": "quantitative"},
+            "y": {"field": y_value_field, "type": "quantitative",
+                  "title": _label_with_unit(primary_y)},
             "tooltip": [
                 {"field": x_field, "type": "ordinal"},
                 {"field": y_value_field, "type": "quantitative",
@@ -1120,7 +1263,7 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
                         "x": {"field": x_field, "type": "ordinal"},
                         "y": {"field": y_field, "type": "quantitative",
                               "axis": {"orient": axis_orient,
-                                       "title": y_field}},
+                                       "title": _label_with_unit(y_field)}},
                         "color": {"datum": y_field, "type": "nominal",
                                   "legend": {"orient": "top",
                                              "title": None}},
@@ -1179,11 +1322,13 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
                         "mark": {"type": "line", "point": True},
                         "encoding": {
                             "x": {"field": x_field, "type": "ordinal"},
-                            "y": {"field": yf, "type": "quantitative"},
+                            "y": {"field": yf, "type": "quantitative",
+                                  "title": _label_with_unit(yf)},
                             "tooltip": [
                                 {"field": x_field, "type": "ordinal"},
                                 {"field": yf, "type": "quantitative",
-                                 "format": _LABEL_FMT, "title": yf},
+                                 "format": _LABEL_FMT,
+                                 "title": _label_with_unit(yf)},
                             ],
                         },
                     },
@@ -1267,7 +1412,8 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
             ],
         }
 
-    title = str(kp.get("topic") or "").replace("_", " ").strip()
-    if title:
-        spec["title"] = title
+    vl_labels = _chart_labels(kp)
+    vl_title = vl_labels["title"]
+    if vl_title:
+        spec["title"] = vl_title
     return spec
