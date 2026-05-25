@@ -332,13 +332,15 @@ def _prewarm_clients() -> None:
         )
 
     try:
-        asyncio.run(asyncio.wait_for(_warmup_call(), timeout=60.0))
+        asyncio.run(asyncio.wait_for(_warmup_call(), timeout=30.0))
         elapsed_ms = int((time.time() - t0) * 1000)
         _BOOT_LOGGER.log("llm_prewarm_done", {
             "backend": backend, "duration_ms": elapsed_ms,
         })
         print(f"[server] LLM prewarm done in {elapsed_ms}ms")
-    except Exception as exc:  # noqa: BLE001 — prewarm is best-effort
+    except KeyboardInterrupt:
+        print("\n[server] LLM prewarm interrupted by user — skipping.")
+    except BaseException as exc:  # noqa: BLE001 — prewarm is best-effort
         elapsed_ms = int((time.time() - t0) * 1000)
         _BOOT_LOGGER.log("llm_prewarm_failed", {
             "backend": backend,
