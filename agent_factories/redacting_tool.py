@@ -1131,102 +1131,103 @@ def redacting_tool(agent: Agent, name: str, description: str):
             run_input_items=len(run_input) if isinstance(run_input, list) else 1,
         )
 
-        # Wall-clock + turn-budget + exception fence around the inner run.
-        # Without these, a hung LLM / network layer or any non-MaxTurnsExceeded
-        # SDK error (ModelBehaviorError, output-schema parse failure, transport
-        # error) escapes to function_tool's default failure handler, which
-        # returns a generic "An error occurred while running the tool" string
-        # — the orchestrator then renders it as "specialist did not return"
-        # and the reviewer never sees the real cause. We catch each class
-        # explicitly, log it, and return a structured ``[FAILED …]`` payload.
-        try:
-            t0 = time.perf_counter()
-            # Mark every LLM call originating from inside this
-            # specialist's Runner.run as "specialist"-kind. The
-            # firewall stack routes these to the specialist semaphore
-            # pool (FIREWALL_SPECIALIST_CONCURRENCY, default 8),
-            # leaving the orchestrator pool reserved for the
-            # team-planning / synthesis calls that happen outside any
-            # specialist context. Without this routing, a Round-1 burst
-            # of 3 specialists × 4-6 internal LLM calls each piled up
-            # behind a single 3-slot semaphore, serializing work that
-            # should be parallel.
-            kind_token = LLM_CALL_KIND.set("specialist")
-            node_store = getattr(app_ctx, "_node_trace_store", None)
+        # Specialist run with retry on ModelBehaviorError. SafeChain can
+        # truncate long JSON outputs, causing parse failures on the first
+        # attempt. A retry often succeeds because the model produces a
+        # shorter response. Max 2 attempts (1 initial + 1 retry).
+        _MAX_SPECIALIST_ATTEMPTS = 2
+        result = None
+        last_exc = None
+        node_store = getattr(app_ctx, "_node_trace_store", None)
+        node_label = name if name == "report_agent" else f"specialist.{name}"
+
+        for _attempt in range(_MAX_SPECIALIST_ATTEMPTS):
             try:
-                node_label = name if name == "report_agent" else f"specialist.{name}"
-                async with _open_node(node_store, node_label, depth=0):
-                    if kb_digest_n_kps:
-                        attach_tag("kb_digest_present")
-                        attach_extra(n_kps_in_digest=kb_digest_n_kps)
-                    if prior:
-                        attach_tag("warm_specialist")
-                    result = await asyncio.wait_for(
-                        Runner.run(
-                            inner, run_input, context=app_ctx,
-                            max_turns=_SPECIALIST_MAX_TURNS,
-                        ),
-                        timeout=_SPECIALIST_TIMEOUT_S,
-                    )
-            finally:
-                LLM_CALL_KIND.reset(kind_token)
-            timer.record(
-                "specialist_runner",
-                int((time.perf_counter() - t0) * 1000),
-                max_turns=_SPECIALIST_MAX_TURNS,
-            )
-        except MaxTurnsExceeded as exc:
-            timer.summary(
-                outcome="failed",
-                error_type="max_turns_exceeded",
-                total_ms=int((time.perf_counter() - runner_started) * 1000),
-            )
-            return _record_failure(
-                app_ctx, name, redacted_in,
-                "max_turns_exceeded",
-                f"hit the {_SPECIALIST_MAX_TURNS}-turn budget — "
-                f"partial findings were not returned. {exc}",
-                exc,
-            )
-        except asyncio.TimeoutError as exc:
-            timer.summary(
-                outcome="failed",
-                error_type="timeout",
-                total_ms=int((time.perf_counter() - runner_started) * 1000),
-            )
-            return _record_failure(
-                app_ctx, name, redacted_in,
-                "timeout",
-                f"specialist did not complete within "
-                f"{_SPECIALIST_TIMEOUT_S:.0f}s wall-clock budget.",
-                exc,
-            )
-        except AgentsException as exc:
-            # Covers ModelBehaviorError (malformed JSON / nonexistent tool /
-            # output-schema parse failure), UserError (SDK misuse), and
-            # guardrail tripwires.
-            timer.summary(
-                outcome="failed",
-                error_type=type(exc).__name__,
-                total_ms=int((time.perf_counter() - runner_started) * 1000),
-            )
-            return _record_failure(
-                app_ctx, name, redacted_in,
-                type(exc).__name__,
-                str(exc) or "no message",
-                exc,
-            )
-        except Exception as exc:  # noqa: BLE001 - last-resort fence
-            # Network / transport / serialization / anything else. We don't
-            # want a stray exception class to slip past and surface as the
-            # SDK's generic paraphrase.
-            timer.summary(
-                outcome="failed",
-                error_type=type(exc).__name__,
-                total_ms=int((time.perf_counter() - runner_started) * 1000),
-            )
-            return _record_failure(
-                app_ctx, name, redacted_in,
+                t0 = time.perf_counter()
+                kind_token = LLM_CALL_KIND.set("specialist")
+                try:
+                    label = node_label if _attempt == 0 else f"{node_label}.retry"
+                    async with _open_node(node_store, label, depth=0):
+                        if _attempt == 0:
+                            if kb_digest_n_kps:
+                                attach_tag("kb_digest_present")
+                                attach_extra(n_kps_in_digest=kb_digest_n_kps)
+                            if prior:
+                                attach_tag("warm_specialist")
+                        else:
+                            attach_tag("retry")
+                        result = await asyncio.wait_for(
+                            Runner.run(
+                                inner, run_input, context=app_ctx,
+                                max_turns=_SPECIALIST_MAX_TURNS,
+                            ),
+                            timeout=_SPECIALIST_TIMEOUT_S,
+                        )
+                finally:
+                    LLM_CALL_KIND.reset(kind_token)
+                timer.record(
+                    "specialist_runner",
+                    int((time.perf_counter() - t0) * 1000),
+                    max_turns=_SPECIALIST_MAX_TURNS,
+                    attempt=_attempt,
+                )
+                break  # success
+            except MaxTurnsExceeded as exc:
+                timer.summary(
+                    outcome="failed",
+                    error_type="max_turns_exceeded",
+                    total_ms=int((time.perf_counter() - runner_started) * 1000),
+                )
+                return _record_failure(
+                    app_ctx, name, redacted_in,
+                    "max_turns_exceeded",
+                    f"hit the {_SPECIALIST_MAX_TURNS}-turn budget — "
+                    f"partial findings were not returned. {exc}",
+                    exc,
+                )
+            except asyncio.TimeoutError as exc:
+                timer.summary(
+                    outcome="failed",
+                    error_type="timeout",
+                    total_ms=int((time.perf_counter() - runner_started) * 1000),
+                )
+                return _record_failure(
+                    app_ctx, name, redacted_in,
+                    "timeout",
+                    f"specialist did not complete within "
+                    f"{_SPECIALIST_TIMEOUT_S:.0f}s wall-clock budget.",
+                    exc,
+                )
+            except AgentsException as exc:
+                last_exc = exc
+                if _attempt + 1 < _MAX_SPECIALIST_ATTEMPTS:
+                    if logger is not None:
+                        logger.log("specialist_retry", {
+                            "specialist": name,
+                            "attempt": _attempt,
+                            "error_type": type(exc).__name__,
+                            "error_message": str(exc)[:200],
+                        })
+                    continue  # retry
+                timer.summary(
+                    outcome="failed",
+                    error_type=type(exc).__name__,
+                    total_ms=int((time.perf_counter() - runner_started) * 1000),
+                )
+                return _record_failure(
+                    app_ctx, name, redacted_in,
+                    type(exc).__name__,
+                    str(exc) or "no message",
+                    exc,
+                )
+            except Exception as exc:  # noqa: BLE001 - last-resort fence
+                timer.summary(
+                    outcome="failed",
+                    error_type=type(exc).__name__,
+                    total_ms=int((time.perf_counter() - runner_started) * 1000),
+                )
+                return _record_failure(
+                    app_ctx, name, redacted_in,
                 type(exc).__name__,
                 str(exc) or repr(exc),
                 exc,
