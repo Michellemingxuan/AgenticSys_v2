@@ -615,17 +615,47 @@ def _render_auto_charts(
 
     # Build chart groups:
     #   1 series → single "trend" chart
-    #   2 series, same unit → "trend" with legend (shared y-axis)
-    #   2 series, different units → "trend_dual" (dual y-axes)
+    #   2 series, same unit + similar range → "trend" (shared y-axis)
+    #   2 series, different units or ranges → "trend_dual" (dual y-axes)
     #   3+ series → individual "trend" charts (separate tabs in the UI)
     from tools.viz_renderer import _infer_unit
+
+    def _series_range(ps: _ParsedSeries) -> tuple[float, float] | None:
+        vals = []
+        for v in ps.lookup.values():
+            try:
+                vals.append(float(v))
+            except (TypeError, ValueError):
+                continue
+        return (min(vals), max(vals)) if vals else None
+
+    def _ranges_compatible(r0, r1) -> bool:
+        """True when two value ranges are close enough to share one y-axis."""
+        if r0 is None or r1 is None:
+            return False
+        all_max = max(r0[1], r1[1])
+        all_min = min(r0[0], r1[0])
+        span = all_max - all_min
+        if span == 0:
+            return True
+        # Each series should cover at least 20% of the combined span,
+        # otherwise the smaller one gets squashed flat.
+        s0 = r0[1] - r0[0]
+        s1 = r1[1] - r1[0]
+        return min(s0, s1) / span >= 0.2
+
     if trend_series:
         if len(trend_series) == 2:
             u0 = _infer_unit(orig_col_names.get(id(trend_series[0]),
                              trend_series[0].column_name))
             u1 = _infer_unit(orig_col_names.get(id(trend_series[1]),
                              trend_series[1].column_name))
-            if u0 and u1 and u0 == u1:
+            same_unit = u0 and u1 and u0 == u1
+            similar_range = _ranges_compatible(
+                _series_range(trend_series[0]),
+                _series_range(trend_series[1]),
+            )
+            if same_unit and similar_range:
                 chart_groups = [("trend", trend_series)]
             else:
                 chart_groups = [("trend_dual", trend_series)]
