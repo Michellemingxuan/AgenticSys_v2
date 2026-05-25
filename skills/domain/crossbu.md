@@ -1,10 +1,10 @@
 ---
 name: crossbu
-description: Cross-BU domain skill — cross-product exposure, consumer-vs-commercial, contagion patterns
+description: Cross-BU domain skill — card portfolio (count, types, limits, balances), cross-product exposure, consumer-vs-commercial, contagion patterns
 type: domain
 owner: [base_specialist]
 mode: inline
-data_hints: [crossbu_cards, crossbu_merchants, xbu_summary]
+data_hints: [crossbu_cards, crossbu_merchants]
 interpretation_guide: >
   High total exposure increases contagion risk. Utilisation > 1.0 = over-limit.
   Classify cards via card_portfolio (CPS = consumer, SBS = commercial).

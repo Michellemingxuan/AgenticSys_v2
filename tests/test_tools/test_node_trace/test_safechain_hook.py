@@ -18,7 +18,7 @@ async def test_safechain_create_records_round_with_tiktoken(tmp_path: Path):
     client = SafeChainAsyncOpenAI(model_name="gpt-4o-mini", firewall=firewall)
 
     # Stub _invoke to bypass real safechain.
-    async def _stub_invoke(self_, *, model, messages, tools, response_format, stream):
+    async def _stub_invoke(self_, *, model, messages, tools, response_format, stream, **kw):
         from llm.safechain_client import _synthesize_chat_completion
         return _synthesize_chat_completion(text='{"output":"hi"}', model=model)
 

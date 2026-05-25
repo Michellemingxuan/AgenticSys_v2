@@ -187,7 +187,8 @@ class _SafeChainChatCompletions:
         stream: bool = False,
         **kw: Any,
     ) -> Any:
-        del kw  # absorbs SDK extras (temperature, max_tokens, …) we don't forward
+        tool_choice = kw.pop("tool_choice", None)
+        del kw  # absorbs remaining SDK extras we don't forward
         from tools.node_trace import (
             ACTIVE_NODE, NodeTrace, _hooks_own_rounds,
             attach_io, attach_latency, attach_usage,
@@ -205,11 +206,13 @@ class _SafeChainChatCompletions:
                         return await self._invoke(
                             model=model, messages=messages, tools=tools,
                             response_format=response_format, stream=stream,
+                            tool_choice=tool_choice,
                         )
                     if _hooks_own_rounds(parent):
                         return await self._invoke(
                             model=model, messages=messages, tools=tools,
                             response_format=response_format, stream=stream,
+                            tool_choice=tool_choice,
                         )
                     round_idx = parent.next_round_index()
                     async with NodeTrace(
@@ -220,7 +223,7 @@ class _SafeChainChatCompletions:
                         node=f"{parent.node}.round_{round_idx}",
                         depth=parent.depth + 1,
                     ):
-                        combined = _combine_messages(messages, tools, response_format)
+                        combined = _combine_messages(messages, tools, response_format, tool_choice=tool_choice)
                         sys_chars = sum(
                             len(m.get("content") or "")
                             for m in messages if m.get("role") == "system"
@@ -237,6 +240,7 @@ class _SafeChainChatCompletions:
                         resp = await self._invoke(
                             model=model, messages=messages, tools=tools,
                             response_format=response_format, stream=stream,
+                            tool_choice=tool_choice,
                         )
                         attach_latency(
                             llm_call_ms=int((time.perf_counter() - _llm_t0) * 1000),
@@ -290,8 +294,9 @@ class _SafeChainChatCompletions:
         tools: list[dict] | None,
         response_format: Any,
         stream: bool = False,
+        tool_choice: str | None = None,
     ) -> Any:
-        combined = _combine_messages(messages, tools, response_format)
+        combined = _combine_messages(messages, tools, response_format, tool_choice=tool_choice)
         try:
             from safechain.prompts import ValidChatPromptTemplate  # type: ignore[import-not-found]
         except ImportError as e:
@@ -398,6 +403,7 @@ def _combine_messages(
     messages: list[dict],
     tools: list[dict] | None,
     response_format: Any,
+    tool_choice: str | None = None,
 ) -> str:
     """Flatten a multi-turn message list into a single string with neutral
     role labels (``Context``, ``Request``, ``Response``, ``Tool result``) and
@@ -417,7 +423,8 @@ def _combine_messages(
         role = m.get("role", "")
         content = m.get("content", "") or ""
         if role == "system" and tools and not tool_block_appended:
-            content = content + "\n\n" + _build_tool_schema_block(tools)
+            content = content + "\n\n" + _build_tool_schema_block(
+                tools, tool_choice=tool_choice)
             tool_block_appended = True
         if (
             role == "system"
@@ -435,23 +442,32 @@ def _combine_messages(
     ):
         synth: list[str] = []
         if tools and not tool_block_appended:
-            synth.append(_build_tool_schema_block(tools))
+            synth.append(_build_tool_schema_block(
+                tools, tool_choice=tool_choice))
         if response_format is not None and not rf_block_appended:
             synth.append(_build_response_format_hint(response_format))
         parts.insert(0, "Context:\n" + "\n\n".join(synth))
     return "\n\n".join(parts)
 
 
-def _build_tool_schema_block(tools: list[dict]) -> str:
+def _build_tool_schema_block(tools: list[dict],
+                             tool_choice: str | None = None) -> str:
     """Render the SDK's tool definitions as a text block the LLM can read.
 
     The SDK passes tools as OpenAI-style dicts with a ``function`` field that
     holds ``name``, ``description``, and ``parameters`` (JSON schema). We just
     render them in a stable text format and tell the LLM how to emit
     ``{"tool_call": …}`` / ``{"output": …}`` JSON.
+
+    When ``tool_choice="required"``, injects mandatory language enforcing
+    that the LLM must call at least one tool before emitting a final answer.
     """
+    mandatory = tool_choice == "required"
     lines = [
-        "You have access to the following tools.",
+        ("You MUST call at least one tool before responding with a final answer. "
+         "Do NOT emit {\"output\": ...} without calling tools first."
+         if mandatory else
+         "You have access to the following tools."),
         "To call ONE tool, respond with ONLY this JSON (no other text, no markdown fences):",
         '  {"tool_call": {"name": "<tool_name>", "arguments": {<args>}}}',
         "",
