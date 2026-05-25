@@ -794,21 +794,82 @@ class _FakeAsyncStream:
         self._idx = len(self._chunks)
 
 
+def _repair_truncated_json(text: str) -> str | None:
+    """Attempt to repair JSON truncated mid-way by SafeChain's output buffer.
+
+    Strategy: close any open strings, then append enough closing braces/brackets
+    to balance the nesting. This recovers partial SpecialistOutput JSON like:
+      {"output": {"domain": "modeling", "findings": "TSR rose...
+    into valid JSON with truncated field values.
+    """
+    s = text.rstrip()
+    if not s:
+        return None
+
+    # Close any open string
+    quote_count = 0
+    in_escape = False
+    for ch in s:
+        if in_escape:
+            in_escape = False
+            continue
+        if ch == "\\":
+            in_escape = True
+            continue
+        if ch == '"':
+            quote_count += 1
+    if quote_count % 2 == 1:
+        s += '"'
+
+    # Close open arrays and objects
+    stack: list[str] = []
+    in_str = False
+    esc = False
+    for ch in s:
+        if esc:
+            esc = False
+            continue
+        if ch == "\\":
+            esc = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]" and stack:
+            stack.pop()
+
+    s += "".join(reversed(stack))
+    return s
+
+
 def _try_parse_json(text: str) -> Any:
     if not isinstance(text, str):
         return None
     try:
         return json.loads(text)
     except (json.JSONDecodeError, ValueError):
-        # Sometimes the LLM wraps JSON in markdown fences. Strip them.
-        stripped = text.strip()
-        for fence in ("```json", "```"):
-            if stripped.startswith(fence):
-                stripped = stripped[len(fence):].lstrip("\n")
-                break
-        if stripped.endswith("```"):
-            stripped = stripped[:-3].rstrip()
+        pass
+    # Strip markdown fences.
+    stripped = text.strip()
+    for fence in ("```json", "```"):
+        if stripped.startswith(fence):
+            stripped = stripped[len(fence):].lstrip("\n")
+            break
+    if stripped.endswith("```"):
+        stripped = stripped[:-3].rstrip()
+    try:
+        return json.loads(stripped)
+    except (json.JSONDecodeError, ValueError):
+        pass
+    # Attempt truncated JSON repair (SafeChain output buffer truncation).
+    repaired = _repair_truncated_json(stripped)
+    if repaired:
         try:
-            return json.loads(stripped)
+            return json.loads(repaired)
         except (json.JSONDecodeError, ValueError):
-            return None
+            pass
+    return None
