@@ -307,22 +307,15 @@ class _SafeChainChatCompletions:
 
         llm = self._parent._ensure_llm()
 
-        # safechain's LCEL model is async-only under the hood, but exposes a
-        # sync `invoke` that bridges to async via `asyncio.run(...)`. With
-        # nest_asyncio applied at module init, that bridge tolerates being
-        # called from inside our turn's event loop — so this matches the v1
-        # sync pattern and lets safechain's `TokenUtil.get_token` coroutine
-        # be properly driven instead of leaking as "never awaited".
-        #
-        # If nest_asyncio is NOT installed, fall back to a worker thread
-        # without a running loop (asyncio.run can construct its own there).
-        # That mode trips the "never awaited" warning on broken safechain
-        # versions, so we surface a clear error if it fails.
+        # Mutable box so re-prompting (tool_choice enforcement) can update
+        # the combined prompt and _sync_invoke picks up the new value.
+        _prompt = [combined]
+
         def _sync_invoke() -> str:
             chain = ValidChatPromptTemplate.from_messages(
                 [("human", "{__input__}")]
             ) | llm
-            r = chain.invoke({"__input__": combined})
+            r = chain.invoke({"__input__": _prompt[0]})
             return r.content if hasattr(r, "content") else str(r)
 
         async def _do_invoke() -> str:
@@ -362,6 +355,27 @@ class _SafeChainChatCompletions:
                 raise FirewallRejection("400", f"safechain bad request: {es}")
             else:
                 raise
+
+        # Enforce tool_choice="required": if the LLM emitted a final
+        # answer instead of calling tools, append its response + a nudge
+        # to the messages and re-invoke once. This catches the safechain
+        # failure mode where the LLM ignores the prompt-level instruction.
+        if tool_choice == "required" and tools:
+            probe_calls, _, _ = _extract_tool_calls_and_content(text)
+            if not probe_calls:
+                messages = messages + [
+                    {"role": "assistant", "content": text},
+                    {"role": "user", "content": (
+                        "You did NOT call any tool. You MUST call at least "
+                        "one tool before producing a final answer. Respond "
+                        "with a tool_call JSON now."
+                    )},
+                ]
+                _prompt[0] = _combine_messages(
+                    messages, tools, response_format,
+                    tool_choice=tool_choice,
+                )
+                text = await _do_invoke()
 
         # The openai-agents SDK calls this with `stream=True` for streamed
         # runs (Runner.run_streamed). Return a synthetic single-chunk async
