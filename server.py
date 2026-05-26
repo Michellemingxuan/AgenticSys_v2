@@ -332,15 +332,13 @@ def _prewarm_clients() -> None:
         )
 
     try:
-        asyncio.run(asyncio.wait_for(_warmup_call(), timeout=30.0))
+        asyncio.run(asyncio.wait_for(_warmup_call(), timeout=60.0))
         elapsed_ms = int((time.time() - t0) * 1000)
         _BOOT_LOGGER.log("llm_prewarm_done", {
             "backend": backend, "duration_ms": elapsed_ms,
         })
         print(f"[server] LLM prewarm done in {elapsed_ms}ms")
-    except KeyboardInterrupt:
-        print("\n[server] LLM prewarm interrupted by user — skipping.")
-    except BaseException as exc:  # noqa: BLE001 — prewarm is best-effort
+    except Exception as exc:  # noqa: BLE001 — prewarm is best-effort
         elapsed_ms = int((time.time() - t0) * 1000)
         _BOOT_LOGGER.log("llm_prewarm_failed", {
             "backend": backend,
@@ -1364,6 +1362,19 @@ async def _run_turn_streamed(
             # No conversation history accumulation — each turn starts
             # fresh. Follow-up context lives in specialist_kb + warmth hint.
 
+            # Guard: if orchestrator emitted zero tool calls (skipped
+            # specialists entirely), retry once — this is a safechain
+            # flake where tool_choice="required" was ignored.
+            if (not tool_calls
+                    and _orch_attempt + 1 < _MAX_ORCH_ATTEMPTS):
+                _orch_attempt += 1
+                sess.logger.log("orchestrator_retry_no_tools", {
+                    "turn_id": turn_id,
+                    "attempt": _orch_attempt,
+                })
+                tool_calls = []
+                continue
+
             # Successful attempt — exit the retry loop.
             break
 
@@ -1500,6 +1511,23 @@ async def _run_turn_streamed(
     _drain_specialist_errors()
 
     # ── 4. Emit final + chat agent message ────────────────────────────────
+    # Guard: if orchestrator finished with zero tool calls (skipped all
+    # specialists), the answer is ungrounded — treat as a failure and
+    # log it. This happens on safechain where tool_choice="required"
+    # is enforced via prompt text and the LLM sometimes ignores it.
+    if not tool_calls and final_answer is not None:
+        sess.logger.log("orchestrator_no_tool_calls", {
+            "turn_id": turn_id,
+            "answer_preview": str(getattr(final_answer, "answer", ""))[:200],
+        })
+        flags_pre = getattr(final_answer, "flags", []) or []
+        flags_pre = list(flags_pre) + [
+            "Orchestrator answered without calling any specialist — "
+            "answer may be ungrounded. Numbers are NOT verified by live data."
+        ]
+        if hasattr(final_answer, "flags"):
+            final_answer.flags = flags_pre
+
     if final_answer is None:
         # Orchestrator streamed cleanly but emitted no structured FinalAnswer
         # (e.g., the model returned an empty / non-parseable message that the
