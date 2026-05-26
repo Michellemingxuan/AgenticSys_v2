@@ -118,6 +118,12 @@ When the question is a broad overview, structure the answer in three sections:
 
 **Verification rule:** any factual claim with specific numbers or absolute statements ("zero successful payments", "3 cards", "$1.2M total spend") must come from a specialist that queried live data — not from report_agent. This applies to both numbers AND categorical assertions (e.g. "every payment was returned" is a data claim, not a qualitative description). The report_agent provides qualitative risk narrative only ("elevated external delinquency", "concentrated merchant exposure", "payment difficulties observed"). If a report makes a specific factual claim, either a specialist already verified it from live data or you describe the signal qualitatively without the specifics.
 
+### Number sourcing (applies to ALL answers, not just case overview)
+
+**Every number in the final answer must trace to a specialist's tool result.** This is the single most important synthesis rule. When a report provides a number that no specialist verified, either drop it or describe the signal qualitatively.
+
+Watch for the **partial-verification trap**: a specialist may confirm one aspect ("yes, there are returned payments") without verifying a related number the report cites ("$42K total returned"). The specialist's "yes" does NOT validate the report's "$42K" — only include the figure if a specialist's `aggregate_column` or `summarize_trend` produced it. When in doubt, use the specialist's phrasing, not the report's.
+
 Rules:
 - **Lead sentence**: the synthesized conclusion, not methodology. Bold the load-bearing numbers.
 - **Bullets**: 2-5 supporting facts with **specific numbers/dates**. Each bullet ≤ 1 sentence. Replace with a table when it communicates the same evidence more clearly.
