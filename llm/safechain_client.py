@@ -29,12 +29,36 @@ In dev / this repo, ``backend="openai"`` keeps the existing
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
+import threading
 import logging
 import os
 import time
 import uuid
 from typing import Any
+
+# Per-LLM-call timeout for safechain. Without this, a hung safechain
+# HTTP call blocks the asyncio.to_thread worker forever — the turn-level
+# fence (360s) can cancel the asyncio task but can't interrupt the
+# underlying thread. This timeout ensures the asyncio side gives up
+# (though the thread itself may linger until safechain returns).
+_SAFECHAIN_CALL_TIMEOUT_S = float(
+    os.environ.get("SAFECHAIN_CALL_TIMEOUT_S", "120")
+)
+
+# Dedicated thread pool for safechain LLM calls. The default
+# ThreadPoolExecutor has max_workers = min(32, cpu_count + 4) — on an
+# 8-core machine that's 12. Each safechain call blocks a thread for
+# 5-60s (normal) or indefinitely (hung). After 2-3 questions with
+# parallel specialists, stuck threads exhaust the default pool and new
+# calls queue behind them — visible as the system "stuck at team
+# construction." A dedicated pool with 64 workers ensures new calls
+# always get a thread even when earlier calls are still blocking.
+_SAFECHAIN_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=int(os.environ.get("SAFECHAIN_THREAD_POOL", "64")),
+    thread_name_prefix="safechain-llm",
+)
 
 from openai.types.chat import (
     ChatCompletion,
@@ -152,8 +176,35 @@ class SafeChainAsyncOpenAI:
             self._refresh_llm()
         return self._llm
 
+    _thread_local = threading.local()
+
+    def _create_llm(self) -> Any:
+        """Return a thread-local safechain model instance.
+
+        The shared singleton (_llm) is NOT thread-safe — concurrent
+        chain.invoke() calls on the same object deadlock on internal
+        token/connection state. Thread-local storage gives each worker
+        thread its own model (created once, reused on subsequent calls
+        to the same thread) — no cross-thread contention, no per-call
+        construction overhead.
+        """
+        tl = self._thread_local
+        if not hasattr(tl, "llm") or tl.llm is None:
+            try:
+                from safechain.core.model import model as safechain_model  # type: ignore[import-not-found]
+            except ImportError as e:
+                raise NotImplementedError(
+                    "safechain is not installed in this environment. "
+                    "SafeChainAsyncOpenAI is only usable in the private/prod env."
+                ) from e
+            model_id = os.environ.get("SAFECHAIN_MODEL", self._model_name)
+            tl.llm = safechain_model(model_id)
+        return tl.llm
+
     def _refresh_llm(self) -> None:
-        """(Re)load the safechain model. Used on first call and on 401 retry."""
+        """(Re)load the shared safechain model. Used on first call and on
+        401 retry. The shared instance is only used as a connectivity
+        check; actual calls use per-call instances from _create_llm."""
         try:
             from safechain.core.model import model as safechain_model  # type: ignore[import-not-found]
         except ImportError as e:
@@ -305,7 +356,11 @@ class _SafeChainChatCompletions:
                 "the private/prod environment only."
             ) from e
 
-        llm = self._parent._ensure_llm()
+        # Create a fresh model per call — the shared singleton is NOT
+        # thread-safe and concurrent chain.invoke() calls deadlock on
+        # internal token/connection state. Mutable box so 401-retry can
+        # swap in a refreshed model.
+        _llm_box = [self._parent._create_llm()]
 
         # Mutable box so re-prompting (tool_choice enforcement) can update
         # the combined prompt and _sync_invoke picks up the new value.
@@ -314,23 +369,32 @@ class _SafeChainChatCompletions:
         def _sync_invoke() -> str:
             chain = ValidChatPromptTemplate.from_messages(
                 [("human", "{__input__}")]
-            ) | llm
+            ) | _llm_box[0]
             r = chain.invoke({"__input__": _prompt[0]})
             return r.content if hasattr(r, "content") else str(r)
 
         async def _do_invoke() -> str:
-            # Always run on a worker thread, even with nest_asyncio applied,
-            # so concurrent specialist calls don't serialize behind the
-            # main loop. nest_asyncio makes safechain's sync→async bridge
-            # safe; `asyncio.to_thread` makes it parallelizable. Without
-            # this, the SDK's parallel-tool-call execution (orchestrator
-            # firing report_agent + N specialists at once) collapses to
-            # sequential because each `chain.invoke` blocks the loop until
-            # the safechain HTTP round-trip returns.
-            return await asyncio.to_thread(_sync_invoke)
+            # Run on the dedicated safechain thread pool, not the default
+            # executor. The default pool (12 workers on 8-core) gets
+            # exhausted by stuck safechain calls; the dedicated pool (64)
+            # ensures new calls always get a thread.
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                _SAFECHAIN_EXECUTOR, _sync_invoke,
+            )
+
+        async def _timed_invoke() -> str:
+            return await asyncio.wait_for(
+                _do_invoke(), timeout=_SAFECHAIN_CALL_TIMEOUT_S,
+            )
 
         try:
-            text = await _do_invoke()
+            text = await _timed_invoke()
+        except asyncio.TimeoutError:
+            raise TimeoutError(
+                f"safechain LLM call did not return within "
+                f"{_SAFECHAIN_CALL_TIMEOUT_S:.0f}s"
+            )
         except RuntimeError as e:
             es = str(e)
             if "running event loop" in es and not _NEST_ASYNCIO_APPLIED:
@@ -346,9 +410,18 @@ class _SafeChainChatCompletions:
         except Exception as e:  # noqa: BLE001 — we re-classify below
             es = str(e)
             if "401" in es:
-                # Token expiry — refresh and retry once.
+                # Token expiry — invalidate thread-local so next
+                # _create_llm() builds a fresh model with new token.
                 self._parent._refresh_llm()
-                text = await _do_invoke()
+                self._parent._thread_local.llm = None
+                _llm_box[0] = self._parent._create_llm()
+                try:
+                    text = await _timed_invoke()
+                except asyncio.TimeoutError:
+                    raise TimeoutError(
+                        f"safechain LLM call did not return within "
+                        f"{_SAFECHAIN_CALL_TIMEOUT_S:.0f}s (after token refresh)"
+                    )
             elif "403" in es:
                 raise FirewallRejection("403", f"safechain blocked: {es}")
             elif "400" in es:
@@ -375,7 +448,10 @@ class _SafeChainChatCompletions:
                     messages, tools, response_format,
                     tool_choice=tool_choice,
                 )
-                text = await _do_invoke()
+                try:
+                    text = await _timed_invoke()
+                except (asyncio.TimeoutError, TimeoutError):
+                    pass  # use the original text; server retry will handle
 
         # The openai-agents SDK calls this with `stream=True` for streamed
         # runs (Runner.run_streamed). Return a synthetic single-chunk async
