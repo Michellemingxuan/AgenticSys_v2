@@ -15,7 +15,7 @@ async def test_outbound_messages_are_redacted():
         model="gpt-4o",
         messages=[
             {"role": "system", "content": "You are an assistant."},
-            {"role": "user", "content": "Look up CASE-12345 and acct 1234567"},
+            {"role": "user", "content": "Look up CASE-12345 and acct 1234567890"},
         ],
     )
 

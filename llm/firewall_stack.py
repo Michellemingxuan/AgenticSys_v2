@@ -35,7 +35,7 @@ LLM_CALL_KIND: contextvars.ContextVar[str] = contextvars.ContextVar(
 
 
 _CASE_ID_RE = re.compile(r"CASE-\d+")
-_DIGIT_RUN_RE = re.compile(r"\d{6,}")
+_DIGIT_RUN_RE = re.compile(r"\d{10,}")
 
 
 FIREWALL_GUIDANCE = (
