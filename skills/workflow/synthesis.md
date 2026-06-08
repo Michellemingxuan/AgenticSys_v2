@@ -104,6 +104,11 @@ Use a markdown table when the answer involves **structured comparisons** — mul
 - <optional 1-2 bullets for context or caveats not captured in the table>
 ```
 
+When the question is **transaction-level** (about specific transactions or
+approve/deny decisions), include a **markdown table of the relevant
+transactions** (e.g. date/time, amount or key score, approve-deny, decline
+reason) — these answers should show the underlying rows, not just prose.
+
 #### Case overview ("what is this case about")
 
 When the question is a broad overview, structure the answer in three sections:
