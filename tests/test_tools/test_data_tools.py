@@ -651,3 +651,47 @@ def test_summarize_by_group_no_rows_after_filter():
         filter_column="Merchant Name", filter_value="ZZZ-nope",
     )
     assert "no rows match" in raw
+
+
+# ── Task 1: _apply_filter — case-insensitive eq/ne, contains op, null ne ────
+
+
+from tools.data_tools import _apply_filter
+
+
+def _rows():
+    return [
+        {"merchant": "WALMART", "amt": 10, "flag": None},
+        {"merchant": " Walmart ", "amt": 20, "flag": "x"},
+        {"merchant": "Target", "amt": 30, "flag": None},
+    ]
+
+
+def test_eq_is_case_and_whitespace_insensitive_for_text():
+    out = _apply_filter(_rows(), "merchant", "walmart", "eq")
+    assert len(out) == 2  # "WALMART" and " Walmart "
+
+
+def test_ne_excludes_case_insensitive_matches_and_counts_nulls():
+    out = _apply_filter(_rows(), "merchant", "walmart", "ne")
+    # Only "Target" differs by value; null cells also satisfy ne.
+    merchants = sorted(str(r["merchant"]) for r in out)
+    assert merchants == ["Target"]
+
+
+def test_ne_counts_null_cells():
+    out = _apply_filter(_rows(), "flag", "x", "ne")
+    # the row with flag=="x" is excluded; the 2 null-flag rows satisfy ne
+    assert len(out) == 2
+
+
+def test_contains_matches_substring_case_insensitively():
+    rows = [{"m": "STARBUCKS #4412 SEATTLE WA"}, {"m": "WALMART"}]
+    out = _apply_filter(rows, "m", "starbucks", "contains")
+    assert len(out) == 1 and out[0]["m"].startswith("STARBUCKS")
+
+
+def test_numeric_eq_still_exact_after_string_changes():
+    rows = [{"code": 0}, {"code": 1}, {"code": 1}]
+    assert len(_apply_filter(rows, "code", "1", "eq")) == 2
+    assert len(_apply_filter(rows, "code", "0", "eq")) == 1

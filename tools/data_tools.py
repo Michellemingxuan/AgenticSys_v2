@@ -594,7 +594,7 @@ def _apply_filter(
 ) -> list[dict]:
     """Filter rows by column using the named comparison operator.
 
-    Supported ops: eq, ne, gt, gte, lt, lte, between.
+    Supported ops: eq, ne, gt, gte, lt, lte, between, contains.
     For ``between``, ``value`` must be "<low>,<high>" (inclusive bounds).
     """
     op = (op or "eq").lower()
@@ -614,6 +614,19 @@ def _apply_filter(
                 out.append(r)
         return out
 
+    if op == "contains":
+        # Case-insensitive substring match for free-text entity columns
+        # (merchant names, reason codes). Null cells never match.
+        needle = str(value).strip().casefold()
+        out = []
+        for r in rows:
+            cell = r.get(column)
+            if cell is None:
+                continue
+            if needle in str(cell).casefold():
+                out.append(r)
+        return out
+
     cmp = _FILTER_OPS.get(op)
     if cmp is None:
         return rows
@@ -621,8 +634,17 @@ def _apply_filter(
     for r in rows:
         cell = r.get(column)
         if cell is None:
+            # A null cell is "not equal" to any concrete value, so it
+            # satisfies `ne`; for all other ops it is dropped.
+            if op == "ne":
+                out.append(r)
             continue
         a, b = _coerce_pair(cell, value)
+        # Text equality is forgiving: case- and whitespace-insensitive.
+        # Numeric / date comparisons are unaffected (they coerce to
+        # float / date-tuple before reaching here).
+        if op in ("eq", "ne") and isinstance(a, str) and isinstance(b, str):
+            a, b = a.strip().casefold(), b.strip().casefold()
         if cmp(a, b):
             out.append(r)
     return out
