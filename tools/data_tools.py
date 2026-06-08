@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import operator
 import re
+from datetime import date, timedelta
 from typing import Any, Callable
 
 from agents import function_tool
@@ -171,6 +172,13 @@ _NUMERIC_DASH_RE = re.compile(r"^(\d{1,2})-(\d{1,2})-(\d{2}|\d{4})$")
 # Compact ISO basic-format: "20241116" (occasionally produced by data-warehouse
 # exports). 8 digits, no separators.
 _COMPACT_DATE_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})$")
+# Month + 2-digit year: "Jul-25", "Jul'25", "July 25".
+_MONTH_2YEAR_RE = re.compile(r"^([A-Za-z]{3,})\s*[-'\s]\s*(\d{2})$")
+# Year + month name: "2025-Jul", "2025 July".
+_YEAR_MONTH_NAME_RE = re.compile(r"^(\d{4})\s*[-'\s]\s*([A-Za-z]{3,})$")
+# Excel serial date base (serial 1 = 1900-01-01; Excel's 1900 leap bug means
+# the usable epoch offset is 1899-12-30).
+_EXCEL_EPOCH = date(1899, 12, 30)
 
 
 def _expand_two_digit_year(yy: int) -> int:
@@ -291,6 +299,18 @@ def _date_key(value: Any) -> tuple[int, int, int] | None:
         if month_idx is not None:
             return (int(m.group(2)), month_idx, 1)
 
+    m = _MONTH_2YEAR_RE.match(s)
+    if m:
+        month_idx = _MONTHS.get(m.group(1).lower())
+        if month_idx is not None:
+            return (_expand_two_digit_year(int(m.group(2))), month_idx, 1)
+
+    m = _YEAR_MONTH_NAME_RE.match(s)
+    if m:
+        month_idx = _MONTHS.get(m.group(2).lower())
+        if month_idx is not None:
+            return (int(m.group(1)), month_idx, 1)
+
     # Compact ISO "YYYYMMDD". Place AFTER _YEAR_RE would mis-route 4-digit
     # input, so guard with a length check; before _YEAR_RE it would never be
     # reached because that regex matches 4 digits exactly. We check length
@@ -306,7 +326,30 @@ def _date_key(value: Any) -> tuple[int, int, int] | None:
     if m:
         return (int(m.group(1)), 1, 1)
 
+    # Excel serial date: a bare 5-digit integer in the plausible range
+    # (~1954..2064). Narrow range so ordinary 5-digit counts aren't misread.
+    if s.isdigit() and len(s) == 5:
+        serial = int(s)
+        if 20000 <= serial <= 60000:
+            d = _EXCEL_EPOCH + timedelta(days=serial)
+            return (d.year, d.month, d.day)
+
     return None
+
+
+# Strict numeric form: a plain integer (no leading zeros beyond a lone "0")
+# or decimal. Rejects "007"/zip codes, "1e3" scientific notation, and
+# inf/nan so ID/code columns are compared as strings, not silently as floats.
+_STRICT_NUMBER_RE = re.compile(r"^-?(?:0|[1-9]\d*)(?:\.\d+)?$|^-?0\.\d+$")
+
+
+def _is_strict_number(v: Any) -> bool:
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, (int, float)):
+        # reject nan / inf (nan != nan; inf is in the sentinel tuple)
+        return v == v and v not in (float("inf"), float("-inf"))
+    return bool(_STRICT_NUMBER_RE.match(str(v).strip()))
 
 
 def _coerce_pair(a: Any, b: Any) -> tuple[Any, Any]:
@@ -316,11 +359,10 @@ def _coerce_pair(a: Any, b: Any) -> tuple[Any, Any]:
     ``MonthName'YYYY`` format all compare chronologically. For everything
     else, falls back to string comparison.
     """
-    # 1) numeric
-    try:
+    # 1) numeric — only when BOTH sides are strictly numeric, so ID/code
+    #    columns ("007", zip codes, "1e3") and inf/nan don't get coerced.
+    if _is_strict_number(a) and _is_strict_number(b):
         return float(a), float(b)
-    except (TypeError, ValueError):
-        pass
     # 2) date-ish — only if BOTH sides parse, so a mixed pair doesn't
     #    quietly mis-compare.
     ak, bk = _date_key(a), _date_key(b)
@@ -580,9 +622,13 @@ def _resolve_real_column(
     target = _normalize(requested)
     if not target:
         return requested
-    for k in real_keys:
-        if _normalize(k) == target:
-            return k
+    matches = [k for k in real_keys if _normalize(k) == target]
+    if len(matches) == 1:
+        return matches[0]
+    # 0 matches → genuinely missing. 2+ → ambiguous (e.g. score_1 / score_2
+    # both normalize to "score"); refuse rather than silently bind to the
+    # wrong sibling column. Return the literal so the caller gets an honest
+    # zero / missing-column result instead of wrong rows.
     return requested
 
 
@@ -594,7 +640,7 @@ def _apply_filter(
 ) -> list[dict]:
     """Filter rows by column using the named comparison operator.
 
-    Supported ops: eq, ne, gt, gte, lt, lte, between.
+    Supported ops: eq, ne, gt, gte, lt, lte, between, contains.
     For ``between``, ``value`` must be "<low>,<high>" (inclusive bounds).
     """
     op = (op or "eq").lower()
@@ -614,6 +660,19 @@ def _apply_filter(
                 out.append(r)
         return out
 
+    if op == "contains":
+        # Case-insensitive substring match for free-text entity columns
+        # (merchant names, reason codes). Null cells never match.
+        needle = str(value).strip().casefold()
+        out = []
+        for r in rows:
+            cell = r.get(column)
+            if cell is None:
+                continue
+            if needle in str(cell).casefold():
+                out.append(r)
+        return out
+
     cmp = _FILTER_OPS.get(op)
     if cmp is None:
         return rows
@@ -621,8 +680,17 @@ def _apply_filter(
     for r in rows:
         cell = r.get(column)
         if cell is None:
+            # A null cell is "not equal" to any concrete value, so it
+            # satisfies `ne`; for all other ops it is dropped.
+            if op == "ne":
+                out.append(r)
             continue
         a, b = _coerce_pair(cell, value)
+        # Text equality is forgiving: case- and whitespace-insensitive.
+        # Numeric / date comparisons are unaffected (they coerce to
+        # float / date-tuple before reaching here).
+        if op in ("eq", "ne") and isinstance(a, str) and isinstance(b, str):
+            a, b = a.strip().casefold(), b.strip().casefold()
         if cmp(a, b):
             out.append(r)
     return out
@@ -937,12 +1005,16 @@ def _query_table_impl(
         filter_value: value(s) for the filter. For ``filter_op="between"`` pass
             "<low>,<high>" (inclusive). For ISO dates (YYYY-MM-DD) and YYYY-MM
             strings, lexicographic order matches chronological order.
-        filter_op: one of "eq" (default), "ne", "gt", "gte", "lt", "lte", "between".
+        filter_op: one of "eq" (default), "ne", "gt", "gte", "lt", "lte",
+            "between", "contains" (case-insensitive substring match).
             Use range ops for time windows — e.g. for payments in the 3 months
             before cut-off 2025-12-01, call:
                 query_table("payments", filter_column="payment_date",
                             filter_op="gte", filter_value="2025-09-01")
-            Or use "between" to bound both sides.
+            Or use "between" to bound both sides. Use "contains" for free-text
+            entity columns (merchant name, reason codes) — e.g.
+                query_table("spends", filter_column="merchant",
+                            filter_op="contains", filter_value="starbucks")
         columns: comma-separated list of column names to return (e.g.
             "fico_score,derog_count"). Leave empty to return all columns.
             REQUIRED for wide tables like model_scores (266 cols) to avoid
@@ -1098,7 +1170,8 @@ def query_table(
         filter_value: value(s) for the filter. For ``filter_op="between"`` pass
             "<low>,<high>" (inclusive). For ISO dates (YYYY-MM-DD) and YYYY-MM
             strings, lexicographic order matches chronological order.
-        filter_op: one of "eq" (default), "ne", "gt", "gte", "lt", "lte", "between".
+        filter_op: one of "eq" (default), "ne", "gt", "gte", "lt", "lte",
+            "between", "contains" (case-insensitive substring match).
         columns: comma-separated list of column names to return (e.g.
             "fico_score,derog_count"). Leave empty to return all columns.
     """

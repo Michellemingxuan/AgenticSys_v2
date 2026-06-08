@@ -464,6 +464,12 @@ def test_summarize_trend_no_rows():
     # it and reuse the MM/DD/YY parsing.
     (["11/05/24 3:03", "11/20/24 14:22", "12/10/24 9:00"],
      ["2024-11", "2024-12"]),
+    # MMM-YY (2-digit year): "Nov-24", "Dec-24".
+    (["Nov-24", "Nov-24", "Dec-24"], ["2024-11", "2024-12"]),
+    # YYYY-MMM: "2024-Nov", "2024-Dec".
+    (["2024-Nov", "2024-Nov", "2024-Dec"], ["2024-11", "2024-12"]),
+    # Excel serial dates: 45292 = 2024-01-01, 45323 = 2024-02-01.
+    (["45292", "45292", "45323"], ["2024-01", "2024-02"]),
 ])
 def test_summarize_trend_handles_extended_date_formats(date_fmt, expected_periods):
     """Regression: private environment hits formats beyond the original
@@ -651,3 +657,118 @@ def test_summarize_by_group_no_rows_after_filter():
         filter_column="Merchant Name", filter_value="ZZZ-nope",
     )
     assert "no rows match" in raw
+
+
+# ── Task 1: _apply_filter — case-insensitive eq/ne, contains op, null ne ────
+
+
+from tools.data_tools import _apply_filter
+
+
+def _rows():
+    return [
+        {"merchant": "WALMART", "amt": 10, "flag": None},
+        {"merchant": " Walmart ", "amt": 20, "flag": "x"},
+        {"merchant": "Target", "amt": 30, "flag": None},
+    ]
+
+
+def test_eq_is_case_and_whitespace_insensitive_for_text():
+    out = _apply_filter(_rows(), "merchant", "walmart", "eq")
+    assert len(out) == 2  # "WALMART" and " Walmart "
+
+
+def test_ne_excludes_case_insensitive_matches_and_counts_nulls():
+    out = _apply_filter(_rows(), "merchant", "walmart", "ne")
+    # Only "Target" differs by value; null cells also satisfy ne.
+    merchants = sorted(str(r["merchant"]) for r in out)
+    assert merchants == ["Target"]
+
+
+def test_ne_counts_null_cells():
+    out = _apply_filter(_rows(), "flag", "x", "ne")
+    # the row with flag=="x" is excluded; the 2 null-flag rows satisfy ne
+    assert len(out) == 2
+
+
+def test_contains_matches_substring_case_insensitively():
+    rows = [{"m": "STARBUCKS #4412 SEATTLE WA"}, {"m": "WALMART"}]
+    out = _apply_filter(rows, "m", "starbucks", "contains")
+    assert len(out) == 1 and out[0]["m"].startswith("STARBUCKS")
+
+
+def test_numeric_eq_still_exact_after_string_changes():
+    rows = [{"code": 0}, {"code": 1}, {"code": 1}]
+    assert len(_apply_filter(rows, "code", "1", "eq")) == 2
+    assert len(_apply_filter(rows, "code", "0", "eq")) == 1
+
+
+# ── Task 2: _coerce_pair — gate numeric coercion for ID/code columns ─────────
+
+
+from tools.data_tools import _coerce_pair
+
+
+def test_leading_zero_ids_stay_strings():
+    a, b = _coerce_pair("007", "7")
+    assert a != b  # not coerced to 7.0 == 7.0
+
+
+def test_plain_numbers_still_coerce():
+    assert _coerce_pair(0, "0") == (0.0, 0.0)
+    assert _coerce_pair("0.7", 0.7) == (0.7, 0.7)
+    assert _coerce_pair("188800", "188800") == (188800.0, 188800.0)
+
+
+def test_scientific_and_inf_nan_not_numeric():
+    a, b = _coerce_pair("1e3", "1000")
+    assert a != b  # "1e3" stays a string, not 1000.0
+
+
+# ── Task 3: _resolve_real_column — refuse ambiguous fuzzy match ──────────────
+
+
+from tools.data_tools import _resolve_real_column
+
+
+def test_fuzzy_column_refuses_ambiguous_match():
+    rows = [{"score_1": 1, "score_2": 2}]
+    # "score_1" exists exactly → returns it.
+    assert _resolve_real_column(rows, "score_1", None) == "score_1"
+    # "score_9" doesn't exist; "score_1" and "score_2" both normalize to
+    # "score" → ambiguous → refuse, return the literal (honest miss).
+    assert _resolve_real_column(rows, "score_9", None) == "score_9"
+
+
+def test_fuzzy_column_unique_match_still_resolves():
+    rows = [{"Merchant Risk Score": 0.5}]
+    assert _resolve_real_column(rows, "merchant_risk_score", None) == "Merchant Risk Score"
+
+
+# ── Task 4: _date_key — MMM-YY, YYYY-MMM, Excel serial, confirm covered ──────
+
+
+from tools.data_tools import _date_key
+
+
+def test_date_key_mmm_yy():
+    assert _date_key("Jul-25") == (2025, 7, 1)
+    assert _date_key("Jul'25") == (2025, 7, 1)
+
+
+def test_date_key_year_mmm():
+    assert _date_key("2025-Jul") == (2025, 7, 1)
+
+
+def test_date_key_excel_serial():
+    # 45292 = 2024-01-01 (Excel epoch 1899-12-30)
+    assert _date_key("45292") == (2024, 1, 1)
+
+
+def test_date_key_mmm_yyyy_already_covered():
+    assert _date_key("Jul-2025") == (2025, 7, 1)
+
+
+def test_date_key_tz_aware_datetime_already_covered():
+    assert _date_key("2024-01-01 15:25:20.602+00:00") == (2024, 1, 1)
+    assert _date_key("2024-01-01T15:25:20Z") == (2024, 1, 1)

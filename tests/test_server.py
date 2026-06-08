@@ -772,3 +772,53 @@ def test_append_charts_to_answer_appends_supporting_section():
     assert "![merchants](/api/cases/X/charts/t-merchants.png)" in out
     # Section divider keeps charts visually distinct from the prose answer.
     assert "---" in out
+
+
+def test_chart_payload_carries_table_kind_and_numbers():
+    """End-to-end shape: a `kind='table'` KP (no image_path, but viz.kind
+    == 'table') must produce a chart payload with `kind == 'table'`,
+    a populated `numbers` list, and an empty `url` (no PNG rendered).
+    This mirrors server.py:1703-1724 — the same logic run after the
+    KB drain each turn."""
+    rows = [{"a": 1, "b": "x"}, {"a": 2, "b": "y"}]
+    kb = {
+        "spend_payments": [{
+            "topic": "march_declines",
+            "captured_at_turn": "t-now",
+            # No image_path — table KPs skip the renderer.
+            "claim": "Two declined transactions in March.",
+            "source_call": "query_table('model_scores_transaction', ...)",
+            "numbers": rows,
+            "viz": {"kind": "table", "x_field": "a", "y_fields": []},
+        }]
+    }
+
+    # Mirror server.py:1703-1724 — collect, then enrich each chart with
+    # the matching KP's metadata (same logic as the trend_dual test above).
+    charts = server._collect_turn_charts(kb, "t-now", "CASE-T")
+    assert len(charts) == 1
+    c = charts[0]
+    kp = server._find_kp(kb, c["specialist"], c["topic"], "t-now")
+    viz = (kp or {}).get("viz") or {}
+    payload = {
+        "specialist": c["specialist"],
+        "topic": c["topic"],
+        "url": c["url"],
+        "claim": (kp or {}).get("claim", ""),
+        "source_call": (kp or {}).get("source_call", ""),
+        "kind": viz.get("kind", "") if isinstance(viz, dict) else "",
+        "vega_spec": (kp or {}).get("vega_spec"),
+    }
+    if payload["kind"] == "table":
+        payload["numbers"] = (kp or {}).get("numbers") or []
+        payload["x_field"] = viz.get("x_field", "") if isinstance(viz, dict) else ""
+        payload["y_fields"] = viz.get("y_fields") or [] if isinstance(viz, dict) else []
+
+    assert payload["kind"] == "table"
+    assert payload["url"] == ""          # no PNG; row data flows via numbers
+    assert payload["numbers"] == rows    # row data present in payload
+    assert payload["x_field"] == "a"
+    assert payload["y_fields"] == []     # empty y_fields accepted (frontend derives cols)
+    assert payload["claim"] == "Two declined transactions in March."
+    # No vega_spec for table kind — frontend renders HTML, not vega-embed.
+    assert payload.get("vega_spec") is None

@@ -28,7 +28,7 @@ Thresholds are auto-injected from the catalog.
 | `trend_grid` | 3-6 time-series metrics with DIFFERENT scales (TSR + CDSS + counts + dollars, etc.) | `[var1, var2, ..., varN]` — N stacked panels sharing the time axis |
 | `bar` | **DEFAULT for categorical breakdowns.** Vertical bars, ranked by value descending. Use this for top-N merchants / industries / branches / specialists / any categorical ranking regardless of category count. The renderer auto-sorts by value desc and rotates x-tick labels when they'd overlap. | single or multi |
 | `share` | **Escape valve ONLY** — use when category labels are SO LONG (multi-word merchant names, "AMAZON DIGITAL DOWNLOADS NORTHEAST ▸▸▸") AND there are many (8+) of them that vertical rotated labels become illegible. The bar layout is identical in information; only the orientation flips. **Do not pick `share` based on count alone** — count alone is not a reason. | `[var]` |
-| `table` | 1-3 rows — surfaces as a table card in the Plots panel, no image rendered | any |
+| `table` | 1-3 rows — surfaces as a table card in the Plots panel, no image rendered | optional — empty = show all keys |
 
 **Rule of thumb for `bar` vs `share`**: prefer **vertical `bar`** by default. Reviewers read time-then-rank flow left-to-right; a vertical ranked bar plot reads "biggest on the left, smallest on the right" intuitively. Switch to `share` only if you've genuinely tried `bar` mentally and the labels can't fit. **Count alone (≥5, ≥8, etc.) is NOT a reason to switch.** See `.claude/memory/feedback_plots_preference.md` — this is a stated user preference, not a heuristic.
 
@@ -62,6 +62,18 @@ make_chart(topic='cdss_tsr_trajectory', kind='trend_dual', ...,
 ```
 
 **Pass EVERY row from the underlying aggregates in `points` — not just the periods/groups you mention in the claim.** The renderer plots `points` exactly as given; dropping interior rows produces a chart with gaps that misrepresents the data and contradicts the claim's stated time window.
+
+**Table (show specific rows):**
+```python
+points=[{"date":"2024-03-04","amount":120.50,"decision":"declined","reason":"R12"},
+        {"date":"2024-03-09","amount":80.00,"decision":"approved","reason":""}]
+make_chart(topic="march_transactions", kind="table",
+           x_field="date", y_fields=["amount","decision","reason"],
+           claim="Two March transactions; one declined (R12).", source_call="query_table(...)")
+# kind="table": x_field = the row-label column (optional);
+#   y_fields = value columns to show, in order (optional — empty shows all keys).
+#   No minimum row count; no image rendered — the rows surface as a table card.
+```
 
 ## Threshold reference lines
 

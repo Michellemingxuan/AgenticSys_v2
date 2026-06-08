@@ -156,7 +156,7 @@ def build_make_chart_tool(specialist_name: str):
                 "[make_chart error] `topic` (snake_case slug) and `claim` "
                 "(one-sentence finding) are both required."
             )
-        if not isinstance(y_fields, list) or not y_fields:
+        if kind != "table" and (not isinstance(y_fields, list) or not y_fields):
             return (
                 "[make_chart error] `y_fields` must be a non-empty list of "
                 "the dict keys in `points` to plot. Pass `[\"value\"]` for "
@@ -222,7 +222,11 @@ def build_make_chart_tool(specialist_name: str):
             "topic": topic.strip(),
             "claim": claim.strip(),
             "numbers": points,
-            "viz": {"kind": kind, "x_field": x_field, "y_fields": list(y_fields)},
+            "viz": {
+                "kind": kind,
+                "x_field": x_field,
+                "y_fields": list(y_fields) if isinstance(y_fields, list) else [],
+            },
             "source_call": source_call.strip(),
             "captured_at_turn": turn_id,
             "confidence": "high",
@@ -235,18 +239,19 @@ def build_make_chart_tool(specialist_name: str):
         # event) picks it up.
         if kind == "table":
             kb.setdefault(specialist_name, []).append(kp_dict)
+            n_cols = len(y_fields) if y_fields else len(points[0]) if points else 0
             if logger is not None:
                 logger.log("make_chart_tool_invoked", {
                     "specialist": specialist_name,
                     "topic": topic,
                     "kind": kind,
                     "n_points": len(points),
-                    "n_series": len(y_fields),
+                    "n_series": len(y_fields) if isinstance(y_fields, list) else 0,
                     "image_path": None,
                 })
             return (
                 f"[chart created] topic={topic!r} kind='table' "
-                f"({len(points)} rows × {len(y_fields)} columns). The "
+                f"({len(points)} rows × {n_cols} columns). The "
                 f"table will surface in the Plots panel this turn. "
                 f"Reference the topic in `findings` so the narrative "
                 f"can refer to it; do NOT re-render."

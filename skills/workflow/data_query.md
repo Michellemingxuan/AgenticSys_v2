@@ -51,6 +51,8 @@ Only call `make_chart` manually when you need a CUSTOM chart that the
 auto-renderer can't produce (e.g., merging data from multiple tables
 into one overlay). This is rare.
 
+Exception: when the answer IS a set of specific transactions/rows the reviewer should see, DO call `make_chart(kind="table", ...)` with those rows — the auto-renderer only produces trend/bar charts, never row tables.
+
 ────────────────────────────────────────
 
 # § DATA QUERY — PLANNING (for R1 — skip when synthesizing)
@@ -185,9 +187,7 @@ Before concluding "no data":
   assume a date format or a value spelling. Match the column's own format
   (e.g. `txn_date_time` is `YYYY-MM-DD HH:MM:SS.fff`; `appr_deny_cd` is the
   integer `0`/`1`, not the words "approved"/"declined").
-- For **free-text entity columns** (merchant name, reason codes), exact `eq`
-  is brittle (case / whitespace). If an exact match returns nothing, re-query
-  with a broader or shorter value before giving up.
+- For **free-text entity columns** (merchant name, reason codes), prefer the **`contains`** operator (case-insensitive substring) over exact `eq`. `eq`/`ne` are now case- and whitespace-insensitive for text, so case alone won't cause a miss — but `contains` is the right tool when the stored value has extra tokens (e.g. "STARBUCKS #4412 SEATTLE WA").
 - On **high-volume transaction tables**, always bound the time range and add
   the most specific entity filter you have. **Filter the day-grain `trans_dt`
   by default**; the exact `txn_date_time` timestamp is available but should be
@@ -200,11 +200,7 @@ Before concluding "no data":
 
 ## Show the transactions in transaction-level answers
 
-For transaction-level answers, surface the specific transactions that back the
-finding: put a compact **markdown table** in your evidence (e.g. date/time,
-amount or key score, approve/deny, reason). The synthesizer renders it in the
-answer. (A richer Plots-panel table via `make_chart(kind="table")` is planned;
-for now the reliable path is a markdown table in evidence/findings.)
+For transaction-level answers, surface the specific transactions both ways: (1) a compact **markdown table** in your evidence (always works in the answer), and (2) a **`make_chart(kind="table")`** call with those rows so they render as an interactive table card in the Plots panel.
 
 ────────────────────────────────────────
 
