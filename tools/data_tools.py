@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import operator
 import re
+from datetime import date, timedelta
 from typing import Any, Callable
 
 from agents import function_tool
@@ -171,6 +172,13 @@ _NUMERIC_DASH_RE = re.compile(r"^(\d{1,2})-(\d{1,2})-(\d{2}|\d{4})$")
 # Compact ISO basic-format: "20241116" (occasionally produced by data-warehouse
 # exports). 8 digits, no separators.
 _COMPACT_DATE_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})$")
+# Month + 2-digit year: "Jul-25", "Jul'25", "July 25".
+_MONTH_2YEAR_RE = re.compile(r"^([A-Za-z]{3,})\s*[-'\s]\s*(\d{2})$")
+# Year + month name: "2025-Jul", "2025 July".
+_YEAR_MONTH_NAME_RE = re.compile(r"^(\d{4})\s*[-'\s]\s*([A-Za-z]{3,})$")
+# Excel serial date base (serial 1 = 1900-01-01; Excel's 1900 leap bug means
+# the usable epoch offset is 1899-12-30).
+_EXCEL_EPOCH = date(1899, 12, 30)
 
 
 def _expand_two_digit_year(yy: int) -> int:
@@ -291,6 +299,18 @@ def _date_key(value: Any) -> tuple[int, int, int] | None:
         if month_idx is not None:
             return (int(m.group(2)), month_idx, 1)
 
+    m = _MONTH_2YEAR_RE.match(s)
+    if m:
+        month_idx = _MONTHS.get(m.group(1).lower())
+        if month_idx is not None:
+            return (_expand_two_digit_year(int(m.group(2))), month_idx, 1)
+
+    m = _YEAR_MONTH_NAME_RE.match(s)
+    if m:
+        month_idx = _MONTHS.get(m.group(2).lower())
+        if month_idx is not None:
+            return (int(m.group(1)), month_idx, 1)
+
     # Compact ISO "YYYYMMDD". Place AFTER _YEAR_RE would mis-route 4-digit
     # input, so guard with a length check; before _YEAR_RE it would never be
     # reached because that regex matches 4 digits exactly. We check length
@@ -305,6 +325,14 @@ def _date_key(value: Any) -> tuple[int, int, int] | None:
     m = _YEAR_RE.match(s)
     if m:
         return (int(m.group(1)), 1, 1)
+
+    # Excel serial date: a bare 5-digit integer in the plausible range
+    # (~1954..2064). Narrow range so ordinary 5-digit counts aren't misread.
+    if s.isdigit() and len(s) == 5:
+        serial = int(s)
+        if 20000 <= serial <= 60000:
+            d = _EXCEL_EPOCH + timedelta(days=serial)
+            return (d.year, d.month, d.day)
 
     return None
 

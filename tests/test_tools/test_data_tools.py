@@ -464,6 +464,12 @@ def test_summarize_trend_no_rows():
     # it and reuse the MM/DD/YY parsing.
     (["11/05/24 3:03", "11/20/24 14:22", "12/10/24 9:00"],
      ["2024-11", "2024-12"]),
+    # MMM-YY (2-digit year): "Nov-24", "Dec-24".
+    (["Nov-24", "Nov-24", "Dec-24"], ["2024-11", "2024-12"]),
+    # YYYY-MMM: "2024-Nov", "2024-Dec".
+    (["2024-Nov", "2024-Nov", "2024-Dec"], ["2024-11", "2024-12"]),
+    # Excel serial dates: 45292 = 2024-01-01, 45323 = 2024-02-01.
+    (["45292", "45292", "45323"], ["2024-01", "2024-02"]),
 ])
 def test_summarize_trend_handles_extended_date_formats(date_fmt, expected_periods):
     """Regression: private environment hits formats beyond the original
@@ -737,3 +743,32 @@ def test_fuzzy_column_refuses_ambiguous_match():
 def test_fuzzy_column_unique_match_still_resolves():
     rows = [{"Merchant Risk Score": 0.5}]
     assert _resolve_real_column(rows, "merchant_risk_score", None) == "Merchant Risk Score"
+
+
+# ── Task 4: _date_key — MMM-YY, YYYY-MMM, Excel serial, confirm covered ──────
+
+
+from tools.data_tools import _date_key
+
+
+def test_date_key_mmm_yy():
+    assert _date_key("Jul-25") == (2025, 7, 1)
+    assert _date_key("Jul'25") == (2025, 7, 1)
+
+
+def test_date_key_year_mmm():
+    assert _date_key("2025-Jul") == (2025, 7, 1)
+
+
+def test_date_key_excel_serial():
+    # 45292 = 2024-01-01 (Excel epoch 1899-12-30)
+    assert _date_key("45292") == (2024, 1, 1)
+
+
+def test_date_key_mmm_yyyy_already_covered():
+    assert _date_key("Jul-2025") == (2025, 7, 1)
+
+
+def test_date_key_tz_aware_datetime_already_covered():
+    assert _date_key("2024-01-01 15:25:20.602+00:00") == (2024, 1, 1)
+    assert _date_key("2024-01-01T15:25:20Z") == (2024, 1, 1)
