@@ -82,6 +82,16 @@ except ImportError:
     _nest_asyncio = None  # type: ignore[assignment]
 
 
+# Per-call wall-clock cap on a single safechain LLM call. Because the call is
+# now awaited via the model's real async `ainvoke` (not run in a worker
+# thread), `asyncio.wait_for` genuinely *cancels* a hung call — the coroutine
+# and its underlying async request are cancelled, with no orphaned thread left
+# behind. (The old sync-in-thread path could not be interrupted: a stuck
+# worker thread leaked forever and eventually starved specialist dispatch.)
+# Generous default so slow-but-valid calls aren't aborted; tune via env.
+_SAFECHAIN_CALL_TIMEOUT_S = float(os.environ.get("SAFECHAIN_CALL_TIMEOUT_S", "180"))
+
+
 _ROLE_LABELS = {
     "system": "Context",
     "user": "Request",
@@ -307,36 +317,47 @@ class _SafeChainChatCompletions:
 
         llm = self._parent._ensure_llm()
 
-        def _sync_invoke() -> str:
-            chain = ValidChatPromptTemplate.from_messages(
-                [("human", "{__input__}")]
-            ) | llm
-            r = chain.invoke({"__input__": combined})
+        # Format the prompt SYNCHRONOUSLY — pure in-memory string work that
+        # returns instantly, so it never holds (or hangs) a worker thread, and
+        # it sidesteps LangChain routing the trivial template step through its
+        # `run_in_executor` fallback when a component doesn't override
+        # `ainvoke`. The ONE call that can block on the network is the model's
+        # `ainvoke`, which SafeChain implements as a *real* async path
+        # (`_agenerate`/`_astream`). Awaiting it natively on the event loop
+        # means NO worker thread is held during the network wait — removing the
+        # thread-occupation that previously caused "stuck at team construction /
+        # specialists can't be assigned" (a hung sync call in a thread cannot
+        # be killed in Python, so it leaked the thread + its semaphore slot).
+        prompt_value = ValidChatPromptTemplate.from_messages(
+            [("human", "{__input__}")]
+        ).invoke({"__input__": combined})
+
+        async def _ainvoke(active_llm: Any) -> str:
+            r = await asyncio.wait_for(
+                active_llm.ainvoke(prompt_value),
+                timeout=_SAFECHAIN_CALL_TIMEOUT_S,
+            )
             return r.content if hasattr(r, "content") else str(r)
 
-        async def _do_invoke() -> str:
-            return await asyncio.to_thread(_sync_invoke)
-
         try:
-            text = await _do_invoke()
-        except RuntimeError as e:
-            es = str(e)
-            if "running event loop" in es and not _NEST_ASYNCIO_APPLIED:
-                raise RuntimeError(
-                    "safechain hit 'asyncio.run cannot be called from a "
-                    "running event loop'. Install nest_asyncio in this "
-                    "environment (`pip install nest_asyncio`) — it is "
-                    "auto-applied by llm.safechain_client when present "
-                    "and resolves the sync→async bridge inside safechain's "
-                    "token acquisition."
-                ) from e
-            raise
+            text = await _ainvoke(llm)
+        except asyncio.TimeoutError as e:
+            raise TimeoutError(
+                f"safechain LLM call did not return within "
+                f"{_SAFECHAIN_CALL_TIMEOUT_S:.0f}s"
+            ) from e
         except Exception as e:  # noqa: BLE001 — we re-classify below
             es = str(e)
             if "401" in es:
-                # Token expiry — refresh and retry once.
+                # Token expiry — refresh the model and retry once.
                 self._parent._refresh_llm()
-                text = await _do_invoke()
+                try:
+                    text = await _ainvoke(self._parent._ensure_llm())
+                except asyncio.TimeoutError as te:
+                    raise TimeoutError(
+                        f"safechain LLM call did not return within "
+                        f"{_SAFECHAIN_CALL_TIMEOUT_S:.0f}s (after token refresh)"
+                    ) from te
             elif "403" in es:
                 raise FirewallRejection("403", f"safechain blocked: {es}")
             elif "400" in es:

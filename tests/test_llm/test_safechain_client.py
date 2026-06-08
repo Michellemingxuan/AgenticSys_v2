@@ -4,7 +4,10 @@ response-synthesis logic, which are pure-Python and don't require safechain.
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import sys
+import types
 
 import pytest
 from unittest.mock import AsyncMock, patch
@@ -227,3 +230,150 @@ async def test_invoking_without_safechain_raises_clear_error():
             model="gpt-4o",
             messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}],
         )
+
+
+# ── async-native invocation (no worker threads) ──────────────────────────
+#
+# The hang-prone LLM call must run via the model's REAL async `ainvoke`
+# (awaited on the event loop), not sync `chain.invoke` in a worker thread.
+# A stuck worker thread can't be killed in Python, so the old threaded path
+# leaked threads and starved specialist dispatch ("stuck at team
+# construction"). These tests pin the async path + the per-call timeout.
+
+
+class _Resp:
+    """Mimics a LangChain message result with a `.content` attribute."""
+    def __init__(self, content: str):
+        self.content = content
+
+
+def _install_fake_safechain_prompts(monkeypatch):
+    """Stub `safechain.prompts.ValidChatPromptTemplate` (the real package
+    isn't installed in dev). The fake template's `.invoke()` returns the
+    combined prompt string verbatim — matching how `_invoke` formats the
+    prompt synchronously before awaiting the model."""
+    class _FakeTemplate:
+        @classmethod
+        def from_messages(cls, _msgs):
+            return cls()
+
+        def invoke(self, d):
+            return d["__input__"]
+
+    prompts_mod = types.ModuleType("safechain.prompts")
+    prompts_mod.ValidChatPromptTemplate = _FakeTemplate
+    pkg = types.ModuleType("safechain")
+    monkeypatch.setitem(sys.modules, "safechain", pkg)
+    monkeypatch.setitem(sys.modules, "safechain.prompts", prompts_mod)
+
+
+@pytest.mark.asyncio
+async def test_invoke_uses_async_ainvoke_not_sync_threads(monkeypatch):
+    _install_fake_safechain_prompts(monkeypatch)
+    fw = FirewallStack(EventLogger(session_id="t"), max_retries=0, concurrency_cap=2)
+    client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
+
+    calls = {"ainvoke": 0}
+
+    class _AsyncLLM:
+        async def ainvoke(self, _prompt_value):
+            calls["ainvoke"] += 1
+            return _Resp('{"output": {"answer": "ok"}}')
+
+        def invoke(self, *a, **k):  # pragma: no cover - must NOT be hit
+            raise AssertionError("sync invoke must not be used on the async path")
+
+    client._llm = _AsyncLLM()
+
+    result = await client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}],
+    )
+    assert calls["ainvoke"] == 1
+    assert "ok" in result.choices[0].message.content
+
+
+@pytest.mark.asyncio
+async def test_invoke_per_call_timeout_raises(monkeypatch):
+    """A hung safechain call must surface as a TimeoutError so the turn fails
+    cleanly and releases the firewall semaphore — instead of blocking forever."""
+    _install_fake_safechain_prompts(monkeypatch)
+    monkeypatch.setattr("llm.safechain_client._SAFECHAIN_CALL_TIMEOUT_S", 0.05)
+    fw = FirewallStack(EventLogger(session_id="t"), max_retries=0, concurrency_cap=2)
+    client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
+
+    class _SlowLLM:
+        async def ainvoke(self, _prompt_value):
+            await asyncio.sleep(5)
+            return _Resp("late")
+
+    client._llm = _SlowLLM()
+
+    with pytest.raises(TimeoutError):
+        await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}],
+        )
+
+
+@pytest.mark.asyncio
+async def test_invoke_refreshes_and_retries_on_401(monkeypatch):
+    _install_fake_safechain_prompts(monkeypatch)
+    fw = FirewallStack(EventLogger(session_id="t"), max_retries=0, concurrency_cap=2)
+    client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
+
+    refreshed = {"n": 0}
+
+    class _Flaky:
+        def __init__(self):
+            self.n = 0
+
+        async def ainvoke(self, _prompt_value):
+            self.n += 1
+            if self.n == 1:
+                raise RuntimeError("HTTP 401 unauthorized")
+            return _Resp('{"output": {"answer": "after-refresh"}}')
+
+    flaky = _Flaky()
+    client._llm = flaky
+    monkeypatch.setattr(
+        client, "_refresh_llm",
+        lambda: refreshed.__setitem__("n", refreshed["n"] + 1),
+    )
+
+    result = await client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}],
+    )
+    assert refreshed["n"] == 1
+    assert flaky.n == 2
+    assert "after-refresh" in result.choices[0].message.content
+
+
+@pytest.mark.asyncio
+async def test_concurrent_calls_overlap_no_thread_serialization(monkeypatch):
+    """Two concurrent calls on the shared client must OVERLAP (real async),
+    proving no per-call thread serialization / no global blocking lock."""
+    _install_fake_safechain_prompts(monkeypatch)
+    fw = FirewallStack(EventLogger(session_id="t"), max_retries=0, concurrency_cap=4)
+    client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
+
+    class _SleepyLLM:
+        async def ainvoke(self, _prompt_value):
+            await asyncio.sleep(0.2)
+            return _Resp('{"output": {"answer": "ok"}}')
+
+    client._llm = _SleepyLLM()
+
+    async def one_call():
+        return await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}],
+        )
+
+    loop = asyncio.get_running_loop()
+    t0 = loop.time()
+    await asyncio.gather(one_call(), one_call(), one_call())
+    elapsed = loop.time() - t0
+    # 3 × 0.2s serialized would be ≥0.6s; overlapping is ≈0.2s. Allow slack.
+    assert elapsed < 0.45, f"calls serialized ({elapsed:.2f}s) — not real async"
