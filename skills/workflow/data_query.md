@@ -159,6 +159,53 @@ Charts render automatically from tool outputs — no `make_chart` call needed.
 - **Unwindowed questions → no date filter.** Windowed → anchor to `cut_off_date`, not today. Derived windows ("ramp-up") → ONE `summarize_trend` on `credit_loss_prob`/`tot_struct_risk_score` to find the inflection.
 - **Coverage-gap disclosure**: if actual data range is narrower than the requested window, lead with the gap. Add a `data_gaps` entry.
 
+## Transaction-level vs monthly-level data
+
+Some domains ship BOTH a monthly table (one row per month, aggregated) and a
+transaction table (one row per transaction). Choose by question type:
+
+- **Transaction-level questions** → transaction tables (`spends`,
+  `model_scores_transaction`, `score_drivers_transaction`). Examples: "was this
+  transaction out of pattern?", "why was the customer declined on <date>?",
+  "show the grocery transactions last month", "what did the risk scores look
+  like at the moment of purchase?".
+- **Trend / trajectory / over-time questions** → monthly tables
+  (`model_scores`, `score_drivers`, `txn_monthly`, …). Examples: "is risk
+  deteriorating?", "how has CDSS moved over 12 months?".
+- When both could apply, prefer the **monthly** table for aggregate/trend
+  framing; use the **transaction** table only when the answer hinges on
+  specific transactions.
+
+## Filter rigor (every query, not just big tables)
+
+A zero-record result is **more often a filter mismatch than a true absence**.
+Before concluding "no data":
+
+- **Check the column's actual format first** via `get_table_schema` — never
+  assume a date format or a value spelling. Match the column's own format
+  (e.g. `txn_date_time` is `YYYY-MM-DD HH:MM:SS.fff`; `appr_deny_cd` is the
+  integer `0`/`1`, not the words "approved"/"declined").
+- For **free-text entity columns** (merchant name, reason codes), exact `eq`
+  is brittle (case / whitespace). If an exact match returns nothing, re-query
+  with a broader or shorter value before giving up.
+- On **high-volume transaction tables**, always bound the time range and add
+  the most specific entity filter you have. **Filter the day-grain `trans_dt`
+  by default**; the exact `txn_date_time` timestamp is available but should be
+  used only when the question needs within-day precision (ordering, time-of-day,
+  the exact moment). Don't over-constrain with a full timestamp — it's both
+  unnecessary and a zero-record risk.
+- If a filtered query returns 0 rows, **state the filter you used** and treat
+  it as a candidate mismatch in `data_gaps`, not as the fact "the customer has
+  no such transactions".
+
+## Show the transactions in transaction-level answers
+
+For transaction-level answers, surface the specific transactions that back the
+finding: put a compact **markdown table** in your evidence (e.g. date/time,
+amount or key score, approve/deny, reason). The synthesizer renders it in the
+answer. (A richer Plots-panel table via `make_chart(kind="table")` is planned;
+for now the reliable path is a markdown table in evidence/findings.)
+
 ────────────────────────────────────────
 
 # § CROSS-DOMAIN (for multi-specialist turns)

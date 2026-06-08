@@ -18,6 +18,7 @@ Project-scoped, version-controlled memory store. Travels with this repo. Consult
 - [`.claude/memory/feedback_vegalite_text_labels.md`](memory/feedback_vegalite_text_labels.md) — Vega-Lite positioned text labels must use inline `data.values` + field encoding; `stroke`/`paintOrder`/`fontWeight:600` all fail.
 - [`.claude/memory/feedback_openai_safechain_parity.md`](memory/feedback_openai_safechain_parity.md) — any change to `firewall_client.py` (OpenAI path) must be mirrored in `safechain_client.py` (SafeChain/prod path). They are parallel implementations.
 - [`.claude/memory/project_bureau_credit_scores.md`](memory/project_bureau_credit_scores.md) — FICO (v7/v8, unsecured-focused) is the primary consumer credit score; LN (LexisNexis) is supplementary. FSS/CSS/Paydex/LN-Business are commercial-entity scores. For small-biz owners, consumer + business scores are treated together.
+- [`.claude/memory/transaction_vs_monthly_tables.md`](memory/transaction_vs_monthly_tables.md) — transaction-level tables (model_scores_transaction / score_drivers_transaction) answer per-txn & approve-deny questions; monthly tables answer trends; filter day-grain `trans_dt` by default, `txn_date_time` only for within-day precision.
 
 When adding a new entry: create the file in `.claude/memory/`, then add a one-line index entry above. Keep file bodies focused (one concern per file).
 
