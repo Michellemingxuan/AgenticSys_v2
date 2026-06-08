@@ -717,3 +717,23 @@ def test_plain_numbers_still_coerce():
 def test_scientific_and_inf_nan_not_numeric():
     a, b = _coerce_pair("1e3", "1000")
     assert a != b  # "1e3" stays a string, not 1000.0
+
+
+# ── Task 3: _resolve_real_column — refuse ambiguous fuzzy match ──────────────
+
+
+from tools.data_tools import _resolve_real_column
+
+
+def test_fuzzy_column_refuses_ambiguous_match():
+    rows = [{"score_1": 1, "score_2": 2}]
+    # "score_1" exists exactly → returns it.
+    assert _resolve_real_column(rows, "score_1", None) == "score_1"
+    # "score_9" doesn't exist; "score_1" and "score_2" both normalize to
+    # "score" → ambiguous → refuse, return the literal (honest miss).
+    assert _resolve_real_column(rows, "score_9", None) == "score_9"
+
+
+def test_fuzzy_column_unique_match_still_resolves():
+    rows = [{"Merchant Risk Score": 0.5}]
+    assert _resolve_real_column(rows, "merchant_risk_score", None) == "Merchant Risk Score"

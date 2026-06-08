@@ -594,9 +594,13 @@ def _resolve_real_column(
     target = _normalize(requested)
     if not target:
         return requested
-    for k in real_keys:
-        if _normalize(k) == target:
-            return k
+    matches = [k for k in real_keys if _normalize(k) == target]
+    if len(matches) == 1:
+        return matches[0]
+    # 0 matches → genuinely missing. 2+ → ambiguous (e.g. score_1 / score_2
+    # both normalize to "score"); refuse rather than silently bind to the
+    # wrong sibling column. Return the literal so the caller gets an honest
+    # zero / missing-column result instead of wrong rows.
     return requested
 
 
