@@ -4,7 +4,7 @@ description: Modeling domain skill — `model_scores` carries output ML risk sco
 type: domain
 owner: [base_specialist]
 mode: inline
-data_hints: [model_scores, score_drivers]
+data_hints: [model_scores, score_drivers, model_scores_transaction, score_drivers_transaction]
 interpretation_guide: >
   Surface BOTH individual variable breaches AND group composites.
   Falling output scores = deterioration. Score divergence from bureau =
@@ -33,6 +33,17 @@ You analyze internal ML model scores: trajectories, divergences, and drivers.
 - **CDSS** → `credit_loss_prob` column (NOT `cust_eff_se_cdss_5_180_day_score`)
 - **TSR** → `tot_struct_risk_score` column
 - Quote both: *"CDSS (`credit_loss_prob`): X"*
+
+**Monthly vs transaction.** `model_scores` / `score_drivers` are monthly
+aggregates — use them for score *trajectory* and *driver rotation over time*.
+`model_scores_transaction` / `score_drivers_transaction` are per-transaction —
+use them to inspect the scores/drivers **at a specific transaction**, or to
+analyze **approve/deny** behavior (`appr_deny_cd`: 0 = approved, 1 = declined;
+`auto_decline_pos_deny_cd_s1` = decline reason, set only on declines). CDSS =
+`credit_loss_prob`, TSR = `tot_struct_risk_score` in both grains — quote the
+column name as always. These transaction tables are large: always filter by a
+narrow time window (day-grain `trans_dt` by default; reserve `txn_date_time`
+for within-day precision) and any known entity before querying.
 
 ────────────────────────────────────────
 
