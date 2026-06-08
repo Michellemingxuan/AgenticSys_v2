@@ -695,3 +695,25 @@ def test_numeric_eq_still_exact_after_string_changes():
     rows = [{"code": 0}, {"code": 1}, {"code": 1}]
     assert len(_apply_filter(rows, "code", "1", "eq")) == 2
     assert len(_apply_filter(rows, "code", "0", "eq")) == 1
+
+
+# ── Task 2: _coerce_pair — gate numeric coercion for ID/code columns ─────────
+
+
+from tools.data_tools import _coerce_pair
+
+
+def test_leading_zero_ids_stay_strings():
+    a, b = _coerce_pair("007", "7")
+    assert a != b  # not coerced to 7.0 == 7.0
+
+
+def test_plain_numbers_still_coerce():
+    assert _coerce_pair(0, "0") == (0.0, 0.0)
+    assert _coerce_pair("0.7", 0.7) == (0.7, 0.7)
+    assert _coerce_pair("188800", "188800") == (188800.0, 188800.0)
+
+
+def test_scientific_and_inf_nan_not_numeric():
+    a, b = _coerce_pair("1e3", "1000")
+    assert a != b  # "1e3" stays a string, not 1000.0

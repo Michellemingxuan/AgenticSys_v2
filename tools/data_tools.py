@@ -309,6 +309,21 @@ def _date_key(value: Any) -> tuple[int, int, int] | None:
     return None
 
 
+# Strict numeric form: a plain integer (no leading zeros beyond a lone "0")
+# or decimal. Rejects "007"/zip codes, "1e3" scientific notation, and
+# inf/nan so ID/code columns are compared as strings, not silently as floats.
+_STRICT_NUMBER_RE = re.compile(r"^-?(?:0|[1-9]\d*)(?:\.\d+)?$|^-?0\.\d+$")
+
+
+def _is_strict_number(v: Any) -> bool:
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, (int, float)):
+        # reject nan / inf (nan != nan; inf is in the sentinel tuple)
+        return v == v and v not in (float("inf"), float("-inf"))
+    return bool(_STRICT_NUMBER_RE.match(str(v).strip()))
+
+
 def _coerce_pair(a: Any, b: Any) -> tuple[Any, Any]:
     """Best-effort comparable coercion: numeric → date-tuple → string.
 
@@ -316,11 +331,10 @@ def _coerce_pair(a: Any, b: Any) -> tuple[Any, Any]:
     ``MonthName'YYYY`` format all compare chronologically. For everything
     else, falls back to string comparison.
     """
-    # 1) numeric
-    try:
+    # 1) numeric — only when BOTH sides are strictly numeric, so ID/code
+    #    columns ("007", zip codes, "1e3") and inf/nan don't get coerced.
+    if _is_strict_number(a) and _is_strict_number(b):
         return float(a), float(b)
-    except (TypeError, ValueError):
-        pass
     # 2) date-ish — only if BOTH sides parse, so a mixed pair doesn't
     #    quietly mis-compare.
     ak, bk = _date_key(a), _date_key(b)
