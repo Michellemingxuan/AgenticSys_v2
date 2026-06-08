@@ -185,9 +185,7 @@ Before concluding "no data":
   assume a date format or a value spelling. Match the column's own format
   (e.g. `txn_date_time` is `YYYY-MM-DD HH:MM:SS.fff`; `appr_deny_cd` is the
   integer `0`/`1`, not the words "approved"/"declined").
-- For **free-text entity columns** (merchant name, reason codes), exact `eq`
-  is brittle (case / whitespace). If an exact match returns nothing, re-query
-  with a broader or shorter value before giving up.
+- For **free-text entity columns** (merchant name, reason codes), prefer the **`contains`** operator (case-insensitive substring) over exact `eq`. `eq`/`ne` are now case- and whitespace-insensitive for text, so case alone won't cause a miss — but `contains` is the right tool when the stored value has extra tokens (e.g. "STARBUCKS #4412 SEATTLE WA").
 - On **high-volume transaction tables**, always bound the time range and add
   the most specific entity filter you have. **Filter the day-grain `trans_dt`
   by default**; the exact `txn_date_time` timestamp is available but should be

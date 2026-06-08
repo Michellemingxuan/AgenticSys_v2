@@ -1005,12 +1005,16 @@ def _query_table_impl(
         filter_value: value(s) for the filter. For ``filter_op="between"`` pass
             "<low>,<high>" (inclusive). For ISO dates (YYYY-MM-DD) and YYYY-MM
             strings, lexicographic order matches chronological order.
-        filter_op: one of "eq" (default), "ne", "gt", "gte", "lt", "lte", "between".
+        filter_op: one of "eq" (default), "ne", "gt", "gte", "lt", "lte",
+            "between", "contains" (case-insensitive substring match).
             Use range ops for time windows — e.g. for payments in the 3 months
             before cut-off 2025-12-01, call:
                 query_table("payments", filter_column="payment_date",
                             filter_op="gte", filter_value="2025-09-01")
-            Or use "between" to bound both sides.
+            Or use "between" to bound both sides. Use "contains" for free-text
+            entity columns (merchant name, reason codes) — e.g.
+                query_table("spends", filter_column="merchant",
+                            filter_op="contains", filter_value="starbucks")
         columns: comma-separated list of column names to return (e.g.
             "fico_score,derog_count"). Leave empty to return all columns.
             REQUIRED for wide tables like model_scores (266 cols) to avoid
@@ -1166,7 +1170,8 @@ def query_table(
         filter_value: value(s) for the filter. For ``filter_op="between"`` pass
             "<low>,<high>" (inclusive). For ISO dates (YYYY-MM-DD) and YYYY-MM
             strings, lexicographic order matches chronological order.
-        filter_op: one of "eq" (default), "ne", "gt", "gte", "lt", "lte", "between".
+        filter_op: one of "eq" (default), "ne", "gt", "gte", "lt", "lte",
+            "between", "contains" (case-insensitive substring match).
         columns: comma-separated list of column names to return (e.g.
             "fico_score,derog_count"). Leave empty to return all columns.
     """
