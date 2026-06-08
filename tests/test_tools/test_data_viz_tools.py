@@ -609,3 +609,28 @@ async def test_make_chart_table_kind_accepts_one_row(tmp_path):
     assert ctx._specialist_kb["modeling"][0]["numbers"] == [
         {"month": "2025-07", "score": 642},
     ]
+
+
+@pytest.mark.asyncio
+async def test_make_chart_table_kind_accepts_empty_y_fields(tmp_path):
+    """A table with no explicit y_fields is valid — the frontend derives
+    columns from the row keys. Must NOT return a `[make_chart error]`."""
+    tool = build_make_chart_tool("modeling")
+    ctx = _make_ctx(tmp_path)
+    out = await tool.on_invoke_tool(
+        RunContextWrapper(ctx),
+        json.dumps({
+            "topic": "march_declines",
+            "kind": "table",
+            "claim": "Two declined transactions in March.",
+            "points": [{"date": "2024-03-04", "amount": 120.5, "decision": "declined"}],
+            "x_field": "date",
+            "y_fields": [],
+            "source_call": "query_table('model_scores_transaction', ...)",
+        }),
+    )
+    assert "[make_chart error]" not in out
+    # KP persisted with the table viz + numbers
+    kp = ctx._specialist_kb["modeling"][0]
+    assert kp["viz"]["kind"] == "table"
+    assert kp["numbers"]
