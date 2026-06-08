@@ -2153,12 +2153,39 @@ def post_rewind(case_id: str):
         sess = _get_or_create_session(case_id)
     except KeyError as exc:
         return jsonify({"error": str(exc)}), 404
-    sess.input_history = []
-    n_cached = len(sess.qa_cache)
-    sess.qa_cache.clear()
-    n_kb_specialists = len(sess.specialist_kb)
-    n_kb_total = sum(len(v) for v in sess.specialist_kb.values())
-    sess.specialist_kb.clear()
+
+    remove_turn_ids: list[str] = body.get("removeTurnIds") or []
+    is_partial = bool(remove_turn_ids)
+
+    if is_partial:
+        # Partial rewind: only remove specified turns from caches.
+        # Drop qa_cache entries whose turn_id is in the removed set.
+        removed_set = set(remove_turn_ids)
+        n_cached = 0
+        for key in list(sess.qa_cache):
+            if sess.qa_cache[key].get("turn_id_origin") in removed_set:
+                del sess.qa_cache[key]
+                n_cached += 1
+        # Drop KB entries produced during the removed turns.
+        n_kb_total = 0
+        for spec_name in list(sess.specialist_kb):
+            before = len(sess.specialist_kb[spec_name])
+            sess.specialist_kb[spec_name] = [
+                kp for kp in sess.specialist_kb[spec_name]
+                if kp.get("captured_at_turn") not in removed_set
+            ]
+            n_kb_total += before - len(sess.specialist_kb[spec_name])
+        n_kb_specialists = sum(
+            1 for kps in sess.specialist_kb.values() if kps
+        )
+    else:
+        # Full rewind: clear everything.
+        sess.input_history = []
+        n_cached = len(sess.qa_cache)
+        sess.qa_cache.clear()
+        n_kb_specialists = len(sess.specialist_kb)
+        n_kb_total = sum(len(v) for v in sess.specialist_kb.values())
+        sess.specialist_kb.clear()
     # Clear rendered chart files
     charts_dir = _REPORTS_DIR / case_id / "charts"
     if charts_dir.exists():
@@ -2201,14 +2228,15 @@ def post_rewind(case_id: str):
                 pass
         sess.cancel_in_flight.set()
     # Wipe node trace rows so the trace DB stays in sync with the
-    # frontend. Both clear-history and rewind-to-point reset all server
-    # state (qa_cache, specialist_kb, input_history), so the trace DB
-    # should match. Delete by case_id (not chat_id) — each server
-    # process gets a fresh session_id, so a chat-id-scoped delete would
-    # leave prior-process rows stranded.
+    # frontend. Partial rewind deletes only the specified turns; full
+    # rewind deletes everything for this case.
     trace_rows_cleared = 0
     if _NODE_TRACE_STORE is not None:
-        trace_rows_cleared = _NODE_TRACE_STORE.delete_case(case_id)
+        if is_partial:
+            trace_rows_cleared = _NODE_TRACE_STORE.delete_turns(
+                remove_turn_ids)
+        else:
+            trace_rows_cleared = _NODE_TRACE_STORE.delete_case(case_id)
     sess.logger.log("rewind", {
         "message_id": msg_id, "case_id": case_id,
         "qa_cache_entries_cleared": n_cached,

@@ -280,6 +280,27 @@ class NodeTraceStore:
             self._log_failure("delete_chat", exc)
             return 0
 
+    def delete_turns(self, turn_ids: list[str]) -> int:
+        """Drop trace rows for specific turn_ids. Returns rows removed."""
+        if not turn_ids:
+            return 0
+        try:
+            with self._lock:
+                placeholders = ",".join("?" for _ in turn_ids)
+                cur = self._conn.execute(
+                    f"DELETE FROM node_trace WHERE turn_id IN ({placeholders})",
+                    turn_ids,
+                )
+                n_traces = int(cur.rowcount or 0)
+                self._conn.execute(
+                    f"DELETE FROM session_snapshot WHERE turn_id IN ({placeholders})",
+                    turn_ids,
+                )
+                return n_traces
+        except Exception as exc:  # noqa: BLE001
+            self._log_failure("delete_turns", exc)
+            return 0
+
     def delete_case(self, case_id: str) -> int:
         """Drop every trace row for ``case_id`` — across all chat_ids /
         session ids that share this case. Returns rows removed.

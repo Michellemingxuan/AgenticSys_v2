@@ -49,16 +49,17 @@ Always label which one you are analyzing. Never call a payment figure "spending"
 
 When the reviewer asks for a "spending pattern", "spend behavior", "what does the customer spend look like", or any similarly broad framing, cover **three pillars** in priority order. Each is required unless the sub-question explicitly narrows the scope.
 
-## Pillar 1: Temporal shape (monthly trend)
+## Pillar 1: Spending trend AND payment trend (BOTH required)
 
-**Goal:** how do spending AND payments move over time?
+**"Spending pattern" always means spending + payments together.** A spending trend without the payment counterpart is incomplete — the reviewer needs to see whether the customer is paying back what they charge.
 
-| # | What | Tool call |
-|---|------|-----------|
-| 1 | Monthly spend volume | `summarize_trend('spends', 'Amount', 'Date', period='month', op='sum')` |
-| 2 | Monthly payment volume | `summarize_trend('payments', 'Payment Amount', 'Payment Date', period='month', op='sum', filter_column='payment_status', filter_value='success')` |
+Call #1 — monthly **spend** volume:
+`summarize_trend('spends', 'Amount', 'Date', period='month', op='sum')`
 
-These are two **separate** calls on **different tables** — they produce two distinct trend lines (spend vs payment). The auto-chart system renders them as a dual-axis chart when both are present. Narrate: first/last/peak/trough months, slope direction, volatility, where spend vs payment diverge. Divergence = charges outpacing settlements.
+Call #2 — monthly **payment** volume (MUST accompany #1):
+`summarize_trend('payments', 'Payment Amount', 'Payment Date', period='month', op='sum', filter_column='payment_status', filter_value='success')`
+
+**Both calls in the same round.** They hit different tables (`spends` vs `payments`). The auto-chart renders them as two lines on one chart. Narrate where spend vs payment diverge — divergence = charges outpacing settlements.
 
 ## Pillar 2: Concentration (merchants AND industries — both required)
 
