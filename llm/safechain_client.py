@@ -29,6 +29,7 @@ In dev / this repo, ``backend="openai"`` keeps the existing
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import os
@@ -82,14 +83,23 @@ except ImportError:
     _nest_asyncio = None  # type: ignore[assignment]
 
 
-# Per-call wall-clock cap on a single safechain LLM call. Because the call is
-# now awaited via the model's real async `ainvoke` (not run in a worker
-# thread), `asyncio.wait_for` genuinely *cancels* a hung call — the coroutine
-# and its underlying async request are cancelled, with no orphaned thread left
-# behind. (The old sync-in-thread path could not be interrupted: a stuck
-# worker thread leaked forever and eventually starved specialist dispatch.)
-# Generous default so slow-but-valid calls aren't aborted; tune via env.
+# Per-call wall-clock cap on a single safechain LLM call. The safechain model
+# is built async (`await amodel(...)`, which does the token acquisition), but
+# the chain INVOKE is blocking/sync — so we run it in a worker thread and bound
+# it with `asyncio.wait_for`. On timeout the asyncio side gives up promptly
+# (freeing the firewall semaphore + turn lock); the underlying thread may
+# linger until safechain returns, which is why we use a DEDICATED, generously
+# sized pool below so a few stuck calls can't starve the shared default
+# executor (the original "stuck at team construction" mechanism).
 _SAFECHAIN_CALL_TIMEOUT_S = float(os.environ.get("SAFECHAIN_CALL_TIMEOUT_S", "180"))
+
+# Dedicated thread pool for the blocking `chain.invoke()`. Sized well above the
+# total LLM concurrency (specialist + orchestrator firewall caps) so a hung
+# call holds a worker without queueing new calls behind dead threads.
+_SAFECHAIN_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=int(os.environ.get("SAFECHAIN_THREAD_POOL", "32")),
+    thread_name_prefix="safechain-invoke",
+)
 
 
 _ROLE_LABELS = {
@@ -157,22 +167,30 @@ class SafeChainAsyncOpenAI:
         # SDK reads these for tracing/logging only. Return None.
         return None
 
-    def _ensure_llm(self) -> Any:
+    async def _aensure_llm(self) -> Any:
+        """Return the cached safechain model, building it once on first use.
+
+        `amodel` is an ASYNC factory (it performs token acquisition), so it
+        MUST be awaited — the model is then reused for every blocking
+        `chain.invoke()`. A concurrent first-build race just builds twice and
+        keeps the last; harmless (no lock, since the client is shared across
+        per-turn event loops and an asyncio.Lock can't span loops)."""
         if self._llm is None:
-            self._refresh_llm()
+            await self._arefresh_llm()
         return self._llm
 
-    def _refresh_llm(self) -> None:
-        """(Re)load the safechain model. Used on first call and on 401 retry."""
+    async def _arefresh_llm(self) -> None:
+        """(Re)build the safechain model via `await amodel(...)`. First call and
+        401 token-expiry retry. Caches on `self._llm`."""
         try:
-            from safechain.core.model import model as safechain_model  # type: ignore[import-not-found]
+            from safechain.core.model import amodel  # type: ignore[import-not-found]
         except ImportError as e:
             raise NotImplementedError(
                 "safechain is not installed in this environment. "
                 "SafeChainAsyncOpenAI is only usable in the private/prod env."
             ) from e
         model_id = os.environ.get("SAFECHAIN_MODEL", self._model_name)
-        self._llm = safechain_model(model_id)
+        self._llm = await amodel(model_id)
 
 
 class _SafeChainChat:
@@ -309,38 +327,37 @@ class _SafeChainChatCompletions:
         combined = _combine_messages(messages, tools, response_format, tool_choice=tool_choice)
         try:
             from safechain.prompts import ValidChatPromptTemplate  # type: ignore[import-not-found]
+            from langchain_core.output_parsers import StrOutputParser  # type: ignore[import-not-found]
         except ImportError as e:
             raise NotImplementedError(
                 "safechain is not installed — SafeChainAsyncOpenAI is for "
                 "the private/prod environment only."
             ) from e
 
-        llm = self._parent._ensure_llm()
+        # Build the model ASYNC (`await amodel(...)` does the token acquisition),
+        # cached + reused. The chain INVOKE is blocking/sync, so run it in a
+        # dedicated worker thread bounded by a per-call timeout: on timeout the
+        # asyncio side gives up promptly (freeing the firewall semaphore + turn
+        # lock) even though the worker may linger until safechain returns.
+        llm = await self._parent._aensure_llm()
 
-        # Format the prompt SYNCHRONOUSLY — pure in-memory string work that
-        # returns instantly, so it never holds (or hangs) a worker thread, and
-        # it sidesteps LangChain routing the trivial template step through its
-        # `run_in_executor` fallback when a component doesn't override
-        # `ainvoke`. The ONE call that can block on the network is the model's
-        # `ainvoke`, which SafeChain implements as a *real* async path
-        # (`_agenerate`/`_astream`). Awaiting it natively on the event loop
-        # means NO worker thread is held during the network wait — removing the
-        # thread-occupation that previously caused "stuck at team construction /
-        # specialists can't be assigned" (a hung sync call in a thread cannot
-        # be killed in Python, so it leaked the thread + its semaphore slot).
-        prompt_value = ValidChatPromptTemplate.from_messages(
-            [("human", "{__input__}")]
-        ).invoke({"__input__": combined})
+        def _sync_invoke(active_model: Any) -> str:
+            chain = (
+                ValidChatPromptTemplate.from_messages([("human", "{__input__}")])
+                | active_model
+                | StrOutputParser()
+            )
+            return chain.invoke({"__input__": combined})
 
-        async def _ainvoke(active_llm: Any) -> str:
-            r = await asyncio.wait_for(
-                active_llm.ainvoke(prompt_value),
+        async def _run(active_model: Any) -> str:
+            loop = asyncio.get_running_loop()
+            return await asyncio.wait_for(
+                loop.run_in_executor(_SAFECHAIN_EXECUTOR, _sync_invoke, active_model),
                 timeout=_SAFECHAIN_CALL_TIMEOUT_S,
             )
-            return r.content if hasattr(r, "content") else str(r)
 
         try:
-            text = await _ainvoke(llm)
+            text = await _run(llm)
         except asyncio.TimeoutError as e:
             raise TimeoutError(
                 f"safechain LLM call did not return within "
@@ -349,10 +366,10 @@ class _SafeChainChatCompletions:
         except Exception as e:  # noqa: BLE001 — we re-classify below
             es = str(e)
             if "401" in es:
-                # Token expiry — refresh the model and retry once.
-                self._parent._refresh_llm()
+                # Token expiry — rebuild the model and retry once.
+                await self._parent._arefresh_llm()
                 try:
-                    text = await _ainvoke(self._parent._ensure_llm())
+                    text = await _run(await self._parent._aensure_llm())
                 except asyncio.TimeoutError as te:
                     raise TimeoutError(
                         f"safechain LLM call did not return within "
