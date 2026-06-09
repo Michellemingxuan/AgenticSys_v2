@@ -190,7 +190,19 @@ class SafeChainAsyncOpenAI:
                 "SafeChainAsyncOpenAI is only usable in the private/prod env."
             ) from e
         model_id = os.environ.get("SAFECHAIN_MODEL", self._model_name)
-        self._llm = await amodel(model_id)
+        # Bound the build too. `amodel()` does token acquisition over the
+        # network; if it hangs it would stall the whole turn with NO timeout
+        # (the per-call timeout below only wraps the INVOKE), which shows up as
+        # a round that's "stale, no input/output captured, never recovers".
+        try:
+            self._llm = await asyncio.wait_for(
+                amodel(model_id), timeout=_SAFECHAIN_CALL_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError as e:
+            raise TimeoutError(
+                f"safechain amodel() build did not return within "
+                f"{_SAFECHAIN_CALL_TIMEOUT_S:.0f}s"
+            ) from e
 
 
 class _SafeChainChat:
