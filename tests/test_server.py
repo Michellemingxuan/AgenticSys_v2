@@ -858,3 +858,42 @@ def test_replay_completed_specialists_noop_when_none_completed():
     sess = _RecordingSess()
     server._replay_completed_specialists(sess, "t1", [{"call_id": "c1", "tool": "x"}])
     assert sess.events == []
+
+
+# ── replay-on-reconnect: emit() buffers events for late subscribers ──────────
+
+
+def _bare_session():
+    """A CaseSession with only the attrs emit() touches; the rest are dummies."""
+    return server.CaseSession(
+        case_id="c", gateway=None, catalog=None, clients=None,
+        pillar_yaml={}, chat_agent=None, logger=None,
+    )
+
+
+def test_emit_buffers_events_but_skips_pings():
+    sess = _bare_session()
+    sess.emit("turn_started", {"turn_id": "t1"})
+    sess.emit("agent_completed", {"turn_id": "t1", "tool": "modeling"})
+    sess.emit("ping", {})  # keepalive — must NOT be buffered for replay
+    names = [n for n, _ in sess.event_buffer]
+    assert names == ["turn_started", "agent_completed"]
+
+
+def test_emit_still_fans_out_to_subscribers():
+    import queue as _q
+    sess = _bare_session()
+    q = _q.Queue()
+    sess.subscribers.append(q)
+    sess.emit("final", {"turn_id": "t1", "answer": "x"})
+    assert q.get_nowait() == ("final", {"turn_id": "t1", "answer": "x"})
+    assert list(sess.event_buffer) == [("final", {"turn_id": "t1", "answer": "x"})]
+
+
+def test_event_buffer_is_bounded():
+    sess = _bare_session()
+    for i in range(server._EVENT_BUFFER_MAX + 50):
+        sess.emit("agent_completed", {"turn_id": "t", "i": i})
+    assert len(sess.event_buffer) == server._EVENT_BUFFER_MAX
+    # Oldest frames dropped; newest retained.
+    assert sess.event_buffer[-1][1]["i"] == server._EVENT_BUFFER_MAX + 49

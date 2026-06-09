@@ -26,6 +26,7 @@ import queue
 import threading
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -76,6 +77,15 @@ MODEL = os.environ.get("MODEL", "gpt-4.1")
 DATA_SOURCE = os.environ.get("DATA_SOURCE", "auto")
 PORT = int(os.environ.get("PORT", 3001))
 HOST = os.environ.get("HOST", "127.0.0.1")
+# Per-session ring buffer of recently-emitted SSE events. When a client
+# (re)connects to the stream — initial load, or recovery after a silent
+# half-open death — these are replayed BEFORE going live, so a turn that ran
+# while no subscriber was connected (the `turn_no_subscribers` case) is
+# recovered instead of lost forever. ~400 events covers the last turn or two;
+# replay is idempotent on the client (upsert by turn_id/call_id; messages
+# deduped by id), so any overlap with live events is harmless.
+_EVENT_BUFFER_MAX = int(os.environ.get("SSE_EVENT_BUFFER_MAX", "400"))
+
 PING_INTERVAL_S = 5.0  # was 15.0 — tighter pings reduce silent SSE disconnects
 # from idle-aware intermediaries (browser tab throttle, corporate proxies,
 # dev-server proxies with default 60s idle-close). Real failure case: user
@@ -220,6 +230,12 @@ class CaseSession:
     # SSE subscribers — each one owns a queue.Queue of (event_name, payload).
     subscribers: list[queue.Queue] = field(default_factory=list)
     subscribers_lock: threading.Lock = field(default_factory=threading.Lock)
+    # Ring buffer of recent (event_name, payload) frames, replayed to a newly
+    # (re)connected subscriber so a turn that ran while disconnected isn't
+    # lost. Guarded by `subscribers_lock`. Cleared on /rewind.
+    event_buffer: deque = field(
+        default_factory=lambda: deque(maxlen=_EVENT_BUFFER_MAX)
+    )
     # Per-session exact-match Q→A cache. Keyed by `_normalize_q(redacted_question)`;
     # value carries the cached FinalAnswer fields. Skips orchestrator on repeats.
     qa_cache: dict = field(default_factory=dict)
@@ -236,6 +252,10 @@ class CaseSession:
         """Fan out an SSE event to every subscriber of this case."""
         event = (event_name, payload)
         with self.subscribers_lock:
+            # Buffer for replay to clients that (re)connect later. Skip pings —
+            # they're pure keepalive with no state to restore.
+            if event_name != "ping":
+                self.event_buffer.append(event)
             for q in self.subscribers:
                 try:
                     q.put_nowait(event)
@@ -2144,6 +2164,8 @@ def post_cancel_turn(case_id: str):
     n_kb_total = sum(len(v) for v in sess.specialist_kb.values())
     sess.specialist_kb.clear()
     sess.input_history = []
+    with sess.subscribers_lock:
+        sess.event_buffer.clear()  # don't replay events from the wiped turn(s)
 
     # Clear rendered chart files
     n_charts_cleared = 0
@@ -2217,6 +2239,19 @@ def post_rewind(case_id: str):
         n_kb_specialists = len(sess.specialist_kb)
         n_kb_total = sum(len(v) for v in sess.specialist_kb.values())
         sess.specialist_kb.clear()
+
+    # Drop replay-buffer frames for the rewound turn(s) so a later (re)connect
+    # doesn't resurrect them.
+    with sess.subscribers_lock:
+        if is_partial:
+            kept = [
+                (n, p) for (n, p) in sess.event_buffer
+                if not (isinstance(p, dict) and p.get("turn_id") in removed_set)
+            ]
+            sess.event_buffer.clear()
+            sess.event_buffer.extend(kept)
+        else:
+            sess.event_buffer.clear()
     # Clear rendered chart files
     charts_dir = _REPORTS_DIR / case_id / "charts"
     if charts_dir.exists():
@@ -2311,11 +2346,24 @@ def stream(case_id: str):
     sub_q: queue.Queue = queue.Queue(maxsize=_SSE_QUEUE_MAXSIZE)
     with sess.subscribers_lock:
         sess.subscribers.append(sub_q)
-    print(f"[SSE] +client case={case_id} (total: {len(sess.subscribers)})")
+        # Snapshot the replay buffer ATOMICALLY with registration: any event
+        # emitted after this point goes to `sub_q` (delivered live below), so
+        # the replay and the live stream never overlap. Recovers a turn that
+        # ran while this client was disconnected (the `turn_no_subscribers`
+        # hole) instead of losing it.
+        replay_frames = list(sess.event_buffer)
+    print(f"[SSE] +client case={case_id} (total: {len(sess.subscribers)}, "
+          f"replay: {len(replay_frames)} buffered)")
 
     def _generate():
         # Initial open frame
         yield ": connected\n\n"
+        # Replay recent events first so a (re)connecting client recovers a
+        # turn that completed (or is mid-flight) while it was disconnected.
+        # Idempotent on the client: trace events upsert by turn_id/call_id and
+        # chat messages dedupe by id.
+        for event_name, payload in replay_frames:
+            yield f"event: {event_name}\ndata: {json.dumps(payload, default=str)}\n\n"
         last_ping = time.time()
         try:
             while True:
