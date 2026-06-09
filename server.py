@@ -906,7 +906,7 @@ async def _run_turn_streamed(
             "prior_questions_sent": len(prior_questions),
         })
         turn_timer.summary(outcome="screen_timeout")
-        sess.emit("error", {
+        sess.emit("turn_error", {
             "turn_id": turn_id,
             "message": (
                 f"Question-check phase exceeded the {_SCREEN_TIMEOUT_S:.0f}s "
@@ -925,7 +925,7 @@ async def _run_turn_streamed(
         return
     except Exception as exc:
         turn_timer.summary(outcome="screen_failed")
-        sess.emit("error", {"turn_id": turn_id, "message": f"screen failed: {exc}", "recoverable": True})
+        sess.emit("turn_error", {"turn_id": turn_id, "message": f"screen failed: {exc}", "recoverable": True})
         sess.emit("turn_done", {"turn_id": turn_id, "ended_at": int(time.time() * 1000),
                                 "duration_ms": int(time.time() * 1000) - started_at,
                                 "outcome": "orchestrator_error"})
@@ -1200,7 +1200,7 @@ async def _run_turn_streamed(
         errors = getattr(ctx, "_specialist_errors", None) or []
         while specialist_errors_emitted < len(errors):
             err = errors[specialist_errors_emitted]
-            sess.emit("error", {
+            sess.emit("turn_error", {
                 "turn_id": turn_id,
                 "specialist": err.get("specialist"),
                 "error_type": err.get("error_type"),
@@ -1497,7 +1497,7 @@ async def _run_turn_streamed(
                 "kind": kind,
                 "n_tool_calls_completed": sum(1 for c in tool_calls if "payload" in c),
             })
-            sess.emit("error", {
+            sess.emit("turn_error", {
                 "turn_id": turn_id,
                 "message": short,
                 "kind": kind,
@@ -1937,7 +1937,7 @@ def _spawn_turn(sess: CaseSession, turn_id: str, question: str) -> None:
                     "limit_s": _QUEUED_TURN_MAX_WAIT_S,
                 })
                 ts = int(time.time() * 1000)
-                sess.emit("error", {
+                sess.emit("turn_error", {
                     "turn_id": turn_id,
                     "message": (
                         f"Prior turn on this case hasn't released after "
@@ -2003,7 +2003,7 @@ def _spawn_turn(sess: CaseSession, turn_id: str, question: str) -> None:
                                  "Lock released; next question can run."),
                     })
                     ts = int(time.time() * 1000)
-                    sess.emit("error", {
+                    sess.emit("turn_error", {
                         "turn_id": turn_id,
                         "message": (
                             f"Turn exceeded the {_TURN_WALL_CLOCK_S:.0f}s "
@@ -2038,7 +2038,7 @@ def _spawn_turn(sess: CaseSession, turn_id: str, question: str) -> None:
                         "reason": reason,
                     })
                     ts = int(time.time() * 1000)
-                    sess.emit("error", {
+                    sess.emit("turn_error", {
                         "turn_id": turn_id,
                         "message": (
                             "Interrupted — the answer was stopped. "
