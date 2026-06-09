@@ -163,7 +163,7 @@ def build_orchestrator_agent(
         # NOT analysis. Give it a tight budget so a stalled safechain round
         # fails fast and best-effort (orchestrator continues without the
         # report draft) instead of dragging the turn toward the 240s fence.
-        timeout_s=float(os.environ.get("REPORT_AGENT_TIMEOUT_S", "45")),
+        timeout_s=float(os.environ.get("REPORT_AGENT_TIMEOUT_S", "100")),
         max_turns=int(os.environ.get("REPORT_AGENT_MAX_TURNS", "2")),
     ))
     tools.append(redacting_tool(
