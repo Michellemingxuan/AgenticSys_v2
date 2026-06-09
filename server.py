@@ -443,6 +443,31 @@ def _synthesize_fallback_answer(
     return "\n".join(lines), flags
 
 
+def _replay_completed_specialists(sess, turn_id: str, tool_calls: list[dict]) -> None:
+    """Re-emit ``team_plan`` + ``agent_completed`` for specialists that produced
+    a payload this turn.
+
+    Error / fallback branches that emit ``final`` MUST call this first, or the
+    reasoning-trace panel loses the work that DID succeed: a turn-wide ``error``
+    leaves completed specialists rendered as "failed" with no trace (see the
+    ``alternate_paths_must_replay_full_sse`` project rule). ``agent_completed``
+    carries the payload and the frontend upserts by ``call_id``, so re-emitting
+    is idempotent on the success path and restorative on the failure path.
+    """
+    completed = [c for c in tool_calls if "payload" in c]
+    if not completed:
+        return
+    sess.emit("team_plan", {"turn_id": turn_id, "tool_calls": list(tool_calls)})
+    for c in completed:
+        sess.emit("agent_completed", {
+            "turn_id": turn_id,
+            "call_id": c.get("call_id"),
+            "tool": c.get("tool"),
+            "payload": c.get("payload"),
+            "duration_ms": c.get("duration_ms", 0),
+        })
+
+
     # (input_history pruning removed — each turn now starts fresh.
     #  Follow-up context lives in specialist_kb + KB warmth hint.)
 
@@ -1475,6 +1500,12 @@ async def _run_turn_streamed(
                     f"specialist '{e['specialist']}' failed: "
                     f"{e['error_type']}: {e['error_message']}"
                 )
+
+            # Replay the completed specialists' traces BEFORE `final` so the
+            # reasoning panel keeps the work that succeeded — otherwise the
+            # turn-wide error renders a correct specialist as "failed" with no
+            # trace (alternate_paths_must_replay_full_sse).
+            _replay_completed_specialists(sess, turn_id, tool_calls)
 
             ts = int(time.time() * 1000)
             sess.emit("final", {

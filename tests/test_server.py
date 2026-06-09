@@ -822,3 +822,39 @@ def test_chart_payload_carries_table_kind_and_numbers():
     assert payload["claim"] == "Two declined transactions in March."
     # No vega_spec for table kind — frontend renders HTML, not vega-embed.
     assert payload.get("vega_spec") is None
+
+
+# ── RC2: failure branches must replay completed specialists' traces ──────────
+
+
+class _RecordingSess:
+    """Minimal session stand-in capturing emitted SSE events."""
+    def __init__(self):
+        self.events = []
+
+    def emit(self, name, payload):
+        self.events.append((name, payload))
+
+
+def test_replay_completed_specialists_emits_team_plan_and_agent_completed():
+    sess = _RecordingSess()
+    tool_calls = [
+        {"call_id": "c1", "tool": "modeling",
+         "payload": {"findings": "ok"}, "duration_ms": 120},
+        {"call_id": "c2", "tool": "report_agent"},  # no payload → skipped
+    ]
+    server._replay_completed_specialists(sess, "t1", tool_calls)
+
+    names = [n for n, _ in sess.events]
+    assert names == ["team_plan", "agent_completed"]
+    ac = [p for n, p in sess.events if n == "agent_completed"]
+    assert len(ac) == 1  # only the specialist with a payload
+    assert ac[0]["tool"] == "modeling"
+    assert ac[0]["payload"] == {"findings": "ok"}
+    assert ac[0]["turn_id"] == "t1"
+
+
+def test_replay_completed_specialists_noop_when_none_completed():
+    sess = _RecordingSess()
+    server._replay_completed_specialists(sess, "t1", [{"call_id": "c1", "tool": "x"}])
+    assert sess.events == []
