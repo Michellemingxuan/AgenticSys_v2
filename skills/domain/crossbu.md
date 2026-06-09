@@ -31,6 +31,8 @@ Row vs card counting: one row per card per case-month. Single-month snapshot →
 
 # Balance ≠ spend ≠ payment
 
+**Balance is ALWAYS a live query** — `aggregate_column('crossbu_cards', 'balance', op='sum')` (or per-card `query_table`). NEVER answer balance from `kb_lookup`, a cached card-count, a prior-turn KP, or any other metric: a count of cards says nothing about how much is owed. If this run produced no `balance` tool-result, emit a `data_gap` — never a fabricated or estimated amount.
+
 | Concept | Column | Table | Owner |
 |---|---|---|---|
 | Balance (point-in-time outstanding) | `balance` | `crossbu_cards` | you |

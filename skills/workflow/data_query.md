@@ -59,21 +59,28 @@ Exception: when the answer IS a set of specific transactions/rows the reviewer s
 
 ## 1.0 Check KB first (follow-up turns)
 
-If your input mentions `[KB — ...]`, call `kb_lookup(topic)` for any topic
-matching the current question BEFORE querying fresh data. This includes
-topics cached by **other specialists** — if the modeling specialist already
-trended TSR, you can `kb_lookup("tsr_trend")` instead of re-running
-`summarize_trend` yourself. The KB is shared across all specialists in
-the session.
+If your input mentions `[KB — ...]`, call `kb_lookup(topic)` for a cached
+topic that is **the same metric the current question asks** — including
+topics cached by **other specialists** (e.g. if modeling already trended TSR,
+you can `kb_lookup("tsr_trend")` instead of re-running `summarize_trend`). The
+KB is shared across all specialists in the session.
 
-If the cached data answers the question (or provides a data point you
-need as context), skip the query and go straight to § DATA ANALYSIS.
-Each skipped query saves ~10-20s wall-clock.
+**A cached topic is a substitute ONLY when it is the exact metric / entity /
+window being asked.** A near-miss is NOT an answer. If the question is
+"balance" and the only cached topic is "card_count", that tells you nothing
+about balance — query the real column and NEVER derive, estimate, or fabricate
+the asked number from an unrelated cached value. A cached number for a
+DIFFERENT metric is reference context at most, never the answer (this is the
+Anti-hallucination rule applied to the KB). If the metric isn't cached AND you
+can't query it this run, emit a `data_gap` — never a plausible filler number.
 
-Only re-query when:
-- The question asks about a different time window or filter than the cached data
+When the cached topic IS the exact metric, skip the query and go straight to
+§ DATA ANALYSIS (~10-20s saved).
+
+Re-query when:
+- The question asks a different time window / filter / entity than the cached data
 - The cached data has low confidence
-- The question requires data the cache doesn't cover
+- The metric isn't covered by the cache
 
 ## 1.1 Round budget (hard cap: 6)
 

@@ -55,8 +55,12 @@ async def kb_list_topics(ctx: RunContextWrapper) -> str:
 async def kb_lookup(ctx: RunContextWrapper, topic: str) -> str:
     """Look up a specific cached knowledge point by topic slug.
     Returns the full claim + numbers + source_call if found.
-    Use this BEFORE re-running an expensive summarize_trend call —
-    if the topic is cached, you can skip the query."""
+    Use this BEFORE re-running an expensive summarize_trend call — if the
+    EXACT metric the question asks is cached, you can skip the query.
+    A cached topic is an answer ONLY when it is the same metric / entity /
+    window being asked. A near-miss (e.g. a cached card-count when the
+    question asks for balance) is NOT an answer — query the real data and
+    never fabricate the asked number from an unrelated cached value."""
     kb = _get_kb(ctx)
     if not kb:
         return f"Topic '{topic}' not found — KB is empty."
