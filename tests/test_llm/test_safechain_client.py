@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import time
 import types
 
 import pytest
@@ -232,82 +233,107 @@ async def test_invoking_without_safechain_raises_clear_error():
         )
 
 
-# ── async-native invocation (no worker threads) ──────────────────────────
+# ── model build via amodel + blocking chain.invoke in a worker thread ───────
 #
-# The hang-prone LLM call must run via the model's REAL async `ainvoke`
-# (awaited on the event loop), not sync `chain.invoke` in a worker thread.
-# A stuck worker thread can't be killed in Python, so the old threaded path
-# leaked threads and starved specialist dispatch ("stuck at team
-# construction"). These tests pin the async path + the per-call timeout.
+# Prod API (per the private env): the model is built with `await amodel(id)`
+# (async — token acquisition), cached and reused; the chain
+# (`prompt | model | StrOutputParser`) is invoked SYNCHRONOUSLY in a dedicated
+# worker thread, bounded by a per-call timeout. These tests pin that shape.
 
 
-class _Resp:
-    """Mimics a LangChain message result with a `.content` attribute."""
-    def __init__(self, content: str):
-        self.content = content
+class _FakeModel:
+    """Stand-in for the amodel-built model. `behavior(inputs)` is the result
+    of the sync `chain.invoke` (or it raises)."""
+    def __init__(self, behavior):
+        self.behavior = behavior
 
 
-def _install_fake_safechain_prompts(monkeypatch):
-    """Stub `safechain.prompts.ValidChatPromptTemplate` (the real package
-    isn't installed in dev). The fake template's `.invoke()` returns the
-    combined prompt string verbatim — matching how `_invoke` formats the
-    prompt synchronously before awaiting the model."""
-    class _FakeTemplate:
-        @classmethod
-        def from_messages(cls, _msgs):
-            return cls()
+class _FakeChain:
+    def __init__(self, model):
+        self._model = model
 
-        def invoke(self, d):
-            return d["__input__"]
+    def __or__(self, _parser):  # `... | StrOutputParser()` → same chain
+        return self
 
+    def invoke(self, inputs):
+        return self._model.behavior(inputs)
+
+
+class _FakePrompt:
+    @classmethod
+    def from_messages(cls, _msgs):
+        return cls()
+
+    def __or__(self, model):  # `prompt | model` → chain seeded with the model
+        return _FakeChain(model)
+
+
+class _FakeStrOutputParser:
+    pass
+
+
+def _install_fake_safechain(monkeypatch, *, amodel_factory):
+    """Stub the safechain + langchain_core imports `_invoke` makes (neither is
+    installed in dev). `amodel_factory()` returns the model for each
+    `await amodel(...)` build."""
     prompts_mod = types.ModuleType("safechain.prompts")
-    prompts_mod.ValidChatPromptTemplate = _FakeTemplate
-    pkg = types.ModuleType("safechain")
-    monkeypatch.setitem(sys.modules, "safechain", pkg)
-    monkeypatch.setitem(sys.modules, "safechain.prompts", prompts_mod)
+    prompts_mod.ValidChatPromptTemplate = _FakePrompt
+    core_model_mod = types.ModuleType("safechain.core.model")
+
+    async def _amodel(_model_id):
+        return amodel_factory()
+    core_model_mod.amodel = _amodel
+
+    lc_parsers = types.ModuleType("langchain_core.output_parsers")
+    lc_parsers.StrOutputParser = _FakeStrOutputParser
+
+    for name, mod in [
+        ("safechain", types.ModuleType("safechain")),
+        ("safechain.core", types.ModuleType("safechain.core")),
+        ("safechain.core.model", core_model_mod),
+        ("safechain.prompts", prompts_mod),
+        ("langchain_core", types.ModuleType("langchain_core")),
+        ("langchain_core.output_parsers", lc_parsers),
+    ]:
+        monkeypatch.setitem(sys.modules, name, mod)
 
 
 @pytest.mark.asyncio
-async def test_invoke_uses_async_ainvoke_not_sync_threads(monkeypatch):
-    _install_fake_safechain_prompts(monkeypatch)
+async def test_invoke_builds_via_amodel_and_reuses_it(monkeypatch):
+    builds = {"n": 0}
+
+    def _factory():
+        builds["n"] += 1
+        return _FakeModel(lambda _in: '{"output": {"answer": "ok"}}')
+
+    _install_fake_safechain(monkeypatch, amodel_factory=_factory)
     fw = FirewallStack(EventLogger(session_id="t"), max_retries=0, concurrency_cap=2)
     client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
 
-    calls = {"ainvoke": 0}
-
-    class _AsyncLLM:
-        async def ainvoke(self, _prompt_value):
-            calls["ainvoke"] += 1
-            return _Resp('{"output": {"answer": "ok"}}')
-
-        def invoke(self, *a, **k):  # pragma: no cover - must NOT be hit
-            raise AssertionError("sync invoke must not be used on the async path")
-
-    client._llm = _AsyncLLM()
-
-    result = await client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}],
-    )
-    assert calls["ainvoke"] == 1
+    msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
+    result = await client.chat.completions.create(model="gpt-4o", messages=msgs)
+    assert builds["n"] == 1  # amodel awaited once to build
     assert "ok" in result.choices[0].message.content
+
+    # Cached: a second call reuses the model (no rebuild).
+    await client.chat.completions.create(model="gpt-4o", messages=msgs)
+    assert builds["n"] == 1
 
 
 @pytest.mark.asyncio
 async def test_invoke_per_call_timeout_raises(monkeypatch):
-    """A hung safechain call must surface as a TimeoutError so the turn fails
-    cleanly and releases the firewall semaphore — instead of blocking forever."""
-    _install_fake_safechain_prompts(monkeypatch)
+    """A hung (blocking) chain.invoke must surface as TimeoutError so the turn
+    fails cleanly and releases the firewall semaphore + turn lock."""
+    def _factory():
+        def _slow(_in):
+            time.sleep(0.5)  # blocking, in the worker thread
+            return "late"
+        return _FakeModel(_slow)
+
+    _install_fake_safechain(monkeypatch, amodel_factory=_factory)
     monkeypatch.setattr("llm.safechain_client._SAFECHAIN_CALL_TIMEOUT_S", 0.05)
     fw = FirewallStack(EventLogger(session_id="t"), max_retries=0, concurrency_cap=2)
     client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
-
-    class _SlowLLM:
-        async def ainvoke(self, _prompt_value):
-            await asyncio.sleep(5)
-            return _Resp("late")
-
-    client._llm = _SlowLLM()
 
     with pytest.raises(TimeoutError):
         await client.chat.completions.create(
@@ -317,53 +343,43 @@ async def test_invoke_per_call_timeout_raises(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_invoke_refreshes_and_retries_on_401(monkeypatch):
-    _install_fake_safechain_prompts(monkeypatch)
+async def test_invoke_rebuilds_and_retries_on_401(monkeypatch):
+    """A 401 (token expiry) rebuilds the model via amodel and retries once."""
+    state = {"build": 0}
+
+    def _factory():
+        state["build"] += 1
+        if state["build"] == 1:
+            def _raise(_in):
+                raise RuntimeError("HTTP 401 unauthorized")
+            return _FakeModel(_raise)
+        return _FakeModel(lambda _in: '{"output": {"answer": "after-refresh"}}')
+
+    _install_fake_safechain(monkeypatch, amodel_factory=_factory)
     fw = FirewallStack(EventLogger(session_id="t"), max_retries=0, concurrency_cap=2)
     client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
-
-    refreshed = {"n": 0}
-
-    class _Flaky:
-        def __init__(self):
-            self.n = 0
-
-        async def ainvoke(self, _prompt_value):
-            self.n += 1
-            if self.n == 1:
-                raise RuntimeError("HTTP 401 unauthorized")
-            return _Resp('{"output": {"answer": "after-refresh"}}')
-
-    flaky = _Flaky()
-    client._llm = flaky
-    monkeypatch.setattr(
-        client, "_refresh_llm",
-        lambda: refreshed.__setitem__("n", refreshed["n"] + 1),
-    )
 
     result = await client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}],
     )
-    assert refreshed["n"] == 1
-    assert flaky.n == 2
+    assert state["build"] == 2  # initial build + rebuild on 401
     assert "after-refresh" in result.choices[0].message.content
 
 
 @pytest.mark.asyncio
-async def test_concurrent_calls_overlap_no_thread_serialization(monkeypatch):
-    """Two concurrent calls on the shared client must OVERLAP (real async),
-    proving no per-call thread serialization / no global blocking lock."""
-    _install_fake_safechain_prompts(monkeypatch)
+async def test_concurrent_calls_overlap_via_thread_pool(monkeypatch):
+    """Concurrent calls run in the dedicated thread pool — they OVERLAP rather
+    than serializing behind a single worker."""
+    def _factory():
+        def _slow(_in):
+            time.sleep(0.2)
+            return '{"output": {"answer": "ok"}}'
+        return _FakeModel(_slow)
+
+    _install_fake_safechain(monkeypatch, amodel_factory=_factory)
     fw = FirewallStack(EventLogger(session_id="t"), max_retries=0, concurrency_cap=4)
     client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
-
-    class _SleepyLLM:
-        async def ainvoke(self, _prompt_value):
-            await asyncio.sleep(0.2)
-            return _Resp('{"output": {"answer": "ok"}}')
-
-    client._llm = _SleepyLLM()
 
     async def one_call():
         return await client.chat.completions.create(
@@ -375,5 +391,5 @@ async def test_concurrent_calls_overlap_no_thread_serialization(monkeypatch):
     t0 = loop.time()
     await asyncio.gather(one_call(), one_call(), one_call())
     elapsed = loop.time() - t0
-    # 3 × 0.2s serialized would be ≥0.6s; overlapping is ≈0.2s. Allow slack.
-    assert elapsed < 0.45, f"calls serialized ({elapsed:.2f}s) — not real async"
+    # 3 × 0.2s serialized would be ≥0.6s; overlapping in the pool is ≈0.2s.
+    assert elapsed < 0.45, f"calls serialized ({elapsed:.2f}s) — pool not used"
