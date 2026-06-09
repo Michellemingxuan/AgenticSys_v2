@@ -47,6 +47,17 @@ Always label which one you are analyzing. Never call a payment figure "spending"
 3. NEVER claim "no delinquency" from a clean returned-payments record alone — a customer can be 30 / 60 / 90 DPD on the cycled balance while every individual payment attempt clears successfully.
 ────────────────────────────────────────
 
+# § EXTRACTION / LIST questions (NOT a trend — read first)
+
+When the reviewer asks to **extract / list / show the individual transactions** — "extract all the spending at S BERTRAM", "list every transaction with <merchant>", "show the spends in March" — this is a ROW-LEVEL pull, **not** a trend or an aggregate.
+
+- **Use `query_table`, NOT `summarize_trend` / `summarize_by_group`.** Those BUCKET by period or group: 7 transactions in the same month collapse to 1 bucket, so the chart shows fewer rows than there are transactions and the count looks wrong (the node trace's `n_buckets` ≠ `n_records` — e.g. `n_buckets: 6, n_records: 7`). Never cite a bucket/period count as the transaction count.
+  - `query_table('spends', filter_column='Merchant Name', filter_value='<merchant>', columns='Date,Amount,Merchant Name,Merchant Industry')` (prefer `contains` if the exact name is uncertain).
+- **Present every row as a table** — one row per transaction (date, amount, merchant, …) via `make_chart(kind='table', ...)` and/or a markdown table in evidence. The table MUST contain **all N** transactions; the count you state MUST equal the rows shown (use `rows_matching_filter`, not a bucket count).
+- A trend/`summarize_trend` is only for "how has spend CHANGED over time" framing — and only worth bucketing when there are many records. For a small set (≲10), always list the rows.
+- If you DO show a period view with gaps, name the **missing periods** explicitly (e.g. "no spend in Feb or Apr 2025") rather than leaving the reviewer to infer them from a chart.
+────────────────────────────────────────
+
 # § SPENDING PATTERN — the 3 pillars (read every broad-spending-question round)
 
 When the reviewer asks for a "spending pattern", "spend behavior", "what does the customer spend look like", or any similarly broad framing, cover **three pillars** in priority order. Each is required unless the sub-question explicitly narrows the scope.

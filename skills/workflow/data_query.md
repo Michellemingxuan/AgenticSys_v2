@@ -53,6 +53,8 @@ into one overlay). This is rare.
 
 Exception: when the answer IS a set of specific transactions/rows the reviewer should see, DO call `make_chart(kind="table", ...)` with those rows — the auto-renderer only produces trend/bar charts, never row tables.
 
+**Extraction / list questions** ("extract / list / show all <rows> matching X") are ROW-LEVEL pulls — use `query_table` and present one row per record, NOT `summarize_trend` / `summarize_by_group`. Those BUCKET by period/group (N records in one period → 1 bucket), so the rendered count is fewer than the real count (`n_buckets` ≠ `n_records`) and the answer looks wrong. The count you state MUST equal the rows shown (`rows_matching_filter`), never a bucket count.
+
 ────────────────────────────────────────
 
 # § DATA QUERY — PLANNING (for R1 — skip when synthesizing)
