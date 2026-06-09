@@ -5,6 +5,7 @@ import asyncio
 import dataclasses
 import hashlib
 import json
+import os
 import time
 import traceback
 from pathlib import Path
@@ -33,7 +34,7 @@ _SPECIALIST_MAX_TURNS = 6
 # vs. the typical 20-90s specialist run, but well below the user-perceived
 # "is this thing broken?" threshold so we surface the failure instead of
 # letting the SSE stream stall.
-_SPECIALIST_TIMEOUT_S = 240.0
+_SPECIALIST_TIMEOUT_S = float(os.environ.get("SPECIALIST_TIMEOUT_S", "240"))
 
 # Wall-clock budget for the second-pass distiller. Distillation is purely
 # text-extraction; should be fast. If it stalls, log + skip — the specialist
@@ -48,7 +49,7 @@ _SPECIALIST_TIMEOUT_S = 240.0
 # specialist-explicit and proves unreliable when the LLM forgets). 60s
 # is still under the slowest specialist budget (240s) so end-of-turn
 # drain doesn't blow up.
-_DISTILLER_TIMEOUT_S = 60.0
+_DISTILLER_TIMEOUT_S = float(os.environ.get("DISTILLER_TIMEOUT_S", "60"))
 
 _SPECIALIST_HISTORY_KEEP_RECENT_USER_MESSAGES = 2
 _ELIDED_SPECIALIST_TOOL_OUTPUT = (
