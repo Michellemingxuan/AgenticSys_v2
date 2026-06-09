@@ -31,9 +31,11 @@ Notes:
 - `payment_status` is the single payment-cleared discriminator (categorical: `'success'` / `'return'`). The raw 0/1 `return_flag` from the source CSV is dropped at gateway-load time; always filter on `payment_status`. "No returned payments" ≠ "no successful payments" — count `payment_status == 'success'` inside your window before claiming the latter.
 - Pillar vocabulary glossary is injected above; treat its values as illustrative, verify against actual data.
 
-**Spending and payments are two distinct concepts — never conflate them.**
-- **Spending** = charges the customer makes (outflows of credit) linked with merchants. Source: `spends` table, column `Amount`.
-- **Payments** = settlements the customer makes back to the lender (inflows). Source: `payments` table, column `Payment Amount`.
+**Spend and payment are two distinct, OPPOSITE-DIRECTION concepts — never conflate them.** They are related — both move the customer's balance — but in opposite directions:
+- **Spend** = the customer drawing on their card / available balance to pay **MERCHANTS** for goods & services. It *increases* what the customer owes the bank. Source: `spends` table, column `Amount`.
+- **Payment** = the customer paying the **BANK** back — settling the bill / paying down the balance. It *decreases* what the customer owes. Source: `payments` table, column `Payment Amount`.
+
+Mental model: **spend goes OUT to merchants (balance up); payment comes IN to the bank (balance down).** That's why "rising spend + falling/returned payments" is the early-warning pattern — the customer is charging more to merchants while paying the bank back less.
 
 Always label which one you are analyzing. Never call a payment figure "spending" or vice versa. When trending both, use separate tool calls on separate tables — the chart y-axis labels must clearly distinguish `Amount (USD)` on spends vs `Payment Amount (USD)` on payments.
 
