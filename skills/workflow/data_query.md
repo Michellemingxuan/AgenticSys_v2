@@ -76,13 +76,21 @@ DIFFERENT metric is reference context at most, never the answer (this is the
 Anti-hallucination rule applied to the KB). If the metric isn't cached AND you
 can't query it this run, emit a `data_gap` — never a plausible filler number.
 
-When the cached topic IS the exact metric, skip the query and go straight to
-§ DATA ANALYSIS (~10-20s saved).
+**Default to the KB for efficiency.** When the data point(s) the question needs
+are ALREADY in the KB (the exact metric / entity / window), answer from them
+DIRECTLY and skip the query — go straight to § DATA ANALYSIS (~10-20s saved per
+skipped call). Don't re-query just to "double-check" what the KB already holds.
 
-Re-query when:
+Only spend a query when you genuinely need an **ADDITIONAL data point** the KB
+doesn't already have — i.e. re-query when:
+- Answering requires a data point NOT covered by the cache (you need MORE than
+  what's cached)
 - The question asks a different time window / filter / entity than the cached data
 - The cached data has low confidence
-- The metric isn't covered by the cache
+
+So: KB has what you need → use it, no query (fast). KB is missing a needed data
+point → query for that point. KB has only a near-miss for the asked metric →
+query (a near-miss is not an answer; see above).
 
 ## 1.1 Round budget (hard cap: 6)
 
