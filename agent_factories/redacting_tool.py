@@ -1134,8 +1134,21 @@ def _normalize_subq(text: str) -> str:
     return " ".join((text or "").strip().lower().split())
 
 
-def redacting_tool(agent: Agent, name: str, description: str):
+def redacting_tool(
+    agent: Agent,
+    name: str,
+    description: str,
+    *,
+    timeout_s: float = _SPECIALIST_TIMEOUT_S,
+    max_turns: int = _SPECIALIST_MAX_TURNS,
+):
     """Return a FunctionTool that runs ``agent`` with input/output redaction.
+
+    ``timeout_s`` / ``max_turns`` override the per-specialist budgets. They
+    default to the domain-specialist values (240s / 6 turns); auxiliary agents
+    like ``report_agent`` (a shallow file lookup, not analysis) should pass a
+    much tighter budget so a stalled LLM round fails fast and best-effort
+    instead of dragging the whole turn toward the 240s fence.
 
     Inter-agent transit boundary: anything flowing in (LLM-generated sub-
     question) gets ``sanitize_message``; anything flowing out (the inner
@@ -1311,16 +1324,16 @@ def redacting_tool(agent: Agent, name: str, description: str):
                         result = await asyncio.wait_for(
                             Runner.run(
                                 inner, run_input, context=app_ctx,
-                                max_turns=_SPECIALIST_MAX_TURNS,
+                                max_turns=max_turns,
                             ),
-                            timeout=_SPECIALIST_TIMEOUT_S,
+                            timeout=timeout_s,
                         )
                 finally:
                     LLM_CALL_KIND.reset(kind_token)
                 timer.record(
                     "specialist_runner",
                     int((time.perf_counter() - t0) * 1000),
-                    max_turns=_SPECIALIST_MAX_TURNS,
+                    max_turns=max_turns,
                     attempt=_attempt,
                 )
                 break  # success
@@ -1333,7 +1346,7 @@ def redacting_tool(agent: Agent, name: str, description: str):
                 return _record_failure(
                     app_ctx, name, redacted_in,
                     "max_turns_exceeded",
-                    f"hit the {_SPECIALIST_MAX_TURNS}-turn budget — "
+                    f"hit the {max_turns}-turn budget — "
                     f"partial findings were not returned. {exc}",
                     exc,
                 )
@@ -1347,7 +1360,7 @@ def redacting_tool(agent: Agent, name: str, description: str):
                     app_ctx, name, redacted_in,
                     "timeout",
                     f"specialist did not complete within "
-                    f"{_SPECIALIST_TIMEOUT_S:.0f}s wall-clock budget.",
+                    f"{timeout_s:.0f}s wall-clock budget.",
                     exc,
                 )
             except asyncio.CancelledError:

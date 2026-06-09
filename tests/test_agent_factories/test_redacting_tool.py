@@ -1,4 +1,5 @@
 """Tests for redacting_tool: verifies PII redaction at inter-agent transit boundaries."""
+import asyncio
 import json
 import pytest
 from unittest.mock import AsyncMock, patch
@@ -6,6 +7,34 @@ from unittest.mock import AsyncMock, patch
 from agents import Agent
 
 from agent_factories.redacting_tool import redacting_tool
+
+
+@pytest.mark.asyncio
+async def test_redacting_tool_honors_timeout_override():
+    """An auxiliary agent (e.g. report_agent) can get a short wall-clock via
+    `timeout_s`; a stalled run fails fast with THAT bound, not the 240s default."""
+    from agents import RunContextWrapper
+
+    inner_agent = Agent(name="inner", instructions="x", tools=[])
+    ctx = _make_failure_ctx()  # module-level helper defined below
+
+    async def _stall(*_a, **_kw):
+        await asyncio.sleep(5)  # would blow a short budget; must be cut short
+
+    with patch("agent_factories.redacting_tool.Runner.run", new=_stall):
+        wrapped = redacting_tool(
+            inner_agent, name="report_agent", description="d",
+            timeout_s=0.05, max_turns=1,
+        )
+        out = await wrapped.on_invoke_tool(
+            RunContextWrapper(ctx), json.dumps({"sub_question": "anything"})
+        )
+
+    assert out.startswith("[FAILED report_agent]")
+    assert "timeout" in out
+    # Message must reflect the override, not the 240s default.
+    assert "240s" not in out
+    assert ctx._specialist_errors[0]["error_type"] == "timeout"
 
 
 @pytest.mark.asyncio
