@@ -1,6 +1,7 @@
 """Orchestrator Agent factory — A1 maximal: specialists + report + general as tools."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from agents import Agent, AgentOutputSchema, ModelSettings
@@ -158,6 +159,12 @@ def build_orchestrator_agent(
         report_agent,
         name="report_agent",
         description="Look up prior curated reports for this case.",
+        # Auxiliary lookup, on the R1 critical path: a shallow file read,
+        # NOT analysis. Give it a tight budget so a stalled safechain round
+        # fails fast and best-effort (orchestrator continues without the
+        # report draft) instead of dragging the turn toward the 240s fence.
+        timeout_s=float(os.environ.get("REPORT_AGENT_TIMEOUT_S", "45")),
+        max_turns=int(os.environ.get("REPORT_AGENT_MAX_TURNS", "2")),
     ))
     tools.append(redacting_tool(
         general_specialist,
