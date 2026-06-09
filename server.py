@@ -1204,10 +1204,11 @@ async def _run_turn_streamed(
                 "turn_id": turn_id,
                 "specialist": err.get("specialist"),
                 "error_type": err.get("error_type"),
-                "message": (
-                    f"{err.get('specialist')}: "
-                    f"{err.get('error_type')}: {err.get('error_message')}"
-                ),
+                # Raw human message ONLY. The frontend composes the display from
+                # the separate `specialist` (node key) + `error_type` (prefix)
+                # fields — embedding them here too produced a doubled label
+                # ("timeout: report_agent: timeout: …").
+                "message": err.get("error_message"),
                 "sub_question": err.get("sub_question"),
                 "recoverable": True,
             })
