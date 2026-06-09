@@ -49,7 +49,7 @@ _SPECIALIST_TIMEOUT_S = float(os.environ.get("SPECIALIST_TIMEOUT_S", "240"))
 # specialist-explicit and proves unreliable when the LLM forgets). 60s
 # is still under the slowest specialist budget (240s) so end-of-turn
 # drain doesn't blow up.
-_DISTILLER_TIMEOUT_S = float(os.environ.get("DISTILLER_TIMEOUT_S", "60"))
+_DISTILLER_TIMEOUT_S = float(os.environ.get("DISTILLER_TIMEOUT_S", "120"))
 
 _SPECIALIST_HISTORY_KEEP_RECENT_USER_MESSAGES = 2
 _ELIDED_SPECIALIST_TOOL_OUTPUT = (

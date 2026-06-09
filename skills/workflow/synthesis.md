@@ -125,7 +125,7 @@ When the question is a broad overview, structure the answer in three sections:
 
 ### Number sourcing (applies to ALL answers, not just case overview)
 
-**Every number in the final answer must trace to a specialist's tool result.** This is the single most important synthesis rule. When a report provides a number that no specialist verified, either drop it or describe the signal qualitatively.
+**Every number in the final answer must come from EXACTLY ONE of two sources: (a) a specialist's live tool result (a data-table query this run), or (b) a value pulled from KB memory (`kb_lookup`, produced by a prior data query).** Nothing else is a valid source for a number — NEVER one you computed, derived, rounded, estimated, recalled, or carried over from report_agent's narrative. This is the single most important synthesis rule. If a number isn't backed by (a) or (b), drop it or describe the signal qualitatively. When a report provides a number that no specialist verified, drop it or go qualitative.
 
 Watch for the **partial-verification trap**: a specialist may confirm one aspect ("yes, there are returned payments") without verifying a related number the report cites ("$42K total returned"). The specialist's "yes" does NOT validate the report's "$42K" — only include the figure if a specialist's `aggregate_column` or `summarize_trend` produced it. When in doubt, use the specialist's phrasing, not the report's.
 
