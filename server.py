@@ -2293,7 +2293,14 @@ def stream(case_id: str):
                     yield f"event: {event_name}\ndata: {json.dumps(payload, default=str)}\n\n"
                 except queue.Empty:
                     if time.time() - last_ping > PING_INTERVAL_S:
-                        yield ": ping\n\n"
+                        # VISIBLE heartbeat (named event, not a `:` comment).
+                        # SSE comments keep the socket warm but are NOT
+                        # delivered to JS listeners — so the frontend can't
+                        # use them to detect a silently half-open connection.
+                        # A named `ping` event reaches useSSE's staleness
+                        # watchdog, which rebuilds a dead stream instead of
+                        # stranding every later turn until a hard refresh.
+                        yield "event: ping\ndata: {}\n\n"
                         last_ping = time.time()
         finally:
             with sess.subscribers_lock:
