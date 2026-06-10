@@ -470,6 +470,12 @@ def test_summarize_trend_no_rows():
     (["2024-Nov", "2024-Nov", "2024-Dec"], ["2024-11", "2024-12"]),
     # Excel serial dates: 45292 = 2024-01-01, 45323 = 2024-02-01.
     (["45292", "45292", "45323"], ["2024-01", "2024-02"]),
+    # DD-MMM-YY / D-MMM-YY (2-digit year) — the private-env
+    # `payments.payment_date` format: "7-Jul-24", "16-Jul-24". The
+    # 4-digit-year DD-MMM-YYYY form was already covered; the 2-digit-year
+    # variant was NOT, so the monthly payment trend came back empty and the
+    # spend-vs-payment chart only showed the spend line.
+    (["7-Jul-24", "16-Jul-24", "3-Aug-24"], ["2024-07", "2024-08"]),
 ])
 def test_summarize_trend_handles_extended_date_formats(date_fmt, expected_periods):
     """Regression: private environment hits formats beyond the original
@@ -767,6 +773,16 @@ def test_date_key_excel_serial():
 
 def test_date_key_mmm_yyyy_already_covered():
     assert _date_key("Jul-2025") == (2025, 7, 1)
+
+
+def test_date_key_day_mmm_2digit_year():
+    # Private-env `payments.payment_date`: "7-Jul-24", "16-Jul-24", "22-Jul-24".
+    assert _date_key("7-Jul-24") == (2024, 7, 7)
+    assert _date_key("16-Jul-24") == (2024, 7, 16)
+    assert _date_key("22-Jul-24") == (2024, 7, 22)
+    # 2-digit-year sliding window (same pivot as the slash forms): 49→2049, 50→1950.
+    assert _date_key("01-Jan-49") == (2049, 1, 1)
+    assert _date_key("01-Jan-50") == (1950, 1, 1)
 
 
 def test_date_key_tz_aware_datetime_already_covered():

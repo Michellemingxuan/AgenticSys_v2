@@ -146,6 +146,10 @@ _YEAR_RE = re.compile(r"^(\d{4})$")
 _MONTH_YEAR_RE = re.compile(r"^([A-Za-z]{3,})\s*[-'\s]\s*(\d{4})$")
 # DD-MMM-YYYY: "07-Jul-2024", "7-Jul-2024".
 _DAY_MONTH_YEAR_RE = re.compile(r"^(\d{1,2})-([A-Za-z]{3,})-(\d{4})$")
+# DD-MMM-YY (2-digit year): "7-Jul-24", "16-Jul-24" — the private-env
+# `payments.payment_date` format. Same shape as DD-MMM-YYYY but the year
+# group is 2 digits, expanded via the shared sliding window.
+_DAY_MONTH_2YEAR_RE = re.compile(r"^(\d{1,2})-([A-Za-z]{3,})-(\d{2})$")
 # ISO datetime (with space or 'T' separator, optional Z / offset / fractional
 # seconds): "2024-11-16 10:30:00", "2024-11-16T10:30:00.123Z", "2024-11-16T10:30:00+00:00".
 # We only care about the date portion; everything after the first ten chars is dropped.
@@ -202,6 +206,7 @@ def _date_key(value: Any) -> tuple[int, int, int] | None:
       - ``11-16-2025`` (US numeric dash, same disambig)    → (2025, 11, 16)
       - ``20251116`` (compact ISO basic)                   → (2025, 11, 16)
       - ``07-Jul-2024`` / ``7-Jul-2024``                   → (2024, 7, 7)
+      - ``7-Jul-24`` / ``16-Jul-24`` (2-digit year)        → (2024, 7, 7)
       - ``2025-11``                                        → (2025, 11, 1)
       - ``October'2024`` / ``October 2024`` / ``Oct'2024`` → (2024, 10, 1)
       - ``Jan-2024`` / ``Jan 2024`` / ``January-2024``     → (2024, 1, 1)
@@ -244,6 +249,14 @@ def _date_key(value: Any) -> tuple[int, int, int] | None:
         month_idx = _MONTHS.get(m.group(2).lower())
         if month_idx is not None:
             return (int(m.group(3)), month_idx, int(m.group(1)))
+
+    # DD-MMM-YY — 2-digit-year variant of the above ("7-Jul-24"). Comes after
+    # the 4-digit form so "07-Jul-2024" never reaches this branch.
+    m = _DAY_MONTH_2YEAR_RE.match(s)
+    if m:
+        month_idx = _MONTHS.get(m.group(2).lower())
+        if month_idx is not None:
+            return (_expand_two_digit_year(int(m.group(3))), month_idx, int(m.group(1)))
 
     # US-slash date with MM/DD vs DD/MM auto-disambiguation.
     m = _US_SLASH_RE.match(s)

@@ -18,6 +18,8 @@ The user has stated three opinionated defaults for any chart produced by the sys
 
 3. **Uniform time intervals for unwindowed questions.** When the reviewer asks a trajectory question WITHOUT specifying a time window (e.g., "how did TSR react?" not "how did TSR react in Q4 2024?"), the chart should show the FULL data range with uniform monthly intervals. Don't skip periods with no data — show them as gaps so the reviewer sees the data coverage. Don't cluster points around anchor periods the claim mentions.
 
+4. **One representation per piece of info — a table OR a figure, never both for the same data** (stated 2026-06-10). Don't emit a `kind="table"` card AND a chart for the same numbers; pick whichever communicates that data best. (Context: deferred adding a deterministic spend-vs-payment table to the auto-chart path specifically to avoid duplicating the dual-line chart's underlying numbers. Table auto-generation is parked for now.)
+
 **Why:** The user has reviewed many charts in iteration and consistently flags: (a) unsorted bars hide the headline finding, (b) horizontal bars with readable labels are preferred for category breakdowns (updated 2026-05-25, originally preferred vertical — walked back after seeing long category names), (c) non-uniform time axes mislead about the data's temporal density.
 
 **How to apply:**
