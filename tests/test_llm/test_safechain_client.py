@@ -118,6 +118,44 @@ def test_try_parse_json_strips_markdown_fence():
     assert parsed == {"output": {"x": 1}}
 
 
+def test_try_parse_json_salvages_unclosed_object_with_trailing_markdown():
+    # The real safechain failure mode (gpt-4.1, no constrained decoding): a
+    # valid JSON object prefix, then the model spills into markdown and never
+    # closes the object. Salvage the valid prefix.
+    text = '{"answer": "x"\n\n- bullet one\n- bullet two'
+    assert _try_parse_json(text) == {"answer": "x"}
+
+
+def test_try_parse_json_salvages_trailing_data_after_closed_object():
+    # Variant: object IS closed, then extra markdown follows ("Extra data").
+    text = '{"answer": "y", "flags": []}\n\n- trailing commentary'
+    assert _try_parse_json(text) == {"answer": "y", "flags": []}
+
+
+def test_synthesize_output_salvages_orchestrator_markdown_spill():
+    # Reproduces the prod ModelBehaviorError: the orchestrator emitted a valid
+    # FinalAnswer object then spilled into markdown bullets without closing the
+    # object, so the SDK's strict parse failed. The synthesized content must be
+    # valid JSON the SDK can parse.
+    text = (
+        '{\n  "answer": "Spend total is $1.7M with a May 2025 peak."\n\n'
+        "  - Aggregate spend: $1,720,483.53\n"
+        "  - Monthly peak: May 2025 ($404,152)\n"
+    )
+    cc = _synthesize_chat_completion(text=text, model="gpt-4.1")
+    msg = cc.choices[0].message
+    assert msg.tool_calls is None
+    parsed = json.loads(msg.content)  # must be valid JSON now (no raise)
+    assert parsed["answer"].startswith("Spend total is $1.7M")
+
+
+def test_synthesize_plain_prose_still_passes_through():
+    # Regression guard: genuinely non-JSON prose must NOT be mangled by salvage.
+    text = "Free-form answer with no JSON."
+    cc = _synthesize_chat_completion(text=text, model="gpt-4.1")
+    assert cc.choices[0].message.content == text
+
+
 # ── factory dispatch ─────────────────────────────────────────────────────
 
 

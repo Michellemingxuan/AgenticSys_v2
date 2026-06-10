@@ -897,3 +897,52 @@ def test_event_buffer_is_bounded():
     assert len(sess.event_buffer) == server._EVENT_BUFFER_MAX
     # Oldest frames dropped; newest retained.
     assert sess.event_buffer[-1][1]["i"] == server._EVENT_BUFFER_MAX + 49
+
+
+# ── SSE non-finite-float serialization ──────────────────────────────────────
+
+
+def _strict_loads(s):
+    """Parse like a browser's JSON.parse: REJECT bare NaN/Infinity tokens.
+
+    Python's json.loads accepts them by default; the browser does not. We force
+    the strict behavior so the test catches frames that would silently drop on
+    the client.
+    """
+    import json as _json
+
+    def _reject(tok):
+        raise ValueError(f"non-finite JSON token: {tok}")
+
+    return _json.loads(s, parse_constant=_reject)
+
+
+def test_sse_data_sanitizes_non_finite_floats():
+    """A `chart` payload carrying NaN/Infinity (in a vega spec, a numeric cell,
+    or a computed stat) must serialize to VALID JSON. Python emits bare
+    NaN/Infinity tokens, which the browser's JSON.parse rejects — silently
+    dropping the whole `chart` event. Non-finite floats become null instead.
+    """
+    payload = {
+        "topic": "tsr_cdss",
+        "vega_spec": {"values": [{"y": float("nan")}, {"y": 1.5}]},
+        "numbers": [{"v": float("inf")}],
+        "ratio": float("-inf"),
+        "ok": 2.0,
+        "n": 3,
+        "claim": "fine",
+    }
+    s = server._sse_data(payload)
+    parsed = _strict_loads(s)  # must NOT raise (no bare NaN/Infinity on the wire)
+    assert parsed["vega_spec"]["values"][0]["y"] is None
+    assert parsed["vega_spec"]["values"][1]["y"] == 1.5
+    assert parsed["numbers"][0]["v"] is None
+    assert parsed["ratio"] is None
+    assert parsed["ok"] == 2.0
+    assert parsed["n"] == 3
+    assert parsed["claim"] == "fine"
+
+
+def test_sse_data_finite_payload_roundtrips_unchanged():
+    payload = {"a": 1, "b": 2.5, "c": "x", "d": [1, 2, {"e": True}], "f": None}
+    assert _strict_loads(server._sse_data(payload)) == payload

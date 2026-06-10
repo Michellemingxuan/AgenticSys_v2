@@ -681,7 +681,17 @@ def _extract_tool_calls_and_content(
     if multi:
         return _dedupe_tool_calls(multi), None, "tool_calls"
 
-    # Plain content fallback.
+    # Plain content fallback. If the text parsed (possibly via the salvage in
+    # `_try_parse_json`) as a JSON object that ISN'T a tool_call/output wrapper
+    # — e.g. the orchestrator's FinalAnswer `{"answer": ...}` emitted directly
+    # (its response-format hint is suppressed under tool_choice="required") —
+    # hand the SDK the re-serialized clean JSON, NOT the raw text. The raw text
+    # may carry trailing markdown the model spilled after the object, which
+    # would then fail the SDK's strict Pydantic parse (ModelBehaviorError).
+    if isinstance(parsed, dict):
+        return None, json.dumps(parsed, ensure_ascii=False), "stop"
+
+    # Genuine plain content (no parseable JSON) — pass through verbatim.
     return None, text, "stop"
 
 
@@ -1013,4 +1023,22 @@ def _try_parse_json(text: str) -> Any:
             return json.loads(repaired)
         except (json.JSONDecodeError, ValueError):
             pass
+    # Trailing-garbage / abandoned-object salvage. SafeChain has no constrained
+    # decoding, so the model sometimes emits a valid JSON prefix then spills
+    # into prose/markdown — e.g. `{"answer": "..."}` followed by markdown
+    # bullets, or an object it abandons mid-way without closing. The decoder
+    # reports the offset where valid JSON ended; truncate there, drop a
+    # dangling comma, then balance any still-open braces/quotes.
+    try:
+        json.loads(stripped)
+    except json.JSONDecodeError as exc:
+        head = stripped[: exc.pos].rstrip()
+        if head.endswith(","):
+            head = head[:-1]
+        salvaged = _repair_truncated_json(head)
+        if salvaged:
+            try:
+                return json.loads(salvaged)
+            except (json.JSONDecodeError, ValueError):
+                pass
     return None

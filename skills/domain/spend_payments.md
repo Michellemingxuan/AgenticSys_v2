@@ -66,23 +66,13 @@ When the reviewer asks for a "spending pattern", "spend behavior", "what does th
 
 **"Spending pattern" always means spending + payments together.** A spending trend without the payment counterpart is incomplete — the reviewer needs to see whether the customer is paying back what they charge.
 
-Call #1 — monthly **spend** volume:
-`summarize_trend('spends', 'Amount', 'Date', period='month', op='sum')`
+Call #1 — monthly **spend** volume
 
-Call #2 — monthly **payment** volume (MUST accompany #1):
-`summarize_trend('payments', 'Payment Amount', 'Payment Date', period='month', op='sum', filter_column='payment_status', filter_value='success')`
+Call #2 — monthly **payment** volume (MUST accompany #1)
 
 **Both calls in the same round** (they hit different tables: `spends` vs `payments`).
 
-Then **explicitly emit the twin-axis chart yourself** — do NOT rely on the auto-renderer for this one. The auto-renderer often picks a single shared y-axis when spend and payment look like the same unit, and it silently drops the chart entirely when post-turn distillation is slow — which is why this chart is frequently missing. Merge the two monthly series into ONE `make_chart(kind='trend_dual', ...)` aligned on `period`, so spend and payment each get their OWN y-axis (their magnitudes usually differ a lot):
-
-```
-make_chart(topic='spend_vs_payment_monthly', kind='trend_dual',
-           points=[{"period":"2024-11","spend":404152,"payment":219000}, ...],
-           x_field='period', y_fields=['spend','payment'],
-           claim='Monthly spend vs successful payments — <where they diverge>.',
-           source_call="summarize_trend('spends',...) + summarize_trend('payments',...)")
-```
+Then **explicitly emit the twin-axis chart yourself** — do NOT rely on the auto-renderer for this one. The auto-renderer often picks a single shared y-axis when spend and payment look like the same unit, and it silently drops the chart entirely when post-turn distillation is slow — which is why this chart is frequently missing. Merge the two monthly series into ONE `make_chart(kind='trend_dual', ...)` aligned on `period`, so spend and payment each get their OWN y-axis (their magnitudes usually differ a lot).
 
 Build `points` by aligning the two `summarize_trend` series on their shared `period`. Narrate where spend vs payment diverge — divergence = charges outpacing settlements.
 

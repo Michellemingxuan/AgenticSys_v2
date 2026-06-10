@@ -250,7 +250,7 @@ columns:
     aliases:
     - tot_struct_risk_score_max
   avg_remit_minus_max:
-    dtype: string
+    dtype: int
     distribution: normal
     mean: 100000
     std: 40000
@@ -470,7 +470,7 @@ columns:
     risk_threshold: 0.05
     risk_direction: above
   cust_lexis_nexis_tot_tax_assess_val_am:
-    dtype: string
+    dtype: int
     distribution: normal
     mean: 1500000
     std: 500000
@@ -533,7 +533,7 @@ columns:
     risk_threshold: 0.08
     risk_direction: above
   gam_clr_erly_risk_score:
-    dtype: string
+    dtype: int
     distribution: normal
     mean: 850.0
     std: 80.0

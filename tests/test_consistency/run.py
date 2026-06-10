@@ -13,8 +13,21 @@ It mirrors the proven wiring in ``notebooks/run_question_suite.py`` (the same
   * only repeats each *seed* question (follow-up chains are skipped), and
   * adds a ``--concurrency`` knob and per-response timing → CSV.
 
-Backend is whatever the suite / CLI says: ``openai`` in dev, ``safechain`` in
-the private/prod env (set ``--backend safechain`` or ``LLM_BACKEND`` there).
+The agent architecture is identical in both environments — only the LLM
+transport differs (``llm.factory.build_session_clients(backend=...)``). So this
+harness runs unchanged in either env; set the backend per the suite / CLI:
+``openai`` in dev, ``safechain`` in the private/prod env (``--backend
+safechain`` or ``LLM_BACKEND=safechain``).
+
+SafeChain note: a hung ``chain.invoke`` occupies a worker thread that cannot be
+cancelled, so under load a single turn can wedge. Two defences here:
+  * ``--timeout`` wraps each response in ``asyncio.wait_for`` — on expiry the
+    row is recorded as ``timeout`` and the run continues (the orphaned worker
+    thread may linger until SafeChain returns; that is unavoidable).
+  * keep ``--concurrency`` modest: each in-flight request fans out to several
+    specialist calls, each taking a slot from the SafeChain pool
+    (``SAFECHAIN_THREAD_POOL``, default 32). Over-subscribing it is the
+    documented "stuck at team construction" hang.
 
 CSV columns (one row per response):
 
@@ -25,17 +38,17 @@ CSV columns (one row per response):
     final_answer      the formatted answer the reviewer would see
                       (or "[rejected] …" for the safety/scope screen)
     elapsed_seconds   wall-clock seconds for the full response
-    outcome           ok | out_of_scope | error
-    error             exception text on the error path, else empty
+    outcome           ok | out_of_scope | timeout | error
+    error             timeout/exception text, else empty
 
 Run (dev):
 
-    python -m tests.test_consistency.run_consistency --k 5 --concurrency 1
+    python -m tests.test_consistency.run --k 5 --concurrency 1
 
 Heavy-traffic load in the private env:
 
-    LLM_BACKEND=safechain python -m tests.test_consistency.run_consistency \
-        --k 5 --concurrency 8 --backend safechain
+    LLM_BACKEND=safechain python -m tests.test_consistency.run \
+        --k 5 --concurrency 4 --backend safechain --timeout 600
 """
 from __future__ import annotations
 
@@ -142,25 +155,44 @@ def build_pipeline(suite: dict, *, backend: str, model: str, concurrency_cap: in
 
 # ── One response ────────────────────────────────────────────────────────────
 
-async def run_once(name, run_index, question, *, chat_agent, orch, case_folder) -> dict:
+async def run_once(
+    name, run_index, question, *, chat_agent, orch, case_folder, timeout=None
+) -> dict:
     """Drive one question through the reviewer path, timing the whole response.
 
     Mirrors ``main.py:_screen_and_run`` — screen (redact + scope) → orchestrator
     → format — so the captured ``final_answer`` is exactly what a reviewer sees.
+
+    ``timeout`` (seconds, or None/0 to disable) caps the whole response via
+    ``asyncio.wait_for``. On expiry the row is marked ``timeout`` and the run
+    continues. Under SafeChain a blocking ``chain.invoke`` can't be cancelled,
+    so the underlying worker thread may stay occupied past this deadline — the
+    cap protects the *test driver* from wedging, not the worker pool.
     """
     start_dt = datetime.now()
     t0 = time.perf_counter()
     outcome = "ok"
     error = ""
     final_answer = ""
-    try:
+
+    async def _pipeline():
         verdict = await chat_agent.screen(question)
         if not verdict.passed:
-            outcome = "out_of_scope"
-            final_answer = f"[rejected] {verdict.reason}"
+            return "out_of_scope", f"[rejected] {verdict.reason}"
+        final = await orch.run(verdict.redacted_question, case_folder)
+        return "ok", chat_agent.format(final)
+
+    try:
+        if timeout and timeout > 0:
+            outcome, final_answer = await asyncio.wait_for(_pipeline(), timeout=timeout)
         else:
-            final = await orch.run(verdict.redacted_question, case_folder)
-            final_answer = chat_agent.format(final)
+            outcome, final_answer = await _pipeline()
+    except asyncio.TimeoutError:
+        outcome = "timeout"
+        error = (
+            f"no response within {timeout:.0f}s "
+            "(SafeChain worker thread may still be occupied)"
+        )
     except Exception as exc:  # noqa: BLE001 — load test must record, not crash
         outcome = "error"
         error = f"{type(exc).__name__}: {exc}"
@@ -183,21 +215,62 @@ async def run_once(name, run_index, question, *, chat_agent, orch, case_folder) 
 async def main_async(args) -> None:
     suite = json.loads(Path(args.suite).read_text())
 
-    backend = args.backend or suite.get("backend", "openai")
+    # Backend precedence: explicit --backend > LLM_BACKEND env > suite default >
+    # "openai". The suite's "backend" is a committed default; the *environment*
+    # (which env we're deployed in) must win over it so the same questions.json
+    # runs as openai in dev and safechain in private without editing the file.
+    backend = (
+        args.backend
+        or os.environ.get("LLM_BACKEND")
+        or suite.get("backend")
+        or "openai"
+    )
     model = args.model or suite.get("model", "gpt-4.1")
     concurrency_cap = int(suite.get("concurrency_cap", 12))
+
+    # Fail fast with an actionable message instead of the opaque
+    # "openai.OpenAIError: api_key must be set" that AsyncOpenAI() raises when
+    # the openai backend is selected without a key (the usual symptom of
+    # running in the private env without selecting safechain).
+    if backend == "openai" and not os.environ.get("OPENAI_API_KEY"):
+        raise SystemExit(
+            "Backend resolved to 'openai' but OPENAI_API_KEY is not set.\n"
+            "  • In the private/prod env, select SafeChain: pass --backend "
+            "safechain or export LLM_BACKEND=safechain.\n"
+            "  • In dev, set OPENAI_API_KEY (e.g. in .env).\n"
+            f"(resolved from: --backend={args.backend!r}, "
+            f"LLM_BACKEND={os.environ.get('LLM_BACKEND')!r}, "
+            f"suite.backend={suite.get('backend')!r})"
+        )
 
     cases = suite["test_cases"]
     if args.limit:
         cases = cases[: args.limit]
 
     print(f"PROJECT_ROOT      : {PROJECT_ROOT}")
-    print(f"OPENAI_API_KEY set: {bool(os.environ.get('OPENAI_API_KEY'))}")
     print(
         f"backend={backend}  model={model}  case_id={suite['case_id']}  "
         f"k={args.k}  request_concurrency={args.concurrency}  "
-        f"firewall_concurrency_cap={concurrency_cap}  questions={len(cases)}"
+        f"firewall_concurrency_cap={concurrency_cap}  "
+        f"timeout={args.timeout or 'off'}  questions={len(cases)}"
     )
+    if backend == "safechain":
+        sc_pool = int(os.environ.get("SAFECHAIN_THREAD_POOL", "32"))
+        sc_to = os.environ.get("SAFECHAIN_CALL_TIMEOUT_S", "180")
+        print(
+            f"SafeChain         : thread_pool={sc_pool}  call_timeout_s={sc_to}  "
+            "(each in-flight request fans out to several specialist calls — keep "
+            "--concurrency well under the pool to avoid the 'stuck at team "
+            "construction' hang)"
+        )
+        if args.concurrency > max(1, sc_pool // 4):
+            print(
+                f"  WARNING: --concurrency {args.concurrency} is high for a "
+                f"{sc_pool}-thread SafeChain pool; specialist fan-out may exhaust "
+                "it and stall. Consider a lower value or raise SAFECHAIN_THREAD_POOL."
+            )
+    else:
+        print(f"OPENAI_API_KEY set: {bool(os.environ.get('OPENAI_API_KEY'))}")
 
     chat_agent, orch, case_folder = build_pipeline(
         suite, backend=backend, model=model, concurrency_cap=concurrency_cap
@@ -233,6 +306,7 @@ async def main_async(args) -> None:
                 row = await run_once(
                     name, run_index, question,
                     chat_agent=chat_agent, orch=orch, case_folder=case_folder,
+                    timeout=args.timeout,
                 )
             async with write_lock:
                 writer.writerow(row)
@@ -283,6 +357,12 @@ def main() -> None:
     parser.add_argument("--backend", choices=["openai", "safechain"], default=None,
                         help="Override the suite's LLM backend. Use 'safechain' "
                              "in the private/prod env.")
+    parser.add_argument("--timeout", type=float, default=600.0,
+                        help="Per-response wall-clock cap in seconds; on expiry the "
+                             "row is marked 'timeout' and the run continues. 0 "
+                             "disables. Default 600 (> SafeChain's internal "
+                             "TURN_WALL_CLOCK_S=360 + screen, so it only catches "
+                             "true hangs).")
     parser.add_argument("--model", type=str, default=None,
                         help="Override the suite's model (default from suite: gpt-4.1).")
     parser.add_argument("--limit", type=int, default=None,

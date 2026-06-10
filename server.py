@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import queue
 import threading
@@ -590,6 +591,31 @@ def _format_kb_warmth_hint(specialist_kb: dict) -> str:
         + "Reuse warm specialists for in-domain follow-ups. "
         + "Reference specific cached findings in sub-questions when relevant.]"
     )
+
+
+def _json_safe(obj):
+    """Recursively replace non-finite floats (NaN / Infinity) with None.
+
+    Python's ``json.dumps`` emits NaN/Infinity as bare ``NaN`` / ``Infinity``
+    tokens — which are INVALID JSON. The browser's ``JSON.parse`` rejects them,
+    so the frontend SSE handler drops the ENTIRE event. This silently lost
+    `chart` payloads (vega specs / numeric cells / computed stats can be
+    non-finite) while leaving text events (`final`, `turn_done`) untouched —
+    the intermittent "chart missing until re-ask" bug. Coercing to null keeps
+    the frame valid JSON; the client renders a gap rather than nothing.
+    """
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
+
+
+def _sse_data(payload: dict) -> str:
+    """Serialize an SSE payload to a guaranteed browser-parseable JSON string."""
+    return json.dumps(_json_safe(payload), default=str)
 
 
 def _collect_turn_charts(specialist_kb: dict, turn_id: str, case_id: str) -> list[dict]:
@@ -2364,13 +2390,13 @@ def stream(case_id: str):
         # Idempotent on the client: trace events upsert by turn_id/call_id and
         # chat messages dedupe by id.
         for event_name, payload in replay_frames:
-            yield f"event: {event_name}\ndata: {json.dumps(payload, default=str)}\n\n"
+            yield f"event: {event_name}\ndata: {_sse_data(payload)}\n\n"
         last_ping = time.time()
         try:
             while True:
                 try:
                     event_name, payload = sub_q.get(timeout=1.0)
-                    yield f"event: {event_name}\ndata: {json.dumps(payload, default=str)}\n\n"
+                    yield f"event: {event_name}\ndata: {_sse_data(payload)}\n\n"
                 except queue.Empty:
                     if time.time() - last_ping > PING_INTERVAL_S:
                         # VISIBLE heartbeat (named event, not a `:` comment).
