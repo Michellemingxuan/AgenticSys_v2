@@ -14,13 +14,19 @@ columns:
     categories:
       success: 0.88
       return: 0.12
-    description: |
-      Single source of truth for whether a payment cleared. Values 'success'
-      (cleared) vs 'return' (failed). Synthesized by the gateway when
-      rbinding payments_success.csv (→ 'success') and payments_returns.csv
-      (→ 'return') into a single `payments` table; the raw 0/1 `return_flag`
+    description: 'Single source of truth for whether a payment cleared. Values ''success''
+
+      (cleared) vs ''return'' (failed). Synthesized by the gateway when
+
+      rbinding payments_success.csv (→ ''success'') and payments_returns.csv
+
+      (→ ''return'') into a single `payments` table; the raw 0/1 `return_flag`
+
       column from the source CSVs is dropped at the same step to avoid
+
       two-column confusion.
+
+      '
     aliases:
     - Return Flag
     - return_flag

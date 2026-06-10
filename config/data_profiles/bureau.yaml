@@ -1,6 +1,7 @@
 table: bureau
-description: Credit bureau data — one row per external tradeline per case. Each row carries the case-level aggregated scores
-  (FICO, SBFE, LN, CSS, FSS, Paydex) plus the tradeline-specific details (balance, limit, utilization, DPD status). Case-level
+description: Credit bureau data — one row per external tradeline per case. Each row
+  carries the case-level aggregated scores (FICO, SBFE, LN, CSS, FSS, Paydex) plus
+  the tradeline-specific details (balance, limit, utilization, DPD status). Case-level
   fields repeat across rows for the same case.
 rows_per_case: 4
 one_row_per_case: false
@@ -10,8 +11,8 @@ columns:
   month:
     dtype: date
     parse_hint: '%b-%Y'
-    description: Monthly snapshot date for this bureau record (e.g. "Jan-2024"). One row per case per month across the review
-      window.
+    description: Monthly snapshot date for this bureau record (e.g. "Jan-2024"). One
+      row per case per month across the review window.
     description_pending: false
     aliases:
     - month
@@ -23,7 +24,8 @@ columns:
     std: 60
     min: 300
     max: 850
-    description: FICO Score — industry-standard credit risk score. Values below 721 are risky.
+    description: FICO Score — industry-standard credit risk score. Values below 721
+      are risky.
     aliases:
     - FICO Score
     risk_threshold: 721
@@ -35,7 +37,8 @@ columns:
     std: 30
     min: 500
     max: 950
-    description: SBFE Score — business credit score predicting financial delinquency or failure. Values below 863 are risky.
+    description: SBFE Score — business credit score predicting financial delinquency
+      or failure. Values below 863 are risky.
     aliases:
     - SBFE Score
     risk_threshold: 863
@@ -47,7 +50,8 @@ columns:
     std: 50
     min: 300
     max: 900
-    description: LexisNexis Credit Score — predicts consumer likelihood of default. Values below 681 are risky.
+    description: LexisNexis Credit Score — predicts consumer likelihood of default.
+      Values below 681 are risky.
     aliases:
     - LN Credit Score
     risk_threshold: 681
@@ -59,7 +63,8 @@ columns:
     std: 50
     min: 300
     max: 900
-    description: LexisNexis Blended Score — combines traditional credit data with alternative data. Values below 694 are risky.
+    description: LexisNexis Blended Score — combines traditional credit data with
+      alternative data. Values below 694 are risky.
     aliases:
     - LN Blended Score
     risk_threshold: 694
@@ -71,7 +76,8 @@ columns:
     std: 15
     min: 1
     max: 100
-    description: CSS Score — business credit risk score using commercial trade data and financials. Values below 71 are risky.
+    description: CSS Score — business credit risk score using commercial trade data
+      and financials. Values below 71 are risky.
     aliases:
     - CSS Score
     risk_threshold: 71
@@ -83,7 +89,8 @@ columns:
     std: 15
     min: 1
     max: 100
-    description: FSS Score — business financial strength/stability score. Values below 51 are risky.
+    description: FSS Score — business financial strength/stability score. Values below
+      51 are risky.
     aliases:
     - FSS Score
     risk_threshold: 51
@@ -95,7 +102,8 @@ columns:
     std: 15
     min: 0
     max: 100
-    description: Paydex Score — business payment performance score. Values below 61 are risky.
+    description: Paydex Score — business payment performance score. Values below 61
+      are risky.
     aliases:
     - Paydex Score
     risk_threshold: 61
@@ -165,7 +173,8 @@ columns:
     lambda: 0.25
     min: 0
     max: 1
-    description: 1 = Amex is primary lender (>= 40% of overall exposure). Considered risky.
+    description: 1 = Amex is primary lender (>= 40% of overall exposure). Considered
+      risky.
     aliases:
     - Amex Primary Lender Indicator
   ln_business_value:
@@ -175,7 +184,8 @@ columns:
     std: 500000
     min: 0
     max: 10000000
-    description: LexisNexis Business Value — total tax-assessed value of business address (USD). Decrement is a negative sign.
+    description: LexisNexis Business Value — total tax-assessed value of business
+      address (USD). Decrement is a negative sign.
     aliases:
     - LN Business Value (USD)
     dtype_pending_review: true

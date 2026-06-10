@@ -9,6 +9,8 @@ logs/
 data_tables/*/*/
 !data_tables/simulated/README.md
 !data_tables/real/README.md
+# Consistency / load-test result CSVs — generated per run, may echo case data.
+tests/test_consistency/results/
 .superpowers/
 venv/
 .venv/

@@ -1,18 +1,35 @@
 table: score_drivers_transaction
-description: "Transaction-level snapshot of the top-5 and bottom-5 contributing\n\
-  variable names for each internal model score — ONE ROW PER TRANSACTION (contrast\n\
-  `score_drivers`, which is per month). Use to explain which features drove the CDSS\n\
-  and TSR scores FOR A SPECIFIC TRANSACTION or decline; use the monthly\n\
-  `score_drivers` for driver-rotation-over-time questions.\n\n\
-  Carries drivers for two ML scores, columns named by family:\n\
-  - CDSS — `top_cdss1..5`, `bottom_cdss1..5`. Cell values are feature names from\n\
-    `model_scores_transaction` that pushed CDSS up / down on that transaction.\n\
-  - TSR — `top_tsr1..5`, `bottom_tsr1..5`. Same pattern for TSR.\n\n\
-  Authorization columns mirror `model_scores_transaction`: `appr_deny_cd`\n\
-  (0 = approved, 1 = declined) and `auto_decline_pos_deny_cd_s1` (decline reason,\n\
-  set only on declines). Join to `model_scores_transaction` on `txn_date_time`.\n\
-  HIGH-VOLUME — filter the day-grain `trans_dt` by default; use `txn_date_time` only\n\
-  for within-day precision.\n"
+description: 'Transaction-level snapshot of the top-5 and bottom-5 contributing
+
+  variable names for each internal model score — ONE ROW PER TRANSACTION (contrast
+
+  `score_drivers`, which is per month). Use to explain which features drove the CDSS
+
+  and TSR scores FOR A SPECIFIC TRANSACTION or decline; use the monthly
+
+  `score_drivers` for driver-rotation-over-time questions.
+
+
+  Carries drivers for two ML scores, columns named by family:
+
+  - CDSS — `top_cdss1..5`, `bottom_cdss1..5`. Cell values are feature names from
+
+  `model_scores_transaction` that pushed CDSS up / down on that transaction.
+
+  - TSR — `top_tsr1..5`, `bottom_tsr1..5`. Same pattern for TSR.
+
+
+  Authorization columns mirror `model_scores_transaction`: `appr_deny_cd`
+
+  (0 = approved, 1 = declined) and `auto_decline_pos_deny_cd_s1` (decline reason,
+
+  set only on declines). Join to `model_scores_transaction` on `txn_date_time`.
+
+  HIGH-VOLUME — filter the day-grain `trans_dt` by default; use `txn_date_time` only
+
+  for within-day precision.
+
+  '
 rows_per_case: 5000
 one_row_per_case: false
 aliases:
@@ -22,8 +39,9 @@ columns:
     dtype: int
     description: Row index within the case's transaction export.
   grms_cid:
-    dtype: string
+    dtype: int
     description: Customer identifier (GRMS CID).
+    dtype_pending_review: true
   trans_dt:
     dtype: date
     parse_hint: '%Y-%m-%d'
@@ -31,7 +49,8 @@ columns:
   txn_date_time:
     dtype: date
     parse_hint: '%Y-%m-%d %H:%M:%S.%f'
-    description: Transaction timestamp with time component. Use only when sub-day precision is needed. Join key to model_scores_transaction.
+    description: Transaction timestamp with time component. Use only when sub-day
+      precision is needed. Join key to model_scores_transaction.
   appr_deny_cd:
     dtype: int
     description: 'Authorization decision: 0 = approved, 1 = declined.'

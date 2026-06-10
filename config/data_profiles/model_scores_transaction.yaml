@@ -1,20 +1,41 @@
 table: model_scores_transaction
-description: "Transaction-level model scoring features — ONE ROW PER TRANSACTION\n\
-  (contrast `model_scores`, which is one row per month). Holds the same ML output\n\
-  scores (CDSS `credit_loss_prob`, TSR `tot_struct_risk_score`, `cbr_score`,\n\
-  `gam_clr_erly_risk_score`, …) and input features as the monthly table, but at the\n\
-  raw per-transaction grain — NO `_max`/`_min`/`_mean` aggregation.\n\n\
-  Use this table for TRANSACTION-LEVEL questions: was a specific transaction out of\n\
-  pattern, why was a transaction approved/declined, what did the scores look like at\n\
-  the moment of a transaction. Use the monthly `model_scores` for TREND / trajectory\n\
-  questions.\n\n\
-  Authorization columns: `appr_deny_cd` (0 = approved, 1 = declined) and\n\
-  `auto_decline_pos_deny_cd_s1` (decline-reason code, populated only on declines).\n\n\
-  This table is HIGH-VOLUME — always filter tightly before querying. Filter the\n\
-  day-grain `trans_dt` by default; reach for the exact `txn_date_time` timestamp only\n\
-  when the question needs within-day precision. Same CSV wire-format quirks as the\n\
-  monthly table apply (quoted numerics, \"thousands\"/\"millions\" suffixes on large\n\
-  monetary values, comma-separated thousands).\n"
+description: 'Transaction-level model scoring features — ONE ROW PER TRANSACTION
+
+  (contrast `model_scores`, which is one row per month). Holds the same ML output
+
+  scores (CDSS `credit_loss_prob`, TSR `tot_struct_risk_score`, `cbr_score`,
+
+  `gam_clr_erly_risk_score`, …) and input features as the monthly table, but at the
+
+  raw per-transaction grain — NO `_max`/`_min`/`_mean` aggregation.
+
+
+  Use this table for TRANSACTION-LEVEL questions: was a specific transaction out of
+
+  pattern, why was a transaction approved/declined, what did the scores look like
+  at
+
+  the moment of a transaction. Use the monthly `model_scores` for TREND / trajectory
+
+  questions.
+
+
+  Authorization columns: `appr_deny_cd` (0 = approved, 1 = declined) and
+
+  `auto_decline_pos_deny_cd_s1` (decline-reason code, populated only on declines).
+
+
+  This table is HIGH-VOLUME — always filter tightly before querying. Filter the
+
+  day-grain `trans_dt` by default; reach for the exact `txn_date_time` timestamp only
+
+  when the question needs within-day precision. Same CSV wire-format quirks as the
+
+  monthly table apply (quoted numerics, "thousands"/"millions" suffixes on large
+
+  monetary values, comma-separated thousands).
+
+  '
 rows_per_case: 5000
 one_row_per_case: false
 aliases:
@@ -24,40 +45,52 @@ columns:
   trans_dt:
     dtype: date
     parse_hint: '%Y-%m-%d'
-    description: Transaction date (YYYY-MM-DD). DEFAULT time-range filter key — use this for day/month/quarter windows.
+    description: Transaction date (YYYY-MM-DD). DEFAULT time-range filter key — use
+      this for day/month/quarter windows.
   txn_date_time:
     dtype: date
     parse_hint: '%Y-%m-%d %H:%M:%S.%f'
-    description: Transaction timestamp with time component (e.g. 2024-01-01 15:25:20.602). Do NOT default to this for retrieval; use only when sub-day precision is needed (within-day ordering, time-of-day, exact moment). eq on a bare date drops the time on both sides.
+    description: Transaction timestamp with time component (e.g. 2024-01-01 15:25:20.602).
+      Do NOT default to this for retrieval; use only when sub-day precision is needed
+      (within-day ordering, time-of-day, exact moment). eq on a bare date drops the
+      time on both sides.
   appr_deny_cd:
     dtype: int
-    description: 'Authorization decision: 0 = approved, 1 = declined. Filter with eq and value 0 or 1.'
+    description: 'Authorization decision: 0 = approved, 1 = declined. Filter with
+      eq and value 0 or 1.'
   auto_decline_pos_deny_cd_s1:
-    dtype: string
-    description: Decline-reason code, populated only when appr_deny_cd = 1 (blank on approvals). Quote the raw code; do not invent a human label.
+    dtype: int
+    description: Decline-reason code, populated only when appr_deny_cd = 1 (blank
+      on approvals). Quote the raw code; do not invent a human label.
+    dtype_pending_review: true
   cust_lexis_nexis_tot_tax_assess_val_am:
     dtype: string
-    description: Total tax-assessed value of the customer business address (USD) from LexisNexis. Stored as string with "millions" suffix (e.g. "3.6 millions" → 3600000.0).
+    description: Total tax-assessed value of the customer business address (USD) from
+      LexisNexis. Stored as string with "millions" suffix (e.g. "3.6 millions" → 3600000.0).
     dtype_pending_review: true
   cust_cash_tot_liab_yr1_rt:
     dtype: float
-    description: ratio of cash to total liability corresponding to latest full year financial
+    description: ratio of cash to total liability corresponding to latest full year
+      financial
   cbr_score:
     dtype: int
     description: customer credit bureau score (raw per-transaction value)
   cust_eff_se_cdss_5_180_day_score:
     dtype: float
-    description: A metric that summarizes the customer's CDSS risk scores over a historical window (from 5 to 180 days ago). Values above 2 are risky.
+    description: A metric that summarizes the customer's CDSS risk scores over a historical
+      window (from 5 to 180 days ago). Values above 2 are risky.
     risk_threshold: 2
     risk_direction: above
   cust_expsr_avg_rem_12m_ratio:
     dtype: float
-    description: Customer Exposure / (Average Remit In 2-12 Months). Values above 3.15 are risky.
+    description: Customer Exposure / (Average Remit In 2-12 Months). Values above
+      3.15 are risky.
     risk_threshold: 3.15
     risk_direction: above
   se_no_norm_wtd_pd_unpaid_amt:
     dtype: float
-    description: normalised accum amount weighted by merchant percentage. Values above 0 are risky.
+    description: normalised accum amount weighted by merchant percentage. Values above
+      0 are risky.
     risk_threshold: 0
     risk_direction: above
   tpf_internal_delinq_idx:
@@ -80,7 +113,8 @@ columns:
     risk_direction: above
   cust_experian_trans_union_inq_idx:
     dtype: float
-    description: risk based index of inquiries from credit bureau. Values above 4.65 are considered risky.
+    description: risk based index of inquiries from credit bureau. Values above 4.65
+      are considered risky.
     risk_threshold: 4.65
     risk_direction: above
   hcam_bal_trnd_indx:
@@ -90,12 +124,14 @@ columns:
     risk_direction: above
   avutil_exrvlv_balgt50:
     dtype: float
-    description: Average utilization in all the external consumer revolving trades with balance more than US$ 50. Values above 75 are risky.
+    description: Average utilization in all the external consumer revolving trades
+      with balance more than US$ 50. Values above 75 are risky.
     risk_threshold: 75
     risk_direction: above
   cust_expr_to_arb_inc_ratio:
     dtype: float
-    description: Total exposure to arbitrated income ratio. Values above 0.08 are risky.
+    description: Total exposure to arbitrated income ratio. Values above 0.08 are
+      risky.
     risk_threshold: 0.08
     risk_direction: above
   lvrg_debt_remit:
@@ -103,7 +139,8 @@ columns:
     description: leverage commercial debt
   cust_intr_extnl_unscr_tt_debt_srvc_rt1:
     dtype: float
-    description: Customer total debt servicing ratio. Values above 0.15 are considered risky.
+    description: Customer total debt servicing ratio. Values above 0.15 are considered
+      risky.
     risk_threshold: 0.15
     risk_direction: above
   cust_lndexpsr_minloc_6m_ratio:
@@ -114,12 +151,14 @@ columns:
     description: total consumer and commercial trades greater than 75
   cust_pymt_chan_risk_score:
     dtype: float
-    description: Customer payment channel risk score. Values above 0.05 are considered risky.
+    description: Customer payment channel risk score. Values above 0.05 are considered
+      risky.
     risk_threshold: 0.05
     risk_direction: above
   exp_pif:
-    dtype: string
-    description: Pay-In-Full exposure (raw per-transaction value). Stored as string with a "thousands" suffix (e.g. "188.8 thousands" → 188800.0).
+    dtype: float
+    description: Pay-In-Full exposure (raw per-transaction value). Stored as string
+      with a "thousands" suffix (e.g. "188.8 thousands" → 188800.0).
     dtype_pending_review: true
   cust_debt_pymcpty_tm_inc:
     dtype: float
@@ -134,17 +173,20 @@ columns:
     risk_direction: above
   cust_min_due_12mo_avg:
     dtype: float
-    description: average number of only minimum due paid in last 12 months. Values above 0.08 are considered risky.
+    description: average number of only minimum due paid in last 12 months. Values
+      above 0.08 are considered risky.
     risk_threshold: 0.08
     risk_direction: above
   cust_enhnc_one_way_spend_concentration_30day_rt1:
     dtype: float
-    description: one way spend concentration risk rate. Values above 2.4 are considered risky.
+    description: one way spend concentration risk rate. Values above 2.4 are considered
+      risky.
     risk_threshold: 2.4
     risk_direction: above
   gam_mtge_loan_actl_pymt_am:
     dtype: float
-    description: Mortgage Loan (Actual Payment Amount). Sentinel -99999999999 = no mortgage on file
+    description: Mortgage Loan (Actual Payment Amount). Sentinel -99999999999 = no
+      mortgage on file
   cust_ext_delinq_idx:
     dtype: float
     description: External Delinquency Index. Values above 5 are risky.
@@ -157,21 +199,25 @@ columns:
     risk_direction: above
   avg_remit_minus_max:
     dtype: string
-    description: average remit (USD). Stored as string with "thousands" suffix (e.g. "221.4 thousands" → 221400.0).
+    description: average remit (USD). Stored as string with "thousands" suffix (e.g.
+      "221.4 thousands" → 221400.0).
     dtype_pending_review: true
   credit_loss_prob:
     dtype: float
-    description: CDSS — ML model score predicting likelihood of default in next 18 months. Scores from 10-100 are considered risky.
+    description: CDSS — ML model score predicting likelihood of default in next 18
+      months. Scores from 10-100 are considered risky.
     risk_threshold: 10
     risk_direction: above
   tot_struct_risk_score:
     dtype: float
-    description: TSR — ML model score predicting likelihood of default on internal/external trades in next 18 months. Scores from 20-100 are considered risky.
+    description: TSR — ML model score predicting likelihood of default on internal/external
+      trades in next 18 months. Scores from 20-100 are considered risky.
     risk_threshold: 20
     risk_direction: above
   ons_30_trd:
-    dtype: int
+    dtype: string
     description: ons 30 trades (raw per-transaction value)
+    dtype_pending_review: true
   last_cycle_cut_revolve_rate:
     dtype: float
     description: last cycle cut revolve rate. Values below 0.46 are risky
@@ -182,7 +228,8 @@ columns:
     description: FICO Trend Index. Values below -19 are risky.
   tpf_cust_hi_rvlv_line_am:
     dtype: int
-    description: The amount of a customer's highest revolving lines. Values below 77 are risky.
+    description: The amount of a customer's highest revolving lines. Values below
+      77 are risky.
     risk_threshold: 77
     risk_direction: below
   cust_lend_acct_paydown:
@@ -197,13 +244,15 @@ columns:
     risk_direction: below
   gam_clr_erly_risk_score:
     dtype: string
-    description: Clear early risk score. Values below 785 are risky. Stored in CSV with comma-separated thousands (e.g. "9,005.00") — strip commas before parsing.
+    description: Clear early risk score. Values below 785 are risky. Stored in CSV
+      with comma-separated thousands (e.g. "9,005.00") — strip commas before parsing.
     dtype_pending_review: true
     risk_threshold: 785
     risk_direction: below
   cust_lexis_nexis_blended_score:
     dtype: int
-    description: score merges business and owner credit data. Values below 693 are risky.
+    description: score merges business and owner credit data. Values below 693 are
+      risky.
     risk_threshold: 693
     risk_direction: below
   cust_sbfe_score:

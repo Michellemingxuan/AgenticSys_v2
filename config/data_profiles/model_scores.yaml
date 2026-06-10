@@ -1,15 +1,20 @@
 table: model_scores
-description: "Internal model scoring features — one row per scoring run per case. Holds\nboth the ML MODEL OUTPUT scores (risk\
-  \ scores produced by Amex's internal\nmachine-learning models) and the FEATURES those models consume.\n\nNotable model-output\
-  \ score columns (examples; other scores may also exist\non this table — probe the schema):\n  - CDSS (Credit Decision Support\
-  \ System): e.g. `creidt_loss_prob_max`.\n  - TSR (Total Structural Risk): e.g. `tot_struct_risk_score_max`.\n  - Other risk\
-  \ scores commonly present: `cbr_score_max`,\n    `credit_loss_prob_max`, `gam_clr_erly_risk_score_min`, `cust_pymt_chan_risk_score_max`.\n\
-  \nThe remaining columns are model-input features (bureau scores, delinquency\nindicators, exposure ratios, payment behavior,\
-  \ spend patterns, third-party\nrisk scores). Per-feature contribution to each output score is described\nin the sibling\
-  \ `score_drivers` table.\n\nCSV wire format quirks to know about — (a) every numeric column is stored\nas a quoted string\
-  \ (\"668.00\" for ints, \"0.00\" for zero counts); (b) large\nmonetary values carry a unit suffix (\"X thousands\", \"X\
-  \ millions\") to dodge\nthe 6+digit firewall mask, so callers must strip the suffix and multiply\n(×1e3 / ×1e6) before computing;\
-  \ (c) some values use comma-separated\nthousands (\"9,005.00\").\n"
+description: "Internal model scoring features — one row per scoring run per case.\
+  \ Holds\nboth the ML MODEL OUTPUT scores (risk scores produced by Amex's internal\n\
+  machine-learning models) and the FEATURES those models consume.\n\nNotable model-output\
+  \ score columns (examples; other scores may also exist\non this table — probe the\
+  \ schema):\n  - CDSS (Credit Decision Support System): e.g. `creidt_loss_prob_max`.\n\
+  \  - TSR (Total Structural Risk): e.g. `tot_struct_risk_score_max`.\n  - Other risk\
+  \ scores commonly present: `cbr_score_max`,\n    `credit_loss_prob_max`, `gam_clr_erly_risk_score_min`,\
+  \ `cust_pymt_chan_risk_score_max`.\n\nThe remaining columns are model-input features\
+  \ (bureau scores, delinquency\nindicators, exposure ratios, payment behavior, spend\
+  \ patterns, third-party\nrisk scores). Per-feature contribution to each output score\
+  \ is described\nin the sibling `score_drivers` table.\n\nCSV wire format quirks\
+  \ to know about — (a) every numeric column is stored\nas a quoted string (\"668.00\"\
+  \ for ints, \"0.00\" for zero counts); (b) large\nmonetary values carry a unit suffix\
+  \ (\"X thousands\", \"X millions\") to dodge\nthe 6+digit firewall mask, so callers\
+  \ must strip the suffix and multiply\n(×1e3 / ×1e6) before computing; (c) some values\
+  \ use comma-separated\nthousands (\"9,005.00\").\n"
 rows_per_case: 12
 one_row_per_case: false
 aliases:
@@ -23,8 +28,9 @@ columns:
     - cbr_score_max
   exp_pif_max:
     dtype: string
-    description: Pay-In-Full exposure (max over scoring window). Stored as string with a "thousands" suffix (e.g. "188.8 thousands"
-      → 188800.0) to dodge firewall masking on 6+digit runs.
+    description: Pay-In-Full exposure (max over scoring window). Stored as string
+      with a "thousands" suffix (e.g. "188.8 thousands" → 188800.0) to dodge firewall
+      masking on 6+digit runs.
     description_pending: false
     aliases:
     - exp_pif_max
@@ -40,7 +46,8 @@ columns:
     year:
     - 2024
     - 2025
-    description: Date of the model scoring run (YYYY-MM-DD). Use this for time-range filtering.
+    description: Date of the model scoring run (YYYY-MM-DD). Use this for time-range
+      filtering.
   last_cycle_cut_revolve_rate:
     dtype: float
     distribution: normal
@@ -71,7 +78,8 @@ columns:
     std: 0.8
     min: 0.0
     max: 10.0
-    description: Customer Exposure / (Average Remit In 2-12 Months). Values above 3.15 are risky.
+    description: Customer Exposure / (Average Remit In 2-12 Months). Values above
+      3.15 are risky.
     aliases:
     - cust_expsr_avg_rem_12m_ratio_max
     risk_threshold: 3.15
@@ -135,7 +143,8 @@ columns:
     std: 0.5
     min: 0.0
     max: 5.0
-    description: ratio of 30-90 days trigger amount. Values above 0 are considered risky.
+    description: ratio of 30-90 days trigger amount. Values above 0 are considered
+      risky.
     aliases:
     - ratio_30_90dys_trig_amt_max
     risk_threshold: 0
@@ -147,8 +156,8 @@ columns:
     std: 20.0
     min: 0.0
     max: 100.0
-    description: Average utilization in all the external consumer revolving trades with balance more than US$ 50. Values above
-      75 are risky.
+    description: Average utilization in all the external consumer revolving trades
+      with balance more than US$ 50. Values above 75 are risky.
     aliases:
     - avutil_exrvlv_balgt50_max
     risk_threshold: 75
@@ -221,7 +230,8 @@ columns:
     std: 5.0
     min: 0.0
     max: 100.0
-    description: ML model score predicting likelihood of default in next 18 months. Scores from 10-100 are considered risky.
+    description: ML model score predicting likelihood of default in next 18 months.
+      Scores from 10-100 are considered risky.
     risk_threshold: 10
     risk_direction: above
     aliases:
@@ -233,8 +243,8 @@ columns:
     std: 10.0
     min: 0.0
     max: 100.0
-    description: ML model score predicting likelihood of default on internal/external trades in next 18 months. Scores from
-      20-100 are considered risky.
+    description: ML model score predicting likelihood of default on internal/external
+      trades in next 18 months. Scores from 20-100 are considered risky.
     risk_threshold: 20
     risk_direction: above
     aliases:
@@ -246,8 +256,8 @@ columns:
     std: 40000
     min: 0
     max: 300000
-    description: average remit (USD). Stored as string with "thousands" suffix (e.g. "221.4 thousands" → 221400.0) to dodge
-      firewall masking on 6+digit runs.
+    description: average remit (USD). Stored as string with "thousands" suffix (e.g.
+      "221.4 thousands" → 221400.0) to dodge firewall masking on 6+digit runs.
     aliases:
     - avg_remit_minus_max_max
     dtype_pending_review: true
@@ -267,7 +277,8 @@ columns:
     std: 10000
     min: 0
     max: 500000
-    description: The amount of a customer's highest revolving lines. Values below 77 are risky.
+    description: The amount of a customer's highest revolving lines. Values below
+      77 are risky.
     aliases:
     - tpf_cust_hi_rvlv_line_am_min
     risk_threshold: 77
@@ -290,7 +301,8 @@ columns:
     lambda: 0.1
     min: 0
     max: 10
-    description: No of triggers greater than 30 days with amount > $500. Values on or above 1 are risky
+    description: No of triggers greater than 30 days with amount > $500. Values on
+      or above 1 are risky
     aliases:
     - sum_o30dn_o60dn_o90dn_max
   hcam_bal_trnd_indx:
@@ -344,8 +356,8 @@ columns:
     std: 1.5
     min: -10.0
     max: 5.0
-    description: A metric that summarizes the customer's CDSS risk scores over a historical window (from 5 to 180 days ago).
-      Values above 2 are risky.
+    description: A metric that summarizes the customer's CDSS risk scores over a historical
+      window (from 5 to 180 days ago). Values above 2 are risky.
     aliases:
     - cust_eff_se_cdss_5_180_day_score_max
     risk_threshold: 2
@@ -357,7 +369,8 @@ columns:
     std: 0.06
     min: 0.0
     max: 0.5
-    description: Total exposure to arbitrated income ratio. Values above 0.08 are risky.
+    description: Total exposure to arbitrated income ratio. Values above 0.08 are
+      risky.
     aliases:
     - cust_expr_to_arb_inc_ratio_max
     risk_threshold: 0.08
@@ -381,7 +394,8 @@ columns:
     std: 3.0
     min: 0.0
     max: 30.0
-    description: risk based index of inquiries from credit bureau. Values above 4.65 are considered risky.
+    description: risk based index of inquiries from credit bureau. Values above 4.65
+      are considered risky.
     aliases:
     - cust_experian_trans_union_inq_idx_max
     risk_threshold: 4.65
@@ -393,7 +407,8 @@ columns:
     std: 0.15
     min: 0.0
     max: 2.0
-    description: Customer total debt servicing ratio. Values above 0.15 are considered risky.
+    description: Customer total debt servicing ratio. Values above 0.15 are considered
+      risky.
     aliases:
     - cust_intr_extnl_unscr_tt_debt_srvc_rt1_max
     risk_threshold: 0.15
@@ -437,7 +452,8 @@ columns:
     std: 0.3
     min: 0.0
     max: 2.0
-    description: ratio of cash to total liability corresponding to latest full year financial
+    description: ratio of cash to total liability corresponding to latest full year
+      financial
     aliases:
     - cust_cash_tot_liab_yr1_rt_max
   cust_pymt_chan_risk_score:
@@ -447,7 +463,8 @@ columns:
     std: 0.01
     min: 0.0
     max: 0.1
-    description: Customer payment channel risk score. Values above 0.05 are considered risky.
+    description: Customer payment channel risk score. Values above 0.05 are considered
+      risky.
     aliases:
     - cust_pymt_chan_risk_score_max
     risk_threshold: 0.05
@@ -459,8 +476,9 @@ columns:
     std: 500000
     min: 0
     max: 5000000
-    description: Total tax-assessed value of the customer business address (USD) from LexisNexis. Stored as string with "millions"
-      suffix (e.g. "3.6 millions" → 3600000.0) to dodge firewall masking on 6+digit runs.
+    description: Total tax-assessed value of the customer business address (USD) from
+      LexisNexis. Stored as string with "millions" suffix (e.g. "3.6 millions" → 3600000.0)
+      to dodge firewall masking on 6+digit runs.
     aliases:
     - cust_lexis_nexis_tot_tax_assess_val_am_max
     dtype_pending_review: true
@@ -471,7 +489,8 @@ columns:
     std: 1.0
     min: 0.0
     max: 10.0
-    description: one way spend concentration risk rate. Values above 2.4 are considered risky.
+    description: one way spend concentration risk rate. Values above 2.4 are considered
+      risky.
     aliases:
     - cust_enhnc_one_way_spend_concentration_30day_rt1_max
     risk_threshold: 2.4
@@ -507,7 +526,8 @@ columns:
     std: 0.05
     min: 0.0
     max: 1.0
-    description: average number of only minimum due paid in last 12 months. Values above 0.08 are considered risky.
+    description: average number of only minimum due paid in last 12 months. Values
+      above 0.08 are considered risky.
     aliases:
     - cust_min_due_12mo_avg_max
     risk_threshold: 0.08
@@ -519,8 +539,8 @@ columns:
     std: 80.0
     min: 500.0
     max: 1000.0
-    description: Clear early risk score. Values below 785 are risky. Stored in CSV with comma-separated thousands (e.g. "9,005.00")
-      — strip commas before parsing.
+    description: Clear early risk score. Values below 785 are risky. Stored in CSV
+      with comma-separated thousands (e.g. "9,005.00") — strip commas before parsing.
     aliases:
     - gam_clr_erly_risk_score_min
     dtype_pending_review: true
@@ -533,7 +553,8 @@ columns:
     std: 5000.0
     min: -99999999999.0
     max: 500000.0
-    description: Mortgage Loan (Actual Payment Amount). Sentinel -99999999999 = no mortgage on file
+    description: Mortgage Loan (Actual Payment Amount). Sentinel -99999999999 = no
+      mortgage on file
     aliases:
     - gam_mtge_loan_actl_pymt_am_max
   se_no_norm_wtd_pd_unpaid_amt:
@@ -543,7 +564,8 @@ columns:
     std: 0.2
     min: 0.0
     max: 1.0
-    description: normalised accum amount weighted by merchant percentage. Values above 0 are risky.
+    description: normalised accum amount weighted by merchant percentage. Values above
+      0 are risky.
     aliases:
     - se_no_norm_wtd_pd_unpaid_amt_max
     risk_threshold: 0
@@ -555,8 +577,9 @@ columns:
     std: 40000.0
     min: 0.0
     max: 300000.0
-    description: Net remit done by a customer in the unbilled period (USD). Stored as string with "thousands" suffix (e.g.
-      "156.2 thousands" → 156200.0) to dodge firewall masking on 6+digit runs.
+    description: Net remit done by a customer in the unbilled period (USD). Stored
+      as string with "thousands" suffix (e.g. "156.2 thousands" → 156200.0) to dodge
+      firewall masking on 6+digit runs.
     aliases:
     - cust_net_pymt_unbl1_max
     dtype_pending_review: true
@@ -567,7 +590,8 @@ columns:
     std: 50
     min: 400
     max: 900
-    description: score merges business and owner credit data. Values below 693 are risky.
+    description: score merges business and owner credit data. Values below 693 are
+      risky.
     aliases:
     - cust_lexis_nexis_blended_score_min
     risk_threshold: 693
