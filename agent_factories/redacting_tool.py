@@ -503,6 +503,7 @@ async def _auto_chart_from_tool_outputs(
     case_folder = getattr(app_ctx, "case_folder", None)
     turn_id = getattr(app_ctx, "_turn_id", None)
     catalog = getattr(app_ctx, "_catalog", None)
+    emit_event = getattr(app_ctx, "_emit_event", None)
 
     if kb is None or case_folder is None:
         if logger:
@@ -544,7 +545,7 @@ async def _auto_chart_from_tool_outputs(
     try:
         charts_rendered = _render_auto_charts(
             trend_series, group_series, name, charts_dir,
-            kb, turn_id, catalog, logger,
+            kb, turn_id, catalog, logger, emit_event,
         )
     except Exception as exc:  # noqa: BLE001
         if logger:
@@ -565,9 +566,25 @@ async def _auto_chart_from_tool_outputs(
 
 def _render_auto_charts(
     trend_series, group_series, name, charts_dir,
-    kb, turn_id, catalog, logger,
+    kb, turn_id, catalog, logger, emit_event=None,
 ) -> int:
     from tools.viz_renderer import kp_to_vega_spec, render_chart
+
+    def _emit_pending(topic: str, kind: str) -> None:
+        # Fire `chart_pending` BEFORE the render so the frontend shows a
+        # "working on the plot…" placeholder during the gap until the
+        # end-of-turn `chart` event lands. Keyed by (specialist, topic) to
+        # match that eventual event so the placeholder clears cleanly. The
+        # auto-chart task runs concurrently (right after the specialist
+        # finishes, not at end-of-turn), so this fires early enough to be
+        # useful. Mirrors make_chart's pending emit (tools/data_viz_tools.py).
+        if callable(emit_event):
+            try:
+                emit_event("chart_pending", {
+                    "specialist": name, "topic": topic, "kind": kind,
+                })
+            except Exception:  # noqa: BLE001 - emit must never break rendering
+                pass
 
     charts_rendered = 0
 
@@ -776,6 +793,7 @@ def _render_auto_charts(
             spec = kp_to_vega_spec(kp_dict)
             if spec:
                 kp_dict["vega_spec"] = spec
+            _emit_pending(topic, kind)
             img_path = render_chart(kp_dict, charts_dir, turn_id=turn_id, logger=logger)
             if img_path:
                 kp_dict["image_path"] = img_path
@@ -825,6 +843,7 @@ def _render_auto_charts(
         spec = kp_to_vega_spec(kp_dict)
         if spec:
             kp_dict["vega_spec"] = spec
+        _emit_pending(topic_slug, "share")
         img_path = render_chart(kp_dict, charts_dir, turn_id=turn_id, logger=logger)
         if img_path:
             kp_dict["image_path"] = img_path
