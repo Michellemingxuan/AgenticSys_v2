@@ -22,11 +22,11 @@ def gen():
 class TestLoadProfiles:
     def test_loads_all_profiles(self, gen: DataGenerator):
         # Sync (datalayer.sync) may add real-data profiles to the same dir;
-        # the simulator core stays = 11.
-        assert len(gen.profiles) >= 11
+        # the simulator core stays = 10.
+        assert len(gen.profiles) >= 10
 
     def test_profile_names(self, gen: DataGenerator):
-        # Original 11 simulator profiles must remain; sync-created profiles
+        # Original 10 simulator profiles must remain; sync-created profiles
         # for real-data tables may also be present (e.g., wcc, modelling_data).
         # As real-data converges, some canonical names may be renamed
         # (e.g., wcc_flags → wcc, score_drivers loses simulator cols).
@@ -34,7 +34,7 @@ class TestLoadProfiles:
         # under SOMETHING — names may shift, but the catalog must not
         # silently lose a concept entirely.
         must_exist_concepts = {
-            "bureau", "txn_monthly", "spends", "payments",
+            "bureau", "spends", "payments",
             "model_scores", "score_drivers", "xbu_summary",
             "cust_tenure", "income_dti",
             "crossbu_cards", "crossbu_merchants",

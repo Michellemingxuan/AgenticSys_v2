@@ -189,11 +189,13 @@ transaction table (one row per transaction). Choose by question type:
   "show the grocery transactions last month", "what did the risk scores look
   like at the moment of purchase?".
 - **Trend / trajectory / over-time questions** → monthly tables
-  (`model_scores`, `score_drivers`, `txn_monthly`, …). Examples: "is risk
+  (`model_scores`, `score_drivers`, …). Examples: "is risk
   deteriorating?", "how has CDSS moved over 12 months?".
 - When both could apply, prefer the **monthly** table for aggregate/trend
   framing; use the **transaction** table only when the answer hinges on
-  specific transactions.
+  specific transactions. For spend/payment there is no monthly table —
+  `spends` and `payments` are transaction-level, so bucket them by month
+  with `summarize_trend` for trend framing.
 
 ## Filter rigor (every query, not just big tables)
 

@@ -4,7 +4,7 @@ description: Spend & Payments — payment trends, delinquency, spend spikes
 type: domain
 owner: [base_specialist]
 mode: inline
-data_hints: [txn_monthly, spends, payments]
+data_hints: [spends, payments]
 interpretation_guide: >
   Rising spend + declining/returned payments = early-warning. Look for
   minimum-payment-only behaviour, sudden spikes, returns. Filter by
@@ -27,7 +27,7 @@ Tables:
 
 Notes:
 - `payment_date` and `spend_date` both span 2024 AND 2025 — double-check year before citing.
-- `txn_monthly.month` is a first-of-month YYYY-MM-DD string; use range filters as dates.
+- Both `spends` and `payments` are transaction-level (one row per transaction); there is no monthly spend table. Derive monthly spend/payment series by bucketing these tables with `summarize_trend(..., period='month')` on `spend_date` / `payment_date`.
 - `payment_status` is the single payment-cleared discriminator (categorical: `'success'` / `'return'`). The raw 0/1 `return_flag` from the source CSV is dropped at gateway-load time; always filter on `payment_status`. "No returned payments" ≠ "no successful payments" — count `payment_status == 'success'` inside your window before claiming the latter.
 - Pillar vocabulary glossary is injected above; treat its values as illustrative, verify against actual data.
 

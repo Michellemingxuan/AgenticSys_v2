@@ -56,8 +56,8 @@ concept_glossary: |
     "ramp-up window" length; identify it FROM THE DATA.
 
     Identification recipe (apply per the activity in question):
-      1. Pull the relevant time series — typically `txn_monthly.spend_total`
-         or `spends_data.Amount` aggregated by month for spend ramp-up;
+      1. Pull the relevant time series — typically `spends_data.Amount`
+         aggregated by month (spends is transaction-level) for spend ramp-up;
          `crossbu_cards.balance` over `Month` for exposure ramp-up;
          `payments.Payment Amount` over `payment_date` for payment ramp-up.
       2. Find the rise: where the metric starts increasing meaningfully
