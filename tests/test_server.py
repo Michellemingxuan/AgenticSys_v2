@@ -946,3 +946,68 @@ def test_sse_data_sanitizes_non_finite_floats():
 def test_sse_data_finite_payload_roundtrips_unchanged():
     payload = {"a": 1, "b": 2.5, "c": "x", "d": [1, 2, {"e": True}], "f": None}
     assert _strict_loads(server._sse_data(payload)) == payload
+
+
+# ── Round-1 planning watchdog (_next_planning_event) ─────────────────────────
+
+import asyncio  # noqa: E402
+import time as _time  # noqa: E402
+import pytest  # noqa: E402
+
+
+class _SlowAiter:
+    """Single-shot async iterator that sleeps `delay` before yielding once."""
+
+    def __init__(self, delay, value="event"):
+        self._delay = delay
+        self._value = value
+        self._done = False
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._done:
+            raise StopAsyncIteration
+        await asyncio.sleep(self._delay)
+        self._done = True
+        return self._value
+
+
+async def test_planning_event_raises_on_stall():
+    """A round-1 call that exceeds the planning budget raises _PlanningTimeout."""
+    it = _SlowAiter(delay=5.0).__aiter__()
+    deadline = _time.monotonic() + 0.05  # 50ms budget vs 5s "call"
+    with pytest.raises(server._PlanningTimeout):
+        await server._next_planning_event(it, deadline, first_tool_seen=False)
+
+
+async def test_planning_event_returns_when_fast():
+    it = _SlowAiter(delay=0.0).__aiter__()
+    deadline = _time.monotonic() + 1.0
+    ev = await server._next_planning_event(it, deadline, first_tool_seen=False)
+    assert ev == "event"
+
+
+async def test_planning_deadline_disarmed_after_first_tool():
+    """Once the first tool call has landed, a slow event must NOT time out even
+    with an already-expired deadline — specialists run under the turn fence."""
+    it = _SlowAiter(delay=0.05).__aiter__()
+    expired = _time.monotonic() - 10
+    ev = await server._next_planning_event(it, expired, first_tool_seen=True)
+    assert ev == "event"
+
+
+async def test_planning_event_no_deadline_passes_through():
+    """Final attempt (plan_deadline=None) never times out the planning phase."""
+    it = _SlowAiter(delay=0.05).__aiter__()
+    ev = await server._next_planning_event(it, None, first_tool_seen=False)
+    assert ev == "event"
+
+
+async def test_planning_event_propagates_stop_async_iteration():
+    it = _SlowAiter(delay=0.0).__aiter__()
+    await it.__anext__()  # exhaust it
+    deadline = _time.monotonic() + 1.0
+    with pytest.raises(StopAsyncIteration):
+        await server._next_planning_event(it, deadline, first_tool_seen=False)

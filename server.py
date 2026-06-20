@@ -113,6 +113,14 @@ _SSE_QUEUE_MAXSIZE = int(os.environ.get("SSE_QUEUE_MAXSIZE", "256"))
 # question queued behind it.
 _TURN_WALL_CLOCK_S = float(os.environ.get("TURN_WALL_CLOCK_S", "360"))
 
+# Round-1 (team-planning) watchdog. The orchestrator's first LLM call decides
+# which specialists to dispatch; it normally returns in ~3s, but under heavy
+# private-env (safechain) traffic it can stall up to ~100s — well under the
+# 180s per-call cap, so it isn't aborted and the user just waits. A fresh call
+# (manual rewind/retry) almost always returns fast, so we bound the planning
+# phase and auto-retry on stall. Generous margin over the ~3s norm; env-tunable.
+_ORCH_PLAN_TIMEOUT_S = float(os.environ.get("ORCH_PLAN_TIMEOUT_S", "25"))
+
 # Tighter fence around the screen phase specifically. Screen is one
 # `redact` LLM call (often skipped) + one `relevance_check` LLM call —
 # normally <5s end-to-end per the project's performance-targets memory.
@@ -616,6 +624,33 @@ def _json_safe(obj):
 def _sse_data(payload: dict) -> str:
     """Serialize an SSE payload to a guaranteed browser-parseable JSON string."""
     return json.dumps(_json_safe(payload), default=str)
+
+
+class _PlanningTimeout(Exception):
+    """Round-1 (team-planning) stalled past ORCH_PLAN_TIMEOUT_S — abort + retry."""
+
+
+async def _next_planning_event(stream_iter, plan_deadline, first_tool_seen):
+    """Await the next orchestrator stream event, bounded by the planning deadline.
+
+    While the orchestrator is still PLANNING (no tool call emitted yet) and a
+    ``plan_deadline`` (``time.monotonic`` seconds) is armed, bound the wait by
+    the remaining budget and raise ``_PlanningTimeout`` if it elapses — so a
+    stalled round-1 call is cancelled and retried with a fresh request instead
+    of dead-waiting. Once the first tool call has landed (``first_tool_seen``)
+    the deadline is disarmed and later events stream under the normal turn
+    wall-clock fence. ``plan_deadline=None`` (the final attempt) also disarms it,
+    so a genuinely slow-but-working env degrades to waiting, not hard failure.
+    """
+    if plan_deadline is not None and not first_tool_seen:
+        budget = plan_deadline - time.monotonic()
+        if budget <= 0:
+            raise _PlanningTimeout()
+        try:
+            return await asyncio.wait_for(stream_iter.__anext__(), timeout=budget)
+        except asyncio.TimeoutError as exc:
+            raise _PlanningTimeout() from exc
+    return await stream_iter.__anext__()
 
 
 def _collect_turn_charts(specialist_kb: dict, turn_id: str, case_id: str) -> list[dict]:
@@ -1310,7 +1345,29 @@ async def _run_turn_streamed(
                 )
                 _orch_perf_t0 = time.perf_counter()
                 _ttft_recorded = False
-                async for event in streamed.stream_events():
+                # Round-1 planning watchdog: bound time-to-first-tool-call and
+                # retry on stall. Disarm on the FINAL attempt (no deadline) so a
+                # genuinely slow-but-working env waits rather than hard-failing.
+                _plan_deadline = (
+                    time.monotonic() + _ORCH_PLAN_TIMEOUT_S
+                    if _orch_attempt + 1 < _MAX_ORCH_ATTEMPTS else None
+                )
+                _stream_iter = streamed.stream_events().__aiter__()
+                while True:
+                    try:
+                        event = await _next_planning_event(
+                            _stream_iter, _plan_deadline, first_tool_call_logged
+                        )
+                    except StopAsyncIteration:
+                        break
+                    except _PlanningTimeout:
+                        # Cancel the stalled run so its background task can't
+                        # later emit a ghost team for a turn we've moved past.
+                        try:
+                            streamed.cancel()
+                        except Exception:  # noqa: BLE001
+                            pass
+                        raise
                     if not _ttft_recorded:
                         attach_latency(
                             ttft_ms=int((time.perf_counter() - _orch_perf_t0) * 1000),
@@ -1449,6 +1506,35 @@ async def _run_turn_streamed(
 
             # Successful attempt — exit the retry loop.
             break
+
+        except _PlanningTimeout:
+            # Round-1 stalled. Count the attempt, tell the UI we're replanning,
+            # and loop — the next attempt issues a fresh planning call (which,
+            # per the heavy-traffic pattern, almost always returns fast). The
+            # final attempt runs with the deadline disarmed, so we never hard
+            # fail an env that's merely slow.
+            _orch_attempt += 1
+            turn_timer.record(
+                "orchestrator_plan_timeout",
+                int((time.perf_counter() - orch_perf_t0) * 1000),
+                attempt=_orch_attempt,
+                timeout_s=_ORCH_PLAN_TIMEOUT_S,
+            )
+            sess.logger.log("orchestrator_plan_timeout", {
+                "turn_id": turn_id,
+                "attempt": _orch_attempt,
+                "timeout_s": _ORCH_PLAN_TIMEOUT_S,
+            })
+            sess.emit("orchestrator_retry", {
+                "turn_id": turn_id,
+                "attempt": _orch_attempt,
+                "reason": "planning_timeout",
+                "message": (
+                    "Replanning — team planning was slow to respond; "
+                    "retrying with a fresh request."
+                ),
+            })
+            continue
 
         except AgentsException as exc:
             # Retry-once on ``ModelBehaviorError`` BEFORE falling through to
