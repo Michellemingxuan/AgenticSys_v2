@@ -1153,3 +1153,58 @@ def test_catalog_toc_amex_font_stack(tmp_path):
     html = r.data.decode("utf-8")
     # The Amex font stack must appear in the CSS for the TOC
     assert "Helvetica Neue" in html or "Helvetica" in html
+
+
+# ---------------------------------------------------------------------------
+# Drop context-only section from catalog viewer
+# ---------------------------------------------------------------------------
+
+def test_catalog_no_context_only_section_rendered(tmp_path, monkeypatch):
+    """GET /catalog must NOT render the context-only vars section in the HTML.
+
+    Context-only vars (context entries with no matching profile column) should
+    be silently dropped — they must NOT appear as a 'Context-only vars' block
+    or with the ctx-only CSS class in the output.
+    """
+    import datalayer.context_dict as cd
+
+    prof_dir = tmp_path / "prof"
+    prof_dir.mkdir()
+    (prof_dir / "model_scores.yaml").write_text(yaml.safe_dump({
+        "table": "model_scores",
+        "description": "scores",
+        "columns": {
+            "score_a": {"dtype": "float", "description": "score A"},
+        },
+    }))
+    ctx_dir = tmp_path / "ctx"
+    ctx_dir.mkdir()
+    (ctx_dir / "modeling_context_description.txt").write_text(
+        "1. score_a: description A.\n"
+        "2. orphan_var: context only — should not appear in catalog.\n"
+    )
+
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {"modeling": ["model_scores"]})
+
+    app = Flask(__name__)
+    app.config.update(
+        PROFILE_DIR=str(prof_dir),
+        CONTEXT_DIR=str(ctx_dir),
+        PROVENANCE_PATH=str(tmp_path / ".prov.json"),
+        RECONCILE_RESULTS=str(tmp_path / "last.json"),
+        DATA_DIR=str(tmp_path / "nonexistent_data"),
+    )
+    register_catalog_routes(app)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+
+    # The context-only section markup must NOT appear
+    assert "Context-only vars" not in html
+    assert "ctx-only" not in html or "ctx-only" in html.split("</style>")[0]  # CSS only, not DOM
+    assert "orphan_var" not in html
+
+    # The matched column must still be present with in_context check mark
+    assert "score_a" in html
+    # in_context ✓ for matched column must still render
+    assert "&#x2713;" in html or "✓" in html

@@ -332,12 +332,6 @@ _CATALOG_TMPL = """{% autoescape true %}<!doctype html>
                   {% endfor %}
                 </tbody>
               </table>
-              {% if tbl.context_only %}
-              <div class="ctx-only">
-                <strong>Context-only vars (not in profile):</strong>
-                {% for v in tbl.context_only %}<span>{{ v }}</span>{% endfor %}
-              </div>
-              {% endif %}
             </div>
           </div>
           {% endfor %}
@@ -383,12 +377,6 @@ _CATALOG_TMPL = """{% autoescape true %}<!doctype html>
                 {% endfor %}
               </tbody>
             </table>
-            {% if tbl.context_only %}
-            <div class="ctx-only">
-              <strong>Context-only vars (not in profile):</strong>
-              {% for v in tbl.context_only %}<span>{{ v }}</span>{% endfor %}
-            </div>
-            {% endif %}
           </div>
           {% endif %}
         </details>

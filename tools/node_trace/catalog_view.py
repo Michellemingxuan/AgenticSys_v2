@@ -138,7 +138,6 @@ def build_catalog_view(
                         },
                         ...
                     ],
-                    "context_only": [var_name, ...],
                 },
                 ...
             ]
@@ -167,7 +166,6 @@ def build_catalog_view(
 
         # Context entries for this table (var_name -> ContextEntry)
         table_ctx: dict = context_by_table.get(table_name, {})
-        profile_col_names: set[str] = set(columns_spec.keys())
 
         # Build a normalized-key index for the context vars to support
         # Title-Case context names (e.g. "FICO Score") matching snake_case
@@ -175,9 +173,6 @@ def build_catalog_view(
         ctx_norm: dict[str, str] = {
             cd.normalize_key(var): var for var in table_ctx
         }
-        # Build a normalized-key set for profile columns for context_only logic.
-        col_norm: set[str] = {cd.normalize_key(c) for c in profile_col_names}
-
         columns_out: list[dict] = []
         for col_name, spec in columns_spec.items():
             dtype = spec.get("dtype", "unknown")
@@ -207,12 +202,6 @@ def build_catalog_view(
                 "provenance": provenance,
             })
 
-        # context_only: context vars whose normalized key matches NO profile column.
-        context_only: list[str] = [
-            var for var in table_ctx
-            if cd.normalize_key(var) not in col_norm
-        ]
-
         tables_out.append({
             "table": table_name,
             "description": description,
@@ -220,7 +209,6 @@ def build_catalog_view(
             "aliases": aliases,
             "stale": stale,
             "columns": columns_out,
-            "context_only": context_only,
         })
 
     # ── Exclude stale tables entirely ─────────────────────────────────────────

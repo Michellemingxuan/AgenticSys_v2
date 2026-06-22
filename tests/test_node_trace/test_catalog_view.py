@@ -82,7 +82,7 @@ def test_build_catalog_view(tmp_path, monkeypatch):
     assert col["threshold"] is not None
     assert col["threshold"]["value"] == [10.0, 100.0]
     assert col["threshold"]["direction"] == "range"
-    assert "extra_var" in t["context_only"]
+    assert "context_only" not in t
 
 
 def test_build_catalog_view_human_provenance(tmp_path, monkeypatch):
@@ -175,8 +175,8 @@ def test_build_catalog_view_table_aliases(tmp_path, monkeypatch):
     assert t["aliases"] == ["spend", "txn_spends"]
 
 
-def test_build_catalog_view_context_only(tmp_path, monkeypatch):
-    """context_only lists vars present in context but absent as profile columns."""
+def test_build_catalog_view_no_context_only_key(tmp_path, monkeypatch):
+    """context_only key must NOT appear in any table dict — context-only vars are dropped."""
     prof = tmp_path / "prof"
     prof.mkdir()
     (prof / "model_scores.yaml").write_text(yaml.safe_dump({
@@ -201,9 +201,9 @@ def test_build_catalog_view_context_only(tmp_path, monkeypatch):
 
     view = build_catalog_view(str(prof), str(ctx), str(tmp_path / ".prov.json"))
     t = view["tables"][0]
-    assert "orphan_var" in t["context_only"]
-    assert "another_orphan" in t["context_only"]
-    assert "score_a" not in t["context_only"]
+    # context_only key must be absent from the table dict
+    assert "context_only" not in t
+    # in_context for a matched profile column must still work correctly
     col = t["columns"][0]
     assert col["in_context"] is True
 
@@ -278,11 +278,8 @@ def test_build_catalog_view_normalized_match(tmp_path, monkeypatch):
     # Column with no context var → in_context=False
     assert by_name["unmatched_col"]["in_context"] is False
 
-    # context_only: 'Orphan Var' has no matching profile column
-    assert "Orphan Var" in t["context_only"]
-    # Matched vars are NOT in context_only
-    assert "FICO Score" not in t["context_only"]
-    assert "SBFE Score" not in t["context_only"]
+    # context_only key must NOT appear in the table dict (context-only vars are dropped)
+    assert "context_only" not in t
 
 
 def test_build_catalog_view_empty_profile_dir(tmp_path, monkeypatch):
