@@ -1,4 +1,5 @@
-from datalayer.context_dict import parse_context_file, ContextEntry
+import pytest
+from datalayer.context_dict import parse_context_file, ContextEntry, normalize_threshold
 
 SAMPLE = """Data Description
 You are a risk analyst. Analyze the case.
@@ -37,3 +38,15 @@ def test_parse_context_file_extracts_entries(tmp_path):
         f"got: {by_name['credit_loss_prob'].raw_description!r}"
     )
     assert "ML model score predicting default" in by_name["credit_loss_prob"].raw_description
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("Values above 5.8 are considered risky.", {"risk_threshold": 5.8, "risk_direction": "above"}),
+    ("Values below 0.46 are risky", {"risk_threshold": 0.46, "risk_direction": "below"}),
+    ("Values on or above 1 are risky", {"risk_threshold": 1.0, "risk_direction": "above"}),
+    ("Scores from 10-100 are considered risky.", {"risk_threshold": [10.0, 100.0], "risk_direction": "range"}),
+    (None, None),
+    ("some prose with no numbers", None),
+])
+def test_normalize_threshold(text, expected):
+    assert normalize_threshold(text) == expected

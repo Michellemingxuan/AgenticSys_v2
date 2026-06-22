@@ -40,3 +40,23 @@ def parse_context_file(path: str) -> list[ContextEntry]:
             description = rest.replace(threshold_text, "").strip() if threshold_text else rest
             entries.append(ContextEntry(var_name, description, threshold_text))
     return entries
+
+
+_RANGE = re.compile(r"\bfrom\s+(-?\d+(?:\.\d+)?)\s*[-to]+\s*(-?\d+(?:\.\d+)?)", re.IGNORECASE)
+_BOUND = re.compile(r"\b(above|below|over|under|greater than|less than|on or above|on or below)\b\s*(-?\d+(?:\.\d+)?)", re.IGNORECASE)
+
+_BELOW_WORDS = {"below", "under", "less than", "on or below"}
+
+
+def normalize_threshold(text: str | None) -> dict | None:
+    if not text:
+        return None
+    rm = _RANGE.search(text)
+    if rm:
+        return {"risk_threshold": [float(rm.group(1)), float(rm.group(2))], "risk_direction": "range"}
+    bm = _BOUND.search(text)
+    if bm:
+        word = bm.group(1).lower()
+        direction = "below" if word in _BELOW_WORDS else "above"
+        return {"risk_threshold": float(bm.group(2)), "risk_direction": direction}
+    return None
