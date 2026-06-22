@@ -651,6 +651,96 @@ def test_viewer_index_has_shared_header(tmp_path):
     assert "traces.db" in html
 
 
+# ---------------------------------------------------------------------------
+# Change 1 — Stale profiles: grey class + "(no data table)" marker
+# ---------------------------------------------------------------------------
+
+def test_catalog_stale_table_has_grey_class(tmp_path):
+    """GET /catalog: a stale table (no backing CSV) renders with .stale CSS class."""
+    prof_dir = tmp_path / "prof"
+    prof_dir.mkdir()
+    (prof_dir / "live.yaml").write_text(yaml.safe_dump({
+        "table": "live", "description": "live table",
+        "columns": {"col": {"dtype": "int", "description": "x"}},
+    }))
+    (prof_dir / "ghost.yaml").write_text(yaml.safe_dump({
+        "table": "ghost", "description": "ghost table",
+        "columns": {"col": {"dtype": "int", "description": "y"}},
+    }))
+    (tmp_path / "ctx").mkdir()
+
+    data_dir = tmp_path / "data"
+    (data_dir / "case001").mkdir(parents=True)
+    (data_dir / "case001" / "live.csv").write_text("col\n1\n")
+
+    app = Flask(__name__)
+    app.config.update(
+        PROFILE_DIR=str(prof_dir),
+        CONTEXT_DIR=str(tmp_path / "ctx"),
+        PROVENANCE_PATH=str(tmp_path / ".prov.json"),
+        RECONCILE_RESULTS=str(tmp_path / "last.json"),
+        DATA_DIR=str(data_dir),
+    )
+    register_catalog_routes(app)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+    # The ghost table must have class="stale" somewhere in its rendering
+    assert "stale" in html
+
+
+def test_catalog_stale_table_has_no_data_table_marker(tmp_path):
+    """GET /catalog: stale table shows '(no data table)' marker."""
+    prof_dir = tmp_path / "prof"
+    prof_dir.mkdir()
+    (prof_dir / "live.yaml").write_text(yaml.safe_dump({
+        "table": "live", "description": "live",
+        "columns": {"col": {"dtype": "int", "description": "x"}},
+    }))
+    (prof_dir / "ghost.yaml").write_text(yaml.safe_dump({
+        "table": "ghost", "description": "ghost",
+        "columns": {"col": {"dtype": "int", "description": "y"}},
+    }))
+    (tmp_path / "ctx").mkdir()
+
+    data_dir = tmp_path / "data"
+    (data_dir / "case001").mkdir(parents=True)
+    # Only live.csv present; ghost has no CSV → stale
+    (data_dir / "case001" / "live.csv").write_text("col\n1\n")
+
+    app = Flask(__name__)
+    app.config.update(
+        PROFILE_DIR=str(prof_dir),
+        CONTEXT_DIR=str(tmp_path / "ctx"),
+        PROVENANCE_PATH=str(tmp_path / ".prov.json"),
+        RECONCILE_RESULTS=str(tmp_path / "last.json"),
+        DATA_DIR=str(data_dir),
+    )
+    register_catalog_routes(app)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    assert b"no data table" in r.data
+
+
+# ---------------------------------------------------------------------------
+# Change 2 — Fold all by default: no `open` attribute on <details>
+# ---------------------------------------------------------------------------
+
+def test_catalog_details_folded_by_default(tmp_path):
+    """GET /catalog: no <details ... open> in the page (all folded by default)."""
+    import re
+    _write_profile(tmp_path / "prof", table_name="fold_test")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+    # Must not contain `open` attribute on any <details> tag
+    assert not re.search(r'<details\b[^>]*\bopen\b', html), (
+        "Found <details ... open> in page — all details should be folded by default"
+    )
+
+
 def test_viewer_index_traces_tab_active(tmp_path):
     """GET / on viewer.app: 'Traces' tab is marked active; 'Data Catalog' is not."""
     import importlib

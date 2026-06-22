@@ -251,3 +251,139 @@ def test_build_catalog_view_empty_profile_dir(tmp_path, monkeypatch):
 
     view = build_catalog_view(str(prof), str(ctx), str(tmp_path / ".prov.json"))
     assert view == {"tables": []}
+
+
+# ---------------------------------------------------------------------------
+# Staleness tests (Change 1)
+# ---------------------------------------------------------------------------
+
+def _make_profile_yaml(name, aliases=None):
+    spec = {"table": name, "description": "d", "columns": {"col": {"dtype": "int", "description": "x"}}}
+    if aliases:
+        spec["aliases"] = aliases
+    return yaml.safe_dump(spec)
+
+
+def test_stale_backed_false_unbacked_true(tmp_path, monkeypatch):
+    """Profile with a matching CSV is stale=False; profile with no CSV is stale=True."""
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    # 'live_table' will have a CSV backing; 'ghost_table' will not.
+    (prof / "live_table.yaml").write_text(_make_profile_yaml("live_table"))
+    (prof / "ghost_table.yaml").write_text(_make_profile_yaml("ghost_table"))
+
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {})
+
+    # Create a case folder with only live_table.csv
+    data_dir = tmp_path / "data"
+    case_dir = data_dir / "case001"
+    case_dir.mkdir(parents=True)
+    (case_dir / "live_table.csv").write_text("col\n1\n2\n")
+    # ghost_table has no CSV
+
+    view = build_catalog_view(
+        str(prof), str(ctx), str(tmp_path / ".prov.json"),
+        data_dir=str(data_dir),
+    )
+    tables = {t["table"]: t for t in view["tables"]}
+    assert tables["live_table"]["stale"] is False
+    assert tables["ghost_table"]["stale"] is True
+
+
+def test_stale_sorts_last(tmp_path, monkeypatch):
+    """Stale tables appear after live tables in the returned list."""
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    (prof / "alpha.yaml").write_text(_make_profile_yaml("alpha"))       # live
+    (prof / "beta.yaml").write_text(_make_profile_yaml("beta"))         # stale
+    (prof / "gamma.yaml").write_text(_make_profile_yaml("gamma"))       # live
+
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {})
+
+    data_dir = tmp_path / "data"
+    case_dir = data_dir / "case001"
+    case_dir.mkdir(parents=True)
+    (case_dir / "alpha.csv").write_text("col\n1\n")
+    (case_dir / "gamma.csv").write_text("col\n1\n")
+    # beta has no CSV — stale
+
+    view = build_catalog_view(
+        str(prof), str(ctx), str(tmp_path / ".prov.json"),
+        data_dir=str(data_dir),
+    )
+    names = [t["table"] for t in view["tables"]]
+    # alpha and gamma (live) before beta (stale)
+    assert names.index("beta") > names.index("alpha")
+    assert names.index("beta") > names.index("gamma")
+
+
+def test_stale_via_alias(tmp_path, monkeypatch):
+    """Profile is live (stale=False) when an alias matches the CSV stem."""
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    (prof / "payments.yaml").write_text(_make_profile_yaml("payments", aliases=["payments_success", "payments_returns"]))
+
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {})
+
+    data_dir = tmp_path / "data"
+    case_dir = data_dir / "case001"
+    case_dir.mkdir(parents=True)
+    # Only payments_success.csv present — alias should match
+    (case_dir / "payments_success.csv").write_text("payment_date,payment_amount\n2024-01-01,100\n")
+
+    view = build_catalog_view(
+        str(prof), str(ctx), str(tmp_path / ".prov.json"),
+        data_dir=str(data_dir),
+    )
+    tables = {t["table"]: t for t in view["tables"]}
+    assert tables["payments"]["stale"] is False
+
+
+def test_stale_none_data_dir_all_false(tmp_path, monkeypatch):
+    """data_dir=None → all tables are stale=False (graceful fallback)."""
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    (prof / "t1.yaml").write_text(_make_profile_yaml("t1"))
+    (prof / "t2.yaml").write_text(_make_profile_yaml("t2"))
+
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {})
+
+    view = build_catalog_view(str(prof), str(ctx), str(tmp_path / ".prov.json"), data_dir=None)
+    for t in view["tables"]:
+        assert t["stale"] is False
+
+
+def test_stale_missing_data_dir_all_false(tmp_path, monkeypatch):
+    """Non-existent data_dir → graceful fallback, all stale=False."""
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    (prof / "t1.yaml").write_text(_make_profile_yaml("t1"))
+
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {})
+
+    view = build_catalog_view(
+        str(prof), str(ctx), str(tmp_path / ".prov.json"),
+        data_dir=str(tmp_path / "nonexistent"),
+    )
+    for t in view["tables"]:
+        assert t["stale"] is False

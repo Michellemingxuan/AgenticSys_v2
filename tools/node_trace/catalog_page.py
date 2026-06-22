@@ -32,6 +32,7 @@ _DEFAULTS: dict[str, str] = {
     "CONTEXT_DIR": "context",
     "PROVENANCE_PATH": "config/data_profiles/.provenance.json",
     "RECONCILE_RESULTS": "logs/last_reconcile.json",
+    "DATA_DIR": "data_tables/real",
 }
 
 _RECONCILE_TIMEOUT = 120  # seconds
@@ -111,6 +112,11 @@ tr:hover td { background: #fafbfc; }
 .ctx-only { font-family: SF Mono, Menlo, Consolas, monospace; font-size: 12px;
              color: #6b7280; padding: 4px 14px 10px; }
 .ctx-only span { margin-right: 8px; }
+/* Stale (no backing data table) */
+.stale { color: #9ca3af; }
+.stale summary { color: #9ca3af; }
+.stale-marker { font-size: 11px; font-weight: normal; color: #9ca3af;
+                margin-left: 6px; font-style: italic; }
 /* Legend */
 .legend { font-size: 12px; color: #6b7280; margin-bottom: 16px; }
 .legend .badge { margin-right: 6px; }
@@ -223,7 +229,7 @@ _CATALOG_TMPL = """{% autoescape true %}<!doctype html>
       <div class="catalog-toc-title">Tables</div>
       <ul>
         {% for tbl in tables %}
-        <li><a href="#tbl-{{ tbl.table }}">{{ tbl.table }}</a></li>
+        <li><a href="#tbl-{{ tbl.table }}" {% if tbl.stale %}class="stale"{% endif %}>{{ tbl.table }}</a></li>
         {% endfor %}
       </ul>
     </aside>
@@ -231,9 +237,12 @@ _CATALOG_TMPL = """{% autoescape true %}<!doctype html>
     <!-- Right: collapsible details blocks -->
     <div class="catalog-main">
       {% for tbl in tables %}
-      <details class="tbl-block" id="tbl-{{ tbl.table }}" open>
+      <details class="tbl-block{% if tbl.stale %} stale{% endif %}" id="tbl-{{ tbl.table }}">
         <summary>
           {{ tbl.table }}
+          {% if tbl.stale %}
+            <span class="stale-marker">(no data table)</span>
+          {% endif %}
           {% if tbl.description %}
             <span class="tbl-desc">— {{ tbl.description }}</span>
           {% endif %}
@@ -353,10 +362,11 @@ def register_catalog_routes(app) -> None:
         context_dir = _cfg("CONTEXT_DIR")
         provenance_path = _cfg("PROVENANCE_PATH")
         reconcile_results = _cfg("RECONCILE_RESULTS")
+        data_dir = _cfg("DATA_DIR")
 
         # Gracefully handle missing dirs (e.g. first run before profiles created).
         try:
-            view = build_catalog_view(profile_dir, context_dir, provenance_path)
+            view = build_catalog_view(profile_dir, context_dir, provenance_path, data_dir=data_dir)
             tables = view.get("tables", [])
         except Exception as exc:
             tables = []

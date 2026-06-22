@@ -5,7 +5,10 @@ Output shape is consumed by Task V3 (the Flask /catalog route).
 """
 from __future__ import annotations
 
+import os
+
 from datalayer.catalog import DataCatalog
+from datalayer.gateway import LocalDataGateway
 from datalayer.provenance import Provenance
 import datalayer.context_dict as cd
 
@@ -45,10 +48,33 @@ def _aggregate_provenance(
     return "unmanaged"
 
 
+def _load_present_tables(data_dir: str | None) -> set[str] | None:
+    """Return the set of table names present across all cases in data_dir.
+
+    Returns None (not an empty set) when the gateway is unusable, so callers
+    can distinguish "no data_dir" from "data_dir exists but has no tables".
+    """
+    if not data_dir or not os.path.isdir(data_dir):
+        return None
+    try:
+        gw = LocalDataGateway.from_case_folders(data_dir)
+        case_ids = gw.list_case_ids()
+        if not case_ids:
+            return None
+        present: set[str] = set()
+        for cid in case_ids:
+            gw.set_case(cid)
+            present.update(gw.list_tables())
+        return present if present else None
+    except Exception:
+        return None
+
+
 def build_catalog_view(
     profile_dir: str,
     context_dir: str,
     provenance_path: str,
+    data_dir: str | None = None,
 ) -> dict:
     """Build the catalog view-model dict.
 
@@ -60,6 +86,11 @@ def build_catalog_view(
         Path to the directory containing ``*_context_description.txt`` files.
     provenance_path:
         Path to the ``.provenance.json`` sidecar file.
+    data_dir:
+        Optional path to the case-folders root (e.g. ``data_tables/real``).
+        When provided and non-empty, used to mark profiles as ``stale=True``
+        when no backing CSV table exists.  If None, missing, or empty,
+        all profiles are marked ``stale=False`` (graceful fallback).
 
     Returns
     -------
@@ -71,6 +102,7 @@ def build_catalog_view(
                     "table": str,
                     "description": str,
                     "aliases": list[str],
+                    "stale": bool,
                     "columns": [
                         {
                             "name": str,
@@ -93,6 +125,8 @@ def build_catalog_view(
     context_by_table = cd.load_context_by_table(context_dir)
     pv = Provenance(provenance_path)
 
+    present_tables = _load_present_tables(data_dir)
+
     tables_out: list[dict] = []
 
     for table_name in catalog.list_tables():
@@ -100,6 +134,13 @@ def build_catalog_view(
         description = profile.get("description", "")
         aliases = list(profile.get("aliases") or [])
         columns_spec: dict = profile.get("columns") or {}
+
+        # Staleness: live when table name OR any alias matches a present table.
+        if present_tables is None:
+            stale = False
+        else:
+            candidate_names = {table_name} | set(aliases)
+            stale = candidate_names.isdisjoint(present_tables)
 
         # Context entries for this table (var_name -> ContextEntry)
         table_ctx: dict = context_by_table.get(table_name, {})
@@ -142,8 +183,12 @@ def build_catalog_view(
             "table": table_name,
             "description": description,
             "aliases": aliases,
+            "stale": stale,
             "columns": columns_out,
             "context_only": context_only,
         })
+
+    # Sort: live (stale=False) first (alphabetical within group), stale last.
+    tables_out.sort(key=lambda t: (t["stale"], t["table"]))
 
     return {"tables": tables_out}
