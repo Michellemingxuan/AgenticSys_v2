@@ -122,41 +122,46 @@ tr:hover td { background: #fafbfc; }
 .legend .badge { margin-right: 6px; }
 /* Catalog master/detail layout */
 .catalog-layout { display: flex; gap: 24px; align-items: flex-start; }
-.catalog-toc { flex: 0 0 180px; min-width: 140px; position: sticky; top: 16px; }
+/* TOC — Amex font stack (Benton Sans degrades to Helvetica Neue / Helvetica / Arial) */
+.catalog-toc { flex: 0 0 200px; min-width: 160px; position: sticky; top: 16px; }
 .catalog-toc ul { list-style: none; margin: 0; padding: 0; }
 .catalog-toc li { margin: 0; }
-.catalog-toc a { display: block; padding: 4px 8px; font-size: 12px; color: #374151;
-                 border-radius: 4px; font-family: SF Mono, Menlo, Consolas, monospace; }
-.catalog-toc a:hover { background: #eff6ff; color: #2563eb; text-decoration: none; }
+.catalog-toc a { display: block; padding: 5px 10px; font-size: 13px; font-weight: 500;
+                 color: #4A5568; border-radius: 2px;
+                 font-family: "Benton Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+                 letter-spacing: 0.02em; }
+.catalog-toc a:hover { background: #F4F6F9; color: #006FCF; text-decoration: none; }
 .catalog-toc-title { font-size: 11px; font-weight: 700; text-transform: uppercase;
-                      letter-spacing: 0.5px; color: #6b7280; margin-bottom: 6px; }
-.catalog-toc-group { margin-bottom: 8px; }
-.catalog-toc-group-label { font-size: 11px; font-weight: 600; color: #9ca3af;
-                            padding: 2px 8px; letter-spacing: 0.3px; }
-.catalog-toc-group-label.stale { color: #d1d5db; }
-.catalog-toc-group ul { padding-left: 6px; }
+                      letter-spacing: 0.08em; color: #4A5568; margin-bottom: 8px;
+                      font-family: "Benton Sans", "Helvetica Neue", Helvetica, Arial, sans-serif; }
 .catalog-main { flex: 1 1 0; min-width: 0; }
 /* Group separator in the main panel */
 .catalog-group { margin-bottom: 28px; }
-.catalog-group-label { font-size: 12px; font-weight: 600; text-transform: uppercase;
-                        letter-spacing: 0.5px; color: #9ca3af; margin-bottom: 8px;
-                        padding-left: 2px; border-left: 3px solid #e5e7eb;
-                        padding-left: 8px; }
-.catalog-group-label.stale { color: #d1d5db; border-left-color: #f3f4f6; }
-/* Collapsible table details */
-details.tbl-block { border: 1px solid #e5e7eb; border-radius: 6px;
+/* Collapsible group details */
+details.grp-block { border: 1px solid #e5e7eb; border-radius: 6px;
                     margin-bottom: 20px; overflow: hidden; }
-details.tbl-block > summary { background: #f9fafb; padding: 10px 14px;
+details.grp-block > summary { background: #f9fafb; padding: 10px 14px;
                                border-bottom: 1px solid #e5e7eb; cursor: pointer;
                                font-size: 15px; font-weight: 600; list-style: none; }
-details.tbl-block > summary::-webkit-details-marker { display: none; }
-details.tbl-block > summary::before { content: "▶ "; font-size: 10px;
+details.grp-block > summary::-webkit-details-marker { display: none; }
+details.grp-block > summary::before { content: "▶ "; font-size: 10px;
                                        color: #6b7280; margin-right: 6px; }
-details.tbl-block[open] > summary::before { content: "▼ "; }
-details.tbl-block > summary .tbl-desc { font-weight: normal; font-size: 13px;
+details.grp-block[open] > summary::before { content: "▼ "; }
+details.grp-block > summary .tbl-desc { font-weight: normal; font-size: 13px;
                                          color: #6b7280; margin-left: 6px; }
-details.tbl-block > summary .tbl-aliases { font-weight: normal; font-size: 12px;
+details.grp-block > summary .tbl-aliases { font-weight: normal; font-size: 12px;
                                             color: #9ca3af; }
+/* Monthly/Transaction tabs */
+.tab-bar { display: flex; gap: 0; border-bottom: 2px solid #E2E8F0; margin: 0; }
+.tab-btn { padding: 10px 22px; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+           font-size: 12px; font-weight: 600; text-transform: uppercase;
+           letter-spacing: 0.08em; color: #4A5568;
+           border: none; border-bottom: 3px solid transparent; background: none;
+           cursor: pointer; margin-bottom: -2px; transition: color 0.15s; }
+.tab-btn.tab-active { color: #006FCF; border-bottom-color: #006FCF; }
+.tab-btn:hover { color: #00175A; }
+.tab-panel { display: none; }
+.tab-panel.tab-visible { display: block; }
 .tbl-inner { padding: 0; }
 </style>
 """
@@ -231,56 +236,110 @@ _CATALOG_TMPL = """{% autoescape true %}<!doctype html>
     <span class="badge badge-unmanaged">unmanaged</span> no baseline recorded
   </div>
 
-  <!-- Master / detail: TOC + collapsible table blocks -->
+  <!-- Master / detail: TOC + collapsible group blocks -->
   {% if not tables %}
     <p class="muted">No data-profile YAML files found in <code>{{ profile_dir }}</code>.</p>
   {% else %}
   <div class="catalog-layout">
-    <!-- Left: table-of-contents (grouped) -->
+    <!-- Left: table-of-contents — one entry per domain group -->
     <aside class="catalog-toc">
       <div class="catalog-toc-title">Tables</div>
-      {% for grp in groups %}
-      {% if grp.tables | length > 1 %}
-      <div class="catalog-toc-group">
-        <div class="catalog-toc-group-label{% if grp.all_stale %} stale{% endif %}">{{ grp.key }}</div>
-        <ul>
-          {% for tbl in grp.tables %}
-          <li><a href="#tbl-{{ tbl.table }}" {% if tbl.stale %}class="stale"{% endif %}>{{ tbl.table }}</a></li>
-          {% endfor %}
-        </ul>
-      </div>
-      {% else %}
       <ul>
-        {% for tbl in grp.tables %}
-        <li><a href="#tbl-{{ tbl.table }}" {% if tbl.stale %}class="stale"{% endif %}>{{ tbl.table }}</a></li>
+        {% for grp in groups %}
+        <li><a href="#grp-{{ grp.key }}">{{ grp.key }}</a></li>
         {% endfor %}
       </ul>
-      {% endif %}
-      {% endfor %}
     </aside>
 
-    <!-- Right: collapsible details blocks (grouped) -->
+    <!-- Right: one collapsible <details> per group; tabs inside for multi-member groups -->
     <div class="catalog-main">
       {% for grp in groups %}
       <div class="catalog-group">
-        {% if grp.tables | length > 1 %}
-        <div class="catalog-group-label{% if grp.all_stale %} stale{% endif %}">{{ grp.key }}</div>
-        {% endif %}
-        {% for tbl in grp.tables %}
-        <details class="tbl-block{% if tbl.stale %} stale{% endif %}" id="tbl-{{ tbl.table }}">
+        <details class="grp-block" id="grp-{{ grp.key }}">
           <summary>
-            {{ tbl.table }}
-            {% if tbl.stale %}
-              <span class="stale-marker">(no data table)</span>
-            {% endif %}
-            {% if tbl.description %}
-              <span class="tbl-desc">— {{ tbl.description }}</span>
-            {% endif %}
-            {% if tbl.aliases %}
-              <span class="tbl-aliases">(aliases: {{ tbl.aliases | join(", ") }})</span>
+            {{ grp.key }}
+            {% if grp.tables | length == 1 %}
+              {% set tbl = grp.tables[0] %}
+              {% if tbl.description_short %}
+                <span class="tbl-desc" title="{{ tbl.description }}">— {{ tbl.description_short }}</span>
+              {% endif %}
+              {% if tbl.aliases %}
+                <span class="tbl-aliases">(aliases: {{ tbl.aliases | join(", ") }})</span>
+              {% endif %}
             {% endif %}
           </summary>
-          <div class="tbl-inner">
+          {% if grp.tables | length > 1 %}
+          <!-- Horizontal tabs: Monthly (base) + Transaction -->
+          <div class="tab-bar" id="tabs-{{ grp.key }}">
+            <button class="tab-btn tab-active"
+                    onclick="switchTab('{{ grp.key }}', 0, this)">Monthly</button>
+            <button class="tab-btn"
+                    onclick="switchTab('{{ grp.key }}', 1, this)">Transaction</button>
+          </div>
+          {% for tbl in grp.tables %}
+          <div class="tab-panel{% if loop.index == 1 %} tab-visible{% endif %}"
+               id="tab-{{ grp.key }}-{{ loop.index0 }}"
+               data-group="{{ grp.key }}" data-idx="{{ loop.index0 }}">
+            <div class="tbl-inner" id="tbl-{{ tbl.table }}">
+              {% if tbl.description %}
+              <p style="font-size:13px;color:#4A5568;padding:8px 14px 0;margin:0;"
+                 title="{{ tbl.description }}">{{ tbl.description_short }}</p>
+              {% endif %}
+              {% if tbl.aliases %}
+              <p style="font-size:12px;color:#9ca3af;padding:2px 14px 0;margin:0;">
+                aliases: {{ tbl.aliases | join(", ") }}</p>
+              {% endif %}
+              <table>
+                <thead>
+                  <tr>
+                    <th>Column</th>
+                    <th>dtype</th>
+                    <th>Description</th>
+                    <th>Threshold</th>
+                    <th title="Has a context entry">In context</th>
+                    <th>Provenance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for col in tbl.columns %}
+                  <tr>
+                    <td><strong>{{ col.name }}</strong></td>
+                    <td class="muted">{{ col.dtype }}{% if col.parse_hint %} <span title="{{ col.parse_hint }}">({{ col.parse_hint }})</span>{% endif %}</td>
+                    <td>{{ col.description or "" }}</td>
+                    <td>
+                      {% if col.threshold %}
+                        <span class="threshold">{{ col.threshold.value }} ({{ col.threshold.direction }})</span>
+                      {% else %}
+                        <span class="muted">—</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if col.in_context %}
+                        <span class="ctx-yes" title="context entry present">&#x2713;</span>
+                      {% else %}
+                        <span class="ctx-no" title="not in context">&#x2717;</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      <span class="badge badge-{{ col.provenance }}">{{ col.provenance }}</span>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+              {% if tbl.context_only %}
+              <div class="ctx-only">
+                <strong>Context-only vars (not in profile):</strong>
+                {% for v in tbl.context_only %}<span>{{ v }}</span>{% endfor %}
+              </div>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+          {% else %}
+          <!-- Single table: no tabs needed -->
+          {% set tbl = grp.tables[0] %}
+          <div class="tbl-inner" id="tbl-{{ tbl.table }}">
             <table>
               <thead>
                 <tr>
@@ -326,8 +385,8 @@ _CATALOG_TMPL = """{% autoescape true %}<!doctype html>
             </div>
             {% endif %}
           </div>
+          {% endif %}
         </details>
-        {% endfor %}
       </div>
       {% endfor %}
     </div>
@@ -336,8 +395,24 @@ _CATALOG_TMPL = """{% autoescape true %}<!doctype html>
 
   </div><!-- /page-body -->
 
-  <!-- TOC anchor + open: clicking a TOC link jumps to the block and opens it -->
   <script>
+  /* Tab switching for Monthly/Transaction groups */
+  function switchTab(groupKey, idx, btn) {
+    // Deactivate all tab buttons in this group
+    var bar = document.getElementById('tabs-' + groupKey);
+    if (bar) {
+      bar.querySelectorAll('.tab-btn').forEach(function(b){ b.classList.remove('tab-active'); });
+    }
+    btn.classList.add('tab-active');
+    // Hide all panels in this group, show the selected one
+    document.querySelectorAll('.tab-panel[data-group="' + groupKey + '"]').forEach(function(p){
+      p.classList.remove('tab-visible');
+    });
+    var active = document.getElementById('tab-' + groupKey + '-' + idx);
+    if (active) active.classList.add('tab-visible');
+  }
+
+  /* TOC anchor + open: clicking a TOC link opens the group <details> and scrolls to it */
   (function(){
     function openTarget(hash){
       if (!hash) return;
@@ -348,18 +423,14 @@ _CATALOG_TMPL = """{% autoescape true %}<!doctype html>
         el.scrollIntoView({behavior: 'smooth', block: 'start'});
       }
     }
-    // Handle clicks on TOC links directly.
     document.querySelectorAll('.catalog-toc a').forEach(function(a){
       a.addEventListener('click', function(e){
-        // Allow the browser's default anchor navigation, then open the target.
         setTimeout(function(){ openTarget(a.getAttribute('href')); }, 0);
       });
     });
-    // Also handle any hashchange (e.g. browser back/forward).
     window.addEventListener('hashchange', function(){
       openTarget(window.location.hash);
     });
-    // On initial load, open if the URL already has a hash.
     if (window.location.hash) openTarget(window.location.hash);
   })();
   </script>

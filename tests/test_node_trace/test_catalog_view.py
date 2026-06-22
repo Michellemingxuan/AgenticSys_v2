@@ -314,7 +314,7 @@ def _make_profile_yaml(name, aliases=None):
 
 
 def test_stale_backed_false_unbacked_true(tmp_path, monkeypatch):
-    """Profile with a matching CSV is stale=False; profile with no CSV is stale=True."""
+    """Profile with a matching CSV is live (appears in tables); profile with no CSV is excluded."""
     prof = tmp_path / "prof"
     prof.mkdir()
     # 'live_table' will have a CSV backing; 'ghost_table' will not.
@@ -332,19 +332,22 @@ def test_stale_backed_false_unbacked_true(tmp_path, monkeypatch):
     case_dir = data_dir / "case001"
     case_dir.mkdir(parents=True)
     (case_dir / "live_table.csv").write_text("col\n1\n2\n")
-    # ghost_table has no CSV
+    # ghost_table has no CSV — excluded
 
     view = build_catalog_view(
         str(prof), str(ctx), str(tmp_path / ".prov.json"),
         data_dir=str(data_dir),
     )
-    tables = {t["table"]: t for t in view["tables"]}
-    assert tables["live_table"]["stale"] is False
-    assert tables["ghost_table"]["stale"] is True
+    table_names = [t["table"] for t in view["tables"]]
+    assert "live_table" in table_names
+    assert view["tables"][0]["stale"] is False
+    # ghost_table excluded entirely — not in tables or groups
+    assert "ghost_table" not in table_names
+    assert "ghost_table" not in [g["key"] for g in view["groups"]]
 
 
 def test_stale_sorts_last(tmp_path, monkeypatch):
-    """Stale tables appear after live tables in the returned list."""
+    """Stale tables are excluded entirely; only live tables appear in the result."""
     prof = tmp_path / "prof"
     prof.mkdir()
     (prof / "alpha.yaml").write_text(_make_profile_yaml("alpha"))       # live
@@ -362,16 +365,17 @@ def test_stale_sorts_last(tmp_path, monkeypatch):
     case_dir.mkdir(parents=True)
     (case_dir / "alpha.csv").write_text("col\n1\n")
     (case_dir / "gamma.csv").write_text("col\n1\n")
-    # beta has no CSV — stale
+    # beta has no CSV — excluded
 
     view = build_catalog_view(
         str(prof), str(ctx), str(tmp_path / ".prov.json"),
         data_dir=str(data_dir),
     )
     names = [t["table"] for t in view["tables"]]
-    # alpha and gamma (live) before beta (stale)
-    assert names.index("beta") > names.index("alpha")
-    assert names.index("beta") > names.index("gamma")
+    # alpha and gamma (live) present; beta (stale) excluded entirely
+    assert "alpha" in names
+    assert "gamma" in names
+    assert "beta" not in names
 
 
 def test_stale_via_alias(tmp_path, monkeypatch):
@@ -556,7 +560,7 @@ def test_grouping_group_key_assigned(tmp_path, monkeypatch):
 
 
 def test_grouping_all_stale_group_sorts_last(tmp_path, monkeypatch):
-    """An all-stale group (both base + transaction stale) should sort after live groups."""
+    """An all-stale group (both base + transaction stale) is excluded entirely; live group remains."""
     prof = tmp_path / "prof"
     prof.mkdir()
     # live standalone table
@@ -581,17 +585,15 @@ def test_grouping_all_stale_group_sorts_last(tmp_path, monkeypatch):
     )
 
     groups = view["groups"]
-    live_group = next(g for g in groups if any(t["table"] == "live_table" for t in g["tables"]))
-    stale_group = next(g for g in groups if any(t["table"] == "stale_base" for t in g["tables"]))
-
-    # All-stale group should have all_stale=True
-    assert stale_group.get("all_stale") is True
+    group_keys = [g["key"] for g in groups]
+    # The live group is present
+    assert "live_table" in group_keys
+    # The stale group is excluded entirely
+    assert "stale_base" not in group_keys
+    # Only one group remains
+    assert len(groups) == 1
+    live_group = groups[0]
     assert live_group.get("all_stale") is False
-
-    # The stale group must appear after the live group.
-    live_idx = groups.index(live_group)
-    stale_idx = groups.index(stale_group)
-    assert stale_idx > live_idx, "all-stale group must sort after live group"
 
 
 def test_grouping_standalone_is_own_group(tmp_path, monkeypatch):
@@ -634,3 +636,197 @@ def test_grouping_existing_tables_key_unchanged(tmp_path, monkeypatch):
     # Existing key must remain
     assert "tables" in view
     assert len(view["tables"]) == 3
+
+
+# ---------------------------------------------------------------------------
+# Change 3 — Stale profiles EXCLUDED entirely from tables and groups
+# ---------------------------------------------------------------------------
+
+def test_stale_excluded_from_tables_and_groups(tmp_path, monkeypatch):
+    """Stale tables (no backing CSV) are EXCLUDED from both 'tables' and 'groups'."""
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    (prof / "live_table.yaml").write_text(_make_profile_yaml("live_table"))
+    (prof / "ghost_table.yaml").write_text(_make_profile_yaml("ghost_table"))
+
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {})
+
+    data_dir = tmp_path / "data"
+    (data_dir / "case001").mkdir(parents=True)
+    (data_dir / "case001" / "live_table.csv").write_text("col\n1\n")
+    # ghost_table has no CSV — stale
+
+    view = build_catalog_view(
+        str(prof), str(ctx), str(tmp_path / ".prov.json"),
+        data_dir=str(data_dir),
+    )
+    table_names = [t["table"] for t in view["tables"]]
+    group_keys = [g["key"] for g in view["groups"]]
+
+    assert "ghost_table" not in table_names, "stale table must be excluded from 'tables'"
+    assert "ghost_table" not in group_keys, "stale table must be excluded from 'groups'"
+    assert "live_table" in table_names, "live table must still be present"
+
+
+def test_stale_pair_excluded_when_both_stale(tmp_path, monkeypatch):
+    """A paired group (base + _transaction) with no backing CSVs is excluded entirely."""
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    (prof / "live.yaml").write_text(_make_profile_yaml("live"))
+    (prof / "stale_base.yaml").write_text(_make_profile_yaml("stale_base"))
+    (prof / "stale_base_transaction.yaml").write_text(_make_profile_yaml("stale_base_transaction"))
+
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {})
+
+    data_dir = tmp_path / "data"
+    (data_dir / "case001").mkdir(parents=True)
+    (data_dir / "case001" / "live.csv").write_text("col\n1\n")
+
+    view = build_catalog_view(
+        str(prof), str(ctx), str(tmp_path / ".prov.json"),
+        data_dir=str(data_dir),
+    )
+    table_names = [t["table"] for t in view["tables"]]
+    group_keys = [g["key"] for g in view["groups"]]
+
+    assert "stale_base" not in table_names
+    assert "stale_base_transaction" not in table_names
+    assert "stale_base" not in group_keys
+    assert "live" in table_names
+
+
+def test_stale_excluded_data_dir_none_all_present(tmp_path, monkeypatch):
+    """data_dir=None → nothing is stale → all tables appear in tables and groups."""
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    (prof / "t1.yaml").write_text(_make_profile_yaml("t1"))
+    (prof / "t2.yaml").write_text(_make_profile_yaml("t2"))
+
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {})
+
+    view = build_catalog_view(str(prof), str(ctx), str(tmp_path / ".prov.json"), data_dir=None)
+    table_names = [t["table"] for t in view["tables"]]
+    assert "t1" in table_names
+    assert "t2" in table_names
+    assert len(view["groups"]) == 2
+
+
+def test_stale_groups_base_first_after_exclusion(tmp_path, monkeypatch):
+    """After excluding stale entries, a live group with base + transaction still has base first."""
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    (prof / "scores.yaml").write_text(_make_profile_yaml("scores"))
+    (prof / "scores_transaction.yaml").write_text(_make_profile_yaml("scores_transaction"))
+    (prof / "ghost.yaml").write_text(_make_profile_yaml("ghost"))
+
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {})
+
+    data_dir = tmp_path / "data"
+    (data_dir / "case001").mkdir(parents=True)
+    (data_dir / "case001" / "scores.csv").write_text("col\n1\n")
+    (data_dir / "case001" / "scores_transaction.csv").write_text("col\n1\n")
+
+    view = build_catalog_view(
+        str(prof), str(ctx), str(tmp_path / ".prov.json"),
+        data_dir=str(data_dir),
+    )
+    scores_group = next(g for g in view["groups"] if g["key"] == "scores")
+    names = [t["table"] for t in scores_group["tables"]]
+    assert names[0] == "scores"
+    assert names[1] == "scores_transaction"
+    assert "ghost" not in [t["table"] for t in view["tables"]]
+
+
+# ---------------------------------------------------------------------------
+# Change 1 — description_short: truncate long descriptions
+# ---------------------------------------------------------------------------
+
+def _make_profile_with_description(tmp_path, name, description):
+    spec = {
+        "table": name,
+        "description": description,
+        "columns": {"col": {"dtype": "int", "description": "x"}},
+    }
+    return yaml.safe_dump(spec)
+
+
+def test_description_short_truncates_at_140_chars(tmp_path, monkeypatch):
+    """Long description (>140 chars, no early sentence end) gets a description_short truncated to ~140 chars + ellipsis."""
+    long_desc = "A" * 200  # no sentence end, 200 chars
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    (prof / "t.yaml").write_text(_make_profile_with_description(tmp_path, "t", long_desc))
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {})
+
+    view = build_catalog_view(str(prof), str(ctx), str(tmp_path / ".prov.json"))
+    t = view["tables"][0]
+    # description must remain full
+    assert t["description"] == long_desc
+    # description_short must be present and shorter
+    assert "description_short" in t
+    short = t["description_short"]
+    assert len(short) <= 145, f"description_short too long: {len(short)}"
+    assert short.endswith("…") or short.endswith("..."), "must end with ellipsis"
+
+
+def test_description_short_uses_first_sentence_when_shorter(tmp_path, monkeypatch):
+    """When the first sentence is < 140 chars, description_short uses the first sentence (not full text)."""
+    # First sentence is 30 chars; total desc is > 140 chars so truncation IS triggered.
+    first_sentence = "First sentence."
+    rest = " " + "B" * 150  # make total > 140
+    desc = first_sentence + rest
+    assert len(desc) > 140, "test precondition: description must exceed 140 chars"
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    (prof / "t.yaml").write_text(_make_profile_with_description(tmp_path, "t", desc))
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {})
+
+    view = build_catalog_view(str(prof), str(ctx), str(tmp_path / ".prov.json"))
+    t = view["tables"][0]
+    assert t["description"] == desc
+    short = t["description_short"]
+    # Should be at most first sentence + ellipsis
+    assert "First sentence" in short
+    assert len(short) < len(desc)
+    assert short.endswith("…") or short.endswith("...")
+
+
+def test_description_short_no_truncation_for_short_desc(tmp_path, monkeypatch):
+    """Short descriptions (< 140 chars) get description_short equal to description (no ellipsis)."""
+    short_desc = "Short description."
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    (prof / "t.yaml").write_text(_make_profile_with_description(tmp_path, "t", short_desc))
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {})
+
+    view = build_catalog_view(str(prof), str(ctx), str(tmp_path / ".prov.json"))
+    t = view["tables"][0]
+    assert t["description_short"] == short_desc

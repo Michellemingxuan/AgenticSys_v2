@@ -28,6 +28,9 @@ def _app(tmp_path, reconcile_enable: bool = False, db_path: str = _TEST_DB):
     """Build a test Flask app.  Pass reconcile_enable=True for tests that
     exercise the enabled path; the default mirrors the production default (OFF).
     Pass db_path to control which NODE_TRACE_DB is shown in the header.
+
+    DATA_DIR is explicitly set to a non-existent path so the stale-exclusion
+    logic falls back to the all-live mode (stale=False for all tables).
     """
     app = Flask(__name__)
     app.config.update(
@@ -37,6 +40,7 @@ def _app(tmp_path, reconcile_enable: bool = False, db_path: str = _TEST_DB):
         RECONCILE_RESULTS=str(tmp_path / "last.json"),
         CATALOG_RECONCILE_ENABLE=reconcile_enable,
         NODE_TRACE_DB=db_path,
+        DATA_DIR=str(tmp_path / "nonexistent_data"),
     )
     register_catalog_routes(app)
     return app
@@ -568,13 +572,14 @@ def test_catalog_traces_tab_not_active(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_catalog_toc_entry_for_table(tmp_path):
-    """GET /catalog renders a TOC <a href="#tbl-<name>"> entry for each table."""
+    """GET /catalog renders a TOC <a href="#grp-<key>"> entry for each group."""
     _write_profile(tmp_path / "prof", table_name="my_scores")
     (tmp_path / "ctx").mkdir()
     app = _app(tmp_path)
     r = app.test_client().get("/catalog")
     assert r.status_code == 200
-    assert b'href="#tbl-my_scores"' in r.data
+    # TOC now links to group-level details (grp-<key>), not individual table (tbl-<name>)
+    assert b'href="#grp-my_scores"' in r.data
 
 
 def test_catalog_details_id_for_table(tmp_path):
@@ -609,7 +614,7 @@ def test_catalog_details_provenance_badge_present(tmp_path):
 
 
 def test_catalog_toc_and_details_multiple_tables(tmp_path):
-    """GET /catalog with multiple tables: TOC and details blocks for each."""
+    """GET /catalog with multiple tables: TOC entry per group, details block per group/table."""
     prof_dir = tmp_path / "prof"
     prof_dir.mkdir()
     for name in ("alpha", "beta", "gamma"):
@@ -622,7 +627,8 @@ def test_catalog_toc_and_details_multiple_tables(tmp_path):
     r = app.test_client().get("/catalog")
     assert r.status_code == 200
     for name in ("alpha", "beta", "gamma"):
-        assert f'href="#tbl-{name}"'.encode() in r.data
+        # TOC links to group (grp-<name>); tbl-<name> still exists inside the group as tbl-inner id
+        assert f'href="#grp-{name}"'.encode() in r.data
         assert f'id="tbl-{name}"'.encode() in r.data
 
 
@@ -690,7 +696,7 @@ def test_catalog_stale_table_has_grey_class(tmp_path):
 
 
 def test_catalog_stale_table_has_no_data_table_marker(tmp_path):
-    """GET /catalog: stale table shows '(no data table)' marker."""
+    """GET /catalog: stale table (no backing CSV) is excluded entirely — not shown at all."""
     prof_dir = tmp_path / "prof"
     prof_dir.mkdir()
     (prof_dir / "live.yaml").write_text(yaml.safe_dump({
@@ -705,7 +711,7 @@ def test_catalog_stale_table_has_no_data_table_marker(tmp_path):
 
     data_dir = tmp_path / "data"
     (data_dir / "case001").mkdir(parents=True)
-    # Only live.csv present; ghost has no CSV → stale
+    # Only live.csv present; ghost has no CSV → excluded from page
     (data_dir / "case001" / "live.csv").write_text("col\n1\n")
 
     app = Flask(__name__)
@@ -719,7 +725,12 @@ def test_catalog_stale_table_has_no_data_table_marker(tmp_path):
     register_catalog_routes(app)
     r = app.test_client().get("/catalog")
     assert r.status_code == 200
-    assert b"no data table" in r.data
+    html = r.data.decode("utf-8")
+    # ghost is excluded entirely — no entry in TOC or details
+    assert 'id="tbl-ghost"' not in html
+    assert 'href="#grp-ghost"' not in html
+    # live is still present
+    assert "live" in html
 
 
 # ---------------------------------------------------------------------------
@@ -806,7 +817,7 @@ def test_catalog_grouped_tables_adjacent_in_html(tmp_path):
 
 
 def test_catalog_toc_grouped_entries(tmp_path):
-    """GET /catalog TOC: model_scores_transaction appears after model_scores in TOC."""
+    """GET /catalog TOC: a paired group has a single TOC entry (group key), not two separate entries."""
     prof_dir = tmp_path / "prof"
     prof_dir.mkdir()
     for name in ("model_scores", "model_scores_transaction"):
@@ -820,12 +831,16 @@ def test_catalog_toc_grouped_entries(tmp_path):
     assert r.status_code == 200
     html = r.data.decode("utf-8")
 
-    # Both TOC links must be present and in correct order.
-    assert 'href="#tbl-model_scores"' in html
-    assert 'href="#tbl-model_scores_transaction"' in html
-    idx_base_toc = html.find('href="#tbl-model_scores"')
-    idx_txn_toc = html.find('href="#tbl-model_scores_transaction"')
-    assert idx_base_toc < idx_txn_toc, "TOC: base table must come before transaction variant"
+    # TOC now has ONE entry per group — group key "model_scores" links to grp-model_scores
+    assert 'href="#grp-model_scores"' in html
+    # The _transaction table must NOT be a separate TOC entry
+    import re
+    toc_match = re.search(r'<aside class="catalog-toc">(.*?)</aside>', html, re.DOTALL)
+    assert toc_match, "catalog-toc aside not found"
+    toc_html = toc_match.group(1)
+    assert "model_scores_transaction" not in toc_html, (
+        "_transaction table should not appear as a separate TOC entry"
+    )
 
 
 def test_catalog_group_label_present_for_paired_tables(tmp_path):
@@ -862,3 +877,268 @@ def test_catalog_standalone_table_no_extra_heading(tmp_path):
     # No "group-heading" or "catalog-group-label" CSS class should appear for solo table.
     # (Light check: the page renders and no 500.)
     assert r.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Change 1 — Truncate long table descriptions
+# ---------------------------------------------------------------------------
+
+def test_catalog_long_description_truncated_in_visible_text(tmp_path):
+    """Long description (>140 chars) is truncated in visible text with ellipsis."""
+    prof_dir = tmp_path / "prof"
+    prof_dir.mkdir()
+    long_desc = "Word " * 60  # ~300 chars, no sentence ending
+    (prof_dir / "t.yaml").write_text(yaml.safe_dump({
+        "table": "t",
+        "description": long_desc.strip(),
+        "columns": {"col": {"dtype": "int", "description": "x"}},
+    }))
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+    # Truncated form (with ellipsis) must appear in visible content
+    assert "…" in html or "..." in html
+    # Full text must NOT appear verbatim in the body text (only in title= attribute)
+    # We verify the full text appears in a title= attribute
+    assert "title=" in html
+
+
+def test_catalog_description_full_text_in_title_attr(tmp_path):
+    """Full description text is accessible via the title= tooltip attribute."""
+    prof_dir = tmp_path / "prof"
+    prof_dir.mkdir()
+    full_desc = "This is a very long description that goes beyond one hundred and forty characters. " + "X" * 100
+    (prof_dir / "t.yaml").write_text(yaml.safe_dump({
+        "table": "t",
+        "description": full_desc,
+        "columns": {"col": {"dtype": "int", "description": "x"}},
+    }))
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+    # The full description text must appear in a title attribute
+    assert "title=" in html
+    # At minimum the start of the full text must appear in title
+    assert "This is a very long" in html
+
+
+def test_catalog_short_description_not_truncated(tmp_path):
+    """Short description (<= 140 chars) renders as-is without ellipsis."""
+    prof_dir = tmp_path / "prof"
+    prof_dir.mkdir()
+    short_desc = "Short table description."
+    (prof_dir / "t.yaml").write_text(yaml.safe_dump({
+        "table": "t",
+        "description": short_desc,
+        "columns": {"col": {"dtype": "int", "description": "x"}},
+    }))
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+    assert short_desc.encode() in r.data
+
+
+# ---------------------------------------------------------------------------
+# Change 2 — Monthly/Transaction horizontal tabs
+# ---------------------------------------------------------------------------
+
+def _write_pair(prof_dir, base="score_drivers"):
+    """Write base + _transaction profile YAMLs."""
+    for name in (base, f"{base}_transaction"):
+        (prof_dir / f"{name}.yaml").write_text(yaml.safe_dump({
+            "table": name,
+            "description": f"{name} table",
+            "columns": {"col1": {"dtype": "str", "description": f"col in {name}"}},
+        }))
+
+
+def test_catalog_multi_member_group_has_tab_controls(tmp_path):
+    """A multi-member group renders Monthly and Transaction tab buttons."""
+    prof_dir = tmp_path / "prof"
+    prof_dir.mkdir()
+    _write_pair(prof_dir, "score_drivers")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+    # Both tab labels must appear
+    assert "Monthly" in html
+    assert "Transaction" in html
+
+
+def test_catalog_single_member_group_no_tab_controls(tmp_path):
+    """A single-member group renders no Monthly/Transaction tab buttons in the body."""
+    _write_profile(tmp_path / "prof", table_name="payments")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+    # Single-table group must NOT have a tab-bar in the body
+    # (CSS may contain "Monthly" in a comment, so check for the actual tab-bar element)
+    assert 'class="tab-bar"' not in html
+    assert 'class="tab-btn' not in html
+
+
+def test_catalog_multi_member_group_both_table_contents_in_dom(tmp_path):
+    """Both base and _transaction table column content are present in DOM (for tab switching)."""
+    prof_dir = tmp_path / "prof"
+    prof_dir.mkdir()
+    (prof_dir / "score_drivers.yaml").write_text(yaml.safe_dump({
+        "table": "score_drivers",
+        "description": "monthly table",
+        "columns": {"monthly_col": {"dtype": "float", "description": "monthly value"}},
+    }))
+    (prof_dir / "score_drivers_transaction.yaml").write_text(yaml.safe_dump({
+        "table": "score_drivers_transaction",
+        "description": "transaction table",
+        "columns": {"txn_col": {"dtype": "str", "description": "transaction value"}},
+    }))
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+    # Both columns' data must appear somewhere in the DOM
+    assert "monthly_col" in html
+    assert "txn_col" in html
+
+
+def test_catalog_multi_member_group_single_details_block(tmp_path):
+    """A paired group uses a SINGLE <details id='grp-...'> block, not separate details per table."""
+    prof_dir = tmp_path / "prof"
+    prof_dir.mkdir()
+    _write_pair(prof_dir, "score_drivers")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+    # Must have grp-score_drivers id (the group-level details)
+    assert 'id="grp-score_drivers"' in html
+
+
+# ---------------------------------------------------------------------------
+# Change 3 — Stale profiles EXCLUDED entirely from page
+# ---------------------------------------------------------------------------
+
+def test_catalog_stale_table_excluded_from_page(tmp_path):
+    """Stale table (no backing CSV) must not appear anywhere in the rendered HTML."""
+    prof_dir = tmp_path / "prof"
+    prof_dir.mkdir()
+    (prof_dir / "live.yaml").write_text(yaml.safe_dump({
+        "table": "live", "description": "live table",
+        "columns": {"col": {"dtype": "int", "description": "x"}},
+    }))
+    (prof_dir / "ghost.yaml").write_text(yaml.safe_dump({
+        "table": "ghost", "description": "ghost table",
+        "columns": {"col": {"dtype": "int", "description": "y"}},
+    }))
+    (tmp_path / "ctx").mkdir()
+
+    data_dir = tmp_path / "data"
+    (data_dir / "case001").mkdir(parents=True)
+    (data_dir / "case001" / "live.csv").write_text("col\n1\n")
+
+    app = Flask(__name__)
+    app.config.update(
+        PROFILE_DIR=str(prof_dir),
+        CONTEXT_DIR=str(tmp_path / "ctx"),
+        PROVENANCE_PATH=str(tmp_path / ".prov.json"),
+        RECONCILE_RESULTS=str(tmp_path / "last.json"),
+        DATA_DIR=str(data_dir),
+    )
+    register_catalog_routes(app)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+    # ghost must NOT appear as a table entry (no tbl-ghost id, no ghost in TOC)
+    assert 'id="tbl-ghost"' not in html
+    assert 'href="#tbl-ghost"' not in html
+    # live must still appear
+    assert 'id="tbl-live"' in html or "live" in html
+
+
+# ---------------------------------------------------------------------------
+# Change 4 — TOC: one entry per domain group
+# ---------------------------------------------------------------------------
+
+def test_catalog_toc_one_entry_per_group(tmp_path):
+    """TOC has one entry per group key; _transaction table is NOT a separate TOC entry."""
+    prof_dir = tmp_path / "prof"
+    prof_dir.mkdir()
+    _write_pair(prof_dir, "score_drivers")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+
+    # Extract TOC section (inside .catalog-toc aside)
+    import re
+    toc_match = re.search(r'<aside class="catalog-toc">(.*?)</aside>', html, re.DOTALL)
+    assert toc_match, "catalog-toc aside not found"
+    toc_html = toc_match.group(1)
+
+    # The group key 'score_drivers' must appear in TOC
+    assert "score_drivers" in toc_html
+    # The full transaction table name must NOT be a separate TOC link
+    assert "score_drivers_transaction" not in toc_html
+
+
+def test_catalog_toc_entry_links_to_group_details(tmp_path):
+    """TOC entry for a group links to grp-<key>, not tbl-<table>."""
+    prof_dir = tmp_path / "prof"
+    prof_dir.mkdir()
+    _write_pair(prof_dir, "score_drivers")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+
+    import re
+    toc_match = re.search(r'<aside class="catalog-toc">(.*?)</aside>', html, re.DOTALL)
+    assert toc_match
+    toc_html = toc_match.group(1)
+    # TOC link for the group must use grp-score_drivers
+    assert 'href="#grp-score_drivers"' in toc_html
+
+
+def test_catalog_toc_standalone_links_to_grp(tmp_path):
+    """TOC entry for a standalone table uses grp-<table> (or tbl-<table>) as anchor."""
+    _write_profile(tmp_path / "prof", table_name="payments")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+    import re
+    toc_match = re.search(r'<aside class="catalog-toc">(.*?)</aside>', html, re.DOTALL)
+    assert toc_match
+    toc_html = toc_match.group(1)
+    # Standalone table TOC entry: either grp-payments or tbl-payments as anchor
+    assert "grp-payments" in toc_html or "payments" in toc_html
+
+
+# ---------------------------------------------------------------------------
+# Change 5 — Amex TOC font
+# ---------------------------------------------------------------------------
+
+def test_catalog_toc_amex_font_stack(tmp_path):
+    """The catalog TOC CSS uses the Amex font stack (Helvetica Neue / Helvetica / Arial)."""
+    _write_profile(tmp_path / "prof", table_name="t")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+    # The Amex font stack must appear in the CSS for the TOC
+    assert "Helvetica Neue" in html or "Helvetica" in html

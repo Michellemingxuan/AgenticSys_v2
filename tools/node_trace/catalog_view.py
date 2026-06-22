@@ -6,6 +6,7 @@ Output shape is consumed by Task V3 (the Flask /catalog route).
 from __future__ import annotations
 
 import os
+import re as _re
 
 from datalayer.catalog import DataCatalog
 from datalayer.gateway import LocalDataGateway
@@ -15,6 +16,26 @@ import datalayer.context_dict as cd
 
 # Fields checked when computing per-column provenance aggregate.
 _PROVENANCE_FIELDS = ("description", "risk_threshold")
+
+_DESC_MAX_CHARS = 140
+
+
+def _description_short(text: str) -> str:
+    """Return a truncated version of *text* for display.
+
+    Strategy: use the first sentence (up to the first '.', '!', or '?')
+    when that is <= _DESC_MAX_CHARS, otherwise truncate at _DESC_MAX_CHARS.
+    Appends a unicode ellipsis when truncation occurs.
+    Returns *text* unchanged when it is already short enough.
+    """
+    if len(text) <= _DESC_MAX_CHARS:
+        return text
+    # Look for the first sentence boundary within the first _DESC_MAX_CHARS chars.
+    m = _re.search(r'[.!?]', text[:_DESC_MAX_CHARS])
+    if m:
+        return text[:m.end()].rstrip() + "…"
+    # No sentence boundary — hard-truncate.
+    return text[:_DESC_MAX_CHARS].rstrip() + "…"
 
 
 def _aggregate_provenance(
@@ -193,11 +214,18 @@ def build_catalog_view(
         tables_out.append({
             "table": table_name,
             "description": description,
+            "description_short": _description_short(description),
             "aliases": aliases,
             "stale": stale,
             "columns": columns_out,
             "context_only": context_only,
         })
+
+    # ── Exclude stale tables entirely ─────────────────────────────────────────
+    # Tables with no backing data file are dropped before grouping.
+    # When data_dir is None/missing, present_tables is None and stale is always
+    # False, so nothing is dropped (graceful fallback preserved).
+    tables_out = [t for t in tables_out if not t["stale"]]
 
     # ── Grouping ──────────────────────────────────────────────────────────────
     # Derive a group key by stripping a trailing "_transaction" suffix.
@@ -225,22 +253,22 @@ def build_catalog_view(
     for members in groups_map.values():
         members.sort(key=_group_sort_key)
 
-    # Build the groups list.  A group is all-stale only when every member is stale.
+    # Build the groups list.  Since stale entries are excluded, all_stale is
+    # always False; keep the key for interface compatibility.
     groups_list: list[dict] = [
         {
             "key": key,
             "tables": members,
-            "all_stale": all(t["stale"] for t in members),
+            "all_stale": False,
         }
         for key, members in groups_map.items()
     ]
 
-    # Sort groups: live (not all-stale) groups first (alphabetical within tier),
-    # all-stale groups last.
-    groups_list.sort(key=lambda g: (g["all_stale"], g["key"]))
+    # Sort groups alphabetically by key (all are live after exclusion).
+    groups_list.sort(key=lambda g: g["key"])
 
     # Rebuild the flat tables list so group members are adjacent and groups are
-    # in the sorted order (live first, stale last).
+    # in the sorted order.
     tables_out = [t for g in groups_list for t in g["tables"]]
 
     return {"tables": tables_out, "groups": groups_list}
