@@ -243,17 +243,25 @@ class DataManagerAgent:
         """
         if self.llm is None or not hasattr(self.llm, "ainvoke"):
             return {"canonical_col": None, "confidence": 0.0}
-        prompt = (
+        user_message = (
             "Match a real data column to one canonical column, or decline.\n"
             f"Real column: {real_col}\nSample values: {real_samples[:10]}\n"
             f"Canonical candidates: {canonical_candidates}\n"
             'Reply ONLY JSON: {"canonical_col": <name or null>, "confidence": <0..1>}'
         )
-        result = await self.llm.ainvoke(prompt)
-        return _parse_json(
-            getattr(result, "content", result),
-            default={"canonical_col": None, "confidence": 0.0},
+        result = await self.llm.ainvoke(
+            system_prompt="You are a data steward matching real column names to a canonical schema.",
+            user_message=user_message,
         )
+        if result.status != "success" or not result.data:
+            return {"canonical_col": None, "confidence": 0.0}
+        text = str(result.data.get("response", "")).strip()
+        out = _parse_json(text, default={"canonical_col": None, "confidence": 0.0})
+        try:
+            out["confidence"] = float(out.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            out["confidence"] = 0.0
+        return out
 
     async def polish_description(self, var_name, raw_description, knowledge_brief) -> str:
         """Rewrite a column description to be clearer and more specific.
@@ -263,16 +271,21 @@ class DataManagerAgent:
         """
         if self.llm is None or not hasattr(self.llm, "ainvoke"):
             return raw_description
-        prompt = (
+        user_message = (
             "Rewrite this variable description to be clear and specific, preserving "
             "its meaning. Do NOT add thresholds or invent facts. Use the house "
             f"knowledge brief for grounding.\nVariable: {var_name}\n"
             f"Description: {raw_description}\nKnowledge brief: {knowledge_brief}\n"
             "Reply with the improved description only."
         )
-        result = await self.llm.ainvoke(prompt)
-        text = getattr(result, "content", result)
-        return (text or raw_description).strip() or raw_description
+        result = await self.llm.ainvoke(
+            system_prompt="You are a senior data steward improving column descriptions for a credit-risk analytics catalog.",
+            user_message=user_message,
+        )
+        if result.status != "success" or not result.data:
+            return raw_description
+        text = str(result.data.get("response", "")).strip()
+        return text or raw_description
 
     async def normalize_threshold_text(self, text) -> dict | None:
         """Parse a threshold sentence the regex couldn't handle.
@@ -284,15 +297,21 @@ class DataManagerAgent:
         """
         if not text or self.llm is None or not hasattr(self.llm, "ainvoke"):
             return None
-        prompt = (
+        user_message = (
             "Extract the risk threshold from this sentence into JSON. Do NOT invent "
             "numbers — use only values present in the text.\n"
             f"Sentence: {text}\n"
             'Reply ONLY JSON: {"risk_threshold": <number or [lo,hi]>, '
             '"risk_direction": "above"|"below"|"range"}'
         )
-        result = await self.llm.ainvoke(prompt)
-        parsed = _parse_json(getattr(result, "content", result), default=None)
+        result = await self.llm.ainvoke(
+            system_prompt="You are a data steward extracting numeric risk thresholds from text into structured JSON.",
+            user_message=user_message,
+        )
+        if result.status != "success" or not result.data:
+            return None
+        resp_text = str(result.data.get("response", "")).strip()
+        parsed = _parse_json(resp_text, default=None)
         if not parsed:
             return None
         # Invariant guard: every numeric value returned MUST appear in the source.
@@ -300,11 +319,16 @@ class DataManagerAgent:
         vals = parsed.get("risk_threshold")
         vals = vals if isinstance(vals, list) else [vals]
         for v in vals:
-            if (
-                str(v) not in nums_in_text
-                and str(int(v)) not in nums_in_text
-                and (f"{v:g}" not in nums_in_text)
-            ):
+            if v is None:
+                return None
+            try:
+                if (
+                    str(v) not in nums_in_text
+                    and str(int(v)) not in nums_in_text
+                    and (f"{v:g}" not in nums_in_text)
+                ):
+                    return None
+            except (TypeError, ValueError):
                 return None
         return parsed
 
