@@ -19,5 +19,5 @@ venv/
 reports/
 # Private verified snapshots — never commit (local versioning only)
 .catalog_verified/
-# Provenance file is private/prod-only — never commit it
-config/data_profiles/.provenance.json
+# config/data_profiles/.provenance.json is intentionally NOT ignored —
+# it travels with the version-tracked YAML profiles (verified-content audit).
