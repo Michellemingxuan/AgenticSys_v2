@@ -24,6 +24,19 @@ class Provenance:
             return True  # never written by the agent → safe to write
         return baseline[field] == current_value
 
+    def ownership(self, table: str, col: str, field: str, current_value) -> str:
+        """Return the ownership status for a field.
+
+        Returns one of:
+          ``"unmanaged"`` — no baseline recorded (agent has never written it).
+          ``"agent"``     — baseline equals current_value (unchanged since last write).
+          ``"human"``     — baseline differs from current_value (human edited it).
+        """
+        baseline = self._data.get(table, {}).get(col, {})
+        if field not in baseline:
+            return "unmanaged"
+        return "agent" if baseline[field] == current_value else "human"
+
     def record(self, table: str, col: str, field: str, value) -> None:
         self._data.setdefault(table, {}).setdefault(col, {})[field] = value
 
