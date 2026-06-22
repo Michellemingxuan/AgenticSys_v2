@@ -29,4 +29,4 @@ class Provenance:
 
     def save(self) -> None:
         with open(self._path, "w", encoding="utf-8") as f:
-            json.dump(self._data, f, indent=2, sort_keys=True, default=str)
+            json.dump(self._data, f, indent=2, sort_keys=True)
