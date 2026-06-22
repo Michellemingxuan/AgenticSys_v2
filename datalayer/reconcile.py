@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from datalayer.context_dict import update_context_entry
+
 
 @dataclass
 class ConsistencyResult:
@@ -61,6 +63,7 @@ KNOWLEDGE_BRIEF = (
 class ReconcileResult:
     writes: list = field(default_factory=list)
     flags: list = field(default_factory=list)
+    context_writes: list = field(default_factory=list)
 
 
 async def reconcile(
@@ -71,6 +74,7 @@ async def reconcile(
     provenance,
     *,
     confidence_min: float = 0.75,
+    context_dir: str = "context",
 ) -> ReconcileResult:
     """Run the full reconciliation pipeline.
 
@@ -91,6 +95,7 @@ async def reconcile(
     cons = check_consistency(gateway)
     flags: list[str] = list(cons.flags)
     writes: list[tuple[str, str, str]] = []
+    context_writes: list[tuple[str, str]] = []
 
     for table, columns in cons.uniform_schema.items():
         schema = catalog.get_schema(table) or {}
@@ -103,6 +108,9 @@ async def reconcile(
                 flags.append(
                     f"[context-only] '{table}.{var}' in dictionary but not in data"
                 )
+
+        # Track which vars have already had reverse-sync attempted (dedupe per var).
+        reverse_synced: set[str] = set()
 
         for real_col in sorted(columns):
             # Resolve canonical column — exact match first, then agent.
@@ -118,6 +126,9 @@ async def reconcile(
                     flags.append(
                         f"[unresolved] '{table}.{real_col}' "
                         f"(conf {match['confidence']:.2f})"
+                    )
+                    flags.append(
+                        f"[coverage] {table}.{real_col} not covered by any profile entry"
                     )
                     continue
 
@@ -149,6 +160,9 @@ async def reconcile(
                     candidates.append(("risk_direction", rd))
 
             col_patch: dict[str, object] = {}
+            # Track whether this var is fully human-owned (all fields non-agent-owned).
+            var_is_human_owned = False
+
             for fieldname, value in candidates:
                 if value is None:
                     continue
@@ -164,10 +178,38 @@ async def reconcile(
                         f"[human-owned] '{table}.{canonical}.{fieldname}' "
                         f"left as human value"
                     )
+                    var_is_human_owned = True
                     continue
                 if live == value:   # already converged → don't rewrite
                     continue
                 col_patch[fieldname] = value
+
+            # Reverse-sync: if this var is human-owned and not yet synced, push
+            # the live profile values back to the context file.
+            if var_is_human_owned and canonical not in reverse_synced:
+                reverse_synced.add(canonical)
+                col_data = (
+                    catalog._profiles.get(table, {})
+                    .get("columns", {})
+                    .get(canonical, {})
+                )
+                live_desc = col_data.get("description", "")
+                rt = col_data.get("risk_threshold")
+                rd = col_data.get("risk_direction")
+                live_threshold = (
+                    {"risk_threshold": rt, "risk_direction": rd}
+                    if rt is not None and rd is not None
+                    else None
+                )
+                status = update_context_entry(
+                    context_dir, table, canonical, live_desc, live_threshold
+                )
+                if status == "updated":
+                    context_writes.append((table, canonical))
+                elif status in ("not_found", "no_context"):
+                    flags.append(f"[context-gap] {table}.{canonical}")
+                elif status == "multi_context":
+                    flags.append(f"[multi-context] {table}")
 
             if col_patch:
                 catalog.write_profile_patch(table, {"columns": {canonical: col_patch}})
@@ -176,7 +218,7 @@ async def reconcile(
                     writes.append((table, canonical, fieldname))
 
     provenance.save()
-    return ReconcileResult(writes=writes, flags=flags)
+    return ReconcileResult(writes=writes, flags=flags, context_writes=context_writes)
 
 
 def _samples(gateway, table: str, col: str, limit: int = 10) -> list:

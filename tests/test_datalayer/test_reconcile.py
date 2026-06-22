@@ -89,3 +89,26 @@ async def test_reconcile_skips_human_edited_field(tmp_path):
     # description was human-edited (current != baseline) → not overwritten, flagged
     assert cat._profiles["model_scores"]["columns"]["credit_loss_prob"]["description"] == "HUMAN EDIT"
     assert any("human" in f.lower() for f in res.flags)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_reverse_syncs_human_field_to_context(tmp_path, monkeypatch):
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {"modeling": ["model_scores"]})
+    ctxdir = tmp_path / "context"; ctxdir.mkdir()
+    (ctxdir / "modeling_context_description.txt").write_text(
+        "1. credit_loss_prob: stale desc. Values above 1 are risky.\n")
+    from datalayer.gateway import LocalDataGateway
+    gw = LocalDataGateway(case_data={"c1": {"model_scores": [{"credit_loss_prob": "55"}]}})
+    cat = _Catalog()
+    cat._profiles["model_scores"]["columns"]["credit_loss_prob"]["description"] = "HUMAN DESC"
+    from datalayer.provenance import Provenance
+    pv = Provenance(str(tmp_path / ".prov.json"))
+    pv.record("model_scores", "credit_loss_prob", "description", "agent-wrote-earlier")
+    from datalayer.context_dict import ContextEntry
+    ctx = {"model_scores": {"credit_loss_prob": ContextEntry(
+        "credit_loss_prob", "stale desc", None, threshold=None)}}
+    res = await reconcile(gw, cat, _Agent(), ctx, pv, context_dir=str(ctxdir))
+    line = (ctxdir / "modeling_context_description.txt").read_text().splitlines()[0]
+    assert "HUMAN DESC" in line                       # human edit pushed back to context
+    assert ("model_scores", "credit_loss_prob") in res.context_writes
