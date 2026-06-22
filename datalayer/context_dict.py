@@ -12,8 +12,10 @@ from dataclasses import dataclass
 # "1. var_name: rest"  — leading index optional, var_name is snake/alnum.
 _LINE = re.compile(r"^\s*\d+\.\s*([A-Za-z0-9_]+)\s*:\s*(.+)$")
 # A sentence that states a risk threshold.
+# The pattern allows dots only between digits (e.g. 5.8) so it cannot bleed
+# across a sentence boundary when an earlier keyword appears in the description.
 _THRESHOLD_SENTENCE = re.compile(
-    r"\b(?:values?|scores?)\b.*?\b(?:risky|risk)\b[^.]*\.",
+    r"\b(?:values?|scores?)\b(?:[^.]|\d\.\d)*\b(?:risky|risk)\b[^.]*\.",
     re.IGNORECASE,
 )
 

@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .env
 logs/
+context/
 # data_tables/ holds per-case CSVs (real or synthetic export). Keep the
 # top-level README and the simulated/ + real/ subfolder READMEs tracked, but
 # never commit actual CSV contents — they can carry sensitive PII.
