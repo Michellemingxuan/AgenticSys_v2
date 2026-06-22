@@ -50,3 +50,19 @@ def test_parse_context_file_extracts_entries(tmp_path):
 ])
 def test_normalize_threshold(text, expected):
     assert normalize_threshold(text) == expected
+
+
+def test_load_context_by_table(tmp_path):
+    from datalayer.context_dict import CONTEXT_TABLE_MAP, load_context_by_table
+
+    (tmp_path / "modeling_context_description.txt").write_text(
+        "1. credit_loss_prob: default score. Scores from 10-100 are risky.\n"
+    )
+    # Monkeypatch the map to point a known stem at two tables.
+    import datalayer.context_dict as cd
+    cd.CONTEXT_TABLE_MAP = {"modeling": ["model_scores", "model_scores_transaction"]}
+
+    out = load_context_by_table(str(tmp_path))
+    assert "model_scores" in out and "model_scores_transaction" in out
+    entry = out["model_scores"]["credit_loss_prob"]
+    assert entry.threshold == {"risk_threshold": [10.0, 100.0], "risk_direction": "range"}

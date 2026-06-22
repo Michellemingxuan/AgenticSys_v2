@@ -6,6 +6,7 @@ this module only splits the description from the threshold sentence.
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 
@@ -25,6 +26,7 @@ class ContextEntry:
     var_name: str
     raw_description: str
     threshold_text: str | None
+    threshold: dict | None = None
 
 
 def parse_context_file(path: str) -> list[ContextEntry]:
@@ -60,3 +62,40 @@ def normalize_threshold(text: str | None) -> dict | None:
         direction = "below" if word in _BELOW_WORDS else "above"
         return {"risk_threshold": float(bm.group(2)), "risk_direction": direction}
     return None
+
+
+# Static domain → tables map (filename stem before "_context_description.txt").
+CONTEXT_TABLE_MAP: dict[str, list[str]] = {
+    "modeling": ["model_scores", "model_scores_transaction"],
+    "score_driver": ["score_drivers", "score_drivers_transaction"],
+    "crossbu": ["crossbu_cards", "crossbu_merchants"],
+    "spend": ["spends"],
+    "payment": ["payments"],
+    "payment_spend": ["spends", "payments"],
+    "bureau": ["bureau"],
+    "strategy": ["strategy"],
+}
+
+
+def load_context_by_table(context_dir: str) -> dict[str, dict[str, ContextEntry]]:
+    """Load context entries grouped by canonical table name.
+
+    Returns a nested dict: {canonical_table: {var_name: ContextEntry}}.
+    Each ContextEntry.threshold is pre-normalized via normalize_threshold.
+    """
+    out: dict[str, dict[str, ContextEntry]] = {}
+    for fname in sorted(os.listdir(context_dir)):
+        if not fname.endswith("_context_description.txt"):
+            continue
+        stem = fname[: -len("_context_description.txt")]
+        tables = CONTEXT_TABLE_MAP.get(stem)
+        if not tables:
+            continue
+        entries = parse_context_file(os.path.join(context_dir, fname))
+        for e in entries:
+            e.threshold = normalize_threshold(e.threshold_text)
+        for table in tables:
+            bucket = out.setdefault(table, {})
+            for e in entries:
+                bucket[e.var_name] = e
+    return out
