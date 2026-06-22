@@ -183,7 +183,21 @@ _STYLE = """
 <style>
 html, body { margin: 0; padding: 0; }
 body { font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-       padding: 24px; color: #1a1a1a; box-sizing: border-box; }
+       color: #1a1a1a; box-sizing: border-box; }
+/* Shared header */
+.site-header { background: #1e3a5f; color: #fff; padding: 12px 24px 0; }
+.site-header .site-title { font-size: 18px; font-weight: 700; letter-spacing: -0.2px;
+                            color: #fff; text-decoration: none; }
+.site-header .site-db { font-size: 11px; color: #93c5fd; margin-top: 2px;
+                         font-family: SF Mono, Menlo, Consolas, monospace; }
+.tab-nav { display: flex; gap: 0; margin-top: 10px; }
+.tab-nav a { display: inline-block; padding: 8px 18px; font-size: 13px; font-weight: 500;
+             color: #93c5fd; text-decoration: none; border-bottom: 3px solid transparent;
+             border-radius: 4px 4px 0 0; transition: color 0.1s; }
+.tab-nav a:hover { color: #fff; background: rgba(255,255,255,0.07); }
+.tab-nav a.tab-active { color: #fff; border-bottom-color: #60a5fa; font-weight: 700; }
+/* Page body padding (replaces old body padding:24px) */
+.page-body { padding: 24px; }
 /* Flex layout (not grid) so a draggable splitter can resize the panes
    by adjusting flex-basis directly. Default 1:1; the user can drag the
    splitter to any ratio between 20% / 80%. Choice is persisted to
@@ -293,12 +307,22 @@ nav a { margin-right: 12px; }
 </style>
 """
 
+_SITE_HEADER_TRACES = """
+<header class="site-header">
+  <div class="site-title">AgenticSys Monitor</div>
+  <div class="site-db">db: {{ db }}</div>
+  <nav class="tab-nav">
+    <a href="/" class="tab-active">Traces</a>
+    <a href="/catalog">Data Catalog</a>
+  </nav>
+</header>
+<div class="page-body">
+"""
+
 _INDEX = """
 <!doctype html>
-<html><head><meta charset="utf-8">""" + _REFRESH_META + """<title>node_trace</title>""" + _STYLE + """</head>
-<body>""" + _REFRESH_BADGE + """
-  <h1>Trace viewer · {{ db }}</h1>
-  <nav><a href="/">chats</a> <a href="/catalog">Catalog</a></nav>
+<html><head><meta charset="utf-8">""" + _REFRESH_META + """<title>AgenticSys Monitor</title>""" + _STYLE + """</head>
+<body>""" + _REFRESH_BADGE + _SITE_HEADER_TRACES + """
   <h2>Chats ({{ chats|length }})</h2>
   <table>
     <thead><tr>
@@ -330,18 +354,18 @@ _INDEX = """
     {% endfor %}
     </tbody>
   </table>
+</div><!-- /page-body -->
 </body></html>
 """
 
 _CHAT = """
 <!doctype html>
-<html><head><meta charset="utf-8">""" + _REFRESH_META + """<title>{{ chat_id }} · node_trace</title>""" + _STYLE + """</head>
-<body>""" + _REFRESH_BADGE + """
+<html><head><meta charset="utf-8">""" + _REFRESH_META + """<title>{{ chat_id }} · AgenticSys Monitor</title>""" + _STYLE + """</head>
+<body>""" + _REFRESH_BADGE + _SITE_HEADER_TRACES + """
   <h1>Chat: {{ chat_id }}</h1>
   <nav>
     <a href="/">← chats</a>
     <a href="/state/{{ chat_id }}">cross-turn state →</a>
-    <a href="/catalog">Catalog</a>
   </nav>
   <h2>Turns ({{ turns|length }})</h2>
   <table>
@@ -373,6 +397,7 @@ _CHAT = """
     {% endfor %}
     </tbody>
   </table>
+</div><!-- /page-body -->
 </body></html>
 """
 
@@ -430,13 +455,12 @@ _NODE_DETAIL_MACRO = """
 
 _STATE = """
 <!doctype html>
-<html><head><meta charset="utf-8">""" + _REFRESH_META + """<title>{{ chat_id }} state · node_trace</title>""" + _STYLE + """</head>
-<body>""" + _REFRESH_BADGE + """
+<html><head><meta charset="utf-8">""" + _REFRESH_META + """<title>{{ chat_id }} state · AgenticSys Monitor</title>""" + _STYLE + """</head>
+<body>""" + _REFRESH_BADGE + _SITE_HEADER_TRACES + """
   <h1>Cross-turn state: {{ chat_id }}</h1>
   <nav>
     <a href="/">← chats</a>
     <a href="/chat/{{ chat_id }}">← turns</a>
-    <a href="/catalog">Catalog</a>
   </nav>
 
   <p class="muted">
@@ -487,13 +511,14 @@ _STATE = """
   {% else %}
     <p class="muted">No snapshots yet. Restart the server and run a turn to populate.</p>
   {% endif %}
+</div><!-- /page-body -->
 </body></html>
 """
 
 _TURN = _NODE_DETAIL_MACRO + """
 <!doctype html>
-<html><head><meta charset="utf-8">""" + _REFRESH_META + """<title>{% if question %}{{ question[:60] }} · {% endif %}{{ turn_id }} · node_trace</title>""" + _STYLE + """</head>
-<body>""" + _REFRESH_BADGE + """
+<html><head><meta charset="utf-8">""" + _REFRESH_META + """<title>{% if question %}{{ question[:60] }} · {% endif %}{{ turn_id }} · AgenticSys Monitor</title>""" + _STYLE + """</head>
+<body>""" + _REFRESH_BADGE + _SITE_HEADER_TRACES + """
   <h1>
     {% if question %}
       {{ question }}
@@ -509,7 +534,6 @@ _TURN = _NODE_DETAIL_MACRO + """
     <a href="/">← chats</a>
     <a href="/chat/{{ chat_id }}">turns list</a>
     <a href="/state/{{ chat_id }}">cross-turn state</a>
-    <a href="/catalog">Catalog</a>
   </nav>
 
   {% if sibling_turns and sibling_turns|length > 1 %}
@@ -770,6 +794,7 @@ _TURN = _NODE_DETAIL_MACRO + """
       }
     })();
   </script>
+</div><!-- /page-body -->
 </body></html>
 """
 
@@ -833,7 +858,7 @@ def chat(chat_id: str):
         return redirect("/")
     return render_template_string(
         _CHAT, chat_id=chat_id, turns=rows, dur_class=_dur_class,
-        refresh_secs=_refresh_secs(),
+        refresh_secs=_refresh_secs(), db=str(_db()),
     )
 
 
@@ -1115,6 +1140,7 @@ def turn(chat_id: str, turn_id: str):
         snapshot=snapshot,
         sibling_turns=sibling_turns,
         refresh_secs=_refresh_secs(),
+        db=str(_db()),
     )
 
 
@@ -1149,7 +1175,7 @@ def state(chat_id: str):
                 latest[dst_key] = "(empty)"
     return render_template_string(
         _STATE, chat_id=chat_id, snapshots=snaps, latest=latest,
-        refresh_secs=_refresh_secs(),
+        refresh_secs=_refresh_secs(), db=str(_db()),
     )
 
 

@@ -42,7 +42,22 @@ _STYLE = """
 <style>
 html, body { margin: 0; padding: 0; }
 body { font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-       padding: 24px; color: #1a1a1a; box-sizing: border-box; }
+       color: #1a1a1a; box-sizing: border-box; }
+/* Shared header */
+.site-header { background: #1e3a5f; color: #fff; padding: 12px 24px 0; }
+.site-header .site-title { font-size: 18px; font-weight: 700; letter-spacing: -0.2px;
+                            color: #fff; text-decoration: none; }
+.site-header .site-db { font-size: 11px; color: #93c5fd; margin-top: 2px;
+                         font-family: SF Mono, Menlo, Consolas, monospace; }
+/* Tab nav */
+.tab-nav { display: flex; gap: 0; margin-top: 10px; }
+.tab-nav a { display: inline-block; padding: 8px 18px; font-size: 13px; font-weight: 500;
+             color: #93c5fd; text-decoration: none; border-bottom: 3px solid transparent;
+             border-radius: 4px 4px 0 0; transition: color 0.1s; }
+.tab-nav a:hover { color: #fff; background: rgba(255,255,255,0.07); }
+.tab-nav a.tab-active { color: #fff; border-bottom-color: #60a5fa; font-weight: 700; }
+/* Page body */
+.page-body { padding: 24px; }
 h1 { font-size: 20px; margin: 0 0 16px; }
 h2 { font-size: 16px; margin: 24px 0 8px; }
 h3 { font-size: 14px; margin: 16px 0 6px; }
@@ -55,10 +70,6 @@ td { text-align: left; }
 th { background: #f9fafb; font-weight: 600; text-align: left; }
 tr:hover td { background: #fafbfc; }
 .muted { color: #6b7280; }
-nav { margin-bottom: 20px; font-size: 13px; border-bottom: 1px solid #e5e7eb;
-      padding-bottom: 10px; }
-nav a { margin-right: 14px; }
-nav a.active { font-weight: 700; color: #1a1a1a; text-decoration: none; }
 .card { border: 1px solid #e5e7eb; border-radius: 6px;
         margin-bottom: 24px; overflow: hidden; }
 .card-header { background: #f9fafb; padding: 10px 14px;
@@ -103,19 +114,51 @@ nav a.active { font-weight: 700; color: #1a1a1a; text-decoration: none; }
 /* Legend */
 .legend { font-size: 12px; color: #6b7280; margin-bottom: 16px; }
 .legend .badge { margin-right: 6px; }
+/* Catalog master/detail layout */
+.catalog-layout { display: flex; gap: 24px; align-items: flex-start; }
+.catalog-toc { flex: 0 0 180px; min-width: 140px; position: sticky; top: 16px; }
+.catalog-toc ul { list-style: none; margin: 0; padding: 0; }
+.catalog-toc li { margin: 0; }
+.catalog-toc a { display: block; padding: 4px 8px; font-size: 12px; color: #374151;
+                 border-radius: 4px; font-family: SF Mono, Menlo, Consolas, monospace; }
+.catalog-toc a:hover { background: #eff6ff; color: #2563eb; text-decoration: none; }
+.catalog-toc-title { font-size: 11px; font-weight: 700; text-transform: uppercase;
+                      letter-spacing: 0.5px; color: #6b7280; margin-bottom: 6px; }
+.catalog-main { flex: 1 1 0; min-width: 0; }
+/* Collapsible table details */
+details.tbl-block { border: 1px solid #e5e7eb; border-radius: 6px;
+                    margin-bottom: 20px; overflow: hidden; }
+details.tbl-block > summary { background: #f9fafb; padding: 10px 14px;
+                               border-bottom: 1px solid #e5e7eb; cursor: pointer;
+                               font-size: 15px; font-weight: 600; list-style: none; }
+details.tbl-block > summary::-webkit-details-marker { display: none; }
+details.tbl-block > summary::before { content: "▶ "; font-size: 10px;
+                                       color: #6b7280; margin-right: 6px; }
+details.tbl-block[open] > summary::before { content: "▼ "; }
+details.tbl-block > summary .tbl-desc { font-weight: normal; font-size: 13px;
+                                         color: #6b7280; margin-left: 6px; }
+details.tbl-block > summary .tbl-aliases { font-weight: normal; font-size: 12px;
+                                            color: #9ca3af; }
+.tbl-inner { padding: 0; }
 </style>
 """
 
 # ── HTML template ─────────────────────────────────────────────────────────────
 
 _CATALOG_TMPL = """{% autoescape true %}<!doctype html>
-<html><head><meta charset="utf-8"><title>Catalog · node_trace</title>""" + _STYLE + """</head>
+<html><head><meta charset="utf-8"><title>Data Catalog · AgenticSys Monitor</title>""" + _STYLE + """</head>
 <body>
-  <h1>Data Catalog</h1>
-  <nav>
-    <a href="/">Traces</a>
-    <a href="/catalog" class="active">Catalog</a>
-  </nav>
+  <!-- Shared header -->
+  <header class="site-header">
+    <div class="site-title">AgenticSys Monitor</div>
+    <div class="site-db">db: {{ db_path }}</div>
+    <nav class="tab-nav">
+      <a href="/">Traces</a>
+      <a href="/catalog" class="tab-active">Data Catalog</a>
+    </nav>
+  </header>
+
+  <div class="page-body">
 
   {% if error %}
   <div class="error-panel">
@@ -170,73 +213,115 @@ _CATALOG_TMPL = """{% autoescape true %}<!doctype html>
     <span class="badge badge-unmanaged">unmanaged</span> no baseline recorded
   </div>
 
-  <!-- Table cards -->
+  <!-- Master / detail: TOC + collapsible table blocks -->
   {% if not tables %}
     <p class="muted">No data-profile YAML files found in <code>{{ profile_dir }}</code>.</p>
-  {% endif %}
+  {% else %}
+  <div class="catalog-layout">
+    <!-- Left: table-of-contents -->
+    <aside class="catalog-toc">
+      <div class="catalog-toc-title">Tables</div>
+      <ul>
+        {% for tbl in tables %}
+        <li><a href="#tbl-{{ tbl.table }}">{{ tbl.table }}</a></li>
+        {% endfor %}
+      </ul>
+    </aside>
 
-  {% for tbl in tables %}
-  <div class="card">
-    <div class="card-header">
-      <h2>{{ tbl.table }}
-        {% if tbl.description %}
-          <span class="muted" style="font-weight:normal;font-size:13px;">— {{ tbl.description }}</span>
-        {% endif %}
-        {% if tbl.aliases %}
-          <span class="muted" style="font-size:12px;font-weight:normal;">
-            (aliases: {{ tbl.aliases | join(", ") }})
-          </span>
-        {% endif %}
-      </h2>
-    </div>
-    <div class="card-body">
-      <table>
-        <thead>
-          <tr>
-            <th>Column</th>
-            <th>dtype</th>
-            <th>Description</th>
-            <th>Threshold</th>
-            <th title="Has a context entry">In context</th>
-            <th>Provenance</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for col in tbl.columns %}
-          <tr>
-            <td><strong>{{ col.name }}</strong></td>
-            <td class="muted">{{ col.dtype }}{% if col.parse_hint %} <span title="{{ col.parse_hint }}">({{ col.parse_hint }})</span>{% endif %}</td>
-            <td>{{ col.description or "" }}</td>
-            <td>
-              {% if col.threshold %}
-                <span class="threshold">{{ col.threshold.value }} ({{ col.threshold.direction }})</span>
-              {% else %}
-                <span class="muted">—</span>
-              {% endif %}
-            </td>
-            <td>
-              {% if col.in_context %}
-                <span class="ctx-yes" title="context entry present">&#x2713;</span>
-              {% else %}
-                <span class="ctx-no" title="not in context">&#x2717;</span>
-              {% endif %}
-            </td>
-            <td>
-              <span class="badge badge-{{ col.provenance }}">{{ col.provenance }}</span>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% if tbl.context_only %}
-      <div class="ctx-only">
-        <strong>Context-only vars (not in profile):</strong>
-        {% for v in tbl.context_only %}<span>{{ v }}</span>{% endfor %}
-      </div>
-      {% endif %}
+    <!-- Right: collapsible details blocks -->
+    <div class="catalog-main">
+      {% for tbl in tables %}
+      <details class="tbl-block" id="tbl-{{ tbl.table }}" open>
+        <summary>
+          {{ tbl.table }}
+          {% if tbl.description %}
+            <span class="tbl-desc">— {{ tbl.description }}</span>
+          {% endif %}
+          {% if tbl.aliases %}
+            <span class="tbl-aliases">(aliases: {{ tbl.aliases | join(", ") }})</span>
+          {% endif %}
+        </summary>
+        <div class="tbl-inner">
+          <table>
+            <thead>
+              <tr>
+                <th>Column</th>
+                <th>dtype</th>
+                <th>Description</th>
+                <th>Threshold</th>
+                <th title="Has a context entry">In context</th>
+                <th>Provenance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for col in tbl.columns %}
+              <tr>
+                <td><strong>{{ col.name }}</strong></td>
+                <td class="muted">{{ col.dtype }}{% if col.parse_hint %} <span title="{{ col.parse_hint }}">({{ col.parse_hint }})</span>{% endif %}</td>
+                <td>{{ col.description or "" }}</td>
+                <td>
+                  {% if col.threshold %}
+                    <span class="threshold">{{ col.threshold.value }} ({{ col.threshold.direction }})</span>
+                  {% else %}
+                    <span class="muted">—</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if col.in_context %}
+                    <span class="ctx-yes" title="context entry present">&#x2713;</span>
+                  {% else %}
+                    <span class="ctx-no" title="not in context">&#x2717;</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <span class="badge badge-{{ col.provenance }}">{{ col.provenance }}</span>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% if tbl.context_only %}
+          <div class="ctx-only">
+            <strong>Context-only vars (not in profile):</strong>
+            {% for v in tbl.context_only %}<span>{{ v }}</span>{% endfor %}
+          </div>
+          {% endif %}
+        </div>
+      </details>
+      {% endfor %}
     </div>
   </div>
-  {% endfor %}
+  {% endif %}
+
+  </div><!-- /page-body -->
+
+  <!-- TOC anchor + open: clicking a TOC link jumps to the block and opens it -->
+  <script>
+  (function(){
+    function openTarget(hash){
+      if (!hash) return;
+      var id = hash.replace(/^#/, '');
+      var el = document.getElementById(id);
+      if (el && el.tagName === 'DETAILS') {
+        el.open = true;
+        el.scrollIntoView({behavior: 'smooth', block: 'start'});
+      }
+    }
+    // Handle clicks on TOC links directly.
+    document.querySelectorAll('.catalog-toc a').forEach(function(a){
+      a.addEventListener('click', function(e){
+        // Allow the browser's default anchor navigation, then open the target.
+        setTimeout(function(){ openTarget(a.getAttribute('href')); }, 0);
+      });
+    });
+    // Also handle any hashchange (e.g. browser back/forward).
+    window.addEventListener('hashchange', function(){
+      openTarget(window.location.hash);
+    });
+    // On initial load, open if the URL already has a hash.
+    if (window.location.hash) openTarget(window.location.hash);
+  })();
+  </script>
 </body></html>
 {% endautoescape %}
 """
@@ -290,6 +375,11 @@ def register_catalog_routes(app) -> None:
         # Pull flash-style error from query param (set by the reconcile POST).
         error = request.args.get("error") or ""
 
+        # Resolve the DB path from app.config (same key viewer.py uses).
+        db_path = app.config.get("NODE_TRACE_DB") or _DEFAULTS.get(
+            "NODE_TRACE_DB", "logs/node_traces.db"
+        )
+
         return render_template_string(
             _CATALOG_TMPL,
             tables=tables,
@@ -297,6 +387,7 @@ def register_catalog_routes(app) -> None:
             error=error,
             profile_dir=profile_dir,
             reconcile_enabled=app.config.get("CATALOG_RECONCILE_ENABLE", False),
+            db_path=str(db_path),
         )
 
     @app.post("/catalog/reconcile")

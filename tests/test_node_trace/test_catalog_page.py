@@ -14,14 +14,20 @@ from unittest.mock import patch
 
 from tools.node_trace.catalog_page import register_catalog_routes
 
+# ---------------------------------------------------------------------------
+# Helper: shared DB path for tests that need it
+# ---------------------------------------------------------------------------
+_TEST_DB = "logs/test_node_traces.db"
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _app(tmp_path, reconcile_enable: bool = False):
+def _app(tmp_path, reconcile_enable: bool = False, db_path: str = _TEST_DB):
     """Build a test Flask app.  Pass reconcile_enable=True for tests that
     exercise the enabled path; the default mirrors the production default (OFF).
+    Pass db_path to control which NODE_TRACE_DB is shown in the header.
     """
     app = Flask(__name__)
     app.config.update(
@@ -30,6 +36,7 @@ def _app(tmp_path, reconcile_enable: bool = False):
         PROVENANCE_PATH=str(tmp_path / ".prov.json"),
         RECONCILE_RESULTS=str(tmp_path / "last.json"),
         CATALOG_RECONCILE_ENABLE=reconcile_enable,
+        NODE_TRACE_DB=db_path,
     )
     register_catalog_routes(app)
     return app
@@ -134,15 +141,17 @@ def test_catalog_get_reconcile_form(tmp_path):
 
 
 def test_catalog_get_nav_links(tmp_path):
-    """GET /catalog includes nav links to Traces (/) and Catalog."""
+    """GET /catalog includes tab links to Traces (/) and Data Catalog."""
     _write_profile(tmp_path / "prof")
     (tmp_path / "ctx").mkdir()
     app = _app(tmp_path)
     r = app.test_client().get("/catalog")
     assert r.status_code == 200
-    # Both Traces and Catalog nav targets present.
+    # Both Traces and Data Catalog tab targets present.
     assert b'href="/"' in r.data
     assert b"/catalog" in r.data
+    assert b"Traces" in r.data
+    assert b"Data Catalog" in r.data
 
 
 def test_catalog_get_empty_profile_dir(tmp_path):
@@ -484,3 +493,185 @@ def test_register_catalog_routes_is_idempotent(tmp_path):
     (tmp_path / "ctx").mkdir(exist_ok=True)
     r = app.test_client().get("/catalog")
     assert r.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# NEW — Shared header: AgenticSys Monitor title + DB path
+# ---------------------------------------------------------------------------
+
+def test_catalog_header_title(tmp_path):
+    """GET /catalog page contains 'AgenticSys Monitor' in the shared header."""
+    _write_profile(tmp_path / "prof")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    assert b"AgenticSys Monitor" in r.data
+
+
+def test_catalog_header_db_path(tmp_path):
+    """GET /catalog page shows the db path (NODE_TRACE_DB) in the shared header."""
+    _write_profile(tmp_path / "prof")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path, db_path="logs/my_traces.db")
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    assert b"logs/my_traces.db" in r.data
+
+
+# ---------------------------------------------------------------------------
+# NEW — Tabs: active state
+# ---------------------------------------------------------------------------
+
+def test_catalog_active_tab_is_data_catalog(tmp_path):
+    """GET /catalog: the 'Data Catalog' tab must be marked active (tab-active class)."""
+    _write_profile(tmp_path / "prof")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+    # tab-active should be on the /catalog link, NOT the / link
+    assert 'class="tab-active"' in html or "tab-active" in html
+    # The active element should be near "Data Catalog" text
+    assert "tab-active" in html
+    # "Traces" link present but NOT marked active
+    assert 'href="/"' in html
+
+
+def test_catalog_traces_tab_not_active(tmp_path):
+    """GET /catalog: the 'Traces' tab must NOT be marked as active.
+
+    The Traces anchor (<a href="/">Traces</a>) must not carry class="tab-active".
+    We check this by verifying tab-active is NOT between the opening <a and the
+    first > (i.e., within that specific anchor's tag attributes).
+    """
+    _write_profile(tmp_path / "prof")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    html = r.data.decode("utf-8")
+    # Find the Traces tab anchor: look for the opening tag that contains href="/"
+    # and extract just the tag attributes (up to the closing >).
+    import re
+    # Match the <a ...href="/"...> opening tag for the Traces link.
+    m = re.search(r'<a\s[^>]*href="/"[^>]*>', html)
+    assert m is not None, "Traces tab anchor not found in page"
+    tag_text = m.group(0)
+    assert "tab-active" not in tag_text, (
+        f"Traces tab should NOT be active on /catalog, but tag was: {tag_text!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# NEW — Catalog master/detail: TOC + <details> collapsible blocks
+# ---------------------------------------------------------------------------
+
+def test_catalog_toc_entry_for_table(tmp_path):
+    """GET /catalog renders a TOC <a href="#tbl-<name>"> entry for each table."""
+    _write_profile(tmp_path / "prof", table_name="my_scores")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    assert b'href="#tbl-my_scores"' in r.data
+
+
+def test_catalog_details_id_for_table(tmp_path):
+    """GET /catalog renders a <details id="tbl-<name>"> block for each table."""
+    _write_profile(tmp_path / "prof", table_name="my_scores")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    assert b'id="tbl-my_scores"' in r.data
+
+
+def test_catalog_details_contains_column_name(tmp_path):
+    """GET /catalog: the <details> block for a table contains the column name."""
+    _write_profile(tmp_path / "prof", table_name="score_table")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    assert b"score_table" in r.data
+    assert b"column a" in r.data or b"col" in r.data  # description or column 'a'
+
+
+def test_catalog_details_provenance_badge_present(tmp_path):
+    """GET /catalog: the collapsible block still renders provenance badges."""
+    _write_profile(tmp_path / "prof", table_name="t2")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    assert any(kw in r.data for kw in (b"unmanaged", b"agent", b"human"))
+
+
+def test_catalog_toc_and_details_multiple_tables(tmp_path):
+    """GET /catalog with multiple tables: TOC and details blocks for each."""
+    prof_dir = tmp_path / "prof"
+    prof_dir.mkdir()
+    for name in ("alpha", "beta", "gamma"):
+        (prof_dir / f"{name}.yaml").write_text(yaml.safe_dump({
+            "table": name, "description": f"{name} table",
+            "columns": {"col1": {"dtype": "str", "description": f"col in {name}"}},
+        }))
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    for name in ("alpha", "beta", "gamma"):
+        assert f'href="#tbl-{name}"'.encode() in r.data
+        assert f'id="tbl-{name}"'.encode() in r.data
+
+
+# ---------------------------------------------------------------------------
+# NEW — Viewer-side: trace index (GET /) has shared header and Traces active tab
+# ---------------------------------------------------------------------------
+
+def test_viewer_index_has_shared_header(tmp_path):
+    """GET / on viewer.app contains 'AgenticSys Monitor' and both tab labels."""
+    import importlib
+    from tools.node_trace import viewer as v
+    importlib.reload(v)
+
+    # Point the app at a non-existent DB (index view handles empty gracefully).
+    db_path = str(tmp_path / "traces.db")
+    v.app.config["NODE_TRACE_DB"] = db_path
+
+    client = v.app.test_client()
+    r = client.get("/")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+    assert "AgenticSys Monitor" in html
+    assert "Traces" in html
+    assert "Data Catalog" in html
+    # DB path should appear
+    assert "traces.db" in html
+
+
+def test_viewer_index_traces_tab_active(tmp_path):
+    """GET / on viewer.app: 'Traces' tab is marked active; 'Data Catalog' is not."""
+    import importlib
+    from tools.node_trace import viewer as v
+    importlib.reload(v)
+
+    v.app.config["NODE_TRACE_DB"] = str(tmp_path / "traces.db")
+    client = v.app.test_client()
+    r = client.get("/")
+    html = r.data.decode("utf-8")
+
+    # Find the Traces tab link (href="/") and ensure it has tab-active
+    idx = html.find('href="/"')
+    assert idx != -1, "'href=\"/\"' not found in page"
+    snippet = html[idx:idx + 80]
+    assert "tab-active" in snippet, f"tab-active not near href='/': {snippet!r}"
+
+    # Data Catalog link must NOT be active on the traces page
+    idx2 = html.find('href="/catalog"')
+    assert idx2 != -1, "'href=\"/catalog\"' not found in page"
+    snippet2 = html[idx2:idx2 + 80]
+    assert "tab-active" not in snippet2, (
+        f"Data Catalog incorrectly marked tab-active on /: {snippet2!r}"
+    )
