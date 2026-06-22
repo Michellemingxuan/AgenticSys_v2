@@ -298,7 +298,8 @@ def test_build_catalog_view_empty_profile_dir(tmp_path, monkeypatch):
     pv = Provenance(str(tmp_path / ".prov.json"))
 
     view = build_catalog_view(str(prof), str(ctx), str(tmp_path / ".prov.json"))
-    assert view == {"tables": []}
+    assert view["tables"] == []
+    assert view["groups"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -435,3 +436,201 @@ def test_stale_missing_data_dir_all_false(tmp_path, monkeypatch):
     )
     for t in view["tables"]:
         assert t["stale"] is False
+
+
+# ---------------------------------------------------------------------------
+# Grouping tests (monthly + transaction variants share a group)
+# ---------------------------------------------------------------------------
+
+def test_grouping_model_scores_and_transaction_share_group(tmp_path, monkeypatch):
+    """model_scores and model_scores_transaction must be in the same group."""
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    (prof / "model_scores.yaml").write_text(_make_profile_yaml("model_scores"))
+    (prof / "model_scores_transaction.yaml").write_text(_make_profile_yaml("model_scores_transaction"))
+    (prof / "standalone.yaml").write_text(_make_profile_yaml("standalone"))
+
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {})
+
+    view = build_catalog_view(str(prof), str(ctx), str(tmp_path / ".prov.json"))
+
+    # The view must include a 'groups' key.
+    assert "groups" in view, "build_catalog_view must return a 'groups' key"
+
+    groups = view["groups"]
+    # Find the group that contains model_scores.
+    ms_group = next(
+        (g for g in groups if any(t["table"] == "model_scores" for t in g["tables"])),
+        None,
+    )
+    assert ms_group is not None, "model_scores should be in a group"
+    group_table_names = [t["table"] for t in ms_group["tables"]]
+    assert "model_scores" in group_table_names
+    assert "model_scores_transaction" in group_table_names, (
+        "model_scores_transaction should share a group with model_scores"
+    )
+
+    # standalone has no transaction variant → it's its own group.
+    standalone_group = next(
+        (g for g in groups if any(t["table"] == "standalone" for t in g["tables"])),
+        None,
+    )
+    assert standalone_group is not None
+    assert len(standalone_group["tables"]) == 1
+
+
+def test_grouping_base_table_before_transaction(tmp_path, monkeypatch):
+    """Within a group, the base (monthly) table must come before the _transaction one."""
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    (prof / "score_drivers.yaml").write_text(_make_profile_yaml("score_drivers"))
+    (prof / "score_drivers_transaction.yaml").write_text(_make_profile_yaml("score_drivers_transaction"))
+
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {})
+
+    view = build_catalog_view(str(prof), str(ctx), str(tmp_path / ".prov.json"))
+
+    sd_group = next(
+        (g for g in view["groups"] if any(t["table"] == "score_drivers" for t in g["tables"])),
+        None,
+    )
+    assert sd_group is not None
+    names = [t["table"] for t in sd_group["tables"]]
+    assert names.index("score_drivers") < names.index("score_drivers_transaction"), (
+        "base table must appear before _transaction variant within its group"
+    )
+
+
+def test_grouping_tables_list_members_are_adjacent(tmp_path, monkeypatch):
+    """In the top-level 'tables' list, grouped members must be adjacent."""
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    (prof / "model_scores.yaml").write_text(_make_profile_yaml("model_scores"))
+    (prof / "model_scores_transaction.yaml").write_text(_make_profile_yaml("model_scores_transaction"))
+    (prof / "payments.yaml").write_text(_make_profile_yaml("payments"))
+
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {})
+
+    view = build_catalog_view(str(prof), str(ctx), str(tmp_path / ".prov.json"))
+    names = [t["table"] for t in view["tables"]]
+
+    idx_base = names.index("model_scores")
+    idx_txn = names.index("model_scores_transaction")
+    # They must be adjacent (differ by exactly 1, base first).
+    assert idx_txn == idx_base + 1, (
+        f"model_scores_transaction (pos {idx_txn}) must immediately follow "
+        f"model_scores (pos {idx_base})"
+    )
+
+
+def test_grouping_group_key_assigned(tmp_path, monkeypatch):
+    """Each table dict must carry a 'group_key' field with the correct value."""
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    (prof / "model_scores.yaml").write_text(_make_profile_yaml("model_scores"))
+    (prof / "model_scores_transaction.yaml").write_text(_make_profile_yaml("model_scores_transaction"))
+
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {})
+
+    view = build_catalog_view(str(prof), str(ctx), str(tmp_path / ".prov.json"))
+    by_name = {t["table"]: t for t in view["tables"]}
+
+    assert by_name["model_scores"]["group_key"] == "model_scores"
+    assert by_name["model_scores_transaction"]["group_key"] == "model_scores"
+
+
+def test_grouping_all_stale_group_sorts_last(tmp_path, monkeypatch):
+    """An all-stale group (both base + transaction stale) should sort after live groups."""
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    # live standalone table
+    (prof / "live_table.yaml").write_text(_make_profile_yaml("live_table"))
+    # stale pair: no backing CSVs
+    (prof / "stale_base.yaml").write_text(_make_profile_yaml("stale_base"))
+    (prof / "stale_base_transaction.yaml").write_text(_make_profile_yaml("stale_base_transaction"))
+
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {})
+
+    data_dir = tmp_path / "data"
+    (data_dir / "case001").mkdir(parents=True)
+    (data_dir / "case001" / "live_table.csv").write_text("col\n1\n")
+
+    view = build_catalog_view(
+        str(prof), str(ctx), str(tmp_path / ".prov.json"),
+        data_dir=str(data_dir),
+    )
+
+    groups = view["groups"]
+    live_group = next(g for g in groups if any(t["table"] == "live_table" for t in g["tables"]))
+    stale_group = next(g for g in groups if any(t["table"] == "stale_base" for t in g["tables"]))
+
+    # All-stale group should have all_stale=True
+    assert stale_group.get("all_stale") is True
+    assert live_group.get("all_stale") is False
+
+    # The stale group must appear after the live group.
+    live_idx = groups.index(live_group)
+    stale_idx = groups.index(stale_group)
+    assert stale_idx > live_idx, "all-stale group must sort after live group"
+
+
+def test_grouping_standalone_is_own_group(tmp_path, monkeypatch):
+    """A table with no _transaction sibling is its own single-member group."""
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    (prof / "payments.yaml").write_text(_make_profile_yaml("payments"))
+
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {})
+
+    view = build_catalog_view(str(prof), str(ctx), str(tmp_path / ".prov.json"))
+
+    assert len(view["groups"]) == 1
+    g = view["groups"][0]
+    assert len(g["tables"]) == 1
+    assert g["tables"][0]["table"] == "payments"
+    assert g["key"] == "payments"
+
+
+def test_grouping_existing_tables_key_unchanged(tmp_path, monkeypatch):
+    """The existing 'tables' key must still be present and contain all tables."""
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    (prof / "model_scores.yaml").write_text(_make_profile_yaml("model_scores"))
+    (prof / "model_scores_transaction.yaml").write_text(_make_profile_yaml("model_scores_transaction"))
+    (prof / "payments.yaml").write_text(_make_profile_yaml("payments"))
+
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {})
+
+    view = build_catalog_view(str(prof), str(ctx), str(tmp_path / ".prov.json"))
+
+    # Existing key must remain
+    assert "tables" in view
+    assert len(view["tables"]) == 3

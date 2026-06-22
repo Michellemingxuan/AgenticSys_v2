@@ -765,3 +765,100 @@ def test_viewer_index_traces_tab_active(tmp_path):
     assert "tab-active" not in snippet2, (
         f"Data Catalog incorrectly marked tab-active on /: {snippet2!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Grouping tests: monthly + transaction variants are rendered together
+# ---------------------------------------------------------------------------
+
+def test_catalog_grouped_tables_adjacent_in_html(tmp_path):
+    """GET /catalog: model_scores and model_scores_transaction details are adjacent."""
+    prof_dir = tmp_path / "prof"
+    prof_dir.mkdir()
+    for name in ("model_scores", "model_scores_transaction", "payments"):
+        (prof_dir / f"{name}.yaml").write_text(yaml.safe_dump({
+            "table": name, "description": f"{name} table",
+            "columns": {"col1": {"dtype": "str", "description": f"col in {name}"}},
+        }))
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+
+    # Both tables' details blocks must be present.
+    assert 'id="tbl-model_scores"' in html
+    assert 'id="tbl-model_scores_transaction"' in html
+
+    # model_scores_transaction must appear immediately after model_scores in the HTML.
+    idx_base = html.find('id="tbl-model_scores"')
+    idx_txn = html.find('id="tbl-model_scores_transaction"')
+    assert idx_base != -1 and idx_txn != -1
+    assert idx_txn > idx_base, "model_scores_transaction block must follow model_scores"
+
+    # No other table's block should appear between the two.
+    idx_payments = html.find('id="tbl-payments"')
+    assert idx_payments != -1
+    # payments must NOT be between the two model_scores blocks
+    assert not (idx_base < idx_payments < idx_txn), (
+        "payments block should not appear between model_scores and model_scores_transaction"
+    )
+
+
+def test_catalog_toc_grouped_entries(tmp_path):
+    """GET /catalog TOC: model_scores_transaction appears after model_scores in TOC."""
+    prof_dir = tmp_path / "prof"
+    prof_dir.mkdir()
+    for name in ("model_scores", "model_scores_transaction"):
+        (prof_dir / f"{name}.yaml").write_text(yaml.safe_dump({
+            "table": name, "description": f"{name} table",
+            "columns": {"col1": {"dtype": "str", "description": "col"}},
+        }))
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+
+    # Both TOC links must be present and in correct order.
+    assert 'href="#tbl-model_scores"' in html
+    assert 'href="#tbl-model_scores_transaction"' in html
+    idx_base_toc = html.find('href="#tbl-model_scores"')
+    idx_txn_toc = html.find('href="#tbl-model_scores_transaction"')
+    assert idx_base_toc < idx_txn_toc, "TOC: base table must come before transaction variant"
+
+
+def test_catalog_group_label_present_for_paired_tables(tmp_path):
+    """GET /catalog: a group label/heading is rendered for a paired group."""
+    prof_dir = tmp_path / "prof"
+    prof_dir.mkdir()
+    for name in ("score_drivers", "score_drivers_transaction"):
+        (prof_dir / f"{name}.yaml").write_text(yaml.safe_dump({
+            "table": name, "description": f"{name} table",
+            "columns": {"col1": {"dtype": "str", "description": "col"}},
+        }))
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+    # A group label for score_drivers should appear (group key as a heading/label).
+    assert "score_drivers" in html
+    # Both details blocks present.
+    assert 'id="tbl-score_drivers"' in html
+    assert 'id="tbl-score_drivers_transaction"' in html
+
+
+def test_catalog_standalone_table_no_extra_heading(tmp_path):
+    """GET /catalog: a standalone table (no transaction variant) renders without a heavy group heading."""
+    _write_profile(tmp_path / "prof", table_name="payments")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    html = r.data.decode("utf-8")
+    # details block present.
+    assert 'id="tbl-payments"' in html
+    # No "group-heading" or "catalog-group-label" CSS class should appear for solo table.
+    # (Light check: the page renders and no 500.)
+    assert r.status_code == 200

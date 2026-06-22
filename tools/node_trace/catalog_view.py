@@ -199,7 +199,48 @@ def build_catalog_view(
             "context_only": context_only,
         })
 
-    # Sort: live (stale=False) first (alphabetical within group), stale last.
-    tables_out.sort(key=lambda t: (t["stale"], t["table"]))
+    # ── Grouping ──────────────────────────────────────────────────────────────
+    # Derive a group key by stripping a trailing "_transaction" suffix.
+    # Tables sharing a group key are rendered together; within a group the
+    # base (monthly) table is listed first, then the _transaction variant.
 
-    return {"tables": tables_out}
+    def _group_key(table_name: str) -> str:
+        if table_name.endswith("_transaction"):
+            return table_name[: -len("_transaction")]
+        return table_name
+
+    for t in tables_out:
+        t["group_key"] = _group_key(t["table"])
+
+    # Collect groups: maps group_key → list of table dicts, base before txn.
+    from collections import OrderedDict
+    groups_map: dict[str, list[dict]] = OrderedDict()
+    for t in tables_out:
+        groups_map.setdefault(t["group_key"], []).append(t)
+
+    # Within each group: base table (no suffix) first, then _transaction.
+    def _group_sort_key(t: dict) -> int:
+        return 1 if t["table"].endswith("_transaction") else 0
+
+    for members in groups_map.values():
+        members.sort(key=_group_sort_key)
+
+    # Build the groups list.  A group is all-stale only when every member is stale.
+    groups_list: list[dict] = [
+        {
+            "key": key,
+            "tables": members,
+            "all_stale": all(t["stale"] for t in members),
+        }
+        for key, members in groups_map.items()
+    ]
+
+    # Sort groups: live (not all-stale) groups first (alphabetical within tier),
+    # all-stale groups last.
+    groups_list.sort(key=lambda g: (g["all_stale"], g["key"]))
+
+    # Rebuild the flat tables list so group members are adjacent and groups are
+    # in the sorted order (live first, stale last).
+    tables_out = [t for g in groups_list for t in g["tables"]]
+
+    return {"tables": tables_out, "groups": groups_list}

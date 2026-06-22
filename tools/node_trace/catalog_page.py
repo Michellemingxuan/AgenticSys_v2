@@ -130,7 +130,19 @@ tr:hover td { background: #fafbfc; }
 .catalog-toc a:hover { background: #eff6ff; color: #2563eb; text-decoration: none; }
 .catalog-toc-title { font-size: 11px; font-weight: 700; text-transform: uppercase;
                       letter-spacing: 0.5px; color: #6b7280; margin-bottom: 6px; }
+.catalog-toc-group { margin-bottom: 8px; }
+.catalog-toc-group-label { font-size: 11px; font-weight: 600; color: #9ca3af;
+                            padding: 2px 8px; letter-spacing: 0.3px; }
+.catalog-toc-group-label.stale { color: #d1d5db; }
+.catalog-toc-group ul { padding-left: 6px; }
 .catalog-main { flex: 1 1 0; min-width: 0; }
+/* Group separator in the main panel */
+.catalog-group { margin-bottom: 28px; }
+.catalog-group-label { font-size: 12px; font-weight: 600; text-transform: uppercase;
+                        letter-spacing: 0.5px; color: #9ca3af; margin-bottom: 8px;
+                        padding-left: 2px; border-left: 3px solid #e5e7eb;
+                        padding-left: 8px; }
+.catalog-group-label.stale { color: #d1d5db; border-left-color: #f3f4f6; }
 /* Collapsible table details */
 details.tbl-block { border: 1px solid #e5e7eb; border-radius: 6px;
                     margin-bottom: 20px; overflow: hidden; }
@@ -224,79 +236,99 @@ _CATALOG_TMPL = """{% autoescape true %}<!doctype html>
     <p class="muted">No data-profile YAML files found in <code>{{ profile_dir }}</code>.</p>
   {% else %}
   <div class="catalog-layout">
-    <!-- Left: table-of-contents -->
+    <!-- Left: table-of-contents (grouped) -->
     <aside class="catalog-toc">
       <div class="catalog-toc-title">Tables</div>
+      {% for grp in groups %}
+      {% if grp.tables | length > 1 %}
+      <div class="catalog-toc-group">
+        <div class="catalog-toc-group-label{% if grp.all_stale %} stale{% endif %}">{{ grp.key }}</div>
+        <ul>
+          {% for tbl in grp.tables %}
+          <li><a href="#tbl-{{ tbl.table }}" {% if tbl.stale %}class="stale"{% endif %}>{{ tbl.table }}</a></li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% else %}
       <ul>
-        {% for tbl in tables %}
+        {% for tbl in grp.tables %}
         <li><a href="#tbl-{{ tbl.table }}" {% if tbl.stale %}class="stale"{% endif %}>{{ tbl.table }}</a></li>
         {% endfor %}
       </ul>
+      {% endif %}
+      {% endfor %}
     </aside>
 
-    <!-- Right: collapsible details blocks -->
+    <!-- Right: collapsible details blocks (grouped) -->
     <div class="catalog-main">
-      {% for tbl in tables %}
-      <details class="tbl-block{% if tbl.stale %} stale{% endif %}" id="tbl-{{ tbl.table }}">
-        <summary>
-          {{ tbl.table }}
-          {% if tbl.stale %}
-            <span class="stale-marker">(no data table)</span>
-          {% endif %}
-          {% if tbl.description %}
-            <span class="tbl-desc">— {{ tbl.description }}</span>
-          {% endif %}
-          {% if tbl.aliases %}
-            <span class="tbl-aliases">(aliases: {{ tbl.aliases | join(", ") }})</span>
-          {% endif %}
-        </summary>
-        <div class="tbl-inner">
-          <table>
-            <thead>
-              <tr>
-                <th>Column</th>
-                <th>dtype</th>
-                <th>Description</th>
-                <th>Threshold</th>
-                <th title="Has a context entry">In context</th>
-                <th>Provenance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for col in tbl.columns %}
-              <tr>
-                <td><strong>{{ col.name }}</strong></td>
-                <td class="muted">{{ col.dtype }}{% if col.parse_hint %} <span title="{{ col.parse_hint }}">({{ col.parse_hint }})</span>{% endif %}</td>
-                <td>{{ col.description or "" }}</td>
-                <td>
-                  {% if col.threshold %}
-                    <span class="threshold">{{ col.threshold.value }} ({{ col.threshold.direction }})</span>
-                  {% else %}
-                    <span class="muted">—</span>
-                  {% endif %}
-                </td>
-                <td>
-                  {% if col.in_context %}
-                    <span class="ctx-yes" title="context entry present">&#x2713;</span>
-                  {% else %}
-                    <span class="ctx-no" title="not in context">&#x2717;</span>
-                  {% endif %}
-                </td>
-                <td>
-                  <span class="badge badge-{{ col.provenance }}">{{ col.provenance }}</span>
-                </td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-          {% if tbl.context_only %}
-          <div class="ctx-only">
-            <strong>Context-only vars (not in profile):</strong>
-            {% for v in tbl.context_only %}<span>{{ v }}</span>{% endfor %}
+      {% for grp in groups %}
+      <div class="catalog-group">
+        {% if grp.tables | length > 1 %}
+        <div class="catalog-group-label{% if grp.all_stale %} stale{% endif %}">{{ grp.key }}</div>
+        {% endif %}
+        {% for tbl in grp.tables %}
+        <details class="tbl-block{% if tbl.stale %} stale{% endif %}" id="tbl-{{ tbl.table }}">
+          <summary>
+            {{ tbl.table }}
+            {% if tbl.stale %}
+              <span class="stale-marker">(no data table)</span>
+            {% endif %}
+            {% if tbl.description %}
+              <span class="tbl-desc">— {{ tbl.description }}</span>
+            {% endif %}
+            {% if tbl.aliases %}
+              <span class="tbl-aliases">(aliases: {{ tbl.aliases | join(", ") }})</span>
+            {% endif %}
+          </summary>
+          <div class="tbl-inner">
+            <table>
+              <thead>
+                <tr>
+                  <th>Column</th>
+                  <th>dtype</th>
+                  <th>Description</th>
+                  <th>Threshold</th>
+                  <th title="Has a context entry">In context</th>
+                  <th>Provenance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for col in tbl.columns %}
+                <tr>
+                  <td><strong>{{ col.name }}</strong></td>
+                  <td class="muted">{{ col.dtype }}{% if col.parse_hint %} <span title="{{ col.parse_hint }}">({{ col.parse_hint }})</span>{% endif %}</td>
+                  <td>{{ col.description or "" }}</td>
+                  <td>
+                    {% if col.threshold %}
+                      <span class="threshold">{{ col.threshold.value }} ({{ col.threshold.direction }})</span>
+                    {% else %}
+                      <span class="muted">—</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if col.in_context %}
+                      <span class="ctx-yes" title="context entry present">&#x2713;</span>
+                    {% else %}
+                      <span class="ctx-no" title="not in context">&#x2717;</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    <span class="badge badge-{{ col.provenance }}">{{ col.provenance }}</span>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            {% if tbl.context_only %}
+            <div class="ctx-only">
+              <strong>Context-only vars (not in profile):</strong>
+              {% for v in tbl.context_only %}<span>{{ v }}</span>{% endfor %}
+            </div>
+            {% endif %}
           </div>
-          {% endif %}
-        </div>
-      </details>
+        </details>
+        {% endfor %}
+      </div>
       {% endfor %}
     </div>
   </div>
@@ -368,8 +400,10 @@ def register_catalog_routes(app) -> None:
         try:
             view = build_catalog_view(profile_dir, context_dir, provenance_path, data_dir=data_dir)
             tables = view.get("tables", [])
+            groups = view.get("groups", [])
         except Exception as exc:
             tables = []
+            groups = []
             # Surface as a warning but don't 500.
             app.logger.warning("build_catalog_view failed: %s", exc)
 
@@ -393,6 +427,7 @@ def register_catalog_routes(app) -> None:
         return render_template_string(
             _CATALOG_TMPL,
             tables=tables,
+            groups=groups,
             last_run=last_run,
             error=error,
             profile_dir=profile_dir,
