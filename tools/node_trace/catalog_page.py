@@ -142,7 +142,8 @@ _CATALOG_TMPL = """{% autoescape true %}<!doctype html>
   </div>
   {% endif %}
 
-  <!-- Reconcile form -->
+  <!-- Reconcile form (shown only when CATALOG_RECONCILE_ENABLE is on) -->
+  {% if reconcile_enabled %}
   <div class="reconcile-box">
     <h2>Reconcile</h2>
     <form method="POST" action="/catalog/reconcile">
@@ -153,6 +154,13 @@ _CATALOG_TMPL = """{% autoescape true %}<!doctype html>
       <button type="submit" class="btn btn-primary">Run reconcile</button>
     </form>
   </div>
+  {% else %}
+  <div class="reconcile-box">
+    <p class="muted" style="margin:0;">
+      Reconcile trigger disabled &mdash; set <code>CATALOG_RECONCILE_ENABLE=1</code> to enable.
+    </p>
+  </div>
+  {% endif %}
 
   <!-- Provenance legend -->
   <div class="legend">
@@ -237,7 +245,19 @@ _CATALOG_TMPL = """{% autoescape true %}<!doctype html>
 # ── Route registration ────────────────────────────────────────────────────────
 
 def register_catalog_routes(app) -> None:
-    """Attach GET /catalog and POST /catalog/reconcile to *app*."""
+    """Attach GET /catalog and POST /catalog/reconcile to *app*.
+
+    Safe to call more than once on the same app (single registration per app).
+    """
+    # Single registration per app — guard against double-import / reload loops.
+    if "catalog_get" in app.view_functions:
+        return
+
+    # Default OFF unless CATALOG_RECONCILE_ENABLE=1|true|True is set.
+    app.config.setdefault(
+        "CATALOG_RECONCILE_ENABLE",
+        os.environ.get("CATALOG_RECONCILE_ENABLE") in ("1", "true", "True"),
+    )
 
     def _cfg(key: str) -> str:
         return app.config.get(key) or _DEFAULTS[key]
@@ -276,10 +296,19 @@ def register_catalog_routes(app) -> None:
             last_run=last_run,
             error=error,
             profile_dir=profile_dir,
+            reconcile_enabled=app.config.get("CATALOG_RECONCILE_ENABLE", False),
         )
 
     @app.post("/catalog/reconcile")
     def catalog_reconcile():
+        # Gate: reconcile trigger is opt-in (default OFF).
+        if not app.config.get("CATALOG_RECONCILE_ENABLE", False):
+            return (
+                "Reconcile trigger is disabled. "
+                "Set CATALOG_RECONCILE_ENABLE=1 to enable.",
+                403,
+            )
+
         profile_dir = _cfg("PROFILE_DIR")
         context_dir = _cfg("CONTEXT_DIR")
         provenance_path = _cfg("PROVENANCE_PATH")

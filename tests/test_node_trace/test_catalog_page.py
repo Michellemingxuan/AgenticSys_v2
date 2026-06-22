@@ -19,13 +19,17 @@ from tools.node_trace.catalog_page import register_catalog_routes
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _app(tmp_path):
+def _app(tmp_path, reconcile_enable: bool = False):
+    """Build a test Flask app.  Pass reconcile_enable=True for tests that
+    exercise the enabled path; the default mirrors the production default (OFF).
+    """
     app = Flask(__name__)
     app.config.update(
         PROFILE_DIR=str(tmp_path / "prof"),
         CONTEXT_DIR=str(tmp_path / "ctx"),
         PROVENANCE_PATH=str(tmp_path / ".prov.json"),
         RECONCILE_RESULTS=str(tmp_path / "last.json"),
+        CATALOG_RECONCILE_ENABLE=reconcile_enable,
     )
     register_catalog_routes(app)
     return app
@@ -119,10 +123,10 @@ def test_catalog_get_provenance_badge(tmp_path):
 
 
 def test_catalog_get_reconcile_form(tmp_path):
-    """GET /catalog includes the Reconcile form with no_llm checkbox."""
+    """GET /catalog includes the Reconcile form with no_llm checkbox when enabled."""
     _write_profile(tmp_path / "prof")
     (tmp_path / "ctx").mkdir()
-    app = _app(tmp_path)
+    app = _app(tmp_path, reconcile_enable=True)
     r = app.test_client().get("/catalog")
     assert r.status_code == 200
     assert b"reconcile" in r.data.lower()
@@ -185,7 +189,7 @@ def test_catalog_reconcile_invokes_subprocess(tmp_path):
     """POST /catalog/reconcile calls subprocess.run and writes results json."""
     _write_profile(tmp_path / "prof")
     (tmp_path / "ctx").mkdir()
-    app = _app(tmp_path)
+    app = _app(tmp_path, reconcile_enable=True)
 
     with patch("tools.node_trace.catalog_page.subprocess.run",
                side_effect=_fake_subprocess_run(flags=["[coverage] t.a"])) as m:
@@ -203,7 +207,7 @@ def test_catalog_reconcile_no_llm_flag(tmp_path):
     """POST with no_llm checkbox appends --no-llm to the subprocess command."""
     _write_profile(tmp_path / "prof")
     (tmp_path / "ctx").mkdir()
-    app = _app(tmp_path)
+    app = _app(tmp_path, reconcile_enable=True)
     captured_cmd = []
 
     def _capture(cmd, **kw):
@@ -234,7 +238,7 @@ def test_catalog_reconcile_no_llm_absent_without_checkbox(tmp_path):
     """POST without no_llm checkbox does NOT pass --no-llm."""
     _write_profile(tmp_path / "prof")
     (tmp_path / "ctx").mkdir()
-    app = _app(tmp_path)
+    app = _app(tmp_path, reconcile_enable=True)
     captured_cmd = []
 
     def _capture(cmd, **kw):
@@ -265,7 +269,7 @@ def test_catalog_reconcile_error_non_zero_returncode(tmp_path):
     """POST /catalog/reconcile with non-zero returncode does NOT 500."""
     _write_profile(tmp_path / "prof")
     (tmp_path / "ctx").mkdir()
-    app = _app(tmp_path)
+    app = _app(tmp_path, reconcile_enable=True)
 
     def _fail(cmd, **kw):
         class _R:
@@ -286,7 +290,7 @@ def test_catalog_reconcile_error_timeout(tmp_path):
     import subprocess as _sp
     _write_profile(tmp_path / "prof")
     (tmp_path / "ctx").mkdir()
-    app = _app(tmp_path)
+    app = _app(tmp_path, reconcile_enable=True)
 
     def _timeout(cmd, **kw):
         raise _sp.TimeoutExpired(cmd, 30)
@@ -300,7 +304,7 @@ def test_catalog_reconcile_missing_json_output(tmp_path):
     """POST /catalog/reconcile when CLI writes nothing still degrades gracefully."""
     _write_profile(tmp_path / "prof")
     (tmp_path / "ctx").mkdir()
-    app = _app(tmp_path)
+    app = _app(tmp_path, reconcile_enable=True)
 
     def _no_write(cmd, **kw):
         # Does NOT write the --json file.
@@ -320,7 +324,7 @@ def test_catalog_reconcile_results_counts(tmp_path):
     """POST /catalog/reconcile persists write/context_write counts in results JSON."""
     _write_profile(tmp_path / "prof")
     (tmp_path / "ctx").mkdir()
-    app = _app(tmp_path)
+    app = _app(tmp_path, reconcile_enable=True)
 
     with patch(
         "tools.node_trace.catalog_page.subprocess.run",
@@ -360,7 +364,7 @@ def test_catalog_reconcile_error_surfaced_in_response(tmp_path):
     """
     _write_profile(tmp_path / "prof")
     (tmp_path / "ctx").mkdir()
-    app = _app(tmp_path)
+    app = _app(tmp_path, reconcile_enable=True)
     app.config["TESTING"] = True
 
     def _fail(cmd, **kw):
@@ -379,3 +383,104 @@ def test_catalog_reconcile_error_surfaced_in_response(tmp_path):
         assert r.status_code == 200
         # The error text (or its escaped form) must appear in the page body.
         assert b"synthetic-error-from-test" in r.data or b"reconcile exited" in r.data
+
+
+# ---------------------------------------------------------------------------
+# FIX 1 — CATALOG_RECONCILE_ENABLE gate
+# ---------------------------------------------------------------------------
+
+def test_catalog_reconcile_disabled_by_default_returns_403(tmp_path):
+    """POST /catalog/reconcile returns 403 and does NOT call subprocess when flag is off (default)."""
+    _write_profile(tmp_path / "prof")
+    (tmp_path / "ctx").mkdir()
+    # Default: reconcile_enable=False
+    app = _app(tmp_path)
+
+    with patch("tools.node_trace.catalog_page.subprocess.run") as mock_run:
+        r = app.test_client().post("/catalog/reconcile", data={})
+        # Must be 403 (or a redirect); subprocess must NOT be invoked.
+        assert r.status_code in (302, 403)
+        assert not mock_run.called, "subprocess.run must NOT be called when flag is off"
+
+
+def test_catalog_get_hides_reconcile_form_when_disabled(tmp_path):
+    """GET /catalog does NOT show the Reconcile form/checkbox when flag is off."""
+    _write_profile(tmp_path / "prof")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)  # flag off
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    # The submit button and checkbox must not be present.
+    assert b"no_llm" not in r.data
+    assert b'action="/catalog/reconcile"' not in r.data
+    # The disabled note must appear instead.
+    assert b"CATALOG_RECONCILE_ENABLE" in r.data
+
+
+def test_catalog_get_shows_reconcile_form_when_enabled(tmp_path):
+    """GET /catalog shows the Reconcile form when flag is on."""
+    _write_profile(tmp_path / "prof")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path, reconcile_enable=True)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    assert b"no_llm" in r.data
+    assert b'action="/catalog/reconcile"' in r.data
+
+
+# ---------------------------------------------------------------------------
+# FIX 2 — autoescape XSS proof
+# ---------------------------------------------------------------------------
+
+def test_autoescape_escapes_script_in_table_description(tmp_path):
+    """A <script> tag in a table description must be HTML-escaped, not rendered raw."""
+    prof_dir = tmp_path / "prof"
+    prof_dir.mkdir()
+    (prof_dir / "xss.yaml").write_text(yaml.safe_dump({
+        "table": "xss_table",
+        "description": "<script>alert(1)</script>",
+        "columns": {
+            "col1": {"dtype": "str", "description": "safe"},
+        },
+    }))
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
+    # Escaped form must be present; raw <script> tag must NOT appear.
+    assert b"&lt;script&gt;" in r.data
+    assert b"<script>alert(1)</script>" not in r.data
+
+
+def test_autoescape_escapes_script_in_error_query_param(tmp_path):
+    """A <script> tag in the ?error= query param must be HTML-escaped."""
+    _write_profile(tmp_path / "prof")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    r = app.test_client().get("/catalog?error=<script>alert(1)</script>")
+    assert r.status_code == 200
+    assert b"&lt;script&gt;" in r.data
+    assert b"<script>alert(1)</script>" not in r.data
+
+
+# ---------------------------------------------------------------------------
+# FIX 3 — idempotent route registration
+# ---------------------------------------------------------------------------
+
+def test_register_catalog_routes_is_idempotent(tmp_path):
+    """Calling register_catalog_routes twice on the same app must not raise."""
+    app = Flask(__name__)
+    app.config.update(
+        PROFILE_DIR=str(tmp_path / "prof"),
+        CONTEXT_DIR=str(tmp_path / "ctx"),
+        PROVENANCE_PATH=str(tmp_path / ".prov.json"),
+        RECONCILE_RESULTS=str(tmp_path / "last.json"),
+    )
+    register_catalog_routes(app)
+    # Second call must be a no-op — no AssertionError / duplicate rule error.
+    register_catalog_routes(app)
+    # Routes still work after double registration.
+    (tmp_path / "prof").mkdir(exist_ok=True)
+    (tmp_path / "ctx").mkdir(exist_ok=True)
+    r = app.test_client().get("/catalog")
+    assert r.status_code == 200
