@@ -26,10 +26,21 @@ class DataCatalog:
         self._load()
 
     def _load(self) -> None:
+        """Build profiles from disk and atomically swap into self._profiles.
+
+        Under threaded Flask, _CATALOG.reload_if_changed() is called per turn
+        (in server.py _start_turn) without a global lock.  Building into a
+        local dict first and assigning in one statement means concurrent readers
+        always observe either the complete old dict or the complete new dict —
+        never an empty or partial catalog.  CPython reference assignment is
+        atomic (GIL), so no explicit lock is needed here.
+        """
+        profiles: dict[str, dict] = {}
         for path in sorted(self._profile_dir.glob("*.yaml")):
             with open(path) as f:
                 profile = yaml.safe_load(f)
-            self._profiles[profile["table"]] = profile
+            profiles[profile["table"]] = profile
+        self._profiles = profiles            # atomic swap — readers never see a partial dict
         self._loaded_mtime = self._max_mtime()
 
     def list_tables(self) -> list[str]:
@@ -40,8 +51,7 @@ class DataCatalog:
         return max((p.stat().st_mtime for p in self._profile_dir.glob("*.yaml")), default=0.0)
 
     def reload(self) -> None:
-        """Clear profiles and re-run _load to pick up changed YAML files."""
-        self._profiles = {}
+        """Rebuild profiles from disk (atomic swap; safe under concurrent reads)."""
         self._load()
 
     def reload_if_changed(self) -> bool:
