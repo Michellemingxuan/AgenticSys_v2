@@ -82,3 +82,33 @@ def test_load_context_by_table(tmp_path):
 def test_render_threshold(thr, expected):
     from datalayer.context_dict import render_threshold
     assert render_threshold(thr) == expected
+
+
+# --- Task E2 tests ---
+from datalayer.context_dict import update_context_entry, context_files_for_table
+
+def _write(p, text): p.write_text(text); return str(p)
+
+def test_update_context_entry_rewrites_existing_line(tmp_path, monkeypatch):
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {"modeling": ["model_scores"]})
+    f = tmp_path / "modeling_context_description.txt"
+    f.write_text("1. credit_loss_prob: old desc. Scores from 10-100 are risky.\n"
+                 "2. cbr_score: bureau score.\n")
+    status = update_context_entry(str(tmp_path), "model_scores", "credit_loss_prob",
+                                  "new clear desc", {"risk_threshold": 5.8, "risk_direction": "above"})
+    assert status == "updated"
+    lines = f.read_text().splitlines()
+    assert lines[0] == "1. credit_loss_prob: new clear desc. Values above 5.8 are risky."
+    assert lines[1] == "2. cbr_score: bureau score."   # other lines preserved
+
+def test_update_context_entry_not_found(tmp_path, monkeypatch):
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {"modeling": ["model_scores"]})
+    (tmp_path / "modeling_context_description.txt").write_text("1. cbr_score: x.\n")
+    assert update_context_entry(str(tmp_path), "model_scores", "credit_loss_prob", "d", None) == "not_found"
+
+def test_update_context_entry_multi_context(tmp_path, monkeypatch):
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {"spend": ["spends"], "payment_spend": ["spends", "payments"]})
+    assert update_context_entry(str(tmp_path), "spends", "amount", "d", None) == "multi_context"

@@ -126,3 +126,52 @@ def render_threshold(threshold: dict | None) -> str:
     if direction in ("above", "below") and value is not None:
         return f"Values {direction} {_fmt(value)} are risky."
     return ""
+
+
+def context_files_for_table(table: str) -> list[str]:
+    """Return context-file stems whose CONTEXT_TABLE_MAP entry includes *table*."""
+    return [stem for stem, tables in CONTEXT_TABLE_MAP.items() if table in tables]
+
+
+def update_context_entry(
+    context_dir: str,
+    table: str,
+    var_name: str,
+    description: str,
+    threshold: dict | None,
+) -> str:
+    """Rewrite the existing line for *var_name* in the table's single context file.
+
+    Returns one of:
+      "updated"       — rewrote the var's line; all other lines preserved byte-for-byte.
+      "not_found"     — single file exists but has no line for *var_name*.
+      "multi_context" — table is covered by >1 context file; nothing written.
+      "no_context"    — table maps to 0 context files; nothing written.
+    """
+    stems = context_files_for_table(table)
+    if not stems:
+        return "no_context"
+    if len(stems) > 1:
+        return "multi_context"
+    path = os.path.join(context_dir, f"{stems[0]}_context_description.txt")
+    if not os.path.isfile(path):
+        return "not_found"
+    sentence = render_threshold(threshold)
+    with open(path, encoding="utf-8-sig") as f:
+        lines = f.readlines()
+    out, found = [], False
+    for line in lines:
+        m = _LINE.match(line)
+        if m and m.group(1) == var_name:
+            idx = line.split(".", 1)[0].strip()
+            desc = description.strip().rstrip(".")
+            body = f"{desc}. {sentence}" if sentence else desc
+            out.append(f"{idx}. {var_name}: {body}\n")
+            found = True
+        else:
+            out.append(line)
+    if not found:
+        return "not_found"
+    with open(path, "w", encoding="utf-8") as f:
+        f.writelines(out)
+    return "updated"
