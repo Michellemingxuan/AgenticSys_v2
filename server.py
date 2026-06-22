@@ -869,11 +869,6 @@ def _get_or_create_session(case_id: str) -> CaseSession:
         case_logger = EventLogger(session_id=f"case-{case_id}-{uuid.uuid4().hex[:6]}")
         case_logger.log("case_session_open", {"case_id": case_id})
 
-        # Reload catalog from disk if any profile YAML has been updated since the
-        # last load (e.g. a between-turns --reconcile run).  Catalog-only; no LLM
-        # or SSE changes.
-        _CATALOG.reload_if_changed()
-
         # First-open: reconcile the canonical catalog against this case's
         # actual CSV columns so specialists' get_table_schema sees accurate
         # aliases + observed value vocabularies for THIS case. In-memory only.
@@ -2233,6 +2228,9 @@ def _start_turn(case_id: str):
     text = (body.get("text") or "").strip()
     if not text:
         return jsonify({"error": "missing text"}), 400
+    # Reload catalog on every turn so a between-turns --reconcile is picked up
+    # even for already-open case sessions.  Cheap mtime stat; catalog-only.
+    _CATALOG.reload_if_changed()
     try:
         sess = _get_or_create_session(case_id)
     except KeyError as exc:

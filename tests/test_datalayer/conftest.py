@@ -49,20 +49,22 @@ def _guard_real_context_files():
         current_bytes = after.get(fpath)
         if current_bytes is None:
             # File was DELETED — restore it.
+            restore_label = "deleted, restored"
             try:
                 with open(fpath, "wb") as fh:
                     fh.write(original_bytes)
             except OSError:
-                pass
-            mutated.append(os.path.basename(fpath) + " (deleted, restored)")
+                restore_label = f"deleted, RESTORE FAILED: {os.path.basename(fpath)}"
+            mutated.append(os.path.basename(fpath) + f" ({restore_label})")
         elif current_bytes != original_bytes:
             # File was MUTATED — restore original content.
+            restore_label = "mutated, restored"
             try:
                 with open(fpath, "wb") as fh:
                     fh.write(original_bytes)
             except OSError:
-                pass
-            mutated.append(os.path.basename(fpath) + " (mutated, restored)")
+                restore_label = f"mutated, RESTORE FAILED: {os.path.basename(fpath)}"
+            mutated.append(os.path.basename(fpath) + f" ({restore_label})")
 
     # 2. Files that were CREATED by the test (not in before snapshot) — remove.
     for fpath in after:
@@ -78,5 +80,5 @@ def _guard_real_context_files():
             f"Test mutated real context file(s): {mutated}. "
             "Pass an isolated context_dir (e.g. str(tmp_path)) to reconcile() "
             "instead of relying on the production default. "
-            "Real files have been automatically restored."
+            "Restore attempted for each file — see labels above for any failures."
         )
