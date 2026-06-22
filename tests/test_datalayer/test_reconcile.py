@@ -85,7 +85,7 @@ async def test_reconcile_skips_human_edited_field(tmp_path):
     ctx = {"model_scores": {"credit_loss_prob": ContextEntry(
         "credit_loss_prob", "new desc", None, threshold=None)}}
 
-    res = await reconcile(gw, cat, _Agent(), ctx, pv)
+    res = await reconcile(gw, cat, _Agent(), ctx, pv, context_dir=str(tmp_path))
     # description was human-edited (current != baseline) → not overwritten, flagged
     assert cat._profiles["model_scores"]["columns"]["credit_loss_prob"]["description"] == "HUMAN EDIT"
     assert any("human" in f.lower() for f in res.flags)
