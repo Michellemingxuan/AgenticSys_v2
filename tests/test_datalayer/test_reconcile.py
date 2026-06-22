@@ -25,3 +25,67 @@ def test_consistency_divergent_table_is_flagged_and_excluded():
     res = check_consistency(gw)
     assert "t" not in res.uniform_schema
     assert any("t" in f and "c2" in f for f in res.flags)
+
+
+import pytest
+from datalayer.context_dict import ContextEntry
+from datalayer.reconcile import reconcile, ReconcileResult
+from datalayer.provenance import Provenance
+
+
+class _Catalog:
+    """Minimal stand-in: one table 'model_scores' with column 'credit_loss_prob'."""
+    def __init__(self):
+        self.patches = []
+        self._profiles = {"model_scores": {"table": "model_scores",
+                          "columns": {"credit_loss_prob": {"dtype": "float", "description": "old"}}}}
+    def list_tables(self): return ["model_scores"]
+    def column_aliases(self, t): return {}
+    def get_schema(self, t):
+        return {c: {"type": s["dtype"], "description": s.get("description", "")}
+                for c, s in self._profiles[t]["columns"].items()}
+    def write_profile_patch(self, table, patch):
+        self.patches.append((table, patch))
+        self._profiles[table]["columns"]["credit_loss_prob"].update(
+            patch["columns"]["credit_loss_prob"])
+
+
+class _Agent:  # deterministic stub (no real LLM)
+    async def polish_description(self, v, raw, brief): return f"polished: {raw}"
+    async def match_column(self, *a, **k): return {"canonical_col": None, "confidence": 0.0}
+    async def normalize_threshold_text(self, t): return None
+
+
+@pytest.mark.asyncio
+async def test_reconcile_writes_context_threshold_and_polished_desc(tmp_path):
+    from datalayer.gateway import LocalDataGateway
+    gw = LocalDataGateway(case_data={"c1": {"model_scores": [{"credit_loss_prob": "55"}]}})
+    cat = _Catalog()
+    pv = Provenance(str(tmp_path / ".provenance.json"))
+    ctx = {"model_scores": {"credit_loss_prob": ContextEntry(
+        "credit_loss_prob", "vague desc", "Scores from 10-100 are risky.",
+        threshold={"risk_threshold": [10.0, 100.0], "risk_direction": "range"})}}
+
+    res = await reconcile(gw, cat, _Agent(), ctx, pv)
+
+    assert isinstance(res, ReconcileResult)
+    spec = cat._profiles["model_scores"]["columns"]["credit_loss_prob"]
+    assert spec["risk_threshold"] == [10.0, 100.0]      # gold threshold written verbatim
+    assert spec["description"] == "polished: vague desc" # description polished
+
+
+@pytest.mark.asyncio
+async def test_reconcile_skips_human_edited_field(tmp_path):
+    from datalayer.gateway import LocalDataGateway
+    gw = LocalDataGateway(case_data={"c1": {"model_scores": [{"credit_loss_prob": "55"}]}})
+    cat = _Catalog()
+    cat._profiles["model_scores"]["columns"]["credit_loss_prob"]["description"] = "HUMAN EDIT"
+    pv = Provenance(str(tmp_path / ".provenance.json"))
+    pv.record("model_scores", "credit_loss_prob", "description", "agent-wrote-this-earlier")
+    ctx = {"model_scores": {"credit_loss_prob": ContextEntry(
+        "credit_loss_prob", "new desc", None, threshold=None)}}
+
+    res = await reconcile(gw, cat, _Agent(), ctx, pv)
+    # description was human-edited (current != baseline) → not overwritten, flagged
+    assert cat._profiles["model_scores"]["columns"]["credit_loss_prob"]["description"] == "HUMAN EDIT"
+    assert any("human" in f.lower() for f in res.flags)
