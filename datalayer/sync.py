@@ -639,6 +639,34 @@ async def amain() -> None:
     except ImportError:
         pass
 
+    # ── --reconcile shortcut: agent-auto reconcile tables+context into profiles ──
+    # Hoisted BEFORE the sources/_load_gateway()/sys.exit(1) block so that
+    # `--reconcile` is reachable in CI / fresh-checkout / any env without
+    # data_tables/real/ present.
+    if args.reconcile:
+        llm = None
+        if not args.no_llm:
+            try:
+                from llm.firewall_stack import FirewallStack
+                from llm.factory import build_session_clients, FirewalledChatShim
+                _session_id = str(uuid.uuid4())[:8]
+                _logger = EventLogger(session_id=_session_id)
+                firewall = FirewallStack(logger=_logger)
+                clients = build_session_clients(firewall, model_name=args.draft_model, backend=None)
+                llm = FirewalledChatShim(clients)
+            except Exception as exc:
+                print(f"  ⚠ LLM unavailable ({exc}); falling back to no-LLM mode.")
+                llm = None
+        result = await run_reconcile(
+            data_dir=args.data_dir,
+            llm=llm,
+        )
+        _rule("RECONCILE FLAGS")
+        for f in result.flags:
+            _say(f)
+        _say(f"\n{len(result.writes)} field(s) written; {len(result.flags)} flag(s).")
+        return
+
     catalog = DataCatalog()
 
     sources: list[Path] = []
@@ -678,19 +706,6 @@ async def amain() -> None:
         except Exception as exc:
             print(f"  ⚠ LLM unavailable ({exc}); falling back to regex drafts.")
             llm = None
-
-    # ── --reconcile shortcut: agent-auto reconcile tables+context into profiles ──
-    if args.reconcile:
-        reconcile_llm = llm  # respects --no-llm
-        result = await run_reconcile(
-            data_dir=args.data_dir,
-            llm=reconcile_llm,
-        )
-        _rule("RECONCILE FLAGS")
-        for f in result.flags:
-            _say(f)
-        _say(f"\n{len(result.writes)} field(s) written; {len(result.flags)} flag(s).")
-        return
 
     from agent_factories.data_manager_agent import DataManagerAgent
     agent = DataManagerAgent(gateway=gateway, catalog=catalog, llm=llm, logger=logger)
