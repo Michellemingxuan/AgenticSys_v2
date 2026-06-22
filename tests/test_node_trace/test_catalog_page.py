@@ -488,6 +488,7 @@ def test_register_catalog_routes_is_idempotent(tmp_path):
         CONTEXT_DIR=str(tmp_path / "ctx"),
         PROVENANCE_PATH=str(tmp_path / ".prov.json"),
         RECONCILE_RESULTS=str(tmp_path / "last.json"),
+        DATA_DIR=str(tmp_path / "nonexistent_data"),  # isolated — never touches data_tables/real
     )
     register_catalog_routes(app)
     # Second call must be a no-op — no AssertionError / duplicate rule error.
@@ -661,8 +662,13 @@ def test_viewer_index_has_shared_header(tmp_path):
 # Change 1 — Stale profiles: grey class + "(no data table)" marker
 # ---------------------------------------------------------------------------
 
-def test_catalog_stale_table_has_grey_class(tmp_path):
-    """GET /catalog: a stale table (no backing CSV) renders with .stale CSS class."""
+def test_catalog_stale_table_excluded_not_greyed(tmp_path):
+    """GET /catalog: a stale table (no backing CSV) is EXCLUDED entirely — not greyed.
+
+    Isolation: DATA_DIR is set to a tmp dir that has a CSV only for 'live',
+    so 'ghost' is stale.  The page must NOT contain any TOC entry or details
+    block for ghost, while live IS present.
+    """
     prof_dir = tmp_path / "prof"
     prof_dir.mkdir()
     (prof_dir / "live.yaml").write_text(yaml.safe_dump({
@@ -677,6 +683,7 @@ def test_catalog_stale_table_has_grey_class(tmp_path):
 
     data_dir = tmp_path / "data"
     (data_dir / "case001").mkdir(parents=True)
+    # Only live.csv present; ghost has no CSV → must be excluded from page
     (data_dir / "case001" / "live.csv").write_text("col\n1\n")
 
     app = Flask(__name__)
@@ -685,14 +692,18 @@ def test_catalog_stale_table_has_grey_class(tmp_path):
         CONTEXT_DIR=str(tmp_path / "ctx"),
         PROVENANCE_PATH=str(tmp_path / ".prov.json"),
         RECONCILE_RESULTS=str(tmp_path / "last.json"),
-        DATA_DIR=str(data_dir),
+        DATA_DIR=str(data_dir),  # explicitly isolated — never touches data_tables/real
     )
     register_catalog_routes(app)
     r = app.test_client().get("/catalog")
     assert r.status_code == 200
     html = r.data.decode("utf-8")
-    # The ghost table must have class="stale" somewhere in its rendering
-    assert "stale" in html
+    # ghost must be excluded: no TOC entry, no details block
+    assert 'href="#grp-ghost"' not in html, "ghost should not appear as TOC entry"
+    assert 'id="grp-ghost"' not in html, "ghost should not have a details block"
+    assert 'id="tbl-ghost"' not in html, "ghost should not have a tbl block"
+    # live must still be rendered
+    assert 'href="#grp-live"' in html or "live" in html, "live table must appear"
 
 
 def test_catalog_stale_table_has_no_data_table_marker(tmp_path):
@@ -1113,7 +1124,7 @@ def test_catalog_toc_entry_links_to_group_details(tmp_path):
 
 
 def test_catalog_toc_standalone_links_to_grp(tmp_path):
-    """TOC entry for a standalone table uses grp-<table> (or tbl-<table>) as anchor."""
+    """TOC entry for a standalone table uses grp-<table> as anchor."""
     _write_profile(tmp_path / "prof", table_name="payments")
     (tmp_path / "ctx").mkdir()
     app = _app(tmp_path)
@@ -1124,8 +1135,8 @@ def test_catalog_toc_standalone_links_to_grp(tmp_path):
     toc_match = re.search(r'<aside class="catalog-toc">(.*?)</aside>', html, re.DOTALL)
     assert toc_match
     toc_html = toc_match.group(1)
-    # Standalone table TOC entry: either grp-payments or tbl-payments as anchor
-    assert "grp-payments" in toc_html or "payments" in toc_html
+    # Standalone table TOC entry must link to the group anchor grp-payments
+    assert 'href="#grp-payments"' in toc_html
 
 
 # ---------------------------------------------------------------------------

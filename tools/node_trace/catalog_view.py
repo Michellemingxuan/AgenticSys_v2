@@ -33,7 +33,9 @@ def _description_short(text: str) -> str:
     # Look for the first sentence boundary within the first _DESC_MAX_CHARS chars.
     m = _re.search(r'[.!?]', text[:_DESC_MAX_CHARS])
     if m:
-        return text[:m.end()].rstrip() + "…"
+        truncated = text[:m.end()].rstrip()
+        # Only append ellipsis when the truncated form differs from the full text.
+        return truncated + ("…" if truncated != text else "")
     # No sentence boundary — hard-truncate.
     return text[:_DESC_MAX_CHARS].rstrip() + "…"
 

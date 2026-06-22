@@ -266,6 +266,11 @@ _CATALOG_TMPL = """{% autoescape true %}<!doctype html>
               {% if tbl.aliases %}
                 <span class="tbl-aliases">(aliases: {{ tbl.aliases | join(", ") }})</span>
               {% endif %}
+            {% else %}
+              {% set base_tbl = grp.tables[0] %}
+              {% if base_tbl.description_short %}
+                <span class="tbl-desc" title="{{ base_tbl.description }}">— {{ base_tbl.description_short }}</span>
+              {% endif %}
             {% endif %}
           </summary>
           {% if grp.tables | length > 1 %}
