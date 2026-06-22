@@ -30,7 +30,6 @@ import argparse
 import difflib
 import hashlib
 import json
-import os
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -123,7 +122,7 @@ def cmd_snapshot(
     snapshot_root: str = _DEFAULT_SNAPSHOT_ROOT,
 ) -> dict[str, Any]:
     """Create a snapshot. Returns dict with snapshot_dir and manifest keys."""
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
     dir_name = f"{ts}-{label}" if label else ts
     snap_dir = Path(snapshot_root) / dir_name
     snap_dir.mkdir(parents=True, exist_ok=False)
@@ -149,10 +148,8 @@ def cmd_snapshot(
 
 
 def cmd_list(
-    context_dir: str = _DEFAULT_CONTEXT_DIR,  # unused but kept for uniform signature
-    profile_dir: str = _DEFAULT_PROFILE_DIR,
-    provenance_path: str = _DEFAULT_PROVENANCE,
     snapshot_root: str = _DEFAULT_SNAPSHOT_ROOT,
+    **_ignored: Any,
 ) -> list[dict[str, Any]]:
     """Return snapshots sorted newest-first."""
     root = Path(snapshot_root)

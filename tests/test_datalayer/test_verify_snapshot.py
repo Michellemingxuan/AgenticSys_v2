@@ -140,7 +140,6 @@ def test_list_empty_when_no_snapshots(tmp_path):
 def test_list_multiple_snapshots_sorted(tmp_path):
     env = _make_env(tmp_path)
     cmd_snapshot(label="first", **env)
-    import time; time.sleep(1.1)  # ensure distinct 1-second timestamp in dir name
     cmd_snapshot(label="second", **env)
     listing = cmd_list(**env)
     assert len(listing) == 2
@@ -230,7 +229,6 @@ def test_diff_detects_removed_file(tmp_path):
 def test_diff_latest_uses_most_recent_snapshot(tmp_path):
     env = _make_env(tmp_path)
     cmd_snapshot(label="old", **env)
-    import time; time.sleep(1.1)  # ensure distinct 1-second timestamp in dir name
     cmd_snapshot(label="new", **env)
 
     # Diff against "latest" should pick "new"
