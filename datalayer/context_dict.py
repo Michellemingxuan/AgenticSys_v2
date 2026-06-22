@@ -10,8 +10,9 @@ import os
 import re
 from dataclasses import dataclass
 
-# "1. var_name: rest"  — leading index optional, var_name is snake/alnum.
-_LINE = re.compile(r"^\s*\d+\.\s*([A-Za-z0-9_]+)\s*:\s*(.+)$")
+# "1. var_name: rest"  — leading index optional, var_name is snake/alnum/spaced.
+# Non-greedy match with \s*: before the colon strips trailing spaces from var_name.
+_LINE = re.compile(r"^\s*\d+\.\s*([A-Za-z0-9_][A-Za-z0-9_ ]*?)\s*:\s*(.+)$")
 # A sentence that states a risk threshold.
 # The pattern allows dots only between digits (e.g. 5.8) so it cannot bleed
 # across a sentence boundary when an earlier keyword appears in the description.
@@ -19,6 +20,15 @@ _THRESHOLD_SENTENCE = re.compile(
     r"\b(?:values?|scores?)\b(?:[^.]|\d\.\d)*\b(?:risky|risk)\b[^.]*\.",
     re.IGNORECASE,
 )
+
+
+def normalize_key(name: str) -> str:
+    """Collapse a context var name or column name to a comparable token.
+
+    Strips all non-alphanumeric characters and lowercases so that
+    "FICO Score" and "fico_score" both become "ficoscore".
+    """
+    return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
 @dataclass

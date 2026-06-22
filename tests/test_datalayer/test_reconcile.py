@@ -92,6 +92,57 @@ async def test_reconcile_skips_human_edited_field(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_reconcile_normalized_lookup_title_case_context(tmp_path):
+    """reconcile() must find a context entry keyed 'FICO Score' when the
+    profile column is 'fico_score' — via normalized matching."""
+    from datalayer.gateway import LocalDataGateway
+    from datalayer.reconcile import reconcile, ReconcileResult
+    from datalayer.provenance import Provenance
+    from datalayer.context_dict import ContextEntry
+
+    # Gateway: one case with a 'bureau' table having 'fico_score'
+    gw = LocalDataGateway(case_data={"c1": {"bureau": [{"fico_score": "700"}]}})
+
+    # Catalog: bureau table with fico_score column
+    class _BureauCatalog:
+        def __init__(self):
+            self.patches = []
+            self._profiles = {"bureau": {
+                "table": "bureau",
+                "columns": {"fico_score": {"dtype": "int", "description": "old desc"}}
+            }}
+        def list_tables(self): return ["bureau"]
+        def column_aliases(self, t): return {}
+        def get_schema(self, t):
+            return {c: {"type": s["dtype"], "description": s.get("description", "")}
+                    for c, s in self._profiles[t]["columns"].items()}
+        def write_profile_patch(self, table, patch):
+            self.patches.append((table, patch))
+            self._profiles[table]["columns"]["fico_score"].update(
+                patch["columns"].get("fico_score", {}))
+
+    cat = _BureauCatalog()
+    pv = Provenance(str(tmp_path / ".prov.json"))
+
+    # Context keyed by Title-Case 'FICO Score' (as in bureau_context_description.txt)
+    ctx = {"bureau": {"FICO Score": ContextEntry(
+        "FICO Score", "credit risk score", "Values below 721 are risky.",
+        threshold={"risk_threshold": 721.0, "risk_direction": "below"})}}
+
+    res = await reconcile(gw, cat, _Agent(), ctx, pv, context_dir=str(tmp_path))
+
+    # The normalized lookup must have found the entry; threshold should be written
+    spec = cat._profiles["bureau"]["columns"]["fico_score"]
+    assert spec.get("risk_threshold") == 721.0, (
+        f"Expected risk_threshold=721.0 from normalized context lookup; got {spec}"
+    )
+    # Must NOT have a [table-only] flag for fico_score
+    assert not any("table-only" in f and "fico_score" in f for f in res.flags), (
+        f"fico_score was flagged [table-only] despite matching 'FICO Score' via normalization; flags={res.flags}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_reconcile_reverse_syncs_human_field_to_context(tmp_path, monkeypatch):
     import datalayer.context_dict as cd
     monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {"modeling": ["model_scores"]})

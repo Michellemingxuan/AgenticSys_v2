@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from datalayer.context_dict import update_context_entry
+from datalayer.context_dict import update_context_entry, normalize_key
 
 
 @dataclass
@@ -102,9 +102,18 @@ async def reconcile(
         ctx = context_by_table.get(table, {})
         canonical_cols = list(schema.keys())
 
+        # Build a normalized-key index for the context vars to enable
+        # Title-Case (e.g. "FICO Score") → snake_case ("fico_score") lookup.
+        ctx_norm: dict[str, str] = {normalize_key(var): var for var in ctx}
+        # Normalized sets for columns (to support context-only computation).
+        columns_norm: set[str] = {normalize_key(c) for c in columns}
+        canonical_norm: set[str] = {normalize_key(c) for c in canonical_cols}
+
         # Flag context entries that reference a column absent from the data.
+        # Use normalized comparison so "FICO Score" matches "fico_score".
         for var in ctx:
-            if var not in columns and var not in canonical_cols:
+            nk = normalize_key(var)
+            if nk not in columns_norm and nk not in canonical_norm:
                 flags.append(
                     f"[context-only] '{table}.{var}' in dictionary but not in data"
                 )
@@ -132,7 +141,14 @@ async def reconcile(
                     )
                     continue
 
-            entry = ctx.get(canonical) or ctx.get(real_col)
+            # Look up context entry: exact match first, then exact on real_col,
+            # then fall back to normalized key (handles Title-Case ↔ snake_case).
+            entry = (
+                ctx.get(canonical)
+                or ctx.get(real_col)
+                or ctx.get(ctx_norm.get(normalize_key(canonical), ""))
+                or ctx.get(ctx_norm.get(normalize_key(real_col), ""))
+            )
             if entry is None:
                 flags.append(
                     f"[table-only] '{table}.{canonical}' has no dictionary entry"

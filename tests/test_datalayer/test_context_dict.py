@@ -1,5 +1,5 @@
 import pytest
-from datalayer.context_dict import parse_context_file, ContextEntry, normalize_threshold
+from datalayer.context_dict import parse_context_file, ContextEntry, normalize_threshold, normalize_key
 
 SAMPLE = """Data Description
 You are a risk analyst. Analyze the case.
@@ -112,6 +112,66 @@ def test_update_context_entry_multi_context(tmp_path, monkeypatch):
     import datalayer.context_dict as cd
     monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {"spend": ["spends"], "payment_spend": ["spends", "payments"]})
     assert update_context_entry(str(tmp_path), "spends", "amount", "d", None) == "multi_context"
+
+# ---------------------------------------------------------------------------
+# Part A: Title-Case var name parsing
+# ---------------------------------------------------------------------------
+
+TITLE_CASE_SAMPLE = (
+    "1. FICO Score: An industry-standard credit risk score. Values below 721 are risky.\n"
+    "2. SBFE Score: Business credit score predicting financial delinquency. Values below 863 are risky.\n"
+    "3. LN Credit Score: LexisNexis credit risk score. Values below 681 are risky.\n"
+    "4. plain_snake: plain description without threshold.\n"
+)
+
+
+def test_parse_context_file_title_case_names(tmp_path):
+    """Lines with spaced/Title-Case var names should parse to the full var name."""
+    p = tmp_path / "bureau_context_description.txt"
+    p.write_text(TITLE_CASE_SAMPLE)
+    entries = parse_context_file(str(p))
+    by_name = {e.var_name: e for e in entries}
+
+    # All 4 lines should parse (including spaced ones)
+    assert set(by_name) == {"FICO Score", "SBFE Score", "LN Credit Score", "plain_snake"}
+
+    # Threshold sentences still split correctly
+    assert by_name["FICO Score"].threshold_text == "Values below 721 are risky."
+    assert "industry-standard credit risk score" in by_name["FICO Score"].raw_description
+    # Threshold sentence NOT in raw_description
+    assert "Values below 721" not in by_name["FICO Score"].raw_description
+
+    # Snake_case still works identically (no regression)
+    assert by_name["plain_snake"].threshold_text is None
+    assert by_name["plain_snake"].raw_description == "plain description without threshold."
+
+
+def test_normalize_key_removes_non_alnum():
+    """normalize_key strips spaces, underscores, case — FICO Score ↔ fico_score."""
+    assert normalize_key("FICO Score") == normalize_key("fico_score")
+    assert normalize_key("LN Credit Score") == normalize_key("ln_credit_score")
+    assert normalize_key("SBFE Score") == normalize_key("sbfe_score")
+    # Already-normalized keys are stable
+    assert normalize_key("credit_loss_prob") == "creditlossprob"
+    assert normalize_key("FICO Score") == "ficoscore"
+
+
+def test_load_context_by_table_title_case(tmp_path, monkeypatch):
+    """load_context_by_table must return entries for Title-Case context files."""
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {"bureau": ["bureau"]})
+    (tmp_path / "bureau_context_description.txt").write_text(TITLE_CASE_SAMPLE)
+
+    out = cd.load_context_by_table(str(tmp_path))
+    assert "bureau" in out
+    bureau = out["bureau"]
+    # All 4 entries parsed
+    assert len(bureau) == 4
+    assert "FICO Score" in bureau
+    assert "SBFE Score" in bureau
+    assert "LN Credit Score" in bureau
+    assert "plain_snake" in bureau
+
 
 def test_update_context_entry_unchanged(tmp_path, monkeypatch):
     """When the rewritten line would be byte-identical to the existing line,

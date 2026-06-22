@@ -237,6 +237,54 @@ def test_build_catalog_view_parse_hint(tmp_path, monkeypatch):
     assert col["parse_hint"] == "D-MMM-YY"
 
 
+# ---------------------------------------------------------------------------
+# Normalized matching: Title-Case context var ↔ snake_case profile column
+# ---------------------------------------------------------------------------
+
+def test_build_catalog_view_normalized_match(tmp_path, monkeypatch):
+    """Profile column 'fico_score' should match context var 'FICO Score' via normalize_key."""
+    prof = tmp_path / "prof"
+    prof.mkdir()
+    (prof / "bureau.yaml").write_text(yaml.safe_dump({
+        "table": "bureau",
+        "description": "bureau data",
+        "columns": {
+            "fico_score": {"dtype": "int", "description": "FICO score"},
+            "sbfe_score": {"dtype": "int", "description": "SBFE score"},
+            "unmatched_col": {"dtype": "str", "description": "no context"},
+        }
+    }))
+    ctx = tmp_path / "ctx"
+    ctx.mkdir()
+    (ctx / "bureau_context_description.txt").write_text(
+        "1. FICO Score: An industry-standard credit risk score. Values below 721 are risky.\n"
+        "2. SBFE Score: Business credit score. Values below 863 are risky.\n"
+        "3. Orphan Var: Context var with no matching profile column.\n"
+    )
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {"bureau": ["bureau"]})
+
+    pv = Provenance(str(tmp_path / ".prov.json"))
+
+    view = build_catalog_view(str(prof), str(ctx), str(tmp_path / ".prov.json"))
+    t = view["tables"][0]
+    assert t["table"] == "bureau"
+
+    by_name = {c["name"]: c for c in t["columns"]}
+    # Normalized match: FICO Score → fico_score → in_context=True
+    assert by_name["fico_score"]["in_context"] is True, "fico_score should match 'FICO Score' via normalization"
+    assert by_name["sbfe_score"]["in_context"] is True, "sbfe_score should match 'SBFE Score' via normalization"
+    # Column with no context var → in_context=False
+    assert by_name["unmatched_col"]["in_context"] is False
+
+    # context_only: 'Orphan Var' has no matching profile column
+    assert "Orphan Var" in t["context_only"]
+    # Matched vars are NOT in context_only
+    assert "FICO Score" not in t["context_only"]
+    assert "SBFE Score" not in t["context_only"]
+
+
 def test_build_catalog_view_empty_profile_dir(tmp_path, monkeypatch):
     """Empty profile dir returns empty tables list."""
     prof = tmp_path / "prof"
