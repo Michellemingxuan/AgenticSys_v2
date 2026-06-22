@@ -98,3 +98,37 @@ The agent may **never**: change a threshold value, alter a clear description's m
 
 - **Context-file → table map:** hand-maintained dict to start; revisit if it grows unwieldy.
 - **Confidence threshold** for the agent's auto-apply gate: start with a tunable constant alongside the existing `FUZZY_THRESHOLD` / `--auto-threshold`; calibrate against the real case once measured.
+
+---
+
+## Extension — Bidirectional reconcile + catalog auto-reload (slice 2)
+
+Slice 1 (above) is forward-only: context txt → profiles. This slice makes `--reconcile` **bidirectional** and closes the loop to the running catalog.
+
+### Full workflow
+```
+context txt change  OR  table column change  → human triggers --reconcile
+        → profiles updated (forward) + context txt updated (reverse) + coverage flagged
+        → running server's catalog auto-reflects the new profiles
+human directly edits a profile  → next --reconcile syncs that edit back to context txt + checks coverage
+```
+
+### Direction is decided per-field by provenance (no ping-pong)
+A single `--reconcile` pass, per consistent table:
+- **Forward** (slice 1): agent-owned / new fields are driven by context txt → profile.
+- **Reverse** (new): human-owned fields (provenance `is_agent_owned == False`) are written back from profile → context txt.
+- **Coverage** (new): real columns with no profile entry → flag; human-edited profile vars with no context line → flag.
+
+Forward touches only agent-owned/new fields; reverse touches only human-owned fields — **disjoint sets**, so they cannot conflict. After reverse-sync writes a human correction into context, the next forward pass sees `context == profile` *and* the provenance gate already skips that human-owned field. Loop closed.
+
+### New components
+1. **`render_threshold(threshold_dict) -> str`** (`context_dict.py`): inverse of `normalize_threshold`. `{risk_threshold: 5.8, risk_direction: "above"}` → `"Values above 5.8 are risky."`; range → `"Scores from 10 to 100 are risky."`. Deterministic.
+2. **Context writeback** (`update_context_entry`, `context_dict.py`): a reverse map `table → its single context file` (inverse of `CONTEXT_TABLE_MAP`). Find the var's existing line in that file, rewrite its description + threshold sentence (via `render_threshold`), preserve all other lines. If the var has **no** existing line → return "not found" so the caller emits a coverage flag — we do NOT fabricate dictionary entries (context stays human-authored). **Single-file coverage only:** if a table is covered by more than one context file, reverse-sync skips it with a `[multi-context]` flag rather than guessing.
+3. **`DataCatalog.reload()` / `reload_if_changed()`** (`catalog.py`): re-reads the profile YAMLs; the mtime variant reloads only when a profile file changed on disk. The server calls `reload_if_changed()` at the start of each case (beside the existing `_sync_case_catalog`). Catalog-only change — no LLM/SSE path touched.
+
+### Result + flags
+`ReconcileResult` gains `context_writes` (context lines updated). New flag categories: `[coverage]` (real column with no profile entry), `[context-gap]` (human-edited profile var with no context line), `[multi-context]` (table covered by >1 context file — reverse-sync skipped).
+
+### Out of scope (slice 2)
+- Multi-context-file tables (skipped + flagged, not handled).
+- Auto-creating new context dictionary entries (only existing lines are updated).
