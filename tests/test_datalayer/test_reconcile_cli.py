@@ -92,3 +92,33 @@ async def test_amain_reconcile_branch_reachable_without_real_data(tmp_path, monk
         f"data_dir mismatch: got {spy_called_with['data_dir']!r}"
     )
     assert spy_called_with["llm"] is None, "--no-llm should pass llm=None"
+
+
+@pytest.mark.asyncio
+async def test_run_reconcile_is_idempotent(tmp_path, monkeypatch):
+    """Second run on already-reconciled profile must produce no writes and no YAML churn."""
+    case = tmp_path / "data" / "c1"
+    case.mkdir(parents=True)
+    (case / "model_scores.csv").write_text("credit_loss_prob\n55\n")
+
+    prof = tmp_path / "profiles"
+    prof.mkdir()
+    (prof / "model_scores.yaml").write_text(yaml.safe_dump(
+        {"table": "model_scores", "description": "",
+         "columns": {"credit_loss_prob": {"dtype": "float", "description": "old"}}}))
+
+    ctx = tmp_path / "context"
+    ctx.mkdir()
+    (ctx / "modeling_context_description.txt").write_text(
+        "1. credit_loss_prob: default score. Scores from 10-100 are risky.\n")
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {"modeling": ["model_scores"]})
+
+    from datalayer.sync import run_reconcile
+    await run_reconcile(str(tmp_path / "data"), str(ctx), str(prof), llm=None)
+    first = (prof / "model_scores.yaml").read_text()
+    res2 = await run_reconcile(str(tmp_path / "data"), str(ctx), str(prof), llm=None)
+    second = (prof / "model_scores.yaml").read_text()
+    assert first == second, "YAML changed on second run — profile churned"
+    assert res2.writes == [], f"Second run produced unexpected writes: {res2.writes}"

@@ -165,6 +165,8 @@ async def reconcile(
                         f"left as human value"
                     )
                     continue
+                if live == value:   # already converged → don't rewrite
+                    continue
                 col_patch[fieldname] = value
 
             if col_patch:
