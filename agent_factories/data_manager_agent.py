@@ -19,6 +19,7 @@ grows an LLM-driven describe-step in a later phase.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,15 @@ from tools.data_tools import _query_table_impl as query_table
 
 
 _WORKFLOW_DIR = Path(__file__).parent.parent / "skills" / "workflow"
+
+
+def _parse_json(text, default):
+    """Extract the first JSON object from *text*, returning *default* on failure."""
+    try:
+        m = re.search(r"\{.*\}", str(text), re.DOTALL)
+        return json.loads(m.group(0)) if m else default
+    except (ValueError, TypeError):
+        return default
 
 
 # Shared patterns with gateway/firewall_stack._sanitize_message + case_scrubber.
@@ -223,6 +233,80 @@ class DataManagerAgent:
             return ""
         text = str(result.data.get("response", "")).strip()
         return text.strip('"').strip("'").strip()
+
+    async def match_column(self, real_col, real_samples, canonical_candidates) -> dict:
+        """Match a real column name to one canonical candidate via the LLM.
+
+        Returns ``{"canonical_col": str | None, "confidence": float}``.
+        Degrades gracefully to ``{canonical_col: None, confidence: 0.0}``
+        when the LLM is unavailable.
+        """
+        if self.llm is None or not hasattr(self.llm, "ainvoke"):
+            return {"canonical_col": None, "confidence": 0.0}
+        prompt = (
+            "Match a real data column to one canonical column, or decline.\n"
+            f"Real column: {real_col}\nSample values: {real_samples[:10]}\n"
+            f"Canonical candidates: {canonical_candidates}\n"
+            'Reply ONLY JSON: {"canonical_col": <name or null>, "confidence": <0..1>}'
+        )
+        result = await self.llm.ainvoke(prompt)
+        return _parse_json(
+            getattr(result, "content", result),
+            default={"canonical_col": None, "confidence": 0.0},
+        )
+
+    async def polish_description(self, var_name, raw_description, knowledge_brief) -> str:
+        """Rewrite a column description to be clearer and more specific.
+
+        Returns *raw_description* unchanged when the LLM is unavailable.
+        The prompt instructs the model not to invent facts or thresholds.
+        """
+        if self.llm is None or not hasattr(self.llm, "ainvoke"):
+            return raw_description
+        prompt = (
+            "Rewrite this variable description to be clear and specific, preserving "
+            "its meaning. Do NOT add thresholds or invent facts. Use the house "
+            f"knowledge brief for grounding.\nVariable: {var_name}\n"
+            f"Description: {raw_description}\nKnowledge brief: {knowledge_brief}\n"
+            "Reply with the improved description only."
+        )
+        result = await self.llm.ainvoke(prompt)
+        text = getattr(result, "content", result)
+        return (text or raw_description).strip() or raw_description
+
+    async def normalize_threshold_text(self, text) -> dict | None:
+        """Parse a threshold sentence the regex couldn't handle.
+
+        Returns a dict with ``risk_threshold`` and ``risk_direction`` keys,
+        or ``None`` when the LLM is unavailable, the reply is unparseable,
+        or — critically — when the LLM invents a numeric value not present
+        in the source *text* (no-invent invariant).
+        """
+        if not text or self.llm is None or not hasattr(self.llm, "ainvoke"):
+            return None
+        prompt = (
+            "Extract the risk threshold from this sentence into JSON. Do NOT invent "
+            "numbers — use only values present in the text.\n"
+            f"Sentence: {text}\n"
+            'Reply ONLY JSON: {"risk_threshold": <number or [lo,hi]>, '
+            '"risk_direction": "above"|"below"|"range"}'
+        )
+        result = await self.llm.ainvoke(prompt)
+        parsed = _parse_json(getattr(result, "content", result), default=None)
+        if not parsed:
+            return None
+        # Invariant guard: every numeric value returned MUST appear in the source.
+        nums_in_text = set(re.findall(r"-?\d+(?:\.\d+)?", text))
+        vals = parsed.get("risk_threshold")
+        vals = vals if isinstance(vals, list) else [vals]
+        for v in vals:
+            if (
+                str(v) not in nums_in_text
+                and str(int(v)) not in nums_in_text
+                and (f"{v:g}" not in nums_in_text)
+            ):
+                return None
+        return parsed
 
     def verify_description(
         self,
