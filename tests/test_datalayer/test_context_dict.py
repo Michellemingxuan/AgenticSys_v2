@@ -71,3 +71,14 @@ def test_load_context_by_table(tmp_path):
     assert "model_scores" in out and "model_scores_transaction" in out
     entry = out["model_scores"]["credit_loss_prob"]
     assert entry.threshold == {"risk_threshold": [10.0, 100.0], "risk_direction": "range"}
+
+
+@pytest.mark.parametrize("thr,expected", [
+    ({"risk_threshold": 5.8, "risk_direction": "above"}, "Values above 5.8 are risky."),
+    ({"risk_threshold": 0.46, "risk_direction": "below"}, "Values below 0.46 are risky."),
+    ({"risk_threshold": [10.0, 100.0], "risk_direction": "range"}, "Scores from 10 to 100 are risky."),
+    (None, ""),
+])
+def test_render_threshold(thr, expected):
+    from datalayer.context_dict import render_threshold
+    assert render_threshold(thr) == expected

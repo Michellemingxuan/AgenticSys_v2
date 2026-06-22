@@ -103,3 +103,26 @@ def load_context_by_table(context_dir: str) -> dict[str, dict[str, ContextEntry]
             for e in entries:
                 bucket[e.var_name] = e
     return out
+
+
+def _fmt(n: float) -> str:
+    """Format a float: integer-valued floats render without .0."""
+    return str(int(n)) if float(n).is_integer() else str(n)
+
+
+def render_threshold(threshold: dict | None) -> str:
+    """Inverse of normalize_threshold: structured threshold dict → sentence.
+
+    Returns a risk threshold sentence like "Values above 5.8 are risky."
+    or "Scores from 10 to 100 are risky." for a structured threshold dict,
+    or "" for None/empty.
+    """
+    if not threshold:
+        return ""
+    direction = threshold.get("risk_direction")
+    value = threshold.get("risk_threshold")
+    if direction == "range" and isinstance(value, (list, tuple)) and len(value) == 2:
+        return f"Scores from {_fmt(value[0])} to {_fmt(value[1])} are risky."
+    if direction in ("above", "below") and value is not None:
+        return f"Values {direction} {_fmt(value)} are risky."
+    return ""
