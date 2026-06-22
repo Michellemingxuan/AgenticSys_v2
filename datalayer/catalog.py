@@ -30,9 +30,29 @@ class DataCatalog:
             with open(path) as f:
                 profile = yaml.safe_load(f)
             self._profiles[profile["table"]] = profile
+        self._loaded_mtime = self._max_mtime()
 
     def list_tables(self) -> list[str]:
         return sorted(self._profiles.keys())
+
+    def _max_mtime(self) -> float:
+        """Return the maximum mtime of all *.yaml files in profile_dir, or 0.0 if none exist."""
+        return max((p.stat().st_mtime for p in self._profile_dir.glob("*.yaml")), default=0.0)
+
+    def reload(self) -> None:
+        """Clear profiles and re-run _load to pick up changed YAML files."""
+        self._profiles = {}
+        self._load()
+
+    def reload_if_changed(self) -> bool:
+        """Reload profiles if any *.yaml mtime is newer than last load.
+
+        Returns True if reloaded, False if no changes detected.
+        """
+        if self._max_mtime() > getattr(self, "_loaded_mtime", 0.0):
+            self.reload()
+            return True
+        return False
 
     def get_schema(self, table_name: str) -> dict | None:
         """Return column schema: {col_name: {type, description, ...}}.
