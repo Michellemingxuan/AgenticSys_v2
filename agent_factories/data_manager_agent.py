@@ -19,7 +19,6 @@ grows an LLM-driven describe-step in a later phase.
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Any
@@ -33,15 +32,6 @@ from tools.data_tools import _query_table_impl as query_table
 
 
 _WORKFLOW_DIR = Path(__file__).parent.parent / "skills" / "workflow"
-
-
-def _parse_json(text, default):
-    """Extract the first JSON object from *text*, returning *default* on failure."""
-    try:
-        m = re.search(r"\{.*\}", str(text), re.DOTALL)
-        return json.loads(m.group(0)) if m else default
-    except (ValueError, TypeError):
-        return default
 
 
 # Shared patterns with gateway/firewall_stack._sanitize_message + case_scrubber.
@@ -252,16 +242,16 @@ class DataManagerAgent:
         result = await self.llm.ainvoke(
             system_prompt="You are a data steward matching real column names to a canonical schema.",
             user_message=user_message,
+            json_mode=True,
         )
-        if result.status != "success" or not result.data:
+        if result.status != "success" or not result.data or result.data.get("_json_parse_error"):
             return {"canonical_col": None, "confidence": 0.0}
-        text = str(result.data.get("response", "")).strip()
-        out = _parse_json(text, default={"canonical_col": None, "confidence": 0.0})
+        canonical_col = result.data.get("canonical_col")
         try:
-            out["confidence"] = float(out.get("confidence") or 0.0)
+            confidence = float(result.data.get("confidence") or 0.0)
         except (TypeError, ValueError):
-            out["confidence"] = 0.0
-        return out
+            confidence = 0.0
+        return {"canonical_col": canonical_col, "confidence": confidence}
 
     async def polish_description(self, var_name, raw_description, knowledge_brief) -> str:
         """Rewrite a column description to be clearer and more specific.
@@ -307,11 +297,11 @@ class DataManagerAgent:
         result = await self.llm.ainvoke(
             system_prompt="You are a data steward extracting numeric risk thresholds from text into structured JSON.",
             user_message=user_message,
+            json_mode=True,
         )
-        if result.status != "success" or not result.data:
+        if result.status != "success" or not result.data or result.data.get("_json_parse_error"):
             return None
-        resp_text = str(result.data.get("response", "")).strip()
-        parsed = _parse_json(resp_text, default=None)
+        parsed = result.data
         if not parsed:
             return None
         # Invariant guard: every numeric value returned MUST appear in the source.

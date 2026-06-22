@@ -82,7 +82,11 @@ def load_context_by_table(context_dir: str) -> dict[str, dict[str, ContextEntry]
 
     Returns a nested dict: {canonical_table: {var_name: ContextEntry}}.
     Each ContextEntry.threshold is pre-normalized via normalize_threshold.
+    Returns an empty dict when *context_dir* does not exist (clean degradation
+    for fresh checkouts where context/ is gitignored).
     """
+    if not os.path.isdir(context_dir):
+        return {}
     out: dict[str, dict[str, ContextEntry]] = {}
     for fname in sorted(os.listdir(context_dir)):
         if not fname.endswith("_context_description.txt"):

@@ -52,6 +52,11 @@ def test_normalize_threshold(text, expected):
     assert normalize_threshold(text) == expected
 
 
+def test_load_context_by_table_missing_dir_returns_empty():
+    from datalayer.context_dict import load_context_by_table
+    assert load_context_by_table("/nonexistent/path/that/cannot/exist") == {}
+
+
 def test_load_context_by_table(tmp_path):
     from datalayer.context_dict import CONTEXT_TABLE_MAP, load_context_by_table
 
