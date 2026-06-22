@@ -11,7 +11,7 @@ snapshot [--label X]
     and a manifest.json with sha256 hashes + git commit.
 
 list
-    Print all snapshots (newest-first) with created_utc, label, file count.
+    Print all snapshots (newest-first) with created, label, file count.
 
 diff [<snapshot>|latest]
     Compare current state against a snapshot: ADDED / REMOVED / CHANGED files
