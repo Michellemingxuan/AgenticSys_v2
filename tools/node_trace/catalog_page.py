@@ -108,7 +108,7 @@ nav a.active { font-weight: 700; color: #1a1a1a; text-decoration: none; }
 
 # ── HTML template ─────────────────────────────────────────────────────────────
 
-_CATALOG_TMPL = """<!doctype html>
+_CATALOG_TMPL = """{% autoescape true %}<!doctype html>
 <html><head><meta charset="utf-8"><title>Catalog · node_trace</title>""" + _STYLE + """</head>
 <body>
   <h1>Data Catalog</h1>
@@ -230,6 +230,7 @@ _CATALOG_TMPL = """<!doctype html>
   </div>
   {% endfor %}
 </body></html>
+{% endautoescape %}
 """
 
 

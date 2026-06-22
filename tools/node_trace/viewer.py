@@ -22,6 +22,7 @@ from pathlib import Path
 from flask import Flask, abort, redirect, render_template_string, request, url_for
 
 from tools.node_trace._io import open_db
+from tools.node_trace.catalog_page import register_catalog_routes
 
 
 # Same default as server.py — and honors the same env var so setting
@@ -45,6 +46,33 @@ _DUR_BAD_S = 50.0
 _REFRESH_SECS = 60
 
 app = Flask(__name__)
+
+# ── Catalog config defaults ─────────────────────────────────────────────────
+# These can be overridden by the env vars before the process starts, or by
+# passing explicit values to app.config after import.  The defaults mirror the
+# catalog_page module's own _DEFAULTS so that a bare `python -m
+# tools.node_trace.viewer` launch works without any extra configuration.
+app.config.setdefault(
+    "PROFILE_DIR",
+    os.environ.get("CATALOG_PROFILE_DIR", "config/data_profiles"),
+)
+app.config.setdefault(
+    "CONTEXT_DIR",
+    os.environ.get("CATALOG_CONTEXT_DIR", "context"),
+)
+app.config.setdefault(
+    "PROVENANCE_PATH",
+    os.environ.get(
+        "CATALOG_PROVENANCE_PATH", "config/data_profiles/.provenance.json"
+    ),
+)
+app.config.setdefault(
+    "RECONCILE_RESULTS",
+    os.environ.get("CATALOG_RECONCILE_RESULTS", "logs/last_reconcile.json"),
+)
+
+# Register catalog routes on this app instance.
+register_catalog_routes(app)
 
 
 def _db() -> Path:
@@ -270,7 +298,7 @@ _INDEX = """
 <html><head><meta charset="utf-8">""" + _REFRESH_META + """<title>node_trace</title>""" + _STYLE + """</head>
 <body>""" + _REFRESH_BADGE + """
   <h1>Trace viewer · {{ db }}</h1>
-  <nav><a href="/">chats</a></nav>
+  <nav><a href="/">chats</a> <a href="/catalog">Catalog</a></nav>
   <h2>Chats ({{ chats|length }})</h2>
   <table>
     <thead><tr>
@@ -313,6 +341,7 @@ _CHAT = """
   <nav>
     <a href="/">← chats</a>
     <a href="/state/{{ chat_id }}">cross-turn state →</a>
+    <a href="/catalog">Catalog</a>
   </nav>
   <h2>Turns ({{ turns|length }})</h2>
   <table>
@@ -407,6 +436,7 @@ _STATE = """
   <nav>
     <a href="/">← chats</a>
     <a href="/chat/{{ chat_id }}">← turns</a>
+    <a href="/catalog">Catalog</a>
   </nav>
 
   <p class="muted">
@@ -479,6 +509,7 @@ _TURN = _NODE_DETAIL_MACRO + """
     <a href="/">← chats</a>
     <a href="/chat/{{ chat_id }}">turns list</a>
     <a href="/state/{{ chat_id }}">cross-turn state</a>
+    <a href="/catalog">Catalog</a>
   </nav>
 
   {% if sibling_turns and sibling_turns|length > 1 %}

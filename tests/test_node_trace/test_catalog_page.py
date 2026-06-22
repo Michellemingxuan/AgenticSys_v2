@@ -336,3 +336,46 @@ def test_catalog_reconcile_results_counts(tmp_path):
     assert data["writes"] == 1
     assert data["context_writes"] == 1
     assert "[coverage] scores.credit_score" in data["flags"]
+
+
+# ---------------------------------------------------------------------------
+# V4 — viewer wiring: /catalog registered on viewer.app
+# ---------------------------------------------------------------------------
+
+def test_viewer_registers_catalog_route():
+    """viewer.app must expose /catalog after register_catalog_routes is called."""
+    import importlib
+    from tools.node_trace import viewer
+    importlib.reload(viewer)
+    rules = {r.rule for r in viewer.app.url_map.iter_rules()}
+    assert "/catalog" in rules
+
+
+def test_catalog_reconcile_error_surfaced_in_response(tmp_path):
+    """POST /catalog/reconcile with non-zero returncode surfaces the error message.
+
+    Tightens the V3 test: we must verify the error is actually visible in the
+    rendered GET /catalog response after the PRG redirect, not just that it
+    does not 500.
+    """
+    _write_profile(tmp_path / "prof")
+    (tmp_path / "ctx").mkdir()
+    app = _app(tmp_path)
+    app.config["TESTING"] = True
+
+    def _fail(cmd, **kw):
+        class _R:
+            returncode = 1
+            stdout = ""
+            stderr = "synthetic-error-from-test"
+
+        return _R()
+
+    with patch("tools.node_trace.catalog_page.subprocess.run", side_effect=_fail):
+        # Follow the redirect to the GET /catalog?error=... page.
+        r = app.test_client().post(
+            "/catalog/reconcile", data={}, follow_redirects=True
+        )
+        assert r.status_code == 200
+        # The error text (or its escaped form) must appear in the page body.
+        assert b"synthetic-error-from-test" in r.data or b"reconcile exited" in r.data
