@@ -869,6 +869,11 @@ def _get_or_create_session(case_id: str) -> CaseSession:
         case_logger = EventLogger(session_id=f"case-{case_id}-{uuid.uuid4().hex[:6]}")
         case_logger.log("case_session_open", {"case_id": case_id})
 
+        # Reload catalog from disk if any profile YAML has been updated since the
+        # last load (e.g. a between-turns --reconcile run).  Catalog-only; no LLM
+        # or SSE changes.
+        _CATALOG.reload_if_changed()
+
         # First-open: reconcile the canonical catalog against this case's
         # actual CSV columns so specialists' get_table_schema sees accurate
         # aliases + observed value vocabularies for THIS case. In-memory only.

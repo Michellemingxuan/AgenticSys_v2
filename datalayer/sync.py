@@ -598,7 +598,7 @@ async def run_reconcile(
     )
     context_by_table = load_context_by_table(context_dir)
     provenance = Provenance(os.path.join(profile_dir, ".provenance.json"))
-    return await reconcile(gateway, catalog, agent, context_by_table, provenance)
+    return await reconcile(gateway, catalog, agent, context_by_table, provenance, context_dir=context_dir)
 
 
 # ── Main ────────────────────────────────────────────────────────────────
