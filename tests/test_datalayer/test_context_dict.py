@@ -112,3 +112,22 @@ def test_update_context_entry_multi_context(tmp_path, monkeypatch):
     import datalayer.context_dict as cd
     monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {"spend": ["spends"], "payment_spend": ["spends", "payments"]})
     assert update_context_entry(str(tmp_path), "spends", "amount", "d", None) == "multi_context"
+
+def test_update_context_entry_unchanged(tmp_path, monkeypatch):
+    """When the rewritten line would be byte-identical to the existing line,
+    return 'unchanged' and do NOT touch the file (idempotent)."""
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {"modeling": ["model_scores"]})
+    f = tmp_path / "modeling_context_description.txt"
+    # Write the line exactly as update_context_entry would produce it:
+    # "1. credit_loss_prob: new clear desc. Values above 5.8 are risky.\n"
+    f.write_text("1. credit_loss_prob: new clear desc. Values above 5.8 are risky.\n"
+                 "2. cbr_score: bureau score.\n")
+    mtime_before = f.stat().st_mtime_ns
+    status = update_context_entry(
+        str(tmp_path), "model_scores", "credit_loss_prob",
+        "new clear desc", {"risk_threshold": 5.8, "risk_direction": "above"},
+    )
+    assert status == "unchanged"
+    # File must NOT have been rewritten.
+    assert f.stat().st_mtime_ns == mtime_before, "file was rewritten despite no change"

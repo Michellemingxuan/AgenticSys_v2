@@ -144,6 +144,8 @@ def update_context_entry(
 
     Returns one of:
       "updated"       — rewrote the var's line; all other lines preserved byte-for-byte.
+      "unchanged"     — the target line is already byte-identical to what would be
+                        written; file is NOT rewritten (idempotent).
       "not_found"     — single file exists but has no line for *var_name*.
       "multi_context" — table is covered by >1 context file; nothing written.
       "no_context"    — table maps to 0 context files; nothing written.
@@ -160,18 +162,24 @@ def update_context_entry(
     with open(path, encoding="utf-8-sig") as f:
         lines = f.readlines()
     out, found = [], False
+    already_current = False
     for line in lines:
         m = _LINE.match(line)
         if m and m.group(1) == var_name:
             idx = line.split(".", 1)[0].strip()
             desc = description.strip().rstrip(".")
             body = f"{desc}. {sentence}" if sentence else desc
-            out.append(f"{idx}. {var_name}: {body}\n")
+            new_line = f"{idx}. {var_name}: {body}\n"
+            if new_line == line:
+                already_current = True
+            out.append(new_line)
             found = True
         else:
             out.append(line)
     if not found:
         return "not_found"
+    if already_current:
+        return "unchanged"
     with open(path, "w", encoding="utf-8") as f:
         f.writelines(out)
     return "updated"

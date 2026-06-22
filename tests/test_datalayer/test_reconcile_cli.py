@@ -125,6 +125,77 @@ async def test_run_reconcile_is_idempotent(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_reverse_sync_is_idempotent(tmp_path, monkeypatch):
+    """Second run on already-reverse-synced context must yield context_writes == []
+    and leave the context file byte-identical to what the first run produced."""
+    case = tmp_path / "data" / "c1"
+    case.mkdir(parents=True)
+    (case / "model_scores.csv").write_text("credit_loss_prob\n55\n")
+
+    prof = tmp_path / "profiles"
+    prof.mkdir()
+    (prof / "model_scores.yaml").write_text(yaml.safe_dump({
+        "table": "model_scores",
+        "description": "",
+        "columns": {
+            "credit_loss_prob": {
+                "dtype": "float",
+                "description": "HUMAN PROFILE DESC",
+            }
+        },
+    }))
+
+    ctx = tmp_path / "context"
+    ctx.mkdir()
+    (ctx / "modeling_context_description.txt").write_text(
+        "1. credit_loss_prob: stale context desc.\n"
+    )
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {"modeling": ["model_scores"]})
+
+    # Provenance marks field as human-owned → triggers reverse-sync.
+    prov_path = prof / ".provenance.json"
+    prov_data = {
+        "model_scores": {
+            "credit_loss_prob": {
+                "description": "agent-wrote-this-earlier"
+            }
+        }
+    }
+    prov_path.write_text(json.dumps(prov_data))
+
+    from datalayer.sync import run_reconcile
+
+    # First run — should write the context file.
+    res1 = await run_reconcile(
+        str(tmp_path / "data"),
+        context_dir=str(ctx),
+        profile_dir=str(prof),
+        llm=None,
+    )
+    assert ("model_scores", "credit_loss_prob") in res1.context_writes, (
+        "First run should reverse-sync the context entry"
+    )
+
+    ctx_content_after_first = (ctx / "modeling_context_description.txt").read_bytes()
+
+    # Second run — context already matches profile; must be a no-op.
+    res2 = await run_reconcile(
+        str(tmp_path / "data"),
+        context_dir=str(ctx),
+        profile_dir=str(prof),
+        llm=None,
+    )
+    assert res2.context_writes == [], (
+        f"Second run produced unexpected context_writes: {res2.context_writes}"
+    )
+    assert (ctx / "modeling_context_description.txt").read_bytes() == ctx_content_after_first, (
+        "Context file was rewritten on second run despite no change"
+    )
+
+
+@pytest.mark.asyncio
 async def test_run_reconcile_passes_context_dir_for_reverse_sync(tmp_path, monkeypatch):
     """run_reconcile must forward context_dir to reconcile() so reverse-sync
     writes to the caller-supplied context dir, NOT the hard-coded default."""

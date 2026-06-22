@@ -2230,11 +2230,22 @@ def _start_turn(case_id: str):
         return jsonify({"error": "missing text"}), 400
     # Reload catalog on every turn so a between-turns --reconcile is picked up
     # even for already-open case sessions.  Cheap mtime stat; catalog-only.
-    _CATALOG.reload_if_changed()
+    reloaded = _CATALOG.reload_if_changed()
     try:
         sess = _get_or_create_session(case_id)
     except KeyError as exc:
         return jsonify({"error": str(exc)}), 404
+
+    # Re-apply case-sync when the catalog was just reloaded from disk.
+    # reload_if_changed() rebuilds _profiles from YAMLs, discarding the
+    # in-memory case-specific aliases that _sync_case_catalog wrote at
+    # session-open. Re-running it here re-layers those aliases on top of
+    # the freshly-loaded profiles so real-CSV-header↔canonical resolutions
+    # survive the reload. This is the same mutation _get_or_create_session
+    # already performs at first-open — we just repeat it on reload turns
+    # (rare: only when a YAML changed on disk between turns).
+    if reloaded:
+        _sync_case_catalog(case_id, sess.gateway, _CATALOG, sess.logger)
 
     turn_id = uuid.uuid4().hex[:12]
     _spawn_turn(sess, turn_id, text)

@@ -206,6 +206,7 @@ async def reconcile(
                 )
                 if status == "updated":
                     context_writes.append((table, canonical))
+                # "unchanged" → context already matches profile; no-op, no flag.
                 elif status in ("not_found", "no_context"):
                     flags.append(f"[context-gap] {table}.{canonical}")
                 elif status == "multi_context":

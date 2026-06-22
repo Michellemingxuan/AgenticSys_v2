@@ -63,5 +63,5 @@ def test_reload_is_atomic_never_leaves_profiles_empty(tmp_path):
     assert cat.get_description("u") == "second"
     # _profiles must never be the empty sentinel dict — the swap inside _load
     # means self._profiles goes from old-full → new-full, never old-full → {}.
-    assert cat._profiles is not {}, "reload() left _profiles as empty dict"
+    assert cat._profiles != {}, "reload() left _profiles as empty dict"
     assert len(cat._profiles) == 2
