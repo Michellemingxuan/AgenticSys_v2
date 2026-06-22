@@ -28,7 +28,10 @@ from pathlib import Path
 
 from datalayer import adapter
 from datalayer.catalog import DataCatalog
+from datalayer.context_dict import load_context_by_table
 from datalayer.gateway import LocalDataGateway
+from datalayer.provenance import Provenance
+from datalayer.reconcile import reconcile, ReconcileResult
 from logger.event_logger import EventLogger
 
 try:
@@ -550,6 +553,54 @@ async def _verify_new_tables(
                 _say("     → written.", style="green")
 
 
+# ── Reconcile wrapper ────────────────────────────────────────────────────
+
+async def run_reconcile(
+    data_dir: str,
+    context_dir: str = "context",
+    profile_dir: str = "config/data_profiles",
+    *,
+    llm=None,
+) -> ReconcileResult:
+    """Thin, testable wrapper around the reconcile() orchestrator.
+
+    Builds LocalDataGateway, DataCatalog, DataManagerAgent, and Provenance
+    from the given paths, then delegates all work to reconcile().
+
+    Parameters
+    ----------
+    data_dir:
+        Root folder that contains one sub-directory per case (each with CSV files).
+    context_dir:
+        Directory containing ``*_context_description.txt`` files.
+    profile_dir:
+        Directory containing per-table YAML profiles (DataCatalog root).
+    llm:
+        Optional LLM shim.  Pass ``None`` for a deterministic/no-LLM run.
+    """
+    import os
+    from agent_factories.data_manager_agent import DataManagerAgent
+
+    gateway = LocalDataGateway.from_case_folders(data_dir)
+    catalog = DataCatalog(profile_dir=profile_dir)
+
+    # Minimal no-op logger — avoids a real EventLogger (which wants a
+    # real session_id + log-file setup) in test / CLI-only contexts.
+    class _NullLogger:
+        def log(self, *a, **k):
+            pass
+
+    agent = DataManagerAgent(
+        gateway=gateway,
+        catalog=catalog,
+        llm=llm,
+        logger=_NullLogger(),
+    )
+    context_by_table = load_context_by_table(context_dir)
+    provenance = Provenance(os.path.join(profile_dir, ".provenance.json"))
+    return await reconcile(gateway, catalog, agent, context_by_table, provenance)
+
+
 # ── Main ────────────────────────────────────────────────────────────────
 
 async def amain() -> None:
@@ -575,6 +626,11 @@ async def amain() -> None:
     parser.add_argument("--accept-drafts", action="store_true",
                         help="Accept LLM drafts for new columns + tables "
                              "without per-entry confirmation.")
+    parser.add_argument("--data-dir", default="data_tables/real",
+                        help="Root folder containing per-case CSV sub-directories "
+                             "(used by --reconcile). Default: data_tables/real.")
+    parser.add_argument("--reconcile", action="store_true",
+                        help="Agent-auto reconcile tables+context into profiles, then exit.")
     args = parser.parse_args()
 
     try:
@@ -615,12 +671,26 @@ async def amain() -> None:
     if not args.no_llm:
         try:
             from llm.firewall_stack import FirewallStack
-            from llm.factory import build_llm
+            from llm.factory import build_session_clients, FirewalledChatShim
             firewall = FirewallStack(logger=logger)
-            llm = build_llm(args.draft_model, firewall)
+            clients = build_session_clients(firewall, model_name=args.draft_model, backend=None)
+            llm = FirewalledChatShim(clients)
         except Exception as exc:
             print(f"  ⚠ LLM unavailable ({exc}); falling back to regex drafts.")
             llm = None
+
+    # ── --reconcile shortcut: agent-auto reconcile tables+context into profiles ──
+    if args.reconcile:
+        reconcile_llm = llm  # respects --no-llm
+        result = await run_reconcile(
+            data_dir=args.data_dir,
+            llm=reconcile_llm,
+        )
+        _rule("RECONCILE FLAGS")
+        for f in result.flags:
+            _say(f)
+        _say(f"\n{len(result.writes)} field(s) written; {len(result.flags)} flag(s).")
+        return
 
     from agent_factories.data_manager_agent import DataManagerAgent
     agent = DataManagerAgent(gateway=gateway, catalog=catalog, llm=llm, logger=logger)
