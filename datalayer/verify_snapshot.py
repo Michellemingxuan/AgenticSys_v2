@@ -102,7 +102,7 @@ def _resolve_snapshot(target: str, snapshot_root: str) -> str:
     """
     if target != "latest":
         return target
-    # cmd_list returns newest-first sorted by created_utc (then dir name).
+    # cmd_list returns newest-first sorted by created (then dir name).
     # We call it directly to avoid duplicating sort logic.
     listing = cmd_list(snapshot_root=snapshot_root)
     if not listing:
@@ -123,9 +123,13 @@ def cmd_snapshot(
 ) -> dict[str, Any]:
     """Create a snapshot. Returns dict with snapshot_dir and manifest keys."""
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
-    dir_name = f"{ts}-{label}" if label else ts
+    dir_name = label if label else ts
     snap_dir = Path(snapshot_root) / dir_name
-    snap_dir.mkdir(parents=True, exist_ok=False)
+    # If the dir already exists (same label called twice), clear stale content
+    # so a re-snapshot is always clean — no FileExistsError.
+    if snap_dir.exists():
+        shutil.rmtree(snap_dir)
+    snap_dir.mkdir(parents=True, exist_ok=True)
 
     current_files = _collect_current_files(context_dir, profile_dir, provenance_path)
 
@@ -137,7 +141,7 @@ def cmd_snapshot(
         manifest_files[relpath] = _sha256(dest)
 
     manifest: dict[str, Any] = {
-        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "created": datetime.now(timezone.utc).isoformat(),
         "label": label,
         "files": manifest_files,
         "git_commit": _git_short_commit(),
@@ -164,17 +168,17 @@ def cmd_list(
                 manifest = json.loads(mf.read_text())
                 entries.append({
                     "name": d.name,
-                    "created_utc": manifest.get("created_utc", ""),
+                    "created": manifest.get("created", manifest.get("created_utc", "")),
                     "label": manifest.get("label"),
                     "file_count": len(manifest.get("files", {})),
                 })
             except Exception:
                 pass
 
-    # Newest-first: sort by (created_utc, name) descending.
-    # created_utc is an ISO datetime string from manifest.json (microsecond precision),
+    # Newest-first: sort by (created, name) descending.
+    # created is an ISO datetime string from manifest.json (microsecond precision),
     # so it correctly orders two snapshots that share the same UTC second in their name.
-    entries.sort(key=lambda e: (e["created_utc"], e["name"]), reverse=True)
+    entries.sort(key=lambda e: (e["created"], e["name"]), reverse=True)
     return entries
 
 
@@ -192,7 +196,7 @@ def cmd_diff(
           "snapshot_used": <name>,
           "added":   [relpath, ...],         # in current but not in snapshot
           "removed": [relpath, ...],         # in snapshot but not in current
-          "changed": [{"file": relpath, "diff": unified_diff_str}, ...],
+          "changed": [{"relpath": relpath, "diff": unified_diff_str}, ...],
         }
     """
     snap_name = _resolve_snapshot(target, snapshot_root)
@@ -223,7 +227,7 @@ def cmd_diff(
                 )
             except Exception:
                 diff = "<binary or unreadable>"
-            changed.append({"file": rel, "diff": diff})
+            changed.append({"relpath": rel, "diff": diff})
 
     return {
         "snapshot_used": snap_name,
@@ -276,10 +280,16 @@ def cmd_restore(
         return Path(snapshot_root).parent / relpath
 
     plan = []
+    would_overwrite: list[str] = []
+    would_create: list[str] = []
     for relpath in sorted(snap_files):
         src = snap_dir / relpath
         dest = _dest_for(relpath)
         plan.append({"src": str(src), "dest": str(dest)})
+        if dest.exists():
+            would_overwrite.append(str(dest))
+        else:
+            would_create.append(str(dest))
 
     if force:
         for item in plan:
@@ -291,6 +301,8 @@ def cmd_restore(
         "dry_run": not force,
         "snapshot": snapshot,
         "plan": plan,
+        "would_overwrite": would_overwrite,
+        "would_create": would_create,
     }
 
 
@@ -310,7 +322,7 @@ def _print_list(entries: list[dict]) -> None:
         return
     for e in entries:
         label_str = f"  label={e['label']}" if e["label"] else ""
-        print(f"  {e['name']}  {e['created_utc']}{label_str}  [{e['file_count']} files]")
+        print(f"  {e['name']}  {e['created']}{label_str}  [{e['file_count']} files]")
 
 
 def _print_diff(result: dict) -> None:
@@ -326,7 +338,7 @@ def _print_diff(result: dict) -> None:
     if result["changed"]:
         print("CHANGED:")
         for c in result["changed"]:
-            print(f"  ~ {c['file']}")
+            print(f"  ~ {c['relpath']}")
             if c["diff"]:
                 for line in c["diff"].splitlines():
                     print(f"    {line}")
@@ -335,11 +347,16 @@ def _print_diff(result: dict) -> None:
 
 
 def _print_restore(result: dict) -> None:
-    mode = "DRY-RUN (no files written)" if result["dry_run"] else "FORCE (files written)"
-    print(f"Restore {mode} — snapshot: {result['snapshot']}")
-    for item in result["plan"]:
-        action = "WOULD overwrite/create" if result["dry_run"] else "Wrote"
-        print(f"  {action}: {item['dest']}")
+    if result["dry_run"]:
+        print(f"Restore DRY-RUN — snapshot: {result['snapshot']} (dry run — pass --force to apply)")
+        would_overwrite_set = set(result.get("would_overwrite", []))
+        for item in result["plan"]:
+            action = "WOULD overwrite" if item["dest"] in would_overwrite_set else "WOULD create"
+            print(f"  {action}: {item['dest']}")
+    else:
+        print(f"Restore FORCE (files written) — snapshot: {result['snapshot']}")
+        for item in result["plan"]:
+            print(f"  Wrote: {item['dest']}")
 
 
 # ---------------------------------------------------------------------------

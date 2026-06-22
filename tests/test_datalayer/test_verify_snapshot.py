@@ -66,7 +66,7 @@ def test_snapshot_creates_folder_and_manifest(tmp_path):
 
     manifest = json.loads((snap_dir / "manifest.json").read_text())
     assert manifest["label"] == "testlabel"
-    assert "created_utc" in manifest
+    assert "created" in manifest
     assert "files" in manifest
     assert "git_commit" in manifest
 
@@ -96,6 +96,19 @@ def test_snapshot_sha256_round_trip(tmp_path):
     for relpath, expected_sha in manifest["files"].items():
         actual_sha = _sha256(snap_dir / relpath)
         assert actual_sha == expected_sha, f"sha mismatch for {relpath}"
+
+
+def test_snapshot_deterministic_label(tmp_path):
+    """Calling snapshot twice with the same label must not raise FileExistsError."""
+    env = _make_env(tmp_path)
+    result1 = cmd_snapshot(label="v42", **env)
+    result2 = cmd_snapshot(label="v42", **env)
+    dir1 = pathlib.Path(result1["snapshot_dir"])
+    dir2 = pathlib.Path(result2["snapshot_dir"])
+    assert dir1.name == "v42", f"expected dir name 'v42', got {dir1.name!r}"
+    assert dir2.name == "v42", f"expected dir name 'v42', got {dir2.name!r}"
+    assert dir1 == dir2, "both calls must produce the same snapshot dir"
+    assert dir2.exists(), "snapshot dir must exist after second call"
 
 
 def test_snapshot_no_label_omits_suffix(tmp_path):
@@ -154,7 +167,7 @@ def test_list_entry_has_required_fields(tmp_path):
     listing = cmd_list(**env)
     entry = listing[0]
     assert "name" in entry
-    assert "created_utc" in entry
+    assert "created" in entry
     assert "label" in entry
     assert "file_count" in entry
 
@@ -183,7 +196,7 @@ def test_diff_detects_changed_file(tmp_path):
     alpha_path.write_text("hello alpha MODIFIED\n")
 
     result = cmd_diff(target=snap_name, **env)
-    changed_files = [c["file"] for c in result["changed"]]
+    changed_files = [c["relpath"] for c in result["changed"]]
     assert any("alpha.txt" in f for f in changed_files)
 
 
@@ -247,17 +260,15 @@ def test_restore_dry_run_does_not_write(tmp_path):
 
     # Mutate a file so restore would have something to do
     alpha_path = pathlib.Path(env["context_dir"]) / "alpha.txt"
-    original_content = alpha_path.read_text()
     alpha_path.write_text("TAMPERED\n")
 
     # Dry-run (default, force=False)
     result = cmd_restore(snapshot=snap_name, force=False, **env)
     assert result["dry_run"] is True
     # File should still be tampered (not written back)
-    assert alpha_path.read_text() == "TAMPERED\n"
-    # Plan should mention alpha.txt
-    plan_files = [p["dest"] for p in result["plan"]]
-    assert any("alpha.txt" in f for f in plan_files)
+    assert alpha_path.read_text() == "TAMPERED\n", "dry-run must not overwrite the tampered file"
+    # would_overwrite should mention alpha.txt (it already exists)
+    assert any("alpha.txt" in f for f in result["would_overwrite"])
 
 
 def test_restore_dry_run_returns_plan(tmp_path):
@@ -270,6 +281,11 @@ def test_restore_dry_run_returns_plan(tmp_path):
     assert isinstance(result["plan"], list)
     # All snapshotted files should be in plan
     assert len(result["plan"]) > 0
+    # Spec-required top-level keys
+    assert "would_overwrite" in result
+    assert "would_create" in result
+    assert isinstance(result["would_overwrite"], list)
+    assert isinstance(result["would_create"], list)
 
 
 def test_restore_force_writes_files(tmp_path):
@@ -285,6 +301,8 @@ def test_restore_force_writes_files(tmp_path):
 
     result = cmd_restore(snapshot=snap_name, force=True, **env)
     assert result["dry_run"] is False
+    assert "would_overwrite" in result
+    assert "would_create" in result
     assert alpha_path.read_text() == "hello alpha\n"
     assert beta_path.read_text() == "hello beta\n"
 
@@ -318,3 +336,16 @@ def test_restore_dry_run_does_not_touch_real_context(tmp_path):
         assert str(tmp_path) in str(dest), (
             f"restore plan contains a path outside tmp_path: {dest}"
         )
+
+
+def test_restore_dry_run_phrase(tmp_path, capsys):
+    """_print_restore must emit exact phrase: (dry run — pass --force to apply)."""
+    import datalayer.verify_snapshot as vs
+    env = _make_env(tmp_path)
+    snap = cmd_snapshot(**env)
+    snap_name = pathlib.Path(snap["snapshot_dir"]).name
+
+    result = cmd_restore(snapshot=snap_name, force=False, **env)
+    vs._print_restore(result)
+    captured = capsys.readouterr()
+    assert "(dry run — pass --force to apply)" in captured.out
