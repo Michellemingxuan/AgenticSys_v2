@@ -261,3 +261,78 @@ async def test_run_reconcile_passes_context_dir_for_reverse_sync(tmp_path, monke
     assert ("model_scores", "credit_loss_prob") in res.context_writes, (
         f"Expected context_writes to contain the pair; got: {res.context_writes}"
     )
+
+
+@pytest.mark.asyncio
+async def test_run_reconcile_json_dump(tmp_path, monkeypatch):
+    """dump_result_json writes {writes, context_writes, flags} as JSON to a file."""
+    # Mirror setup from test_run_reconcile_writes_threshold_from_context
+    case = tmp_path / "data" / "c1"
+    case.mkdir(parents=True)
+    (case / "model_scores.csv").write_text("credit_loss_prob\n55\n")
+
+    prof = tmp_path / "profiles"
+    prof.mkdir()
+    (prof / "model_scores.yaml").write_text(yaml.safe_dump(
+        {"table": "model_scores", "description": "",
+         "columns": {"credit_loss_prob": {"dtype": "float", "description": "old"}}}))
+
+    ctx = tmp_path / "context"
+    ctx.mkdir()
+    (ctx / "modeling_context_description.txt").write_text(
+        "1. credit_loss_prob: default score. Scores from 10-100 are risky.\n")
+
+    import datalayer.context_dict as cd
+    monkeypatch.setattr(cd, "CONTEXT_TABLE_MAP", {"modeling": ["model_scores"]})
+
+    from datalayer.sync import run_reconcile, dump_result_json
+    res = await run_reconcile(str(tmp_path / "data"), str(ctx), str(prof), llm=None)
+
+    out = tmp_path / "result.json"
+    dump_result_json(res, str(out))
+
+    loaded = json.loads(out.read_text())
+    assert set(loaded) == {"writes", "context_writes", "flags"}
+    assert isinstance(loaded["flags"], list)
+    assert isinstance(loaded["writes"], list)
+    assert isinstance(loaded["context_writes"], list)
+    # Each write entry must be a list (tuples serialized as lists)
+    for entry in loaded["writes"]:
+        assert isinstance(entry, list)
+    for entry in loaded["context_writes"]:
+        assert isinstance(entry, list)
+
+
+@pytest.mark.asyncio
+async def test_amain_reconcile_json_arg(tmp_path, monkeypatch):
+    """--json <path> writes dump_result_json output when --reconcile is passed."""
+    import datalayer.sync as sync
+
+    async def _fake_run_reconcile(data_dir, context_dir="context",
+                                  profile_dir="config/data_profiles", *, llm=None):
+        from datalayer.reconcile import ReconcileResult
+        return ReconcileResult(
+            writes=[("model_scores", "credit_loss_prob", "risk_threshold")],
+            context_writes=[("model_scores", "credit_loss_prob")],
+            flags=["[coverage] model_scores.credit_loss_prob"],
+        )
+
+    monkeypatch.setattr(sync, "run_reconcile", _fake_run_reconcile)
+    monkeypatch.setattr(sync, "_REAL_DIR", tmp_path / "nonexistent_real")
+    monkeypatch.setattr(sync, "_SIM_DIR", tmp_path / "nonexistent_sim")
+
+    json_out = tmp_path / "out.json"
+    monkeypatch.setattr(sys, "argv", [
+        "sync", "--reconcile", "--no-llm",
+        "--data-dir", str(tmp_path / "my_data"),
+        "--json", str(json_out),
+    ])
+
+    await sync.amain()
+
+    assert json_out.exists(), "--json file was not created"
+    loaded = json.loads(json_out.read_text())
+    assert set(loaded) == {"writes", "context_writes", "flags"}
+    assert loaded["flags"] == ["[coverage] model_scores.credit_loss_prob"]
+    assert loaded["writes"] == [["model_scores", "credit_loss_prob", "risk_threshold"]]
+    assert loaded["context_writes"] == [["model_scores", "credit_loss_prob"]]

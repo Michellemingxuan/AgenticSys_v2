@@ -555,6 +555,24 @@ async def _verify_new_tables(
 
 # ── Reconcile wrapper ────────────────────────────────────────────────────
 
+def dump_result_json(result, path: str) -> None:
+    """Write a ReconcileResult to *path* as JSON.
+
+    Tuples are serialized as lists so the output is valid JSON:
+      {"writes": [[table, col, field], ...],
+       "context_writes": [[table, col], ...],
+       "flags": [str, ...]}
+    """
+    import json
+    payload = {
+        "writes": [list(w) for w in result.writes],
+        "context_writes": [list(c) for c in result.context_writes],
+        "flags": list(result.flags),
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+
+
 async def run_reconcile(
     data_dir: str,
     context_dir: str = "context",
@@ -631,6 +649,9 @@ async def amain() -> None:
                              "(used by --reconcile). Default: data_tables/real.")
     parser.add_argument("--reconcile", action="store_true",
                         help="Agent-auto reconcile tables+context into profiles, then exit.")
+    parser.add_argument("--json", default=None, metavar="PATH",
+                        help="With --reconcile: write structured result JSON to PATH "
+                             "({writes, context_writes, flags}).")
     args = parser.parse_args()
 
     try:
@@ -661,6 +682,8 @@ async def amain() -> None:
             data_dir=args.data_dir,
             llm=llm,
         )
+        if args.json:
+            dump_result_json(result, args.json)
         _rule("RECONCILE FLAGS")
         for f in result.flags:
             _say(f)
