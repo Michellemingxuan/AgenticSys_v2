@@ -107,6 +107,9 @@ async def fs_grep(ctx: RunContextWrapper[AppContext], terms: list[str]) -> str:
     `L<n>: <line>` snippets (1-based line numbers that line up with
     fs_read_file's start_line/end_line). Discovery only — read the file (or a
     slice of it) before drafting.
+
+    Note: file contents are comma-formatted before matching, so numeric search
+    terms must include separators (e.g. `174,897`, not `174897`).
     """
     folder = ctx.context.case_folder
     if folder is None or not folder.exists():
