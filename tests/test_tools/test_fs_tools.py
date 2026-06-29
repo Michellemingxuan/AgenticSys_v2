@@ -83,3 +83,53 @@ async def test_fs_grep_empty_terms(tmp_path):
     ctx = RunContextWrapper(AppContext(gateway=None, case_folder=tmp_path, logger=None))
     out = await fs_grep.on_invoke_tool(ctx, json.dumps({"terms": []}))
     assert out == "No terms provided."
+
+
+_FIVE_LINES = (
+    "line one alpha\n"
+    "line two beta\n"
+    "line three gamma\n"
+    "line four delta\n"
+    "line five epsilon\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_fs_read_file_whole_file_default_unchanged(tmp_path):
+    (tmp_path / "r.md").write_text(_FIVE_LINES)
+    ctx = RunContextWrapper(AppContext(gateway=None, case_folder=tmp_path, logger=None))
+    out = await fs_read_file.on_invoke_tool(ctx, json.dumps({"filename": "r.md"}))
+    assert "alpha" in out and "epsilon" in out  # all lines present
+
+
+@pytest.mark.asyncio
+async def test_fs_read_file_range_returns_window(tmp_path):
+    (tmp_path / "r.md").write_text(_FIVE_LINES)
+    ctx = RunContextWrapper(AppContext(gateway=None, case_folder=tmp_path, logger=None))
+    out = await fs_read_file.on_invoke_tool(
+        ctx, json.dumps({"filename": "r.md", "start_line": 2, "end_line": 4})
+    )
+    assert "beta" in out and "gamma" in out and "delta" in out
+    assert "alpha" not in out and "epsilon" not in out
+
+
+@pytest.mark.asyncio
+async def test_fs_read_file_range_clamps_out_of_bounds(tmp_path):
+    (tmp_path / "r.md").write_text(_FIVE_LINES)
+    ctx = RunContextWrapper(AppContext(gateway=None, case_folder=tmp_path, logger=None))
+    out = await fs_read_file.on_invoke_tool(
+        ctx, json.dumps({"filename": "r.md", "start_line": 4, "end_line": 999})
+    )
+    assert "delta" in out and "epsilon" in out
+    assert "gamma" not in out
+
+
+@pytest.mark.asyncio
+async def test_fs_read_file_range_inverted_bounds_swap(tmp_path):
+    (tmp_path / "r.md").write_text(_FIVE_LINES)
+    ctx = RunContextWrapper(AppContext(gateway=None, case_folder=tmp_path, logger=None))
+    out = await fs_read_file.on_invoke_tool(
+        ctx, json.dumps({"filename": "r.md", "start_line": 4, "end_line": 2})
+    )
+    assert "beta" in out and "gamma" in out and "delta" in out
+    assert "alpha" not in out and "epsilon" not in out

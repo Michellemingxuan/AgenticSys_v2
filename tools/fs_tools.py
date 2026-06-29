@@ -65,7 +65,12 @@ async def fs_list_files(ctx: RunContextWrapper[AppContext]) -> str:
 
 
 @function_tool
-async def fs_read_file(ctx: RunContextWrapper[AppContext], filename: str) -> str:
+async def fs_read_file(
+    ctx: RunContextWrapper[AppContext],
+    filename: str,
+    start_line: int = 0,
+    end_line: int = 0,
+) -> str:
     folder = ctx.context.case_folder
     if folder is None:
         return "No case folder available."
@@ -77,9 +82,21 @@ async def fs_read_file(ctx: RunContextWrapper[AppContext], filename: str) -> str
         return f"Access denied: '{filename}' is outside the case folder."
     if not target.exists() or not target.is_file():
         return f"File not found: {filename}"
-    raw = target.read_text()
     # Comma-format long numeric runs so they survive boundary redaction.
-    return _format_long_numerics(raw)
+    formatted = _format_long_numerics(target.read_text())
+    # Default (0, 0) → whole file, unchanged.
+    if start_line <= 0 and end_line <= 0:
+        return formatted
+    # Ranged read: 1-based inclusive, clamped to the file extent.
+    lines = formatted.splitlines()
+    n = len(lines)
+    lo = start_line if start_line > 0 else 1
+    hi = end_line if end_line > 0 else n
+    lo = max(1, min(lo, n))
+    hi = max(1, min(hi, n))
+    if lo > hi:
+        lo, hi = hi, lo
+    return "\n".join(lines[lo - 1 : hi])
 
 
 @function_tool
