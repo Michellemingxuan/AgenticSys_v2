@@ -9,7 +9,7 @@ import json
 import pytest
 from pathlib import Path
 from agents import RunContextWrapper
-from tools.fs_tools import fs_list_files, fs_read_file
+from tools.fs_tools import fs_grep, fs_list_files, fs_read_file
 from agent_factories.app_context import AppContext
 
 
@@ -36,3 +36,50 @@ async def test_fs_read_file_rejects_path_traversal(tmp_path):
     ctx = RunContextWrapper(AppContext(gateway=None, case_folder=tmp_path, logger=None))
     out = await fs_read_file.on_invoke_tool(ctx, json.dumps({"filename": "../etc/passwd"}))
     assert "denied" in out.lower() or "invalid" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_fs_grep_or_matching_and_ranking(tmp_path):
+    # file_hi matches 3 distinct terms across 2 lines; file_lo matches 1.
+    (tmp_path / "file_hi.md").write_text(
+        "Recurring spend pattern observed.\n"
+        "A high-value transaction of 174897 posted.\n"
+    )
+    (tmp_path / "file_lo.md").write_text("Only one recurring note here.\n")
+    ctx = RunContextWrapper(AppContext(gateway=None, case_folder=tmp_path, logger=None))
+    out = await fs_grep.on_invoke_tool(
+        ctx, json.dumps({"terms": ["spend", "transaction", "recurring"]})
+    )
+    # both files surface
+    assert "file_hi.md" in out and "file_lo.md" in out
+    # file_hi (3 distinct terms) ranks above file_lo (1 term)
+    assert out.index("file_hi.md") < out.index("file_lo.md")
+    # line-numbered snippets present
+    assert "L1:" in out and "L2:" in out
+    # numeric parity with fs_read_file's comma formatting
+    assert "174,897" in out
+
+
+@pytest.mark.asyncio
+async def test_fs_grep_is_case_insensitive(tmp_path):
+    (tmp_path / "r.md").write_text("Total SPEND was high.\n")
+    ctx = RunContextWrapper(AppContext(gateway=None, case_folder=tmp_path, logger=None))
+    out = await fs_grep.on_invoke_tool(ctx, json.dumps({"terms": ["spend"]}))
+    assert "r.md" in out
+
+
+@pytest.mark.asyncio
+async def test_fs_grep_no_matches_signal(tmp_path):
+    (tmp_path / "r.md").write_text("nothing relevant here\n")
+    ctx = RunContextWrapper(AppContext(gateway=None, case_folder=tmp_path, logger=None))
+    out = await fs_grep.on_invoke_tool(ctx, json.dumps({"terms": ["bureau", "fico"]}))
+    assert out.startswith("No matches for:")
+    assert "bureau" in out and "fico" in out
+
+
+@pytest.mark.asyncio
+async def test_fs_grep_empty_terms(tmp_path):
+    (tmp_path / "r.md").write_text("anything\n")
+    ctx = RunContextWrapper(AppContext(gateway=None, case_folder=tmp_path, logger=None))
+    out = await fs_grep.on_invoke_tool(ctx, json.dumps({"terms": []}))
+    assert out == "No terms provided."
