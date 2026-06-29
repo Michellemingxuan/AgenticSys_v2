@@ -8,4 +8,4 @@ def test_build_report_agent_returns_agent():
     assert isinstance(agent, Agent)
     assert agent.name == "report_agent"
     assert agent.output_type.output_type is ReportDraft
-    assert len(agent.tools) == 2  # fs_list_files, fs_read_file
+    assert len(agent.tools) == 3  # fs_grep, fs_list_files, fs_read_file
