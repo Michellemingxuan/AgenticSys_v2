@@ -4,8 +4,8 @@ The agent uses two markdown skills:
   - `workflow/report_needle.md` — coverage rubric (full | partial | none)
   - `workflow/report_analysis.md` — evidence extraction format
 
-The agent calls fs_list_files and fs_read_file tools autonomously and
-returns a structured ReportDraft.
+The agent calls fs_list_files, fs_grep, and fs_read_file tools autonomously
+and returns a structured ReportDraft.
 """
 
 from __future__ import annotations
