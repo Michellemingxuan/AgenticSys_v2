@@ -35,7 +35,7 @@ from typing import Any
 # Load `.env` from the project root BEFORE anything reads ``os.environ``.
 # Without this, vars like ``NODE_TRACE_DB``, ``LLM_BACKEND``, ``PILLAR``, …
 # defined in `.env` are silently ignored when running `python server.py`
-# directly. Standalone scripts (notebooks, datalayer.sync) already do
+# directly. Standalone scripts (notebooks, dataagent.sync) already do
 # this — server.py was the missing one. Lazy/optional import so the
 # server still starts if python-dotenv isn't installed (e.g. private env).
 try:
@@ -817,7 +817,7 @@ def _sync_case_catalog(case_id: str, gateway, catalog, logger) -> None:
     (real CSV headers ↔ canonical names, observed value vocabularies, etc.).
     YAMLs on disk are NOT touched — committing case-specific drift back to
     source-controlled profiles is still the interactive
-    `python -m datalayer.sync` flow's job.
+    `python -m dataagent.sync` flow's job.
 
     Skips LLM drafting for speed (regex-based descriptions only) — the
     runtime path can't afford the 5-30s LLM round-trips on each first open.

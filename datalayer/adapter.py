@@ -637,7 +637,7 @@ def apply_diff_in_memory(diff: Diff, catalog) -> dict[str, dict]:
     want the catalog to reflect that case's actual CSV columns immediately
     (so specialists see accurate aliases / observed_categories), but we
     don't want to commit case-specific drift back to the source-controlled
-    YAMLs — that's still the job of the interactive ``python -m datalayer.sync``
+    YAMLs — that's still the job of the interactive ``python -m dataagent.sync``
     flow.
 
     Returns the patches that were applied so the caller can log a summary.

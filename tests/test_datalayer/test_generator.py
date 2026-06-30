@@ -21,7 +21,7 @@ def gen():
 
 class TestLoadProfiles:
     def test_loads_all_profiles(self, gen: DataGenerator):
-        # Sync (datalayer.sync) may add real-data profiles to the same dir;
+        # Sync (dataagent.sync) may add real-data profiles to the same dir;
         # the simulator core stays = 10.
         assert len(gen.profiles) >= 10
 
