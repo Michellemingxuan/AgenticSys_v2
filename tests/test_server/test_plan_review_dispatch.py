@@ -12,3 +12,11 @@ def test_team_construction_skill_content():
         assert shape in body.lower()
     # row-31 restriction removed
     assert "NOT TSR/CDSS" not in body
+
+
+def test_orchestrator_instructions_vp_framing():
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[2]
+           / "agent_factories" / "orchestrator_agent.py").read_text(encoding="utf-8")
+    assert "SINGLE response" not in src          # forced-parallel mandate removed
+    assert "manager" in src.lower()              # VP framing present

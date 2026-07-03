@@ -97,8 +97,12 @@ def _compose_orchestrator_instructions(
             "general_specialist (quick pass) → R3 → FinalAnswer\n\n"
             "TOOL-USE DISCIPLINE: Before FinalAnswer, MUST have called "
             "BOTH (1) report_agent and (2) at least one domain specialist. "
-            "PARALLEL EXECUTION: Emit report_agent + every domain "
-            "specialist in a SINGLE response so they run in parallel."
+            "You are the manager. Dispatch the team by judgment (see the "
+            "team_construction Dispatch-shape guidance): prefer parallel for "
+            "independent sub-questions; collapse a causal dependency into one "
+            "cross-querying specialist when possible; sequence only when an "
+            "anchor needs another specialist's deep analysis first. Emit "
+            "independent specialist calls together so they run in parallel."
         ),
         # ── § SYNTHESIS (how to produce FinalAnswer — read every round) ─
         "§ SYNTHESIS\n\n" + _load_skill(_WORKFLOW_DIR / "synthesis.md").body,
