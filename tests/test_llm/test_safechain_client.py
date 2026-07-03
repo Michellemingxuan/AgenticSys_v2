@@ -271,17 +271,20 @@ async def test_invoking_without_safechain_raises_clear_error():
         )
 
 
-# ── model build via amodel + blocking chain.invoke in a worker thread ───────
+# ── model build via amodel + native async chain.ainvoke ─────────────────────
 #
 # Prod API (per the private env): the model is built with `await amodel(id)`
 # (async — token acquisition), cached and reused; the chain
-# (`prompt | model | StrOutputParser`) is invoked SYNCHRONOUSLY in a dedicated
-# worker thread, bounded by a per-call timeout. These tests pin that shape.
+# (`prompt | model | StrOutputParser`) is run via `ainvoke` (native async on
+# this build), bounded by a per-call timeout that actually aborts a hung or
+# cancelled call rather than orphaning a worker thread. These tests pin that
+# shape (see .claude/memory/safechain_async_and_thread_occupation.md).
 
 
 class _FakeModel:
-    """Stand-in for the amodel-built model. `behavior(inputs)` is the result
-    of the sync `chain.invoke` (or it raises)."""
+    """Stand-in for the amodel-built model. `behavior(inputs)` produces the
+    result of `chain.ainvoke`: a plain value, a raise, or a coroutine to await
+    (for slow/cancellable cases)."""
     def __init__(self, behavior):
         self.behavior = behavior
 
@@ -293,8 +296,11 @@ class _FakeChain:
     def __or__(self, _parser):  # `... | StrOutputParser()` → same chain
         return self
 
-    def invoke(self, inputs):
-        return self._model.behavior(inputs)
+    async def ainvoke(self, inputs):
+        result = self._model.behavior(inputs)
+        if asyncio.iscoroutine(result):
+            return await result
+        return result
 
 
 class _FakePrompt:
@@ -360,12 +366,12 @@ async def test_invoke_builds_via_amodel_and_reuses_it(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_invoke_per_call_timeout_raises(monkeypatch):
-    """A hung (blocking) chain.invoke must surface as TimeoutError so the turn
-    fails cleanly and releases the firewall semaphore + turn lock."""
+    """A hung chain.ainvoke must surface as TimeoutError so the turn fails
+    cleanly and releases the firewall semaphore + turn lock. Because ainvoke is
+    natively cancellable, wait_for actually aborts it at the timeout."""
     def _factory():
         def _slow(_in):
-            time.sleep(0.5)  # blocking, in the worker thread
-            return "late"
+            return asyncio.sleep(0.5, result="late")  # awaitable, cancellable
         return _FakeModel(_slow)
 
     _install_fake_safechain(monkeypatch, amodel_factory=_factory)
@@ -406,13 +412,12 @@ async def test_invoke_rebuilds_and_retries_on_401(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_concurrent_calls_overlap_via_thread_pool(monkeypatch):
-    """Concurrent calls run in the dedicated thread pool — they OVERLAP rather
-    than serializing behind a single worker."""
+async def test_concurrent_calls_overlap(monkeypatch):
+    """Concurrent calls OVERLAP on the event loop (native async ainvoke) rather
+    than serializing."""
     def _factory():
         def _slow(_in):
-            time.sleep(0.2)
-            return '{"output": {"answer": "ok"}}'
+            return asyncio.sleep(0.2, result='{"output": {"answer": "ok"}}')
         return _FakeModel(_slow)
 
     _install_fake_safechain(monkeypatch, amodel_factory=_factory)
@@ -429,5 +434,41 @@ async def test_concurrent_calls_overlap_via_thread_pool(monkeypatch):
     t0 = loop.time()
     await asyncio.gather(one_call(), one_call(), one_call())
     elapsed = loop.time() - t0
-    # 3 × 0.2s serialized would be ≥0.6s; overlapping in the pool is ≈0.2s.
-    assert elapsed < 0.45, f"calls serialized ({elapsed:.2f}s) — pool not used"
+    # 3 × 0.2s serialized would be ≥0.6s; overlapping on the loop is ≈0.2s.
+    assert elapsed < 0.45, f"calls serialized ({elapsed:.2f}s) — not overlapping"
+
+
+@pytest.mark.asyncio
+async def test_invoke_cancellation_aborts_without_orphan(monkeypatch):
+    """Cancelling an in-flight call returns promptly AND aborts the underlying
+    work — no orphaned coroutine/thread runs to completion. This is the
+    regression guard for the pre-ainvoke "stuck after rewind" bug, where a
+    cancelled sync `chain.invoke` kept its worker thread running its full call.
+    """
+    completed = {"n": 0}
+
+    def _factory():
+        async def _slow(_in):
+            await asyncio.sleep(1.0)
+            completed["n"] += 1      # reached only if NOT aborted
+            return "late"
+        return _FakeModel(lambda _in: _slow(_in))
+
+    _install_fake_safechain(monkeypatch, amodel_factory=_factory)
+    fw = FirewallStack(EventLogger(session_id="t"), max_retries=0, concurrency_cap=2)
+    client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
+
+    task = asyncio.create_task(client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}],
+    ))
+    await asyncio.sleep(0.1)                       # let it reach the awaited sleep
+    loop = asyncio.get_running_loop()
+    t0 = loop.time()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert loop.time() - t0 < 0.2, "cancel did not return promptly"
+
+    await asyncio.sleep(1.2)                       # past the would-be completion
+    assert completed["n"] == 0, "work completed despite cancel — orphaned"
