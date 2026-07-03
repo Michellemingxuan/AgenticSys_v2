@@ -28,7 +28,7 @@ Pick specialist tool(s) to call and frame each one's sub-question. The team rost
 
 | Topic | Team | Each specialist's slice |
 |---|---|---|
-| **spending / spend pattern / merchant concentration** | `spend_payments` + `modeling` (+ `crossbu` only if explicitly B2B) | `spend_payments` = spending AND payment trends (both required — a spending pattern without payment comparison is incomplete), top merchants, industry concentration. Frame sub-question as: *"Analyze the spending AND payment pattern: monthly spend trend + monthly payment trend (two separate calls on spends and payments tables), merchant concentration, industry mix."* `modeling` = ML-derived spend features only (out-of-pattern, concentration risk-rate, spend divergence — NOT output scores like TSR/CDSS). |
+| **spending / spend pattern / merchant concentration** | `spend_payments` + `modeling` (+ `crossbu` only if explicitly B2B) | `spend_payments` = spending AND payment trends (both required — a spending pattern without payment comparison is incomplete), top merchants, industry concentration. Frame sub-question as: *"Analyze the spending AND payment pattern: monthly spend trend + monthly payment trend (two separate calls on spends and payments tables), merchant concentration, industry mix."* `modeling` = ML score response to the spending — out-of-pattern / concentration / divergence features AND the output scores they move (CDSS/TSR gate approval, so they are in-scope for spend-driver questions). |
 | **default journey / DPD progression** | `bureau` + `modeling` | `bureau` = external default tradelines + derogs. `modeling` = score evolution + driver rotation + internal delinquency indicators. |
 | **delinquency / payment-deterioration trajectory** | `modeling` + `spend_payments` (+ `bureau` only if "external" is explicit) | `modeling` = stage-of-delinquency indicators (DPD counts, internal indices, return indices, min-due-only). `spend_payments` = settlement-attempt side (success/return counts + reasons). Indicators give the *stage*; payments give the *attempts*. |
 | **exposure / total customer risk** | `crossbu` + `bureau` + `capacity_afford` (+ `modeling` for rolled-up ratio / leverage view) | `crossbu` = card balances/limits. `bureau` = external exposure. `capacity_afford` = vs income/headroom. `modeling` = model-rolled-up exposure & leverage ratios. |
@@ -83,3 +83,20 @@ For multi-specialist turns where the reviewer's question has the shape *"why is 
 Specialists CAN query each other's tables regardless of role (no table is "owned"); the role just decides depth — subject = deep, condition = shallow cross-peek. See the "Cross-domain queries" section in `data_query.md` for the discipline specialists apply on their side.
 
 Single-specialist turns and turns where the question is genuinely symmetric (no clear subject) don't need this framing — write sub-questions directly.
+
+## Dispatch shape (parallel-first; the VP's judgment)
+
+You are the manager. Get a sharp, coherent answer in the fewest rounds. Pick a
+shape per turn — you are NOT limited to firing everyone at once:
+
+- **parallel** (DEFAULT) — independent sub-questions; emit them together.
+- **collapse** — when a question is causally dependent ("what drives X") and ONE
+  specialist can self-anchor by cross-querying, hand it the whole chain:
+  *"modeling: find the spend-spike month from spends_data yourself, then analyze
+  the model-score drivers around that month."* One specialist, no extra round.
+- **sequential** — when the anchor needs another specialist's DEEP analysis
+  first: dispatch the anchor specialist, read its result, then dispatch the
+  dependent with the anchor threaded into its sub-question.
+
+Specialists can query ANY table, so prefer parallel or collapse; use sequential
+only when the anchor is itself heavy. Add a round only when a dependency needs it.
