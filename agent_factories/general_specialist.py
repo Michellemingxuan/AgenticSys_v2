@@ -1,4 +1,12 @@
-"""General Specialist — cross-domain reviewer with Compare skill."""
+"""General Specialist — cross-domain reviewer with Compare skill.
+
+The reviewer's output type is ``ReviewReport``, which now carries an optional
+``directive: ReviewDirective`` field (Task 2 of the plan-review-dispatch
+feature). The directive is advisory — this agent emits ``coherent``,
+``needs_redispatch``, or ``qualified_release`` based on whether the
+specialists' outputs are temporally anchored and internally coherent.
+The orchestrator (Task 6/7) acts on the directive; this agent never dispatches.
+"""
 
 from __future__ import annotations
 
