@@ -239,3 +239,70 @@ async def test_causal_question_redispatches_modeling_anchored(monkeypatch):
     assert new_final.answer != phase1_final.answer, (
         "re-dispatched final_answer must not be the stale phase-1 answer"
     )
+
+
+@pytest.mark.asyncio
+async def test_invalidate_specialist_distillation_cancels_and_wipes():
+    """Re-dispatch KB hygiene — GENERAL, keyed on the re-dispatched specialist +
+    turn_id (NOT specific to any one question): cancel that specialist's in-flight
+    distill/autochart tasks and drop its this-turn KPs; leave OTHER specialists
+    and PRIOR turns untouched."""
+    import asyncio
+    import types
+    import server
+
+    turn = "turn-abc"
+
+    async def _long():
+        await asyncio.sleep(30)
+
+    d_x = asyncio.create_task(_long(), name="distill-modeling")
+    a_x = asyncio.create_task(_long(), name="autochart-modeling")
+    d_other = asyncio.create_task(_long(), name="distill-spend_payments")
+    ctx = types.SimpleNamespace(
+        _pending_distillers=[d_x, a_x, d_other],
+        _specialist_kb={
+            "modeling": [
+                {"topic": "drivers_wrong_window", "captured_at_turn": turn},   # this-turn phase-1 (stale)
+                {"topic": "prior_kp", "captured_at_turn": "older-turn"},       # prior turn (keep)
+            ],
+            "spend_payments": [
+                {"topic": "spend_spike", "captured_at_turn": turn},            # other specialist (keep)
+            ],
+        },
+    )
+
+    stats = await server._invalidate_specialist_distillation(ctx, "modeling", turn)
+
+    assert stats["tasks_cancelled"] == 2
+    assert d_x.cancelled() and a_x.cancelled()
+    assert ctx._pending_distillers == [d_other]          # other specialist's task kept
+    assert not d_other.done()
+    assert stats["kps_removed"] == 1
+    assert [kp["topic"] for kp in ctx._specialist_kb["modeling"]] == ["prior_kp"]
+    assert [kp["topic"] for kp in ctx._specialist_kb["spend_payments"]] == ["spend_spike"]
+
+    d_other.cancel()
+    try:
+        await d_other
+    except asyncio.CancelledError:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_invalidate_specialist_distillation_tolerates_missing_state():
+    """No pending list / no KB entry → graceful no-op for any specialist."""
+    import types
+    import server
+
+    ctx = types.SimpleNamespace()  # no _pending_distillers, no _specialist_kb
+    stats = await server._invalidate_specialist_distillation(ctx, "anything", "t")
+    assert stats == {"tasks_cancelled": 0, "kps_removed": 0}
+
+
+def test_team_construction_causal_dispatch_rule():
+    """Prompt encourages sequencing/collapsing causal ('what drives X') questions
+    so the review rarely has to repair a naive parallel dispatch."""
+    body = (SKILLS / "team_construction.md").read_text(encoding="utf-8")
+    assert "Causal questions are dependent" in body
+    assert "what drives" in body.lower()

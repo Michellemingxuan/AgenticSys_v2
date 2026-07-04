@@ -100,3 +100,15 @@ shape per turn — you are NOT limited to firing everyone at once:
 
 Specialists can query ANY table, so prefer parallel or collapse; use sequential
 only when the anchor is itself heavy. Add a round only when a dependency needs it.
+
+**Causal questions are dependent — do NOT split them naively in parallel.** A
+"what drives / caused / explains X" or "why did X happen" question needs X's
+window (or identity) established BEFORE its drivers can be analyzed. If you fire
+the "X" specialist and the "drivers" specialist in parallel, the driver analysis
+anchors to the WRONG window — e.g. spend spiked in 2025-05 but the model-score
+drivers come back from 2024, and the two halves don't connect. For these,
+**sequence** (establish X first, then dispatch the driver specialist with X's
+window folded into its sub-question) or **collapse** (give the whole chain to one
+cross-querying specialist that self-anchors). This is the exact mistake the
+server-side coherence review has to repair with an extra round — plan it right
+up front so the review rarely fires.

@@ -980,6 +980,57 @@ async def _run_review(sess, ctx, question: str, specialist_outputs: dict):
         return None
 
 
+async def _invalidate_specialist_distillation(ctx, specialist: str, turn_id) -> dict:
+    """Before re-dispatching ``specialist``, discard its now-superseded phase-1
+    distillation for THIS turn so the corrected re-dispatch repopulates the KB
+    cleanly (re-dispatch KB hygiene). Topic-supersession does NOT cover this: a
+    mis-anchored phase-1 driver KP (e.g. ``..._2024_09``) has a different topic
+    than the corrected one (``..._2025_05``), so both would otherwise stay active.
+
+    Two steps, scoped strictly to ``specialist`` and this ``turn_id``:
+      1. Cancel any in-flight ``distill-{specialist}`` / ``autochart-{specialist}``
+         tasks in ``ctx._pending_distillers`` (a still-running phase-1 distiller
+         must not persist a stale KP), and drop the specialist's tasks from the
+         pending list.
+      2. Remove ``ctx._specialist_kb[specialist]`` entries whose
+         ``captured_at_turn == turn_id`` — this turn's phase-1 KPs (already
+         persisted before we cancelled). Prior turns' KPs and OTHER specialists'
+         KPs are untouched.
+    Returns a small stats dict for logging.
+    """
+    stats = {"tasks_cancelled": 0, "kps_removed": 0}
+    target_names = {f"distill-{specialist}", f"autochart-{specialist}"}
+
+    pending = getattr(ctx, "_pending_distillers", None)
+    if isinstance(pending, list):
+        to_settle: list = []
+        keep: list = []
+        for t in pending:
+            name = t.get_name() if hasattr(t, "get_name") else ""
+            if name in target_names:
+                if not t.done():
+                    t.cancel()
+                    to_settle.append(t)
+                    stats["tasks_cancelled"] += 1
+                # done or now-cancelled: drop from pending (KPs handled in step 2)
+            else:
+                keep.append(t)
+        if to_settle:
+            await asyncio.gather(*to_settle, return_exceptions=True)
+        ctx._pending_distillers = keep
+
+    kb = getattr(ctx, "_specialist_kb", None)
+    if isinstance(kb, dict) and isinstance(kb.get(specialist), list):
+        before = len(kb[specialist])
+        kb[specialist] = [
+            kp for kp in kb[specialist]
+            if not (isinstance(kp, dict) and kp.get("captured_at_turn") == turn_id)
+        ]
+        stats["kps_removed"] = before - len(kb[specialist])
+
+    return stats
+
+
 async def _apply_review_directive(
     *,
     sess,
@@ -1059,6 +1110,20 @@ async def _apply_review_directive(
                         "dispatch_count": _dispatch_count(ctx),
                     })
                 except Exception:  # noqa: BLE001
+                    pass
+                # Re-dispatch KB hygiene: discard the re-dispatched specialist's
+                # now-superseded phase-1 distillation for this turn so only the
+                # corrected (anchored) KPs survive. Best-effort — a hygiene
+                # failure must not block the correction itself.
+                try:
+                    _inval = await _invalidate_specialist_distillation(
+                        ctx, directive.specialist, turn_id)
+                    sess.logger.log("review_redispatch_invalidated_distill", {
+                        "turn_id": turn_id,
+                        "specialist": directive.specialist,
+                        **_inval,
+                    })
+                except Exception:  # noqa: BLE001 — best-effort KB hygiene
                     pass
                 new_final = await run_redispatch_pass_fn(resume_input)
                 review_flags.append(
