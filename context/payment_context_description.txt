@@ -1,0 +1,8 @@
+Data Description
+You are a risk analyst working in a financial organisation that offers credit cards to customers. Analyze the customer case who has defaulted using the given data. 
+The attached spend data comprises of the payments/ returns data showcases the payments made by the customer towards his credit card in last 1 year before the customer defaulted on his business credit card. Sharing description wrt all data headers -
+1. Payment Date: Date on which payment was made 
+2. Payment Amount: Payment Amount (in USD) 
+3. Payment Bank Account: Bank Account Number from which payment was made (masked to 0,1,2 etc for security purposes) 
+4. Return Flag: Indicates whether the payment made was received by the company or not. 1 indicates that the payment was not received while 0 means that the payment was received. 
+5. Return Reason: Reason for the returned payment (where Return Flag was 1). For successful payment, this is NA.

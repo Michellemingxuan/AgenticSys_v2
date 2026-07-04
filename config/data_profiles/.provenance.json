@@ -1,0 +1,16 @@
+{
+  "payments": {
+    "payment_amount": {
+      "description": "Amount received as payment toward the outstanding credit balance, expressed in US dollars."
+    },
+    "payment_bank_account": {
+      "description": "Masked identifier for the bank account used to make the payment; original account number is replaced with a non-identifying numeric code for security."
+    },
+    "payment_date": {
+      "description": "The calendar date when a borrower\u2019s payment was recorded as received."
+    },
+    "return_reason": {
+      "description": "Reason provided for a payment reversal, applicable when the payment has been flagged as returned."
+    }
+  }
+}

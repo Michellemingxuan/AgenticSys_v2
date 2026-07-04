@@ -1,7 +1,7 @@
 """Distiller second-pass: extract reusable KnowledgePoints from a specialist's
 output and persist them to the session KB, filling `numbers` from parsed tool
 outputs. Fire-and-forget; scheduled by redacting_tool._runner. Extracted from
-agent_factories/redacting_tool.py (see the decomposition design spec)."""
+tools/redacting_tool.py (see the decomposition design spec)."""
 from __future__ import annotations
 
 import asyncio

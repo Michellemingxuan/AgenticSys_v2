@@ -1,0 +1,165 @@
+table: score_drivers
+description: "Monthly snapshot of the top-5 and bottom-5 contributing variable names\n\
+  for each internal model score, per case per month. Used to explain which\nfeatures\
+  \ pushed each model's score up (top) or down (bottom).\n\nCurrently carries drivers\
+  \ for two ML scores, with columns named by family:\n  - CDSS (Credit Decision Support\
+  \ System) — columns `top_cdss1..5`,\n    `bottom_cdss1..5`. The cell values are\
+  \ the feature names from\n    `modelling_data` that pushed the CDSS score up / down\
+  \ that month.\n  - TSR (Total Structural Risk) — columns `top_tsr1..5`, `bottom_tsr1..5`.\n\
+  \    Same pattern for the TSR score.\nNew score families would surface as new `top_<name>*`\
+  \ / `bottom_<name>*`\ncolumn groups — probe the schema rather than assuming the\
+  \ list is fixed.\n\nCross-reference: the numeric values of CDSS / TSR (and any other\
+  \ internal\nscores) live on `model_scores`, joined by `trans_month`.\n"
+rows_per_case: 12
+one_row_per_case: false
+aliases:
+- score_drivers_data
+columns:
+  trans_month:
+    dtype: string
+    parse_hint: '%b-%Y'
+    description: Monthly snapshot date for this score-driver record (e.g. "Jan-2024").
+      One row per case per month across the review window.
+    description_pending: false
+    aliases:
+    - trans_month
+  top_cdss1:
+    dtype: string
+    description: Name of the rank-1 top contributing variable to the CDSS model score
+      for this case-month.
+    description_pending: false
+    aliases:
+    - top_cdss1
+  top_cdss2:
+    dtype: string
+    description: Name of the rank-2 top contributing variable to the CDSS model score
+      for this case-month.
+    description_pending: false
+    aliases:
+    - top_cdss2
+  top_cdss3:
+    dtype: string
+    description: Name of the rank-3 top contributing variable to the CDSS model score
+      for this case-month.
+    description_pending: false
+    aliases:
+    - top_cdss3
+  top_cdss4:
+    dtype: string
+    description: Name of the rank-4 top contributing variable to the CDSS model score
+      for this case-month.
+    description_pending: false
+    aliases:
+    - top_cdss4
+  top_cdss5:
+    dtype: string
+    description: Name of the rank-5 top contributing variable to the CDSS model score
+      for this case-month.
+    description_pending: false
+    aliases:
+    - top_cdss5
+  bottom_cdss1:
+    dtype: string
+    description: Name of the rank-1 bottom contributing variable to the CDSS model
+      score for this case-month.
+    description_pending: false
+    aliases:
+    - bottom_cdss1
+  bottom_cdss2:
+    dtype: string
+    description: Name of the rank-2 bottom contributing variable to the CDSS model
+      score for this case-month.
+    description_pending: false
+    aliases:
+    - bottom_cdss2
+  bottom_cdss3:
+    dtype: string
+    description: Name of the rank-3 bottom contributing variable to the CDSS model
+      score for this case-month.
+    description_pending: false
+    aliases:
+    - bottom_cdss3
+  bottom_cdss4:
+    dtype: string
+    description: Name of the rank-4 bottom contributing variable to the CDSS model
+      score for this case-month.
+    description_pending: false
+    aliases:
+    - bottom_cdss4
+  bottom_cdss5:
+    dtype: string
+    description: Name of the rank-5 bottom contributing variable to the CDSS model
+      score for this case-month.
+    description_pending: false
+    aliases:
+    - bottom_cdss5
+  top_tsr1:
+    dtype: string
+    description: Name of the rank-1 top contributing variable to the TSR model score
+      for this case-month.
+    description_pending: false
+    aliases:
+    - top_tsr1
+  top_tsr2:
+    dtype: string
+    description: Name of the rank-2 top contributing variable to the TSR model score
+      for this case-month.
+    description_pending: false
+    aliases:
+    - top_tsr2
+  top_tsr3:
+    dtype: string
+    description: Name of the rank-3 top contributing variable to the TSR model score
+      for this case-month.
+    description_pending: false
+    aliases:
+    - top_tsr3
+  top_tsr4:
+    dtype: string
+    description: Name of the rank-4 top contributing variable to the TSR model score
+      for this case-month.
+    description_pending: false
+    aliases:
+    - top_tsr4
+  top_tsr5:
+    dtype: string
+    description: Name of the rank-5 top contributing variable to the TSR model score
+      for this case-month.
+    description_pending: false
+    aliases:
+    - top_tsr5
+  bottom_tsr1:
+    dtype: string
+    description: Name of the rank-1 bottom contributing variable to the TSR model
+      score for this case-month.
+    description_pending: false
+    aliases:
+    - bottom_tsr1
+  bottom_tsr2:
+    dtype: string
+    description: Name of the rank-2 bottom contributing variable to the TSR model
+      score for this case-month.
+    description_pending: false
+    aliases:
+    - bottom_tsr2
+  bottom_tsr3:
+    dtype: string
+    description: Name of the rank-3 bottom contributing variable to the TSR model
+      score for this case-month.
+    description_pending: false
+    aliases:
+    - bottom_tsr3
+  bottom_tsr4:
+    dtype: string
+    description: Name of the rank-4 bottom contributing variable to the TSR model
+      score for this case-month.
+    description_pending: false
+    aliases:
+    - bottom_tsr4
+  bottom_tsr5:
+    dtype: string
+    description: Name of the rank-5 bottom contributing variable to the TSR model
+      score for this case-month.
+    description_pending: false
+    aliases:
+    - bottom_tsr5

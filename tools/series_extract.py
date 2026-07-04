@@ -2,7 +2,7 @@
 auto-chart renderer. Parses summarize_trend / batch_summarize_trend /
 summarize_by_group tool outputs into `_ParsedSeries`, and fills/constructs a
 KnowledgePoint `numbers` array from them. Pure data plumbing — no LLM, no I/O.
-Extracted from agent_factories/redacting_tool.py (see
+Extracted from tools/redacting_tool.py (see
 docs/superpowers/specs/2026-07-05-redacting-tool-decomposition-design.md)."""
 from __future__ import annotations
 

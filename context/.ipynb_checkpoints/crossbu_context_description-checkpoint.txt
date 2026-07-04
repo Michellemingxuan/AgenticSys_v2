@@ -1,0 +1,12 @@
+The data comprises of details about the different cards held by the customer and 12 months data about the their merchant relationship with Amex (if they have one) before the customer defaulted on their business credit card. Sharing description wrt all data headers -
+1. Card Name: Name of the card used by the customer
+2. Card Type: Type of Card (Charge, Lending or LOC)
+3. Card Portfolio: Amex Portfolio to which the card belongs
+4. Card Limit: Credit Card Limit (in USD)
+5. Balance: Outstanding exposure on the card (in USD)
+6. Card Tenure: Tenure of the card account
+7. Account Status: Shows the status of the account. 'Current' means the account is up to date and not in arrears. 30 DPB means 30 days past due and similarly 60 DPB/ 90 DPB/ 120 DPB means 60/ 90/ 120 days past due respectively
+8. Past Delinquencies (Last 12M): Shows the past delinquencies (30 DPB) on the card in the last 12 months
+9. Merchant Name: Name of the customer's business which has merchant relationship with Amex meaning that their business accepts Amex cards for payments
+10. Merchant Industry: Industry of the customer's business which has merchant relationship with Amex
+11. Merchant Charge Volume: Estimated Payments (in USD) made at the customer's business which is a source of revenue for the customer's business

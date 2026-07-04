@@ -6,7 +6,7 @@ from pathlib import Path
 
 from agents import Agent, AgentOutputSchema, ModelSettings
 
-from agent_factories.redacting_tool import redacting_tool
+from tools.redacting_tool import redacting_tool
 from models.types import FinalAnswer
 from skills.domain.loader import load_domain_skill as _load_domain_skill
 from skills.loader import load_skill as _load_skill

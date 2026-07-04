@@ -1,6 +1,6 @@
 """Auto-chart renderer: build charts from a specialist's parsed tool-output
 series with NO LLM. Scheduled fire-and-forget by redacting_tool._runner in
-parallel with the distiller. Extracted from agent_factories/redacting_tool.py
+parallel with the distiller. Extracted from tools/redacting_tool.py
 (see the decomposition design spec)."""
 from __future__ import annotations
 

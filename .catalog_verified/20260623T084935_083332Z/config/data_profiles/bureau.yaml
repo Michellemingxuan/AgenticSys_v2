@@ -1,0 +1,245 @@
+table: bureau
+description: Credit bureau data — one row per external tradeline per case. Each row
+  carries the case-level aggregated scores (FICO, SBFE, LN, CSS, FSS, Paydex) plus
+  the tradeline-specific details (balance, limit, utilization, DPD status). Case-level
+  fields repeat across rows for the same case.
+rows_per_case: 4
+one_row_per_case: false
+aliases:
+- bureau_data
+columns:
+  month:
+    dtype: date
+    parse_hint: '%b-%Y'
+    description: Monthly snapshot date for this bureau record (e.g. "Jan-2024"). One
+      row per case per month across the review window.
+    description_pending: false
+    aliases:
+    - month
+    dtype_pending_review: true
+  fico_score:
+    dtype: int
+    distribution: normal
+    mean: 740
+    std: 60
+    min: 300
+    max: 850
+    description: FICO Score — industry-standard credit risk score. Values below 721
+      are risky.
+    aliases:
+    - FICO Score
+    risk_threshold: 721
+    risk_direction: below
+  sbfe_score:
+    dtype: int
+    distribution: normal
+    mean: 875
+    std: 30
+    min: 500
+    max: 950
+    description: SBFE Score — business credit score predicting financial delinquency
+      or failure. Values below 863 are risky.
+    aliases:
+    - SBFE Score
+    risk_threshold: 863
+    risk_direction: below
+  ln_credit_score:
+    dtype: int
+    distribution: normal
+    mean: 710
+    std: 50
+    min: 300
+    max: 900
+    description: LexisNexis Credit Score — predicts consumer likelihood of default.
+      Values below 681 are risky.
+    aliases:
+    - LN Credit Score
+    risk_threshold: 681
+    risk_direction: below
+  ln_blended_score:
+    dtype: int
+    distribution: normal
+    mean: 720
+    std: 50
+    min: 300
+    max: 900
+    description: LexisNexis Blended Score — combines traditional credit data with
+      alternative data. Values below 694 are risky.
+    aliases:
+    - LN Blended Score
+    risk_threshold: 694
+    risk_direction: below
+  css_score:
+    dtype: int
+    distribution: normal
+    mean: 78
+    std: 15
+    min: 1
+    max: 100
+    description: CSS Score — business credit risk score using commercial trade data
+      and financials. Values below 71 are risky.
+    aliases:
+    - CSS Score
+    risk_threshold: 71
+    risk_direction: below
+  fss_score:
+    dtype: int
+    distribution: normal
+    mean: 60
+    std: 15
+    min: 1
+    max: 100
+    description: FSS Score — business financial strength/stability score. Values below
+      51 are risky.
+    aliases:
+    - FSS Score
+    risk_threshold: 51
+    risk_direction: below
+  paydex_score:
+    dtype: int
+    distribution: normal
+    mean: 72
+    std: 15
+    min: 0
+    max: 100
+    description: Paydex Score — business payment performance score. Values below 61
+      are risky.
+    aliases:
+    - Paydex Score
+    risk_threshold: 61
+    risk_direction: below
+  delinquent_external_trades:
+    dtype: int
+    distribution: poisson
+    lambda: 0.4
+    min: 0
+    max: 20
+    description: Total count of external credit lines on which the customer defaulted.
+    aliases:
+    - Delinquent External Trades
+  external_delinquency_amount:
+    dtype: float
+    distribution: normal
+    mean: 2000
+    std: 8000
+    min: 0
+    max: 500000
+    description: Total default amount on external credit lines (USD).
+    aliases:
+    - External Delinquency Amount (USD)
+  total_tradelines:
+    dtype: int
+    distribution: normal
+    mean: 12
+    std: 6
+    min: 0
+    max: 50
+    description: Overall count of external credit lines linked to the customer.
+    aliases:
+    - Total Tradelines
+  overall_external_exposure:
+    dtype: float
+    distribution: normal
+    mean: 45000
+    std: 40000
+    min: 0
+    max: 500000
+    description: Total outstanding balance on all external credit lines (USD).
+    aliases:
+    - Overall External Exposure (USD)
+  overall_external_revolving_balance:
+    dtype: float
+    distribution: normal
+    mean: 15000
+    std: 18000
+    min: 0
+    max: 300000
+    description: Total revolving balance on all external credit lines (USD).
+    aliases:
+    - Overall External Revolving Balance (USD)
+  avg_external_utilization:
+    dtype: float
+    distribution: normal
+    mean: 0.35
+    std: 0.2
+    min: 0.0
+    max: 1.5
+    description: Average utilization across all external credit lines.
+    aliases:
+    - Average External Utlization
+  amex_primary_lender_indicator:
+    dtype: int
+    distribution: poisson
+    lambda: 0.25
+    min: 0
+    max: 1
+    description: 1 = Amex is primary lender (>= 40% of overall exposure). Considered
+      risky.
+    aliases:
+    - Amex Primary Lender Indicator
+  ln_business_value:
+    dtype: string
+    distribution: normal
+    mean: 1500000
+    std: 500000
+    min: 0
+    max: 10000000
+    description: LexisNexis Business Value — total tax-assessed value of business
+      address (USD). Decrement is a negative sign.
+    aliases:
+    - LN Business Value (USD)
+    dtype_pending_review: true
+  judgements_org_count:
+    dtype: int
+    distribution: poisson
+    lambda: 0.15
+    min: 0
+    max: 10
+    description: Number of court judgments filed against the organization.
+    aliases:
+    - Judgements Org Count
+  lien_org_count:
+    dtype: int
+    distribution: poisson
+    lambda: 0.2
+    min: 0
+    max: 10
+    description: Number of active liens filed against the organization's assets.
+    aliases:
+    - Lien Org Count
+correlations:
+- columns:
+  - fico_score
+  - delinquent_external_trades
+  direction: negative
+  strength: 0.7
+- columns:
+  - fico_score
+  - avg_external_utilization
+  direction: negative
+  strength: 0.5
+- columns:
+  - sbfe_score
+  - delinquent_external_trades
+  direction: negative
+  strength: 0.6
+- columns:
+  - overall_external_exposure
+  - overall_external_revolving_balance
+  direction: positive
+  strength: 0.7
+- columns:
+  - judgements_org_count
+  - lien_org_count
+  direction: positive
+  strength: 0.5
+- columns:
+  - ln_credit_score
+  - fico_score
+  direction: positive
+  strength: 0.7
+- columns:
+  - css_score
+  - fss_score
+  direction: positive
+  strength: 0.6
