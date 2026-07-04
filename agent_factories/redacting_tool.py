@@ -14,11 +14,7 @@ from agents.exceptions import AgentsException, MaxTurnsExceeded
 from logger.process_timer import ProcessTimer
 from llm.firewall_stack import LLM_CALL_KIND, redact_payload, sanitize_message
 from tools.node_trace import _open_node, attach_extra, attach_tag
-from tools.series_extract import (
-    _values_match,
-    _fill_kp_numbers,
-    _extract_data_tool_outputs,
-)
+from tools.series_extract import _extract_data_tool_outputs
 from tools.distiller_pass import _distill_and_persist
 from tools.auto_chart import _auto_chart_from_tool_outputs
 
