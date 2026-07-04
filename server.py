@@ -980,6 +980,121 @@ async def _run_review(sess, ctx, question: str, specialist_outputs: dict):
         return None
 
 
+async def _apply_review_directive(
+    *,
+    sess,
+    ctx,
+    framed_question: str,
+    tool_calls: list,
+    streamed,
+    turn_id: str,
+    run_redispatch_pass_fn,
+) -> "tuple":
+    """Server-enforced coherence review decision (Task 6 / §5.2).
+
+    Calls ``_run_review``; on ``needs_redispatch`` (within the ≤2-round cap)
+    bumps ``_dispatch_count``, injects a ``[REVIEW DIRECTIVE]`` user turn into
+    the phase-1 transcript, and calls ``run_redispatch_pass_fn(resume_input)``
+    for the phase-3 orchestrator re-run.
+
+    Returns ``(new_final: FinalAnswer | None, review_flags: list[str])``.
+
+    ``new_final`` is ``None`` when no re-dispatch occurred (coherent / capped /
+    review failed). The caller is responsible for replacing ``final_answer``
+    when ``new_final is not None``, and for calling ``_drain_specialist_errors``
+    afterwards.
+
+    Extracted from ``_run_turn_streamed`` to make the decision path testable
+    without spinning up a live orchestrator: tests inject a fake
+    ``run_redispatch_pass_fn`` and monkeypatch ``_run_review``.
+    """
+    review_flags: list[str] = []
+    try:
+        specialist_outputs = {
+            c["tool"]: c.get("payload")
+            for c in tool_calls
+            if c.get("tool") not in _AUX_REVIEW_TOOLS and "payload" in c
+        }
+        review = await _run_review(
+            sess, ctx, framed_question, specialist_outputs
+        )
+        directive = getattr(review, "directive", None) if review else None
+        kind = getattr(directive, "kind", None) if directive else None
+        try:
+            sess.logger.log("review_done", {
+                "turn_id": turn_id,
+                "n_domain_specialists": len(
+                    getattr(ctx, "_domain_specialists_called", set()) or set()
+                ),
+                "directive_kind": kind,
+                "review_ran": review is not None,
+            })
+        except Exception:  # noqa: BLE001
+            pass
+        if kind == "needs_redispatch" and getattr(directive, "specialist", None):
+            if _dispatch_count(ctx) < 2:
+                _bump_dispatch_count(ctx)
+                # Inject the directive as an appended user turn and resume
+                # the orchestrator on the full phase-1 transcript (spike §4).
+                _why = (directive.why
+                        or "align the driver analysis to the event it explains.")
+                _anchor = directive.anchor or "(the event window)"
+                resume_input = streamed.to_input_list()
+                resume_input.append({
+                    "role": "user",
+                    "content": (
+                        f"[REVIEW DIRECTIVE] needs_redispatch: re-invoke "
+                        f"`{directive.specialist}` anchored to {_anchor}. "
+                        f"Reason: {_why} "
+                        f"Re-run ONLY that specialist with the anchor folded "
+                        f"into its sub-question, then synthesize the final "
+                        f"answer."
+                    ),
+                })
+                try:
+                    sess.logger.log("review_redispatch", {
+                        "turn_id": turn_id,
+                        "specialist": directive.specialist,
+                        "anchor": directive.anchor,
+                        "dispatch_count": _dispatch_count(ctx),
+                    })
+                except Exception:  # noqa: BLE001
+                    pass
+                new_final = await run_redispatch_pass_fn(resume_input)
+                review_flags.append(
+                    f"coherence_review: re-dispatched "
+                    f"`{directive.specialist}` anchored to "
+                    f"{directive.anchor or 'the event window'} "
+                    f"({directive.why or 'alignment fix'})."
+                )
+                return new_final, review_flags
+            else:
+                # Cap reached (design §6): synthesize with a residual flag.
+                review_flags.append(
+                    "coherence_review: re-dispatch needed but the ≤2 "
+                    "dispatch-round cap was reached — the driver analysis "
+                    "may not be fully anchored to the event window."
+                )
+                try:
+                    sess.logger.log("review_capped", {
+                        "turn_id": turn_id,
+                        "specialist": getattr(directive, "specialist", None),
+                        "dispatch_count": _dispatch_count(ctx),
+                    })
+                except Exception:  # noqa: BLE001
+                    pass
+    except Exception as exc:  # noqa: BLE001 — never wedge the turn on review
+        try:
+            sess.logger.log("review_phase_error", {
+                "turn_id": turn_id,
+                "exception_type": type(exc).__name__,
+                "message": str(exc)[:300],
+            })
+        except Exception:  # noqa: BLE001
+            pass
+    return None, review_flags
+
+
 # ── Async streaming worker ──────────────────────────────────────────────────
 
 async def _run_turn_streamed(
@@ -1866,77 +1981,18 @@ async def _run_turn_streamed(
                 })
                 return None
 
-        try:
-            specialist_outputs = {
-                c["tool"]: c.get("payload")
-                for c in tool_calls
-                if c.get("tool") not in _AUX_REVIEW_TOOLS and "payload" in c
-            }
-            review = await _run_review(
-                sess, ctx, framed_question, specialist_outputs
-            )
-            directive = getattr(review, "directive", None) if review else None
-            kind = getattr(directive, "kind", None) if directive else None
-            sess.logger.log("review_done", {
-                "turn_id": turn_id,
-                "n_domain_specialists": len(ctx._domain_specialists_called),
-                "directive_kind": kind,
-                "review_ran": review is not None,
-            })
-            if kind == "needs_redispatch" and getattr(directive, "specialist", None):
-                if _dispatch_count(ctx) < 2:
-                    _bump_dispatch_count(ctx)
-                    # Inject the directive as an appended user turn and resume
-                    # the orchestrator on the full phase-1 transcript (spike §4).
-                    _why = (directive.why
-                            or "align the driver analysis to the event it explains.")
-                    _anchor = directive.anchor or "(the event window)"
-                    resume_input = streamed.to_input_list()
-                    resume_input.append({
-                        "role": "user",
-                        "content": (
-                            f"[REVIEW DIRECTIVE] needs_redispatch: re-invoke "
-                            f"`{directive.specialist}` anchored to {_anchor}. "
-                            f"Reason: {_why} "
-                            f"Re-run ONLY that specialist with the anchor folded "
-                            f"into its sub-question, then synthesize the final "
-                            f"answer."
-                        ),
-                    })
-                    sess.logger.log("review_redispatch", {
-                        "turn_id": turn_id,
-                        "specialist": directive.specialist,
-                        "anchor": directive.anchor,
-                        "dispatch_count": _dispatch_count(ctx),
-                    })
-                    new_final = await _run_redispatch_pass(resume_input)
-                    if new_final is not None:
-                        final_answer = new_final
-                    review_flags.append(
-                        f"coherence_review: re-dispatched "
-                        f"`{directive.specialist}` anchored to "
-                        f"{directive.anchor or 'the event window'} "
-                        f"({directive.why or 'alignment fix'})."
-                    )
-                    _drain_specialist_errors()
-                else:
-                    # Cap reached (design §6): synthesize with a residual flag.
-                    review_flags.append(
-                        "coherence_review: re-dispatch needed but the ≤2 "
-                        "dispatch-round cap was reached — the driver analysis "
-                        "may not be fully anchored to the event window."
-                    )
-                    sess.logger.log("review_capped", {
-                        "turn_id": turn_id,
-                        "specialist": getattr(directive, "specialist", None),
-                        "dispatch_count": _dispatch_count(ctx),
-                    })
-        except Exception as exc:  # noqa: BLE001 — never wedge the turn on review
-            sess.logger.log("review_phase_error", {
-                "turn_id": turn_id,
-                "exception_type": type(exc).__name__,
-                "message": str(exc)[:300],
-            })
+        new_final, review_flags = await _apply_review_directive(
+            sess=sess,
+            ctx=ctx,
+            framed_question=framed_question,
+            tool_calls=tool_calls,
+            streamed=streamed,
+            turn_id=turn_id,
+            run_redispatch_pass_fn=_run_redispatch_pass,
+        )
+        if new_final is not None:
+            final_answer = new_final
+        _drain_specialist_errors()
 
     # ── 4. Emit final + chat agent message ────────────────────────────────
     # Guard: if orchestrator finished with zero tool calls (skipped all
