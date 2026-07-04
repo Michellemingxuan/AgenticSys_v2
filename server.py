@@ -248,6 +248,7 @@ class CaseSession:
     # Per-session exact-match Q→A cache. Keyed by `_normalize_q(redacted_question)`;
     # value carries the cached FinalAnswer fields. Skips orchestrator on repeats.
     qa_cache: dict = field(default_factory=dict)
+    _qa_turn_seq: int = 0   # monotonic per-session sequence for episodic ordering
     # Per-specialist KNOWLEDGE BASE — survives across turns within this session.
     # Keyed by specialist name; each value is a chronological list of
     # KnowledgePoint dicts produced by the distiller agent after each
@@ -540,6 +541,8 @@ def _store_cached_qa(sess: CaseSession, cache_key: str | None, value: dict) -> i
     """
     if not cache_key:
         return 0
+    sess._qa_turn_seq += 1
+    value["turn_seq"] = sess._qa_turn_seq
     sess.qa_cache[cache_key] = value
     evicted = 0
     while _QA_CACHE_MAX_ENTRIES > 0 and len(sess.qa_cache) > _QA_CACHE_MAX_ENTRIES:
