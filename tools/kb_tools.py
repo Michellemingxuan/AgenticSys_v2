@@ -28,6 +28,50 @@ def _active_kps(kps: list[dict]) -> list[dict]:
     return list(active.values())
 
 
+def _format_kb_digest(kps: list[dict], full_kb: dict | None = None,
+                      self_name: str | None = None) -> str:
+    """Render a short KB hint pointing to the lookup tools.
+
+    Instead of dumping all KP claims into the input (which inflates token
+    count on follow-up turns), we list topic names only and tell the
+    specialist to use kb_lookup(topic) for details.
+
+    When *full_kb* and *self_name* are provided, also lists topic counts
+    from OTHER specialists so this specialist knows cross-domain data is
+    available via kb_lookup / kb_list_topics without re-querying.
+    """
+    active = _active_kps(kps)
+    parts: list[str] = []
+    if active:
+        topics = [kp.get("topic", "?") for kp in active]
+        parts.append(
+            f"[KB — your cached topics ({len(active)}): "
+            f"{', '.join(topics)}.]"
+        )
+    other_lines: list[str] = []
+    if full_kb and self_name:
+        for spec, spec_kps in sorted(full_kb.items()):
+            if spec == self_name:
+                continue
+            other_active = _active_kps(spec_kps)
+            if other_active:
+                other_topics = [kp.get("topic", "?") for kp in other_active]
+                other_lines.append(f"  {spec}: {', '.join(other_topics)}")
+    if other_lines:
+        parts.append(
+            "[KB — other specialists' cached topics "
+            "(use kb_lookup(topic) to retrieve without re-querying):\n"
+            + "\n".join(other_lines) + "]"
+        )
+    if not parts:
+        return ""
+    parts.append(
+        "Call kb_lookup(topic) to get cached data before re-querying. "
+        "Call kb_list_topics() to see all cached claims."
+    )
+    return "\n".join(parts)
+
+
 @function_tool
 async def kb_list_topics(ctx: RunContextWrapper) -> str:
     """List all cached topics in the knowledge base from previous turns.
