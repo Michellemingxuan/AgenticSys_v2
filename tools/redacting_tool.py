@@ -41,6 +41,17 @@ _ELIDED_SPECIALIST_TOOL_OUTPUT = (
 )
 
 
+def _compose_specialist_input(episodic_block: str, kb_digest: str, sub_question: str) -> str:
+    """Prepend the specialist's episodic slice + KB digest (non-empty, in that
+    order) before the sub-question, keeping the existing '--- New question ---'
+    marker when any preface is present. Byte-identical to the prior KB-only
+    format when episodic_block is empty."""
+    prefixes = [p for p in (episodic_block, kb_digest) if p]
+    if not prefixes:
+        return sub_question
+    return "\n\n".join(prefixes) + f"\n\n--- New question ---\n{sub_question}"
+
+
 def _compact_specialist_history(
     history: list,
     keep_recent_user_messages: int = _SPECIALIST_HISTORY_KEEP_RECENT_USER_MESSAGES,
@@ -255,16 +266,24 @@ def redacting_tool(
         kb_digest_n_kps = 0
         if not prior:
             kb_obj = getattr(app_ctx, "_specialist_kb", None)
+            kb_digest = ""
+            kps_for_name: list = []
             if isinstance(kb_obj, dict):
                 kps_for_name = kb_obj.get(name, [])
                 kb_digest = _format_kb_digest(
                     kps_for_name, full_kb=kb_obj, self_name=name,
                 )
-                if kb_digest:
-                    contextual_in = (
-                        f"{kb_digest}\n\n--- New question ---\n{redacted_in}"
-                    )
-                    kb_digest_n_kps = len(_active_kps(kps_for_name))
+            from tools.episodic import (select_specialist_episodic,
+                                        render_specialist_block, EPISODIC_TURNS)
+            try:
+                _recs = getattr(app_ctx, "_episodic_records", None) or []
+                _episodic_block = render_specialist_block(
+                    select_specialist_episodic(_recs, name, EPISODIC_TURNS))
+            except Exception:  # noqa: BLE001 — never break the specialist call
+                _episodic_block = ""
+            contextual_in = _compose_specialist_input(_episodic_block, kb_digest, redacted_in)
+            if kb_digest:
+                kb_digest_n_kps = len(_active_kps(kps_for_name))
 
         # Inject the case folder file list for report_agent so it can
         # use the report_needle skill's concept→file routing table to
