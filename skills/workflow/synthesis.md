@@ -1,6 +1,6 @@
 ---
 name: Synthesis
-description: Orchestrator's final-answer synthesizer — merges report_agent, the team of domain specialists, AND the general specialist's review into a unified answer. Specialist live-data evidence outranks curated report text on factual claims.
+description: Orchestrator's final-answer synthesizer — merges report_agent and the team of domain specialists into a unified answer. Cross-specialist coherence review runs SERVER-SIDE before synthesis; when a `[REVIEW DIRECTIVE]` turn is present in the input, incorporate it. Specialist live-data evidence outranks curated report text on factual claims.
 type: workflow
 owner: [orchestrator]
 mode: inline
@@ -9,7 +9,6 @@ inputs:
   question: str
   report_draft: { coverage, answer, evidence_excerpts, files_consulted }
   team_draft: { answer, specialists_consulted, evidence, raw_data, open_conflicts, data_gaps }
-  general_review: { resolved, open_conflicts, cross_domain_insights }
 outputs:
   answer: str
   flags: list
@@ -34,8 +33,8 @@ Lead with the specialist's findings, append one sentence of report context if it
 {"answer": "<specialist findings>. <optional 1-sentence report context>", "flags": [], "data_pull_request": null}
 ```
 
-**Path C — general_specialist has resolutions** (2+ specialists, general_specialist returned `resolved` or `open_conflicts`):
-Adopt resolutions verbatim. Use post-correction specialist outputs. Fold `cross_domain_insights` into the answer. Put `open_conflicts` in `flags`.
+**Path C — server-side coherence review** (2+ specialists):
+Cross-specialist coherence review and any anchored re-dispatch are handled SERVER-SIDE after your dispatch round — you do not call a reviewer tool or produce `resolved` objects yourself. If a `[REVIEW DIRECTIVE]` user turn is present in your input (the server injected it after finding a contradiction), incorporate its guidance; otherwise synthesize directly from the specialist outputs.
 
 Only fall through to the FULL PATH below when the report **factually contradicts** specialist data on a specific claim (different number, different date, different conclusion).
 
@@ -55,7 +54,7 @@ That's it. One rule, one flag. Don't over-analyze agreement or partial overlap �
 
 - Report-vs-data disagreement — leading claim is the data-grounded one.
 - Stale-report risk — confident-vs-data narrative mismatch.
-- Open conflicts from `team_draft.open_conflicts` (or `general_review.open_conflicts`).
+- Open conflicts from `team_draft.open_conflicts` (or any `[REVIEW DIRECTIVE]` the server injected).
 - Signal-bearing gaps (`team_draft.data_gaps` where `is_signal == true`).
 
 Clean agreement, no conflicts, no signal-bearing gaps → `flags: []`.
