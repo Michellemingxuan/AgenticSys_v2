@@ -31,6 +31,12 @@ class AppContext:
     # the redacting_tool guard to block general_specialist when < 2 domain
     # specialists ran (programmatic enforcement of the HARD GATE).
     _domain_specialists_called: set = field(default_factory=set)
+    # Number of dispatch ROUNDS the server has driven this turn (initial
+    # dispatch = 1; at most ONE server-enforced re-dispatch = 2). Enforces
+    # the design's "≤ 2 dispatch rounds per turn" cap in the plan-review
+    # phased run. server.py reads/bumps this via `_dispatch_count` /
+    # `_bump_dispatch_count`; a re-dispatch is refused once it reaches 2.
+    _dispatch_count: int = 0
     # Per-specialist KNOWLEDGE BASE — survives across turns within a case
     # session. Keyed by specialist name; each value is a chronological list of
     # KnowledgePoint dicts (Pydantic-dumped). The list is owned by
