@@ -701,7 +701,7 @@ def test_distill_and_persist_noop_when_distiller_unwired():
     ctx_no_distiller = SimpleNamespace(
         logger=None, _specialist_kb={}, _distiller=None, _turn_id=None,
     )
-    n = _asyncio.get_event_loop().run_until_complete(
+    n = _asyncio.run(
         _distill_and_persist(ctx_no_distiller, "x", "q", "out")
     )
     assert n == 0
@@ -735,7 +735,7 @@ def test_distill_and_persist_skips_report_agent():
         _distiller=_MockDistiller(),
         _turn_id="t-1",
     )
-    n = _asyncio.get_event_loop().run_until_complete(
+    n = _asyncio.run(
         _distill_and_persist(ctx, "report_agent", "q", "out")
     )
     assert n == 0
