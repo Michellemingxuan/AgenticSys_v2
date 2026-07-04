@@ -604,6 +604,11 @@ def _format_kb_warmth_hint(specialist_kb: dict) -> str:
     )
 
 
+def _compose_framed_question(episodic_block: str, warmth_hint: str, question: str) -> str:
+    """Order: episodic (coreference) -> KB warmth (topics) -> question. Skip empties."""
+    return "\n\n".join(p for p in (episodic_block, warmth_hint, question) if p)
+
+
 def _json_safe(obj):
     """Recursively replace non-finite floats (NaN / Infinity) with None.
 
@@ -1206,9 +1211,17 @@ async def _run_turn_streamed(
             ],
             "hint_length": len(warmth_hint),
         })
-        framed_question = f"{warmth_hint}\n\n{verdict.redacted_question}"
-    else:
-        framed_question = verdict.redacted_question
+    from tools.episodic import (build_records, select_episodic,
+                                render_orchestrator_block, EPISODIC_TURNS)
+    try:
+        episodic_window = build_records(sess.qa_cache)
+        episodic_block = render_orchestrator_block(
+            select_episodic(episodic_window, EPISODIC_TURNS))
+    except Exception:  # noqa: BLE001 — episodic assembly must never break a turn
+        episodic_window, episodic_block = [], ""
+    ctx._episodic_records = episodic_window          # ctx already exists (line 1177)
+    framed_question = _compose_framed_question(
+        episodic_block, warmth_hint, verdict.redacted_question)
 
     # Each turn starts fresh — no accumulated conversation history.
     # Follow-up context is carried by:

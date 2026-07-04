@@ -73,3 +73,6 @@ class AppContext:
     # auto-inject risk_threshold values into KP numbers from structured
     # profile metadata (no LLM extraction needed).
     _catalog: Any = None
+    # Episodic record window (built from qa_cache each turn) — this specialist's
+    # own slice is prepended to its sub-question by redacting_tool._runner.
+    _episodic_records: list = field(default_factory=list)
