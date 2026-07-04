@@ -1218,9 +1218,11 @@ async def _run_turn_streamed(
         episodic_window = build_records(sess.qa_cache)
         episodic_block = render_orchestrator_block(
             select_episodic(episodic_window, EPISODIC_TURNS))
-    except Exception:  # noqa: BLE001 — episodic assembly must never break a turn
+    except Exception as _epi_exc:  # noqa: BLE001 — episodic assembly must never break a turn
         episodic_window, episodic_block = [], ""
-    ctx._episodic_records = episodic_window          # ctx already exists (line 1177)
+        sess.logger.log("episodic_assembly_failed",
+                        {"turn_id": turn_id, "error": repr(_epi_exc)})
+    ctx._episodic_records = episodic_window          # ctx constructed earlier this turn
     framed_question = _compose_framed_question(
         episodic_block, warmth_hint, verdict.redacted_question)
 
@@ -2291,6 +2293,7 @@ def post_cancel_turn(case_id: str):
     # Full rewind: clear all session state from the stopped turn
     n_cached = len(sess.qa_cache)
     sess.qa_cache.clear()
+    sess._qa_turn_seq = 0   # episodic ordering counter rewinds with qa_cache (spec §4)
     n_kb_total = sum(len(v) for v in sess.specialist_kb.values())
     sess.specialist_kb.clear()
     sess.input_history = []
@@ -2366,6 +2369,7 @@ def post_rewind(case_id: str):
         sess.input_history = []
         n_cached = len(sess.qa_cache)
         sess.qa_cache.clear()
+        sess._qa_turn_seq = 0   # episodic ordering counter rewinds with qa_cache (spec §4)
         n_kb_specialists = len(sess.specialist_kb)
         n_kb_total = sum(len(v) for v in sess.specialist_kb.values())
         sess.specialist_kb.clear()

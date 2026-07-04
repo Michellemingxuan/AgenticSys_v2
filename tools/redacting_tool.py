@@ -280,8 +280,11 @@ def redacting_tool(
                 _recs = getattr(app_ctx, "_episodic_records", None) or []
                 _episodic_block = render_specialist_block(
                     select_specialist_episodic(_recs, name, EPISODIC_TURNS))
-            except Exception:  # noqa: BLE001 — never break the specialist call
+            except Exception as _epi_exc:  # noqa: BLE001 — never break the specialist call
                 _episodic_block = ""
+                if logger is not None:
+                    logger.log("episodic_specialist_assembly_failed",
+                               {"specialist": name, "error": repr(_epi_exc)})
             contextual_in = _compose_specialist_input(_episodic_block, kb_digest, redacted_in)
             if kb_digest:
                 kb_digest_n_kps = len(_active_kps(kps_for_name))
