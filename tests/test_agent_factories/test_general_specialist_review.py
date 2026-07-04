@@ -1,40 +1,10 @@
 """Tests for general_specialist review-directive wiring.
 
-matplotlib is not installed in the dev environment but is imported at module
-level by tools/viz_renderer.py (→ tools/data_viz_tools.py → general_specialist).
-Stub it here, before the factory import, so this module can be collected without
-the library installed. The guard prevents shadowing a real install.
+Run under the `autoAI` pyenv virtualenv (it has matplotlib); `general_specialist`
+imports the matplotlib chain via tools/viz_renderer at module level. See
+.claude/memory/dev_env_autoai_interpreter.md.
 """
 from __future__ import annotations
-import sys
-import types
-
-
-def _make_matplotlib_stub() -> types.ModuleType:
-    mpl = types.ModuleType("matplotlib")
-    mpl.use = lambda *a, **kw: None  # matplotlib.use("Agg")
-
-    plt = types.ModuleType("matplotlib.pyplot")
-
-    # Minimal stubs for anything called at *import* time in viz_renderer.
-    # Actual render calls happen only inside render_chart(); none of the
-    # factory-wiring tests invoke it.
-    class _FuncFormatter:
-        def __init__(self, fn):
-            self._fn = fn
-
-    plt.FuncFormatter = _FuncFormatter
-    plt.subplots = lambda *a, **kw: (None, None)
-    plt.close = lambda *a, **kw: None
-
-    mpl.pyplot = plt
-    sys.modules["matplotlib"] = mpl
-    sys.modules["matplotlib.pyplot"] = plt
-    return mpl
-
-
-if "matplotlib" not in sys.modules:
-    _make_matplotlib_stub()
 
 import pytest
 from agent_factories.general_specialist import build_general_specialist

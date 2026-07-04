@@ -2086,66 +2086,13 @@ async def _run_turn_streamed(
         ]
         flags = list(flags or []) + failure_flags
 
-    # Protocol check: when 2+ unique domain specialists were called, the
-    # orchestrator MUST also have called general_specialist (per the
-    # team_construction skill's "HARD GATE"). Surface a flag when it didn't —
-    # the answer still ships so the reviewer isn't stonewalled, but the
-    # violation is visible in the audit trail and the Flags section.
-    _AUX_TOOLS = {"report_agent", "general_specialist"}
-    unique_domain_specialists = {
-        c["tool"] for c in tool_calls if c["tool"] not in _AUX_TOOLS
-    }
-    general_specialist_called = any(
-        c["tool"] == "general_specialist" for c in tool_calls
-    )
-    if len(unique_domain_specialists) >= 2 and not general_specialist_called:
-        # Log for audit but don't flag as a violation — the orchestrator
-        # may have legitimately determined the specialists were orthogonal
-        # (no shared concepts to compare). The protocol allows this.
-        sess.logger.log("general_specialist_skipped", {
-            "turn_id": turn_id,
-            "n_domain_specialists": len(unique_domain_specialists),
-            "domain_specialists": sorted(unique_domain_specialists),
-        })
-    elif len(unique_domain_specialists) == 1 and general_specialist_called:
-        # Converse violation: general_specialist invoked on a 1-specialist
-        # turn — wastes 30-60s and produces an empty ReviewReport (a single
-        # specialist cannot disagree with itself). Flag so the LLM's
-        # training signal sees this is wrong.
-        violation_flag = (
-            f"general_specialist invoked unnecessarily (protocol violation: "
-            f"only 1 domain specialist ran — nothing to cross-compare)"
-        )
-        flags = list(flags or []) + [violation_flag]
-        sess.logger.log("orchestrator_protocol_violation", {
-            "turn_id": turn_id,
-            "violation": "unnecessary_general_specialist",
-            "n_domain_specialists": 1,
-            "domain_specialists": sorted(unique_domain_specialists),
-        })
-
-    # Round 2.5 protocol check: when general_specialist's `resolved` entries
-    # carry a `corrected_specialist`, the orchestrator MUST re-invoke that
-    # specialist with the correction before finalizing (see HARD GATE block
-    # in orchestrator_agent.py). If a re-invocation is missing, the
-    # pre-correction (wrong) specialist output flowed into synthesis —
-    # flag it so the reviewer sees the violation in the audit trail.
-    missing_reanswers = _detect_missing_reanswers(tool_calls)
-    if missing_reanswers:
-        for mr in missing_reanswers:
-            violation_flag = (
-                f"re-answer not invoked (protocol violation: "
-                f"general_specialist flagged `{mr['corrected_specialist']}` "
-                f"for correction to `{mr['corrected_value']}` but the "
-                f"specialist was not re-invoked with that correction)"
-            )
-            flags = list(flags or []) + [violation_flag]
-        sess.logger.log("orchestrator_protocol_violation", {
-            "turn_id": turn_id,
-            "violation": "missing_reanswer",
-            "n_missing": len(missing_reanswers),
-            "missing": missing_reanswers,
-        })
+    # (Removed) Orchestrator general_specialist self-invocation protocol checks
+    # (skipped / unnecessary / missing-reanswer). Obsolete now that the
+    # coherence review is server-enforced (`_run_review` / `_apply_review_directive`)
+    # and the orchestrator no longer calls general_specialist. They fired
+    # misleading `general_specialist_skipped` on every 2+ specialist turn.
+    # `_detect_missing_reanswers` is retained (still unit-tested) but now unused;
+    # a later sweep can drop it.
 
     # ── Emit final answer IMMEDIATELY — don't wait for distiller drain.
     # The user sees the text answer now; charts arrive asynchronously.
