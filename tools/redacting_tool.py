@@ -15,6 +15,9 @@ from tools.series_extract import _extract_data_tool_outputs
 from tools.distiller_pass import _distill_and_persist
 from tools.auto_chart import _auto_chart_from_tool_outputs
 from tools.kb_tools import _active_kps, _format_kb_digest
+from tools.episodic import (
+    EPISODIC_TURNS, render_specialist_block, select_specialist_episodic,
+)
 
 
 # Inner-specialist turn budget. SDK default is 10. Lowered from 15 → 6
@@ -273,8 +276,6 @@ def redacting_tool(
                 kb_digest = _format_kb_digest(
                     kps_for_name, full_kb=kb_obj, self_name=name,
                 )
-            from tools.episodic import (select_specialist_episodic,
-                                        render_specialist_block, EPISODIC_TURNS)
             try:
                 _recs = getattr(app_ctx, "_episodic_records", None) or []
                 _episodic_block = render_specialist_block(

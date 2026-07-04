@@ -69,6 +69,9 @@ from main import _DATA_TABLES_DIR, _REPORTS_DIR, _resolve_data_source
 from models.types import FinalAnswer
 from orchestrator.orchestrator import Orchestrator
 from tools.data_tools import init_tools
+from tools.episodic import (
+    EPISODIC_TURNS, build_records, render_orchestrator_block, select_episodic,
+)
 
 
 # ── Configuration ───────────────────────────────────────────────────────────
@@ -1211,8 +1214,6 @@ async def _run_turn_streamed(
             ],
             "hint_length": len(warmth_hint),
         })
-    from tools.episodic import (build_records, select_episodic,
-                                render_orchestrator_block, EPISODIC_TURNS)
     try:
         episodic_window = build_records(sess.qa_cache)
         episodic_block = render_orchestrator_block(
