@@ -69,6 +69,9 @@ from main import _DATA_TABLES_DIR, _REPORTS_DIR, _resolve_data_source
 from models.types import FinalAnswer
 from orchestrator.orchestrator import Orchestrator
 from tools.data_tools import init_tools
+from tools.episodic import (
+    EPISODIC_TURNS, build_records, render_orchestrator_block, select_episodic,
+)
 
 
 # ── Configuration ───────────────────────────────────────────────────────────
@@ -248,6 +251,7 @@ class CaseSession:
     # Per-session exact-match Q→A cache. Keyed by `_normalize_q(redacted_question)`;
     # value carries the cached FinalAnswer fields. Skips orchestrator on repeats.
     qa_cache: dict = field(default_factory=dict)
+    _qa_turn_seq: int = 0   # monotonic per-session sequence for episodic ordering
     # Per-specialist KNOWLEDGE BASE — survives across turns within this session.
     # Keyed by specialist name; each value is a chronological list of
     # KnowledgePoint dicts produced by the distiller agent after each
@@ -540,6 +544,8 @@ def _store_cached_qa(sess: CaseSession, cache_key: str | None, value: dict) -> i
     """
     if not cache_key:
         return 0
+    sess._qa_turn_seq += 1
+    value["turn_seq"] = sess._qa_turn_seq
     sess.qa_cache[cache_key] = value
     evicted = 0
     while _QA_CACHE_MAX_ENTRIES > 0 and len(sess.qa_cache) > _QA_CACHE_MAX_ENTRIES:
@@ -599,6 +605,11 @@ def _format_kb_warmth_hint(specialist_kb: dict) -> str:
         + "Reuse warm specialists for in-domain follow-ups. "
         + "Reference specific cached findings in sub-questions when relevant.]"
     )
+
+
+def _compose_framed_question(episodic_block: str, warmth_hint: str, question: str) -> str:
+    """Order: episodic (coreference) -> KB warmth (topics) -> question. Skip empties."""
+    return "\n\n".join(p for p in (episodic_block, warmth_hint, question) if p)
 
 
 def _json_safe(obj):
@@ -1203,9 +1214,17 @@ async def _run_turn_streamed(
             ],
             "hint_length": len(warmth_hint),
         })
-        framed_question = f"{warmth_hint}\n\n{verdict.redacted_question}"
-    else:
-        framed_question = verdict.redacted_question
+    try:
+        episodic_window = build_records(sess.qa_cache)
+        episodic_block = render_orchestrator_block(
+            select_episodic(episodic_window, EPISODIC_TURNS))
+    except Exception as _epi_exc:  # noqa: BLE001 — episodic assembly must never break a turn
+        episodic_window, episodic_block = [], ""
+        sess.logger.log("episodic_assembly_failed",
+                        {"turn_id": turn_id, "error": repr(_epi_exc)})
+    ctx._episodic_records = episodic_window          # ctx constructed earlier this turn
+    framed_question = _compose_framed_question(
+        episodic_block, warmth_hint, verdict.redacted_question)
 
     # Each turn starts fresh — no accumulated conversation history.
     # Follow-up context is carried by:
@@ -2274,6 +2293,7 @@ def post_cancel_turn(case_id: str):
     # Full rewind: clear all session state from the stopped turn
     n_cached = len(sess.qa_cache)
     sess.qa_cache.clear()
+    sess._qa_turn_seq = 0   # episodic ordering counter rewinds with qa_cache (spec §4)
     n_kb_total = sum(len(v) for v in sess.specialist_kb.values())
     sess.specialist_kb.clear()
     sess.input_history = []
@@ -2349,6 +2369,7 @@ def post_rewind(case_id: str):
         sess.input_history = []
         n_cached = len(sess.qa_cache)
         sess.qa_cache.clear()
+        sess._qa_turn_seq = 0   # episodic ordering counter rewinds with qa_cache (spec §4)
         n_kb_specialists = len(sess.specialist_kb)
         n_kb_total = sum(len(v) for v in sess.specialist_kb.values())
         sess.specialist_kb.clear()

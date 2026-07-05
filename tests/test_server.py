@@ -59,7 +59,7 @@ def test_format_kb_warmth_hint_empty_when_no_warm_specialists():
 
 def test_store_cached_qa_evicts_oldest_entry(monkeypatch):
     monkeypatch.setattr(server, "_QA_CACHE_MAX_ENTRIES", 2)
-    sess = SimpleNamespace(qa_cache={})
+    sess = SimpleNamespace(qa_cache={}, _qa_turn_seq=0)
 
     server._store_cached_qa(sess, "q1", {"answer": "a1"})
     server._store_cached_qa(sess, "q2", {"answer": "a2"})
