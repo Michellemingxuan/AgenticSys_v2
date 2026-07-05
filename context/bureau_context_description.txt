@@ -1,0 +1,18 @@
+The data comprises of various bureau metrics (like credit scores, external credit balances etc) spanning 18 months before the customer defaulted on their business credit card. Sharing description wrt all data headers and their risk thresholds -
+1. SBFE Score: Business credit score that is used to predict a business's likelihood of financial delinquency or failure. Values below 863 are risky.
+2. Delinquent External Trades: Total Count of External Credit Lines (like cards, loans etc) on which the customer defaulted
+3. External Delinquency Amount (USD): Total default amount on External Credit Lines (like cards, loans etc)
+4. Total Tradelines: Overall Count of External Credit Lines (like cards, loans etc) linked to the customer
+5. Overall External Exposure (USD): Total Outstanding balance on all External Credit Lines (like cards, loans etc)
+6. Overall External Revolving Balance (USD): Total Revolving balance on all External Credit Lines (like cards, loans etc)
+7. Average External Utlization: Average utilization in all the all External Credit Lines
+8. Amex Primary Lender Indicator: Indicator for identifying whether Amex was the primary lender (i.e. >= 40% of overall exposure across internal + external credit lines was on Amex) for customer which is considered risky. 1 indicates that Amex was the primary lender.
+9. LN Credit Score: A risk score that predicts a consumer’s likelihood of default using traditional credit bureau data and public records. Values below 681 are risky.
+10. LN Blended Score: A risk score that combines traditional credit data with alternative data (like public records and non-credit signals) to assess credit risk more holistically. Values below 694 are risky.
+11 LN Business Value (USD): The total tax assessed value of the customer business address basis lexis nexis. Decrement in the values is considered a negative sign. 
+12. FICO Score: An industry-standard credit risk score that predicts the likelihood of serious delinquency using only traditional credit bureau data such as payment history, balances, and credit utilization. Values before 721 are risky.
+13. CSS Score: A business credit risk score that predicts the likelihood of a company becoming delinquent or failing, using commercial trade data, firmographics, financials, and public records. Values below 71 are risky.
+14. FSS Score: A business-level risk score that evaluates a company’s financial strength or stability, typically using firmographic data, financials, trade credit behavior, and public records. Values below 51 are risky.
+15. Paydex Score: It is a business credit score that measures a company’s payment performance. Values below 61 are risky.
+16. Judgements Org Count: The number of court judgments filed against an organization, indicating unresolved legal obligations that signal elevated credit stress and potential payment default risk.
+17. Lien Org Count: The number of active liens filed against an organization’s assets, reflecting creditor claims due to unpaid obligations and signaling financial strain and heightened credit risk.

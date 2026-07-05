@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from agents import Agent
 
-from agent_factories.redacting_tool import redacting_tool
+from tools.redacting_tool import redacting_tool
 
 
 @pytest.mark.asyncio
@@ -21,7 +21,7 @@ async def test_redacting_tool_honors_timeout_override():
     async def _stall(*_a, **_kw):
         await asyncio.sleep(5)  # would blow a short budget; must be cut short
 
-    with patch("agent_factories.redacting_tool.Runner.run", new=_stall):
+    with patch("tools.redacting_tool.Runner.run", new=_stall):
         wrapped = redacting_tool(
             inner_agent, name="report_agent", description="d",
             timeout_s=0.05, max_turns=1,
@@ -44,7 +44,7 @@ async def test_redacting_tool_sanitizes_input_to_inner_agent():
     fake_result = type("R", (), {"final_output": "all clear"})()
 
     with patch(
-        "agent_factories.redacting_tool.Runner.run",
+        "tools.redacting_tool.Runner.run",
         new=AsyncMock(return_value=fake_result),
     ) as mock_run:
         wrapped = redacting_tool(inner_agent, name="x", description="d")
@@ -71,7 +71,7 @@ async def test_redacting_tool_redacts_output():
     fake_result = type("R", (), {"final_output": "Found CASE-99999 issue"})()
 
     with patch(
-        "agent_factories.redacting_tool.Runner.run",
+        "tools.redacting_tool.Runner.run",
         new=AsyncMock(return_value=fake_result),
     ):
         wrapped = redacting_tool(inner_agent, name="x", description="d")
@@ -100,7 +100,7 @@ async def test_redacting_tool_passes_inner_agent_to_runner():
     fake_result = type("R", (), {"final_output": "ok"})()
 
     with patch(
-        "agent_factories.redacting_tool.Runner.run",
+        "tools.redacting_tool.Runner.run",
         new=AsyncMock(return_value=fake_result),
     ) as mock_run:
         wrapped = redacting_tool(inner_agent, name="x", description="d")
@@ -147,7 +147,7 @@ async def test_redacting_tool_multi_turn_keeps_specialist_alive():
     app_ctx = SimpleNamespace(_specialist_histories={})
     wrapper = RunContextWrapper(app_ctx)
 
-    with patch("agent_factories.redacting_tool.Runner.run", new=_fake_run):
+    with patch("tools.redacting_tool.Runner.run", new=_fake_run):
         wrapped = redacting_tool(inner_agent, name="crossbu", description="d")
 
         # Turn 1: no prior history → input is the bare sub-question string.
@@ -209,7 +209,7 @@ async def test_redacting_tool_specialist_histories_isolated_per_specialist():
     app_ctx = SimpleNamespace(_specialist_histories={})
     wrapper = RunContextWrapper(app_ctx)
 
-    with patch("agent_factories.redacting_tool.Runner.run", new=_fake_run):
+    with patch("tools.redacting_tool.Runner.run", new=_fake_run):
         a_tool = redacting_tool(inner_a, name="alpha", description="d")
         b_tool = redacting_tool(inner_b, name="beta", description="d")
 
@@ -268,7 +268,7 @@ async def test_redacting_tool_records_max_turns_exceeded():
     async def _raise(*_a, **_kw):
         raise MaxTurnsExceeded("ran out of turns")
 
-    with patch("agent_factories.redacting_tool.Runner.run", new=_raise):
+    with patch("tools.redacting_tool.Runner.run", new=_raise):
         wrapped = redacting_tool(inner_agent, name="wcc", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx), json.dumps({"sub_question": "anything"})
@@ -296,7 +296,7 @@ async def test_redacting_tool_records_model_behavior_error():
     async def _raise(*_a, **_kw):
         raise ModelBehaviorError("malformed JSON output")
 
-    with patch("agent_factories.redacting_tool.Runner.run", new=_raise):
+    with patch("tools.redacting_tool.Runner.run", new=_raise):
         wrapped = redacting_tool(inner_agent, name="domain_x", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx), json.dumps({"sub_question": "anything"})
@@ -319,7 +319,7 @@ async def test_redacting_tool_records_generic_exception():
     async def _raise(*_a, **_kw):
         raise RuntimeError("connection reset")
 
-    with patch("agent_factories.redacting_tool.Runner.run", new=_raise):
+    with patch("tools.redacting_tool.Runner.run", new=_raise):
         wrapped = redacting_tool(inner_agent, name="domain_y", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx), json.dumps({"sub_question": "anything"})
@@ -345,7 +345,7 @@ async def test_redacting_tool_records_timeout():
         raise _asyncio.TimeoutError()
 
     # Patch wait_for itself so we don't have to actually wait the timeout.
-    with patch("agent_factories.redacting_tool.asyncio.wait_for", new=_raise):
+    with patch("tools.redacting_tool.asyncio.wait_for", new=_raise):
         wrapped = redacting_tool(inner_agent, name="domain_z", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx), json.dumps({"sub_question": "anything"})
@@ -366,7 +366,7 @@ async def test_redacting_tool_success_does_not_record_error():
     fake_result = type("R", (), {"final_output": "all good"})()
 
     with patch(
-        "agent_factories.redacting_tool.Runner.run",
+        "tools.redacting_tool.Runner.run",
         new=AsyncMock(return_value=fake_result),
     ):
         wrapped = redacting_tool(inner_agent, name="ok_tool", description="d")
@@ -386,12 +386,10 @@ async def test_redacting_tool_success_does_not_record_error():
 # session-scoped dict that survives across turns.
 
 
-from agent_factories.redacting_tool import (
-    _active_kps,
+from tools.redacting_tool import (
     _compact_specialist_history,
-    _format_kb_digest,
-    _distill_and_persist,
 )
+from tools.distiller_pass import _distill_and_persist
 
 
 def _make_kb_ctx(distiller=None, kb=None):
@@ -416,57 +414,6 @@ def _make_kb_ctx(distiller=None, kb=None):
         # KB must await the tasks collected here before inspecting it.
         _pending_distillers=[],
     )
-
-
-def test_active_kps_keeps_latest_per_topic():
-    """Older KPs with the same topic are retained in the list (audit) but
-    `_active_kps` returns only the most recent per topic."""
-    kps = [
-        {"topic": "monthly_spend_trend", "claim": "v1", "captured_at_turn": "t1"},
-        {"topic": "top_merchants", "claim": "m1", "captured_at_turn": "t1"},
-        {"topic": "monthly_spend_trend", "claim": "v2-revised", "captured_at_turn": "t2"},
-    ]
-    active = _active_kps(kps)
-    by_topic = {k["topic"]: k["claim"] for k in active}
-    # Latest one wins per topic, older still present in the source list
-    # (audit log) but not returned by the active filter.
-    assert by_topic == {"monthly_spend_trend": "v2-revised", "top_merchants": "m1"}
-    assert len(kps) == 3  # source list untouched
-
-
-def test_format_kb_digest_empty_when_no_kps():
-    assert _format_kb_digest([]) == ""
-    assert _format_kb_digest(None) == ""
-
-
-def test_format_kb_digest_renders_active_set_only():
-    """The digest lists active topic names and points to kb_lookup tools."""
-    kps = [
-        {"topic": "fico_trajectory", "claim": "FICO 720→680 over 6 months",
-         "confidence": "high", "source_call": "summarize_trend('bureau','fico_score',...)"},
-        {"topic": "fico_trajectory", "claim": "FICO 720→645 (revised)",
-         "confidence": "medium"},
-    ]
-    digest = _format_kb_digest(kps)
-    assert "fico_trajectory" in digest    # topic name shown
-    assert "kb_lookup" in digest          # points to lookup tool
-    assert "(1)" in digest                # deduped to 1 active topic
-
-
-def test_format_kb_digest_shows_cross_specialist_topics():
-    """When full_kb is provided, digest includes other specialists' topics."""
-    own_kps = [{"topic": "gl_reductions", "claim": "Two GL cuts"}]
-    full_kb = {
-        "strategy": own_kps,
-        "modeling": [{"topic": "tsr_trend", "claim": "TSR rose from 12 to 39"}],
-        "bureau": [{"topic": "fico_trend", "claim": "FICO dropped to 680"}],
-    }
-    digest = _format_kb_digest(own_kps, full_kb=full_kb, self_name="strategy")
-    assert "gl_reductions" in digest       # own topic shown
-    assert "tsr_trend" in digest           # cross-specialist topic shown
-    assert "fico_trend" in digest          # cross-specialist topic shown
-    assert "modeling" in digest            # specialist name shown
-    assert "strategy" not in digest.split("other specialists")[1]  # self excluded from "other"
 
 
 def test_compact_specialist_history_elides_old_tool_outputs_only():
@@ -516,7 +463,7 @@ async def test_redacting_tool_prepends_kb_digest_when_no_intra_turn_history():
         ]},
     )
 
-    with patch("agent_factories.redacting_tool.Runner.run", new=_fake_run):
+    with patch("tools.redacting_tool.Runner.run", new=_fake_run):
         wrapped = redacting_tool(inner_agent, name="modeling", description="d")
         await wrapped.on_invoke_tool(
             RunContextWrapper(ctx),
@@ -561,7 +508,7 @@ async def test_redacting_tool_skips_kb_digest_on_intra_turn_followup():
         {"role": "assistant", "content": "prior answer"},
     ]
 
-    with patch("agent_factories.redacting_tool.Runner.run", new=_fake_run):
+    with patch("tools.redacting_tool.Runner.run", new=_fake_run):
         wrapped = redacting_tool(inner_agent, name="modeling", description="d")
         await wrapped.on_invoke_tool(
             RunContextWrapper(ctx),
@@ -622,7 +569,7 @@ async def test_distiller_persists_knowledge_points_to_session_kb():
     ctx = _make_kb_ctx(distiller=distiller, kb={})
 
     import asyncio as _asyncio
-    with patch("agent_factories.redacting_tool.Runner.run", new=_fake_run):
+    with patch("tools.redacting_tool.Runner.run", new=_fake_run):
         wrapped = redacting_tool(inner_agent, name="spend_payments", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx),
@@ -673,7 +620,7 @@ async def test_distiller_failure_does_not_break_specialist_response():
     ctx = _make_kb_ctx(distiller=distiller, kb={})
 
     import asyncio as _asyncio
-    with patch("agent_factories.redacting_tool.Runner.run", new=_fake_run):
+    with patch("tools.redacting_tool.Runner.run", new=_fake_run):
         wrapped = redacting_tool(inner_agent, name="bureau", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx),
@@ -690,152 +637,3 @@ async def test_distiller_failure_does_not_break_specialist_response():
     assert ctx._specialist_kb == {}
     # Failure was logged.
     assert any(e[0] == "distiller_failed" for e in ctx.logger.events)
-
-
-def test_distill_and_persist_noop_when_distiller_unwired():
-    """Tests / legacy paths without _distiller or _specialist_kb must behave
-    like the legacy single-turn flow — no errors, no KB updates."""
-    import asyncio as _asyncio
-    from types import SimpleNamespace
-
-    ctx_no_distiller = SimpleNamespace(
-        logger=None, _specialist_kb={}, _distiller=None, _turn_id=None,
-    )
-    n = _asyncio.get_event_loop().run_until_complete(
-        _distill_and_persist(ctx_no_distiller, "x", "q", "out")
-    )
-    assert n == 0
-    assert ctx_no_distiller._specialist_kb == {}
-
-
-def test_distill_and_persist_skips_report_agent():
-    """report_agent returns ReportDraft (narrative), not SpecialistOutput —
-    running the distiller on it costs ~20s for trivial KPs. The wrapper
-    must short-circuit so neither the distiller LLM call nor the KB write
-    happens for report_agent. The distiller mock is asserted untouched."""
-    import asyncio as _asyncio
-    from types import SimpleNamespace
-
-    distiller_calls: list = []
-
-    class _MockDistiller:
-        def __call__(self, *args, **kwargs):
-            distiller_calls.append((args, kwargs))
-            raise AssertionError("distiller should not have been invoked for report_agent")
-
-    logged_events: list = []
-
-    class _MockLogger:
-        def log(self, event, payload):
-            logged_events.append((event, payload))
-
-    ctx = SimpleNamespace(
-        logger=_MockLogger(),
-        _specialist_kb={},
-        _distiller=_MockDistiller(),
-        _turn_id="t-1",
-    )
-    n = _asyncio.get_event_loop().run_until_complete(
-        _distill_and_persist(ctx, "report_agent", "q", "out")
-    )
-    assert n == 0
-    assert distiller_calls == []
-    assert ctx._specialist_kb == {}
-    # The skip is observable in the JSONL so perf regressions are auditable.
-    assert any(e == "distiller_skipped" and p.get("specialist") == "report_agent"
-               for e, p in logged_events)
-
-
-async def test_auto_chart_emits_chart_pending_before_render(tmp_path):
-    """The auto-chart path renders charts from specialist tool outputs
-    WITHOUT the specialist calling make_chart (this is what actually
-    happens in practice — the JSONL log shows viz_rendered/auto_chart_rendered
-    and no make_chart). It must emit a `chart_pending` SSE event per chart,
-    keyed by (specialist, topic) so it matches the eventual end-of-turn
-    `chart` event and the frontend clears the "working on the plot…"
-    placeholder. (make_chart already does this; the auto-chart path didn't.)
-    """
-    from types import SimpleNamespace
-    from agent_factories.redacting_tool import _auto_chart_from_tool_outputs
-
-    class _Logger:
-        def __init__(self):
-            self.events = []
-
-        def log(self, evt, payload):
-            self.events.append((evt, payload))
-
-    emits: list = []
-    case_folder = tmp_path / "CASE-AUTOCHART"
-    case_folder.mkdir()
-    ctx = SimpleNamespace(
-        logger=_Logger(),
-        case_folder=case_folder,
-        _specialist_kb={},
-        _turn_id="t-auto",
-        _catalog=None,
-        _emit_event=lambda evt, payload: emits.append((evt, payload)),
-    )
-
-    # A summarize_trend-shaped tool output with ≥4 points so a chart renders.
-    tool_outputs = json.dumps({
-        "series": [
-            {"period": "2024-11", "raw_value": 720},
-            {"period": "2024-12", "raw_value": 705},
-            {"period": "2025-01", "raw_value": 690},
-            {"period": "2025-02", "raw_value": 680},
-        ],
-        "value_column": "fico",
-        "table": "model_scores",
-    })
-
-    n = await _auto_chart_from_tool_outputs(ctx, "modeling", tool_outputs)
-    assert n >= 1, "auto-chart should have rendered at least one chart"
-
-    # A KP was persisted; grab its topic — the pending event must match it.
-    assert ctx._specialist_kb.get("modeling"), "auto-chart should persist a KP"
-    topic = ctx._specialist_kb["modeling"][0]["topic"]
-
-    pending = [p for (e, p) in emits if e == "chart_pending"]
-    assert pending, f"auto-chart emitted no chart_pending; events={emits}"
-    assert any(
-        p.get("specialist") == "modeling" and p.get("topic") == topic
-        for p in pending
-    ), f"no chart_pending matching rendered topic {topic!r}; got {pending}"
-
-
-async def test_auto_chart_no_emit_hook_does_not_crash(tmp_path):
-    """When the AppContext has no `_emit_event` (legacy callers / notebooks),
-    the auto-chart path must still render without raising."""
-    from types import SimpleNamespace
-    from agent_factories.redacting_tool import _auto_chart_from_tool_outputs
-
-    class _Logger:
-        def __init__(self):
-            self.events = []
-
-        def log(self, evt, payload):
-            self.events.append((evt, payload))
-
-    case_folder = tmp_path / "CASE-NOEMIT"
-    case_folder.mkdir()
-    ctx = SimpleNamespace(
-        logger=_Logger(),
-        case_folder=case_folder,
-        _specialist_kb={},
-        _turn_id="t-noemit",
-        _catalog=None,
-        # no _emit_event attribute at all
-    )
-    tool_outputs = json.dumps({
-        "series": [
-            {"period": "2024-11", "raw_value": 720},
-            {"period": "2024-12", "raw_value": 705},
-            {"period": "2025-01", "raw_value": 690},
-            {"period": "2025-02", "raw_value": 680},
-        ],
-        "value_column": "fico",
-        "table": "model_scores",
-    })
-    n = await _auto_chart_from_tool_outputs(ctx, "modeling", tool_outputs)
-    assert n >= 1

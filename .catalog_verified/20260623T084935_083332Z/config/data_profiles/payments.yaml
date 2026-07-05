@@ -50,7 +50,8 @@ columns:
     year:
     - 2024
     - 2025
-    description: The calendar date when a borrower’s payment was recorded as received.
+    description: 'Date the payment was attempted (YYYY-MM-DD). Range: 2024-2025; data
+      cut-off is 2025-12.'
     aliases:
     - Payment Date
   payment_amount:
@@ -60,8 +61,7 @@ columns:
     std: 2500
     min: 25
     max: 50000
-    description: Amount received as payment toward the outstanding credit balance,
-      expressed in US dollars.
+    description: Payment amount in USD
     aliases:
     - Payment Amount
   payment_bank_account:
@@ -72,9 +72,7 @@ columns:
       bank_account_3: 0.1
       bank_account_5: 0.06
       bank_account_4: 0.04
-    description: Masked identifier for the bank account used to make the payment;
-      original account number is replaced with a non-identifying numeric code for
-      security.
+    description: Bank account the payment was drawn from (masked)
     aliases:
     - Payment Bank Account
     categories_pending_review: true
@@ -89,7 +87,6 @@ columns:
       Invalid Account Number: 0.01
       Unauthorized / Disputed: 0.01
       Bank Processing Error: 0.01
-    description: Reason provided for a payment reversal, applicable when the payment
-      has been flagged as returned.
+    description: Reason for return. Empty when payment_status = success.
     aliases:
     - Return Reason
