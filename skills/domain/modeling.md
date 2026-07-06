@@ -76,8 +76,8 @@ If driver columns are empty, probe `get_table_schema('score_drivers')` for actua
 For concept-scoped questions ("spending features?", "delinquency signals?", "risk indicators?"):
 
 **R1:** Probe schema + batch query in ONE round:
-1. `get_table_schema('model_scores')` — read descriptions to find matching columns
-2. Map concept → columns using the vocabulary table below
+1. If a **§ DIRECTED VARIABLES** block was prepended to your input, use those columns directly. Otherwise `get_table_schema('model_scores')` — read descriptions to find matching columns
+2. Map concept → columns using the **§ Concept → variable selection** guidance below
 3. Pick 3-6 MOST RELEVANT columns **for the asked concept**
 4. `batch_summarize_trend(...)` with all selected columns
 
