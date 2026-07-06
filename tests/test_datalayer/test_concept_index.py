@@ -43,3 +43,20 @@ def test_variables_for_concepts_cap(tmp_path):
 def test_gloss_covers_taxonomy():
     for c in ("internal_delinquency", "oop", "third_party_score"):
         assert c in CONCEPT_GLOSS
+
+def test_description_short_survives_leading_abbreviation(tmp_path):
+    # "No. of times…" must not collapse to just "No" (regression: the
+    # ". " split hits the abbreviation dot).
+    (tmp_path / "m.yaml").write_text(textwrap.dedent("""
+    table: m
+    columns:
+      times_30_dpd:
+        dtype: int
+        description: No. of times 30 days past due. Values above 1 are risky.
+        risk_threshold: 1
+        risk_direction: above
+        concept: internal_delinquency
+    """))
+    cat = DataCatalog(profile_dir=str(tmp_path))
+    v = cat.variables_for_concepts(["m"], ["internal_delinquency"])[0]
+    assert v["description_short"] == "No. of times 30 days past due"

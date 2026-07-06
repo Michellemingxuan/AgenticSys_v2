@@ -403,7 +403,16 @@ class DataCatalog:
                     continue
                 seen.add(name)
                 desc = (spec.get("description") or "").strip()
-                short = desc.split(". ")[0].strip().rstrip(".")
+                # First sentence — but don't let a leading abbreviation like
+                # "No." (as in "No. of times…") collapse the meaning to two
+                # chars; keep absorbing dot-segments until it's substantive.
+                parts = desc.split(". ")
+                short = parts[0].strip()
+                i = 1
+                while len(short.rstrip(".")) <= 3 and i < len(parts):
+                    short = f"{short}. {parts[i]}".strip()
+                    i += 1
+                short = short.rstrip(".")
                 thr = ""
                 if "risk_threshold" in spec:
                     sym = ">" if spec.get("risk_direction", "above") == "above" else "<"

@@ -305,6 +305,10 @@ def redacting_tool(
                 try:
                     _vars = catalog.variables_for_concepts(data_hints, concepts)
                     _directed_block = _render_directed_variables(_vars)
+                    if _directed_block and logger is not None:
+                        logger.log("directed_variables_injected",
+                                   {"specialist": name, "concepts": concepts,
+                                    "count": len(_vars)})
                 except Exception as _dv_exc:  # noqa: BLE001 — never break the call
                     _directed_block = ""
                     if logger is not None:

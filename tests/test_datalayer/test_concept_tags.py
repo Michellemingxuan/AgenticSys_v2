@@ -1,6 +1,5 @@
 import yaml
 from datalayer.generator import DataGenerator
-from tools import data_tools
 
 TAXONOMY = {
     "internal_delinquency", "external_delinquency", "exposure_leverage",
