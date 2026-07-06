@@ -10,6 +10,7 @@ from tools.redacting_tool import redacting_tool
 from models.types import FinalAnswer
 from skills.domain.loader import load_domain_skill as _load_domain_skill
 from skills.loader import load_skill as _load_skill
+from datalayer.catalog import CONCEPT_GLOSS
 
 _WORKFLOW_DIR = Path(__file__).parent.parent / "skills" / "workflow"
 
@@ -47,6 +48,14 @@ def _render_team_roster(specialists: list[Agent], catalog=None) -> str:
             else:
                 lines.append(f"    owns `{table}`.")
 
+        if catalog is not None:
+            concepts = catalog.concepts_for_tables(hints)
+            if concepts:
+                gloss = "; ".join(
+                    f"{c} ({CONCEPT_GLOSS.get(c, c)})" for c in concepts
+                )
+                lines.append(f"    concepts you can direct: {gloss}")
+
         # Surface a couple of risk-signal phrases so the orchestrator
         # can also route by concern type, not just data table name.
         if skill and skill.risk_signals:
@@ -55,7 +64,10 @@ def _render_team_roster(specialists: list[Agent], catalog=None) -> str:
     lines.append(
         "\nROUTING RULE: pick the specialist whose `owns` table most directly "
         "carries the reviewer's question. Prefer 1–2 specialists; only widen "
-        "to 3+ when the question explicitly spans multiple domains."
+        "to 3+ when the question explicitly spans multiple domains. When a "
+        "specialist lists `concepts you can direct`, pass `concepts=[...]` in "
+        "the tool call naming the concept(s) relevant to your sub-question so "
+        "the specialist receives the exact variable definitions."
     )
     return "\n".join(lines)
 
