@@ -44,15 +44,27 @@ _ELIDED_SPECIALIST_TOOL_OUTPUT = (
 )
 
 
-def _compose_specialist_input(episodic_block: str, kb_digest: str, sub_question: str) -> str:
-    """Prepend the specialist's episodic slice + KB digest (non-empty, in that
-    order) before the sub-question, keeping the existing '--- New question ---'
-    marker when any preface is present. Byte-identical to the prior KB-only
-    format when episodic_block is empty."""
-    prefixes = [p for p in (episodic_block, kb_digest) if p]
+def _compose_specialist_input(episodic_block: str, kb_digest: str,
+                              sub_question: str, directed_block: str = "") -> str:
+    """Prepend episodic slice, KB digest, and directed-variable block (each
+    non-empty, in that order) before the sub-question. Directed variables sit
+    last (nearest the question) as the most question-specific prefix.
+    Byte-identical to the prior behavior when directed_block is empty."""
+    prefixes = [p for p in (episodic_block, kb_digest, directed_block) if p]
     if not prefixes:
         return sub_question
     return "\n\n".join(prefixes) + f"\n\n--- New question ---\n{sub_question}"
+
+
+def _render_directed_variables(variables: list[dict]) -> str:
+    """Render the compact §DIRECTED VARIABLES block from variables_for_concepts."""
+    if not variables:
+        return ""
+    lines = ["§ DIRECTED VARIABLES (for this question — from the data catalog)"]
+    for v in variables:
+        thr = f"; {v['threshold_text']}" if v.get("threshold_text") else ""
+        lines.append(f"[{v['concept']}] {v['name']} — {v['description_short']}{thr}")
+    return "\n".join(lines)
 
 
 def _compact_specialist_history(
@@ -159,6 +171,8 @@ def redacting_tool(
     *,
     timeout_s: float = _SPECIALIST_TIMEOUT_S,
     max_turns: int = _SPECIALIST_MAX_TURNS,
+    catalog=None,
+    data_hints: list[str] | None = None,
 ):
     """Return a FunctionTool that runs ``agent`` with input/output redaction.
 
@@ -184,7 +198,8 @@ def redacting_tool(
     inner = agent
 
     @function_tool(name_override=name, description_override=description)
-    async def _runner(ctx: RunContextWrapper, sub_question: str) -> str:
+    async def _runner(ctx: RunContextWrapper, sub_question: str,
+                      concepts: list[str] | None = None) -> str:
         runner_started = time.perf_counter()
         redacted_in = sanitize_message(sub_question)
 
@@ -285,7 +300,19 @@ def redacting_tool(
                 if logger is not None:
                     logger.log("episodic_specialist_assembly_failed",
                                {"specialist": name, "error": repr(_epi_exc)})
-            contextual_in = _compose_specialist_input(_episodic_block, kb_digest, redacted_in)
+            _directed_block = ""
+            if concepts and catalog is not None and data_hints:
+                try:
+                    _vars = catalog.variables_for_concepts(data_hints, concepts)
+                    _directed_block = _render_directed_variables(_vars)
+                except Exception as _dv_exc:  # noqa: BLE001 — never break the call
+                    _directed_block = ""
+                    if logger is not None:
+                        logger.log("directed_variables_assembly_failed",
+                                   {"specialist": name, "concepts": concepts,
+                                    "error": repr(_dv_exc)})
+            contextual_in = _compose_specialist_input(
+                _episodic_block, kb_digest, redacted_in, _directed_block)
             if kb_digest:
                 kb_digest_n_kps = len(_active_kps(kps_for_name))
 

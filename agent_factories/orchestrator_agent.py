@@ -163,10 +163,14 @@ def build_orchestrator_agent(
     catalog=None,
     pillar_config: dict | None = None,
 ) -> Agent:
-    tools = [
-        redacting_tool(s, name=s.name, description=_describe_specialist(s))
-        for s in specialists
-    ]
+    tools = []
+    for s in specialists:
+        _sk = _load_domain_skill(s.name)
+        tools.append(redacting_tool(
+            s, name=s.name, description=_describe_specialist(s),
+            catalog=catalog,
+            data_hints=(list(_sk.data_hints) if _sk else None),
+        ))
     tools.append(redacting_tool(
         report_agent,
         name="report_agent",
