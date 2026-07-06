@@ -629,3 +629,28 @@ columns:
     description: total consumer and commercial trades greater than 30
     aliases:
     - tot_cons_comm_trds_g75_max
+  overall_exposure:
+    dtype: float
+    distribution: normal
+    mean: 200000
+    std: 120000
+    min: 0
+    max: 2000000
+    description: Overall customer exposure in USD for the scoring month (monthly roll-up
+      of the transaction-level `one_expsr_usd_currency_amt`). Plain float on the wire
+      (e.g. "252387.11").
+    description_pending: true
+    aliases:
+    - overall_exposure
+  business_revenue:
+    dtype: float
+    distribution: normal
+    mean: 5000000
+    std: 8000000
+    min: 0
+    max: 100000000
+    description: Reported annual revenue of the customer's business in USD. Constant
+      across the case's scoring months (e.g. "19892101.0").
+    description_pending: true
+    aliases:
+    - business_revenue

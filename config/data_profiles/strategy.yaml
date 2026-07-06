@@ -3,9 +3,14 @@ description: 'Internal credit-strategy action log — discrete decisions the fir
   on the customer''s account (global-limit changes, RLA / Risk Line Action events,
   portfolio actions). Each row is one deliberate intervention; the set tells the firm''s
   historical risk view of this account. Sourced from the strategy-action management
-  system (real, not simulated).
+  system (real, not simulated). An older-vintage extract ships the same table as
+  `rla.csv` with snake_case names (`act_nm`, `portfo_nm`, `crnt_glbl_lmt_am`, ...);
+  those are carried as aliases below so both formats resolve to this profile.
 
   '
+aliases:
+- rla
+- rla_data
 columns:
   Product Type:
     dtype: categorical
@@ -36,6 +41,7 @@ columns:
     - Strategy Action
     - action
     - strategy_action
+    - act_nm
   Portfolio:
     dtype: categorical
     description: Portfolio classification the action falls under. Known values include
@@ -44,6 +50,7 @@ columns:
     aliases:
     - Portfolio
     - portfolio
+    - portfo_nm
   RLA Type:
     dtype: categorical
     description: Risk Line Action type — which risk-management framework governed
@@ -52,6 +59,7 @@ columns:
     aliases:
     - RLA Type
     - rla_type
+    - RLA_Type
   Current Global Limit:
     dtype: float
     description: Account's global limit BEFORE this action (in dollars). The "current"
@@ -60,6 +68,7 @@ columns:
     aliases:
     - Current Global Limit
     - current_global_limit
+    - crnt_glbl_lmt_am
   New Global Limit:
     dtype: float
     description: Account's global limit AFTER this action (in dollars). For GL_REDUCTION,
@@ -69,6 +78,7 @@ columns:
     aliases:
     - New Global Limit
     - new_global_limit
+    - new_glbl_lmt_am
   Current Line Amount:
     dtype: float
     description: Per-line amount (sub-limit on a specific card line within the global
@@ -78,6 +88,7 @@ columns:
     aliases:
     - Current Line Amount
     - current_line_amount
+    - crnt_lend_line_am
   New Line Amount:
     dtype: float
     description: Per-line amount after the action. 0 when not adjusted by this action.
@@ -85,3 +96,4 @@ columns:
     aliases:
     - New Line Amount
     - new_line_amount
+    - new_lend_line_am

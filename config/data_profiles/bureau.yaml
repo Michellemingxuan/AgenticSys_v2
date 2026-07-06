@@ -1,35 +1,23 @@
 table: bureau
-description: Credit bureau data — one row per external tradeline per case. Each row
-  carries the case-level aggregated scores (FICO, SBFE, LN, CSS, FSS, Paydex) plus
-  the tradeline-specific details (balance, limit, utilization, DPD status). Case-level
-  fields repeat across rows for the same case.
-rows_per_case: 4
+description: Credit bureau data — monthly case-level snapshots spanning the ~18-month
+  window before the customer defaulted on their business credit card. One row per case
+  per month. Each row carries the case-level bureau scores (FICO, SBFE, LN, CSS, FSS,
+  Paydex) plus commercial (SBFE), D&B, consumer-trade, and public-record (judgement/lien)
+  aggregates for that month.
+rows_per_case: 18  # TUNE: months in the review window (real data ships monthly snapshots)
 one_row_per_case: false
 aliases:
 - bureau_data
 columns:
   month:
     dtype: date
-    parse_hint: '%b-%Y'
-    description: Monthly snapshot date for this bureau record (e.g. "Jan-2024"). One
+    parse_hint: "%B'%Y"
+    description: Monthly snapshot date for this bureau record (e.g. "July'2023"). One
       row per case per month across the review window.
     description_pending: false
     aliases:
     - month
     dtype_pending_review: true
-  fico_score:
-    dtype: int
-    distribution: normal
-    mean: 740
-    std: 60
-    min: 300
-    max: 850
-    description: FICO Score — industry-standard credit risk score. Values below 721
-      are risky.
-    aliases:
-    - FICO Score
-    risk_threshold: 721
-    risk_direction: below
   sbfe_score:
     dtype: int
     distribution: normal
@@ -38,11 +26,79 @@ columns:
     min: 500
     max: 950
     description: SBFE Score — business credit score predicting financial delinquency
-      or failure. Values below 863 are risky.
+      or failure. Irrelevant when SBFE Commercial Tradelines == 0 (no commercial trade
+      history to score). Values below 863 are risky.
     aliases:
     - SBFE Score
     risk_threshold: 863
     risk_direction: below
+  sbfe_commercial_delinquent_trades:
+    dtype: int
+    distribution: poisson
+    lambda: 0.4
+    min: 0
+    max: 20
+    description: Total count of external commercial credit lines (cards, loans, etc.)
+      on which the customer defaulted.
+    aliases:
+    - SBFE Commercial Delinquent Trades
+    - Delinquent External Trades
+  sbfe_commercial_delinquency_amount:
+    dtype: float
+    distribution: normal
+    mean: 2000
+    std: 8000
+    min: 0
+    max: 500000
+    description: Total default amount on external commercial credit lines (USD).
+    aliases:
+    - SBFE Commercial Delinquency Amount (USD)
+    - External Delinquency Amount (USD)
+  sbfe_commercial_tradelines:
+    dtype: int
+    distribution: normal
+    mean: 12
+    std: 6
+    min: 0
+    max: 50
+    description: Overall count of external commercial credit lines linked to the customer.
+      If this is 0 for at least 12 months, then Amex is the primary lender.
+    aliases:
+    - SBFE Commercial Tradelines
+    - Total Tradelines
+  sbfe_commercial_exposure:
+    dtype: float
+    distribution: normal
+    mean: 45000
+    std: 40000
+    min: 0
+    max: 500000
+    description: Total outstanding balance on all external commercial credit lines (USD).
+    aliases:
+    - SBFE Commercial Exposure (USD)
+    - Overall External Exposure (USD)
+  sbfe_commercial_revolving_balance:
+    dtype: float
+    distribution: normal
+    mean: 15000
+    std: 18000
+    min: 0
+    max: 300000
+    description: Total revolving balance on all external commercial credit lines (USD).
+    aliases:
+    - SBFE Commercial Revolving Balance (USD)
+    - Overall External Revolving Balance (USD)
+  sbfe_commercial_utilization:
+    dtype: float
+    distribution: normal
+    mean: 35
+    std: 20
+    min: 0
+    max: 150
+    description: Average % utilization across all external commercial credit lines.
+    aliases:
+    - SBFE Commercial Utlization
+    - Average External Utlization
   ln_credit_score:
     dtype: int
     distribution: normal
@@ -68,6 +124,31 @@ columns:
     aliases:
     - LN Blended Score
     risk_threshold: 694
+    risk_direction: below
+  ln_business_value:
+    dtype: string
+    distribution: normal
+    mean: 1500000
+    std: 500000
+    min: 0
+    max: 10000000
+    description: LexisNexis Business Value — total tax-assessed value of business
+      address (USD). Decrement is a negative sign.
+    aliases:
+    - LN Business Value (USD)
+    dtype_pending_review: true
+  fico_score:
+    dtype: int
+    distribution: normal
+    mean: 740
+    std: 60
+    min: 300
+    max: 850
+    description: FICO Score — industry-standard credit risk score. Values below 721
+      are risky.
+    aliases:
+    - FICO Score
+    risk_threshold: 721
     risk_direction: below
   css_score:
     dtype: int
@@ -108,87 +189,40 @@ columns:
     - Paydex Score
     risk_threshold: 61
     risk_direction: below
-  delinquent_external_trades:
+  dnb_payment_experiences:
     dtype: int
     distribution: poisson
-    lambda: 0.4
+    lambda: 10
     min: 0
-    max: 20
-    description: Total count of external credit lines on which the customer defaulted.
+    max: 100
+    description: D&B Payment Experiences — volume of reported supplier payment observations
+      used to gauge the reliability of delinquency signals and assess a business's
+      credit stress.
     aliases:
-    - Delinquent External Trades
-  external_delinquency_amount:
-    dtype: float
-    distribution: normal
-    mean: 2000
-    std: 8000
-    min: 0
-    max: 500000
-    description: Total default amount on external credit lines (USD).
-    aliases:
-    - External Delinquency Amount (USD)
-  total_tradelines:
-    dtype: int
-    distribution: normal
-    mean: 12
-    std: 6
-    min: 0
-    max: 50
-    description: Overall count of external credit lines linked to the customer.
-    aliases:
-    - Total Tradelines
-  overall_external_exposure:
-    dtype: float
-    distribution: normal
-    mean: 45000
-    std: 40000
-    min: 0
-    max: 500000
-    description: Total outstanding balance on all external credit lines (USD).
-    aliases:
-    - Overall External Exposure (USD)
-  overall_external_revolving_balance:
-    dtype: float
-    distribution: normal
-    mean: 15000
-    std: 18000
-    min: 0
-    max: 300000
-    description: Total revolving balance on all external credit lines (USD).
-    aliases:
-    - Overall External Revolving Balance (USD)
-  avg_external_utilization:
-    dtype: float
-    distribution: normal
-    mean: 0.35
-    std: 0.2
-    min: 0.0
-    max: 1.5
-    description: Average utilization across all external credit lines.
-    aliases:
-    - Average External Utlization
-  amex_primary_lender_indicator:
+    - D&B Payment Experiences
+  dnb_delinquent_payment_experiences:
     dtype: int
     distribution: poisson
-    lambda: 0.25
+    lambda: 1.0
     min: 0
-    max: 1
-    description: 1 = Amex is primary lender (>= 40% of overall exposure). Considered
-      risky.
+    max: 100
+    description: D&B Delinquent Payment Experiences — count of supplier payment observations
+      reflecting delinquency; quantifies the frequency and severity of a business's
+      payment stress.
     aliases:
-    - Amex Primary Lender Indicator
-  ln_business_value:
-    dtype: string
+    - D&B Delinquent Payment Experiences
+  dnb_delinquent_payment_amount:
+    dtype: float
     distribution: normal
-    mean: 1500000
-    std: 500000
+    mean: 1500
+    std: 6000
     min: 0
-    max: 10000000
-    description: LexisNexis Business Value — total tax-assessed value of business
-      address (USD). Decrement is a negative sign.
+    max: 500000
+    description: D&B Delinquent Payment Amount — aggregate amount associated with
+      delinquent supplier payment records (USD); measures the severity of an organization's
+      liquidity pressure.
     aliases:
-    - LN Business Value (USD)
-    dtype_pending_review: true
+    - D&B Delinquent Payment Amount (USD)
   judgements_org_count:
     dtype: int
     distribution: poisson
@@ -207,25 +241,119 @@ columns:
     description: Number of active liens filed against the organization's assets.
     aliases:
     - Lien Org Count
+  judgements_amount:
+    dtype: float
+    distribution: normal
+    mean: 3000
+    std: 12000
+    min: 0
+    max: 1000000
+    description: Total monetary value of court judgments filed against the business
+      (USD) — unresolved legal debt obligations; indicates the severity of credit stress.
+    aliases:
+    - Judgements Amount (USD)
+  liens_amount:
+    dtype: float
+    distribution: normal
+    mean: 4000
+    std: 15000
+    min: 0
+    max: 1000000
+    description: Total monetary value of active liens placed on the business's assets
+      (USD) — magnitude of creditor claims due to unpaid obligations; signals financial
+      strain and elevated credit risk.
+    aliases:
+    - Liens Amount (USD)
+  non_revolving_consumer_trades_count:
+    dtype: int
+    distribution: normal
+    mean: 4
+    std: 3
+    min: 0
+    max: 40
+    description: Number of open non-revolving consumer credit accounts (fixed-payment
+      obligations) — contributes to ongoing consumer credit burden and stress.
+    aliases:
+    - Non-Revolving Consumer Trades Count
+  revolving_consumer_trades_count:
+    dtype: int
+    distribution: normal
+    mean: 6
+    std: 4
+    min: 0
+    max: 40
+    description: Number of open revolving consumer credit accounts (credit cards,
+      lines of credit) — access to revolving credit and potential utilization-driven
+      credit stress.
+    aliases:
+    - Revolving Consumer Trades Count
+  non_revolving_consumer_trades_amount:
+    dtype: float
+    distribution: normal
+    mean: 20000
+    std: 25000
+    min: 0
+    max: 500000
+    description: Total outstanding balance across non-revolving consumer credit accounts
+      (USD) — fixed repayment obligations contributing to a consumer's debt burden
+      and credit stress.
+    aliases:
+    - Non-Revolving Consumer Trades Amount (USD)
+  revolving_consumer_trades_amount:
+    dtype: float
+    distribution: normal
+    mean: 18000
+    std: 22000
+    min: 0
+    max: 500000
+    description: Total outstanding balance across revolving consumer credit accounts
+      (credit cards, lines of credit) (USD) — variable debt exposure that can drive
+      liquidity pressure and utilization-based credit stress.
+    aliases:
+    - Revolving Consumer Trades Amount (USD)
+  delinquent_consumer_trades_count:
+    dtype: int
+    distribution: poisson
+    lambda: 0.4
+    min: 0
+    max: 20
+    description: Number of consumer credit accounts currently past due or with a recorded
+      delinquency — frequency of payment distress and elevated credit stress.
+    aliases:
+    - Delinquent Consumer Trades Count
+  amex_exposure_share:
+    dtype: float
+    distribution: normal
+    mean: 30
+    std: 20
+    min: 0
+    max: 100
+    description: Percentage of the customer's Amex exposure relative to overall exposure
+      (consumer + commercial + Amex). If Amex Exposure Share is >= 50 for at least
+      12 months, then Amex is the primary lender (considered risky).
+    aliases:
+    - Amex Exposure Share
+    risk_threshold: 50
+    risk_direction: above
 correlations:
 - columns:
   - fico_score
-  - delinquent_external_trades
+  - sbfe_commercial_delinquent_trades
   direction: negative
   strength: 0.7
 - columns:
   - fico_score
-  - avg_external_utilization
+  - sbfe_commercial_utilization
   direction: negative
   strength: 0.5
 - columns:
   - sbfe_score
-  - delinquent_external_trades
+  - sbfe_commercial_delinquent_trades
   direction: negative
   strength: 0.6
 - columns:
-  - overall_external_exposure
-  - overall_external_revolving_balance
+  - sbfe_commercial_exposure
+  - sbfe_commercial_revolving_balance
   direction: positive
   strength: 0.7
 - columns:
@@ -233,6 +361,36 @@ correlations:
   - lien_org_count
   direction: positive
   strength: 0.5
+- columns:
+  - judgements_org_count
+  - judgements_amount
+  direction: positive
+  strength: 0.6
+- columns:
+  - lien_org_count
+  - liens_amount
+  direction: positive
+  strength: 0.6
+- columns:
+  - dnb_payment_experiences
+  - dnb_delinquent_payment_experiences
+  direction: positive
+  strength: 0.4
+- columns:
+  - dnb_delinquent_payment_experiences
+  - dnb_delinquent_payment_amount
+  direction: positive
+  strength: 0.6
+- columns:
+  - revolving_consumer_trades_count
+  - revolving_consumer_trades_amount
+  direction: positive
+  strength: 0.6
+- columns:
+  - non_revolving_consumer_trades_count
+  - non_revolving_consumer_trades_amount
+  direction: positive
+  strength: 0.6
 - columns:
   - ln_credit_score
   - fico_score

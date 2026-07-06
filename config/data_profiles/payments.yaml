@@ -8,7 +8,18 @@ one_row_per_case: false
 aliases:
 - payments_success
 - payments_returns
+- payments_data
+- payments_returns_data
+- payments_returns_data_full
 columns:
+  grms_cid:
+    dtype: string
+    description: GRMS customer identifier for the account the payment belongs to.
+      Numeric 11-digit id (equals the case id in real data, e.g. "11854808010").
+      Present only in the full returns extract.
+    description_pending: true
+    aliases:
+    - grms_cid
   payment_status:
     dtype: categorical
     categories:

@@ -269,3 +269,10 @@ columns:
     dtype: float
     description: One-exposure amount in USD currency (raw per-transaction value).
     description_pending: true
+  business_revenue:
+    dtype: float
+    description: Reported annual revenue of the customer's business in USD (per-transaction
+      value; often blank on the transaction table).
+    description_pending: true
+    aliases:
+    - business_revenue

@@ -15,6 +15,34 @@ columns:
     description: Date of the spend transaction (DD-Mon-YYYY, e.g., 05-Nov-2024).
     aliases:
     - Date
+  spend_month:
+    dtype: date
+    parse_hint: "%B'%Y"
+    description: Transaction month for this spend (e.g. "January'2024").
+    aliases:
+    - Month
+    dtype_pending_review: true
+  spend_timestamp:
+    dtype: date
+    parse_hint: '%Y-%m-%d %H:%M:%S.%f'
+    description: Full transaction timestamp with millisecond precision (e.g. "2024-01-09
+      12:04:30.036"). Day-grain equivalent of `Date`.
+    aliases:
+    - Timestamp
+    dtype_pending_review: true
+  customer_industry:
+    dtype: categorical
+    categories:
+      Schools & Colleges: 0.2
+      Professional Services: 0.2
+      Retail: 0.2
+      Construction: 0.2
+      Healthcare: 0.2
+    description: The industry in which the customer's own business operates (constant
+      per case; distinct from per-transaction `Merchant Industry`).
+    aliases:
+    - Customer Industry
+    categories_pending_review: true
   amount:
     dtype: float
     distribution: normal

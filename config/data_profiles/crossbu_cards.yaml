@@ -17,6 +17,13 @@ one_row_per_case: false
 aliases:
 - crossbu_cards_data
 columns:
+  cm11:
+    dtype: string
+    description: Card member / account identifier for this card (numeric 11-digit
+      id, e.g. "37675218257").
+    description_pending: true
+    aliases:
+    - cm11
   Month:
     dtype: date
     parse_hint: '%b-%Y'
@@ -86,6 +93,17 @@ columns:
     description: Outstanding exposure on the card in USD
     aliases:
     - Balance
+  write_off_amount:
+    dtype: float
+    distribution: normal
+    mean: 0
+    std: 3000
+    min: 0
+    max: 500000
+    description: Amount written off on the card in USD (0 when the account has not
+      been charged off).
+    aliases:
+    - Write Off Amount
   card_tenure:
     dtype: int
     distribution: normal
