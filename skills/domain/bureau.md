@@ -33,7 +33,7 @@ Bureau scores fall into two families — **consumer** (measuring the individual 
 
 | Score | Provider | What it measures | Notes |
 |---|---|---|---|
-| `sbfe_score` | SBFE | Business financial delinquency/failure | Small Business Financial Exchange — based on trade payment data from lenders. |
+| `sbfe_score` | SBFE | Business financial delinquency/failure | Small Business Financial Exchange — based on trade payment data from lenders. **Meaningless when `sbfe_commercial_tradelines` == 0** (no commercial trade history to score) — don't flag a low/blank SBFE score as risk in that case. |
 | `css_score` | D&B / bureau | Business credit risk | Uses commercial trade data and financials. |
 | `fss_score` | D&B / bureau | Business financial strength/stability | Measures balance-sheet health and operating stability. |
 | `paydex_score` | D&B | Business payment performance | How promptly the business pays its bills (0–100, 80 = on-time). |
@@ -48,21 +48,37 @@ Our commercial customers are typically **small business owners**. The owner and 
 When analysing commercial customers:
 - Always examine **both** consumer scores (FICO, LN) **and** business scores (SBFE, CSS, FSS, Paydex) together.
 - Flag divergence: e.g. FICO dropping while Paydex holds steady suggests the owner is personally strained but the business hasn't shown it yet — or the business is being propped up.
-- Pair with `judgements_org_count` and `lien_org_count` for business-side legal distress signals.
+- Pair with `judgements_org_count` / `judgements_amount` and `lien_org_count` / `liens_amount` for business-side legal distress signals (count and USD magnitude).
 
 # External delinquency (load-bearing columns on `bureau`)
 
-When the reviewer asks about *external delinquency, default tradelines, defaulted balances, or any "outside-Amex" past-due exposure*, the answer lives in these case-level fields on `bureau` (probe schema; the `month` column gives a per-month snapshot):
+When the reviewer asks about *external delinquency, default tradelines, defaulted balances, or any "outside-Amex" past-due exposure*, the answer lives in these case-level fields on `bureau` (probe schema; the `month` column gives a per-month snapshot). The columns split into a **commercial (SBFE)** side and a **consumer trades** side — cover both when the framing is generic:
+
+**Commercial (SBFE) external tradelines:**
 
 | Column | What it measures |
 |---|---|
-| `delinquent_external_trades` | Count of external credit lines on which the customer defaulted. |
-| `external_delinquency_amount` | Total default amount (USD) across those external lines. |
-| `total_tradelines` | Overall count of external credit lines linked to the customer (denominator for the share-defaulted ratio). |
-| `overall_external_exposure` | Total outstanding balance on all external credit lines (USD). |
-| `avg_external_utilization` | Average utilization across external lines — high util alongside delinquency = stretched. |
-| `amex_primary_lender_indicator` | 1 = Amex carries ≥40% of overall exposure (means external view is a smaller piece of the picture). |
+| `sbfe_commercial_delinquent_trades` | Count of external commercial credit lines on which the customer defaulted. |
+| `sbfe_commercial_delinquency_amount` | Total default amount (USD) across those external commercial lines. |
+| `sbfe_commercial_tradelines` | Overall count of external commercial credit lines (denominator for the share-defaulted ratio). **If 0 for ≥12 months, Amex is the primary lender** — and `sbfe_score` is meaningless (no trade history to score). |
+| `sbfe_commercial_exposure` | Total outstanding balance on all external commercial credit lines (USD). |
+| `sbfe_commercial_revolving_balance` | Revolving portion of that commercial exposure (USD). |
+| `sbfe_commercial_utilization` | Average % utilization across external commercial lines — high util alongside delinquency = stretched. |
 
-For trajectory, run `summarize_trend('bureau', '<column>', 'month', period='month', op='max')` on the relevant indicator. Quote both the level and the share: *"3 of 12 external tradelines (25%) were delinquent at the latest snapshot, totaling $14,200 — share rose from 8% six months ago."*
+**Consumer external trades:**
+
+| Column | What it measures |
+|---|---|
+| `revolving_consumer_trades_count` / `non_revolving_consumer_trades_count` | Count of open revolving / non-revolving consumer credit accounts. |
+| `revolving_consumer_trades_amount` / `non_revolving_consumer_trades_amount` | Outstanding balance (USD) on those revolving / non-revolving consumer accounts. |
+| `delinquent_consumer_trades_count` | Count of consumer credit accounts currently past due / delinquent. |
+
+**D&B supplier-payment stress:** `dnb_payment_experiences` (volume of reported supplier-payment observations), `dnb_delinquent_payment_experiences` (count that are delinquent), `dnb_delinquent_payment_amount` (USD).
+
+**Public-record legal distress:** `judgements_org_count` / `judgements_amount` (court judgments, count + USD) and `lien_org_count` / `liens_amount` (active liens, count + USD).
+
+**Amex share of exposure:** `amex_exposure_share` — % of overall exposure (consumer + commercial + Amex) carried by Amex. **≥ 50 for ≥12 months ⇒ Amex is the primary lender** (external view is a smaller piece of the picture). *(This replaces the old 0/1 `amex_primary_lender_indicator`.)*
+
+For trajectory, run `summarize_trend('bureau', '<column>', 'month', period='month', op='max')` on the relevant indicator. Quote both the level and the share: *"3 of 12 external commercial tradelines (25%) were delinquent at the latest snapshot, totaling $14,200 — share rose from 8% six months ago."*
 
 The `modeling` specialist carries the **model-rolled-up index view** of external delinquency (`cust_ext_delinq_idx`, `tot_cons_comm_trds_g30`) — your tradeline-level view is the underlying ground truth, theirs is the model's aggregated read. Pair on cross-domain default-journey questions; don't substitute one for the other.

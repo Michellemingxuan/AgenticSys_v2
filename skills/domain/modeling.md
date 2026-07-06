@@ -93,8 +93,8 @@ For concept-scoped questions ("spending features?", "delinquency signals?", "ris
 |---|---|---|
 | Internal delinquency | `delinq`, `dpd`, `30/60/90 day`, `min_due`, `return`, `trig_amt` | `times_30_dpd`, `tpf_internal_delinq_idx`, `delnqncy_ind_intrnl` |
 | External delinquency | `ext_delinq`, `external trades`, `g30/g60`, `avutil` | `cust_ext_delinq_idx`, `avutil_exrvlv_balgt50` |
-| Exposure & leverage | `expsr`, `exp_pif`, `remit`, `lvrg`, `revolve` | `cust_expsr_avg_rem_12m_ratio`, `lvrg_debt_remit` |
-| Capacity & paydown | `income`, `debt_srvc`, `paydown`, `pymcpty`, `arb_inc` | `cust_lend_acct_paydown`, `cust_open_acct_paydown` |
+| Exposure & leverage | `expsr`, `exp_pif`, `remit`, `lvrg`, `revolve`, `overall_exposure` | `cust_expsr_avg_rem_12m_ratio`, `lvrg_debt_remit`, `overall_exposure` (monthly USD roll-up; per-txn = `one_expsr_usd_currency_amt`) |
+| Capacity & paydown | `income`, `debt_srvc`, `paydown`, `pymcpty`, `arb_inc`, `revenue` | `cust_lend_acct_paydown`, `cust_open_acct_paydown`, `business_revenue` (annual business revenue, USD) |
 | Spend-pattern (ML) | `spend_concentration`, `oop`, `rnn_score`, `spend_divergence` | `oop_interaction`, `cust_rnn_score` |
 | Trends & tenure | `trnd_indx`, `tenure`, `rec_age`, `agec` | `hcam_src_trnd_indx`, `hcam_bal_trnd_indx` |
 | Bureau-derived | `experian`, `trans_union`, `inq_idx`, `lexis_nexis` | `cust_experian_trans_union_inq_idx` |
@@ -138,6 +138,20 @@ CDSS/TSR have consumer (CPS) and commercial (SBS) versions. Only ONE is material
 ## Score drivers (`score_drivers`)
 
 Per-`trans_month` snapshot: `top_<score>1..5` / `bottom_<score>1..5` → features pushing scores up/down. Pair with `model_scores` values by `trans_month` to bridge feature breaches → score moves.
+
+## Out-of-pattern (OOP) & exposure-vs-remit reads
+
+"Remit" = the customer's repayment/remittance to the bank. Several OOP ("out of pattern") variables exist — read each column's description, don't assume one OOP equals another.
+
+- **`cust_expsr_avg_rem_12m_ratio` — the pure OOP.** Customer Exposure ÷ (Average Remit over months 2–12), i.e. *how much the customer owes / spends on the bank now vs. what they've actually been paying back over the trailing year*. High ratio (**> 3.15**) = exposure has outrun recent repayment — carrying far more than the last-12-months of payments support. When the reviewer says just "OOP", this base ratio is what they mean.
+- **`oop_interaction` — the adjusted OOP.** *Out of Pattern Spend index wrt Exposure* — a derived index built on the same exposure-vs-remit foundation but adjusted (spend-pattern weighted). Risky **> 28**. Use it as the model's refined read, alongside — not instead of — the base ratio.
+- **`avg_remit_minus_max`** — the average remit amount (USD) itself; the denominator behind the ratio (wire-format: "thousands" suffix → strip + ×1e3). A falling avg remit alongside a rising exposure ratio confirms the squeeze is repayment-side, not just exposure-side.
+
+**Prefer the variable over a from-scratch calculation.** `cust_expsr_avg_rem_12m_ratio` already encodes the spend/exposure-vs-repayment relationship on a fixed 12-month remit basis — so for *"is the customer paying back what they charge / spend-to-payment ratio"* questions, **cite this variable rather than recomputing total-spend ÷ total-payment from the raw tables.** Reviewers deliberately pull payments over a *longer* window (to read the payment-behaviour pattern) and spend over a *shorter* window (to see what happened right before default); a naive total/total ratio over those mismatched windows can be flat-out wrong. The model variable sidesteps that.
+
+**General principle — read the variable, don't re-derive it.** When a `model_scores` variable already materializes a concept (a ratio, an index, an out-of-pattern measure), quote its value + catalog threshold rather than re-deriving the metric from raw transaction tables. Re-derivation risks window mismatch, wire-format (thousands/millions) errors, and disagreeing with what the model actually scored on. Re-derive only when no variable captures the concept, or to provide transaction-side *evidence* underneath the variable (label it as such).
+
+Other OOP variants may surface as **score drivers** (e.g. `cust_debt_incom_oop` = exposure out-of-pattern vs. similar-income peers; `cust_out_pat_spend_rt` = last-month vs. first-11-months spend ratio) — probe `score_drivers` / the schema descriptions before treating them as interchangeable.
 
 ## Wire-format quirks
 

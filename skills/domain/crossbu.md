@@ -37,6 +37,7 @@ Row vs card counting: one row per card per case-month. Single-month snapshot →
 |---|---|---|---|
 | Balance (point-in-time outstanding) | `balance` | `crossbu_cards` | you |
 | Limit | `card_limit` | `crossbu_cards` | you |
+| Amount written off (charged-off loss on the card) | `write_off_amount` | `crossbu_cards` | you |
 | Customer-side spend (transaction flow) — incl. merchant concentration | `Amount`, `Merchant Name`, `Merchant Industry` | `spends_data` | spend_payments |
 | Merchant-side B2B receipts (customer's businesses) | `merchant_charge_volume` | `crossbu_merchants` | **you** (only on B2B framings) |
 | Payment amount (paid TO issuer) | `Payment Amount` | `payments` | spend_payments |
