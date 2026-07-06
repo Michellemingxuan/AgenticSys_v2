@@ -12,6 +12,21 @@ from pathlib import Path
 import yaml
 
 
+CONCEPT_GLOSS: dict[str, str] = {
+    "internal_delinquency": "internal delinquency / DPD / payment-return behaviour",
+    "external_delinquency": "external-trade delinquency & utilization",
+    "exposure_leverage": "exposure, revolving balances, leverage",
+    "capacity_paydown": "income, debt-service, paydown, remit capacity",
+    "oop": "out-of-pattern: exposure vs. trailing-12-month remit",
+    "spend_pattern": "spend concentration / RNN / merchant-risk spend signals",
+    "trends_tenure": "score/balance trend indices & tenure/age",
+    "bureau_derived": "third-party bureau inputs (FICO, LexisNexis, inquiries)",
+    "risk_events": "risky-event counts & product-risk flags",
+    "output_score": "internal ML output scores (CDSS, TSR)",
+    "third_party_score": "embedded third-party scores (Paydex, SBFE, LN, Clarity)",
+}
+
+
 class DataCatalog:
     """Loads table metadata from YAML data-profile configs.
 
@@ -356,3 +371,48 @@ class DataCatalog:
             f"  - {real_col} ({dtype}){canonical_annot}: "
             f"{desc_str}{parse_annot}{pending_annot}"
         )
+
+    @staticmethod
+    def _concept_set(spec: dict) -> set[str]:
+        c = spec.get("concept")
+        if isinstance(c, str):
+            return {c}
+        if isinstance(c, list):
+            return set(c)
+        return set()
+
+    def concepts_for_tables(self, tables: list[str]) -> list[str]:
+        found: set[str] = set()
+        for t in tables:
+            prof = self._profiles.get(t) or {}
+            for spec in (prof.get("columns") or {}).values():
+                found |= self._concept_set(spec)
+        return sorted(found)
+
+    def variables_for_concepts(
+        self, tables: list[str], concepts: list[str], limit: int = 15,
+    ) -> list[dict]:
+        want = set(concepts)
+        hits: list[dict] = []
+        seen: set[str] = set()
+        for t in tables:
+            prof = self._profiles.get(t) or {}
+            for name, spec in (prof.get("columns") or {}).items():
+                match = self._concept_set(spec) & want
+                if not match or name in seen:
+                    continue
+                seen.add(name)
+                desc = (spec.get("description") or "").strip()
+                short = desc.split(". ")[0].strip().rstrip(".")
+                thr = ""
+                if "risk_threshold" in spec:
+                    sym = ">" if spec.get("risk_direction", "above") == "above" else "<"
+                    thr = f"risky {sym} {spec['risk_threshold']}"
+                hits.append({
+                    "concept": sorted(match)[0],
+                    "name": name,
+                    "description_short": short,
+                    "threshold_text": thr,
+                })
+        hits.sort(key=lambda h: (h["threshold_text"] == "", h["concept"], h["name"]))
+        return hits[:limit]
