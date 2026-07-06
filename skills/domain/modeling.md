@@ -87,18 +87,9 @@ For concept-scoped questions ("spending features?", "delinquency signals?", "ris
 
 **KB relevance filter.** When the KB holds cached data from a prior turn (e.g. TSR/CDSS trajectories), only reference it if it directly answers the current concept question. 
 
-## Concept → vocabulary lookup
+## Concept → variable selection
 
-| Concept | Keywords in column name/description | Examples |
-|---|---|---|
-| Internal delinquency | `delinq`, `dpd`, `30/60/90 day`, `min_due`, `return`, `trig_amt` | `times_30_dpd`, `tpf_internal_delinq_idx`, `delnqncy_ind_intrnl` |
-| External delinquency | `ext_delinq`, `external trades`, `g30/g60`, `avutil` | `cust_ext_delinq_idx`, `avutil_exrvlv_balgt50` |
-| Exposure & leverage | `expsr`, `exp_pif`, `remit`, `lvrg`, `revolve`, `overall_exposure` | `cust_expsr_avg_rem_12m_ratio`, `lvrg_debt_remit`, `overall_exposure` (monthly USD roll-up; per-txn = `one_expsr_usd_currency_amt`) |
-| Capacity & paydown | `income`, `debt_srvc`, `paydown`, `pymcpty`, `arb_inc`, `revenue` | `cust_lend_acct_paydown`, `cust_open_acct_paydown`, `business_revenue` (annual business revenue, USD) |
-| Spend-pattern (ML) | `spend_concentration`, `oop`, `rnn_score`, `spend_divergence` | `oop_interaction`, `cust_rnn_score` |
-| Trends & tenure | `trnd_indx`, `tenure`, `rec_age`, `agec` | `hcam_src_trnd_indx`, `hcam_bal_trnd_indx` |
-| Bureau-derived | `experian`, `trans_union`, `inq_idx`, `lexis_nexis` | `cust_experian_trans_union_inq_idx` |
-| Risk events | `rsky_evnt`, `positive_events`, `product_risk` | `sum_tot_rsky_evnt` |
+The orchestrator directs each sub-question with `concepts=[...]`; when it does, a **§ DIRECTED VARIABLES** block (variable · meaning · threshold) is prepended to your input — use those variables directly. If no directed block is present (or you need the full set), call `get_table_schema('model_scores')` and map the concept to columns by reading descriptions. Concept vocabulary: internal_delinquency, external_delinquency, exposure_leverage, capacity_paydown, oop, spend_pattern, trends_tenure, bureau_derived, risk_events, output_score, third_party_score. See §OOP below for the interpretation that tags alone don't carry.
 
 ## Threshold reading
 
