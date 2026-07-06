@@ -1,18 +1,30 @@
 The data comprises of various bureau metrics (like credit scores, external credit balances etc) spanning 18 months before the customer defaulted on their business credit card. Sharing description wrt all data headers and their risk thresholds -
-1. SBFE Score: Business credit score that is used to predict a business's likelihood of financial delinquency or failure. Values below 863 are risky.
-2. Delinquent External Trades: Total Count of External Credit Lines (like cards, loans etc) on which the customer defaulted
-3. External Delinquency Amount (USD): Total default amount on External Credit Lines (like cards, loans etc)
-4. Total Tradelines: Overall Count of External Credit Lines (like cards, loans etc) linked to the customer
-5. Overall External Exposure (USD): Total Outstanding balance on all External Credit Lines (like cards, loans etc)
-6. Overall External Revolving Balance (USD): Total Revolving balance on all External Credit Lines (like cards, loans etc)
-7. Average External Utlization: Average utilization in all the all External Credit Lines
-8. Amex Primary Lender Indicator: Indicator for identifying whether Amex was the primary lender (i.e. >= 40% of overall exposure across internal + external credit lines was on Amex) for customer which is considered risky. 1 indicates that Amex was the primary lender.
-9. LN Credit Score: A risk score that predicts a consumer’s likelihood of default using traditional credit bureau data and public records. Values below 681 are risky.
-10. LN Blended Score: A risk score that combines traditional credit data with alternative data (like public records and non-credit signals) to assess credit risk more holistically. Values below 694 are risky.
-11 LN Business Value (USD): The total tax assessed value of the customer business address basis lexis nexis. Decrement in the values is considered a negative sign. 
-12. FICO Score: An industry-standard credit risk score that predicts the likelihood of serious delinquency using only traditional credit bureau data such as payment history, balances, and credit utilization. Values before 721 are risky.
-13. CSS Score: A business credit risk score that predicts the likelihood of a company becoming delinquent or failing, using commercial trade data, firmographics, financials, and public records. Values below 71 are risky.
-14. FSS Score: A business-level risk score that evaluates a company’s financial strength or stability, typically using firmographic data, financials, trade credit behavior, and public records. Values below 51 are risky.
-15. Paydex Score: It is a business credit score that measures a company’s payment performance. Values below 61 are risky.
-16. Judgements Org Count: The number of court judgments filed against an organization, indicating unresolved legal obligations that signal elevated credit stress and potential payment default risk.
-17. Lien Org Count: The number of active liens filed against an organization’s assets, reflecting creditor claims due to unpaid obligations and signaling financial strain and heightened credit risk.
+1. SBFE Score: Business credit score that is used to predict a business's likelihood of financial delinquency or failure. SBFE scores are irrelevant if SBFE Commercial Tradelines == 0. Values below 863 are risky.
+2. SBFE Commercial Delinquent Trades: Total Count of External Commercial Credit Lines (like cards, loans etc) on which the customer defaulted 
+3. SBFE Commercial Delinquency Amount (USD): Total default amount on External Commercial Credit Lines (like cards, loans etc) 
+4. SBFE Commercial Tradelines: Overall Count of External Commercial Credit Lines (like cards, loans etc) linked to the customer. If SBFE Commercial Tradelines == 0 for at least 12 months, then Amex is the primary lender.
+5. SBFE Commercial Exposure (USD): Total Outstanding balance on all External Commercial Credit Lines (like cards, loans etc) 
+6. SBFE Commercial Revolving Balance (USD): Total Revolving balance on all External Commercial Credit Lines (like cards, loans etc) 
+7. SBFE Commercial Utlization: % Average utilization in all the all External Commercial Credit Lines 
+8. LN Credit Score: A risk score that predicts a consumer’s likelihood of default using traditional credit bureau data and public records. Values below 681 are risky.
+9. LN Blended Score: A risk score that combines traditional credit data with alternative data (like public records and non-credit signals) to assess credit risk more holistically. Values below 694 are risky.
+10. LN Business Value (USD): The total tax assessed value of the customer business address basis lexis nexis. Decrement in the values is considered a negative sign. 
+11. FICO Score: An industry-standard credit risk score that predicts the likelihood of serious delinquency using only traditional credit bureau data such as payment history, balances, and credit utilization. Values before 721 are risky.
+12. CSS Score: A business credit risk score that predicts the likelihood of a company becoming delinquent or failing, using commercial trade data, firmographics, financials, and public records. Values below 71 are risky.
+13. FSS Score: A business-level risk score that evaluates a company’s financial strength or stability, typically using firmographic data, financials, trade credit behavior, and public records. Values below 51 are risky.
+14. Paydex Score: It is a business credit score that measures a company’s payment performance. Values below 61 are risky.
+15. D&B Payment Experiences: The volume of reported supplier payment observations used to gauge the reliability of delinquency signals and assess a business’s credit stress. 
+16. D&B Delinquent Payment Experiences: The count of supplier payment observations reflecting delinquency, used to quantify the frequency and severity of a business’s payment stress.
+17. D&B Delinquent Payment Amount (USD): The aggregate amount associated with delinquent supplier payment records, used to measure the severity of an organization’s liquidity pressure.
+18. Judgements Org Count: The number of court judgments filed against an organization, indicating unresolved legal obligations that signal elevated credit stress and potential payment default risk. 
+19. Lien Org Count: The number of active liens filed against an organization’s assets, reflecting creditor claims due to unpaid obligations and signaling financial strain and heightened credit risk. 
+20. Judgements Amount (USD): The total monetary value of court judgments filed against a business, representing unresolved legal debt obligations and indicating the severity of its credit stress. 
+21. Liens Amount (USD): The total monetary value of active liens placed on a business’s assets, reflecting the magnitude of creditor claims due to unpaid obligations and signaling financial strain and elevated credit risk. 
+22. Non-Revolving Consumer Trades Count: The number of open credit accounts associated with a consumer, reflecting fixed-payment obligations that contribute to ongoing credit burden and stress.
+23. Revolving Consumer Trades Count : The number of open revolving credit accounts (e.g., credit cards, lines of credit) associated with a consumer, indicating access to revolving credit and potential exposure to utilization-driven credit stress.
+24. Non-Revolving Consumer Trades Amount (USD): The total outstanding balance across non-revolving consumer credit accounts representing fixed repayment obligations that contribute to a consumer’s debt burden and credit stress.
+25. Revolving Consumer Trades Amount (USD): The total outstanding balance across revolving consumer credit accounts (e.g., credit cards and lines of credit), reflecting variable debt exposure that can drive liquidity pressure and utilization-based credit stress.
+26. Delinquent Consumer Trades Count: The number of consumer credit accounts that are currently past due or have a recorded delinquency, indicating the frequency of payment distress and elevated credit stress.
+27. Amex Exposure Share: Percentage of customer's Amex exposure with respect to overall exposure (consumer + commercial + Amex). If Amex Exposure Share is >= 50 for at least 12 months, then Amex is the primary lender.
+
+

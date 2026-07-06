@@ -35,7 +35,7 @@ class TestLoadProfiles:
         # silently lose a concept entirely.
         must_exist_concepts = {
             "bureau", "spends", "payments",
-            "model_scores", "score_drivers", "xbu_summary",
+            "model_scores", "score_drivers",
             "cust_tenure", "income_dti",
             "crossbu_cards", "crossbu_merchants",
         }
@@ -114,10 +114,12 @@ class TestDumpCSV:
         # may have lost simulator-only columns (e.g., score_drivers became
         # all-real). Generator only dumps profiles with at least one
         # generatable column, so the count is a lower bound, not exact.
+        # (xbu_summary was retired; cust_tenure / income_dti are retained as
+        # data-less specialist-backing profiles.)
         gen.generate_all()
         with tempfile.TemporaryDirectory() as tmpdir:
             paths = gen.dump_csv(tmpdir)
-            assert len(paths) >= 9
+            assert len(paths) >= 8
             for p in paths:
                 assert os.path.exists(p)
                 # Check file has header + data rows

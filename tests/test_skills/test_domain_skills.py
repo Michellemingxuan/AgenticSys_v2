@@ -35,3 +35,10 @@ def test_all_skills_have_required_fields():
         assert skill.data_hints, f"{name} missing data_hints"
         assert skill.interpretation_guide, f"{name} missing interpretation_guide"
         assert skill.risk_signals, f"{name} missing risk_signals"
+
+
+def test_modeling_defers_to_directed_variables():
+    from skills.domain.loader import load_domain_skill
+    body = load_domain_skill("modeling").system_prompt
+    assert "DIRECTED VARIABLES" in body
+    assert "Out-of-pattern (OOP)" in body  # semantic overlay retained

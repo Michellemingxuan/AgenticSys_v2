@@ -68,180 +68,219 @@ columns:
     description: Total tax-assessed value of the customer business address (USD) from
       LexisNexis. Stored as string with "millions" suffix (e.g. "3.6 millions" → 3600000.0).
     dtype_pending_review: true
+    concept: bureau_derived
   cust_cash_tot_liab_yr1_rt:
     dtype: float
     description: ratio of cash to total liability corresponding to latest full year
       financial
+    concept: capacity_paydown
   cbr_score:
     dtype: int
     description: customer credit bureau score (raw per-transaction value)
+    concept: bureau_derived
   cust_eff_se_cdss_5_180_day_score:
     dtype: float
     description: A metric that summarizes the customer's CDSS risk scores over a historical
       window (from 5 to 180 days ago). Values above 2 are risky.
     risk_threshold: 2
     risk_direction: above
+    concept: spend_pattern
   cust_expsr_avg_rem_12m_ratio:
     dtype: float
     description: Customer Exposure / (Average Remit In 2-12 Months). Values above
       3.15 are risky.
     risk_threshold: 3.15
     risk_direction: above
+    concept: [oop, exposure_leverage]
   se_no_norm_wtd_pd_unpaid_amt:
     dtype: float
     description: normalised accum amount weighted by merchant percentage. Values above
       0 are risky.
     risk_threshold: 0
     risk_direction: above
+    concept: risk_events
   tpf_internal_delinq_idx:
     dtype: float
     description: Internal Delinquency Index. Values above 5.8 are considered risky.
     risk_threshold: 5.8
     risk_direction: above
+    concept: internal_delinquency
   oop_interaction:
     dtype: float
     description: Out of Pattern Spend index wrt to Exposure. Values above 28 are risky.
     risk_threshold: 28
     risk_direction: above
+    concept: [oop, spend_pattern]
   sum_tot_rsky_evnt:
     dtype: int
     description: total risky events
+    concept: risk_events
   cust_rnn_score:
     dtype: float
     description: Timeseries Spend Variable. Values above 0.028 are considered risky.
     risk_threshold: 0.028
     risk_direction: above
+    concept: spend_pattern
   cust_experian_trans_union_inq_idx:
     dtype: float
     description: risk based index of inquiries from credit bureau. Values above 4.65
       are considered risky.
     risk_threshold: 4.65
     risk_direction: above
+    concept: bureau_derived
   hcam_bal_trnd_indx:
     dtype: float
     description: hcam balance trend index. Values above 2.65 are risky.
     risk_threshold: 2.65
     risk_direction: above
+    concept: [trends_tenure, exposure_leverage]
   avutil_exrvlv_balgt50:
     dtype: float
     description: Average utilization in all the external consumer revolving trades
       with balance more than US$ 50. Values above 75 are risky.
     risk_threshold: 75
     risk_direction: above
+    concept: [external_delinquency, exposure_leverage]
   cust_expr_to_arb_inc_ratio:
     dtype: float
     description: Total exposure to arbitrated income ratio. Values above 0.08 are
       risky.
     risk_threshold: 0.08
     risk_direction: above
+    concept: [capacity_paydown, exposure_leverage]
   lvrg_debt_remit:
     dtype: float
     description: leverage commercial debt
+    concept: exposure_leverage
   cust_intr_extnl_unscr_tt_debt_srvc_rt1:
     dtype: float
     description: Customer total debt servicing ratio. Values above 0.15 are considered
       risky.
     risk_threshold: 0.15
     risk_direction: above
+    concept: capacity_paydown
   cust_lndexpsr_minloc_6m_ratio:
     dtype: float
     description: customer lending exposure minloc 6 months ratio
+    concept: exposure_leverage
   tot_cons_comm_trds_g75:
     dtype: int
     description: total consumer and commercial trades greater than 75
+    concept: [external_delinquency, exposure_leverage]
   cust_pymt_chan_risk_score:
     dtype: float
     description: Customer payment channel risk score. Values above 0.05 are considered
       risky.
     risk_threshold: 0.05
     risk_direction: above
+    concept: risk_events
   exp_pif:
     dtype: float
     description: Pay-In-Full exposure (raw per-transaction value). Stored as string
       with a "thousands" suffix (e.g. "188.8 thousands" → 188800.0).
     dtype_pending_review: true
+    concept: exposure_leverage
   cust_debt_pymcpty_tm_inc:
     dtype: float
     description: debt to payment capacity
+    concept: capacity_paydown
   positive_events:
     dtype: int
     description: positive events
+    concept: risk_events
   times_30_dpd:
     dtype: int
     description: No. of times 30 days past due. Values above 1 are risky.
     risk_threshold: 1
     risk_direction: above
+    concept: internal_delinquency
   cust_min_due_12mo_avg:
     dtype: float
     description: average number of only minimum due paid in last 12 months. Values
       above 0.08 are considered risky.
     risk_threshold: 0.08
     risk_direction: above
+    concept: capacity_paydown
   cust_enhnc_one_way_spend_concentration_30day_rt1:
     dtype: float
     description: one way spend concentration risk rate. Values above 2.4 are considered
       risky.
     risk_threshold: 2.4
     risk_direction: above
+    concept: spend_pattern
   gam_mtge_loan_actl_pymt_am:
     dtype: float
     description: Mortgage Loan (Actual Payment Amount). Sentinel -99999999999 = no
       mortgage on file
+    concept: capacity_paydown
   cust_ext_delinq_idx:
     dtype: float
     description: External Delinquency Index. Values above 5 are risky.
     risk_threshold: 5
     risk_direction: above
+    concept: external_delinquency
   time_wtd_return_index:
     dtype: float
     description: Internal Payment Return Index. Values above 0.2 are considered risky.
     risk_threshold: 0.2
     risk_direction: above
+    concept: internal_delinquency
   avg_remit_minus_max:
     dtype: string
     description: average remit (USD). Stored as string with "thousands" suffix (e.g.
       "221.4 thousands" → 221400.0).
     dtype_pending_review: true
+    concept: [capacity_paydown, oop]
   credit_loss_prob:
     dtype: float
     description: CDSS — ML model score predicting likelihood of default in next 18
       months. Scores from 10-100 are considered risky.
     risk_threshold: 10
     risk_direction: above
+    concept: output_score
   tot_struct_risk_score:
     dtype: float
     description: TSR — ML model score predicting likelihood of default on internal/external
       trades in next 18 months. Scores from 20-100 are considered risky.
     risk_threshold: 20
     risk_direction: above
+    concept: output_score
   ons_30_trd:
     dtype: string
     description: ons 30 trades (raw per-transaction value)
     dtype_pending_review: true
+    concept: internal_delinquency
   last_cycle_cut_revolve_rate:
     dtype: float
     description: last cycle cut revolve rate. Values below 0.46 are risky
     risk_threshold: 0.46
     risk_direction: below
+    concept: capacity_paydown
   hcam_src_trnd_indx:
     dtype: float
     description: FICO Trend Index. Values below -19 are risky.
+    risk_threshold: -19
+    risk_direction: below
+    concept: [bureau_derived, trends_tenure]
   tpf_cust_hi_rvlv_line_am:
     dtype: int
     description: The amount of a customer's highest revolving lines. Values below
       77 are risky.
     risk_threshold: 77
     risk_direction: below
+    concept: exposure_leverage
   cust_lend_acct_paydown:
     dtype: float
     description: customer level paydown on lending account. Values below 0.1 are risky.
     risk_threshold: 0.1
     risk_direction: below
+    concept: capacity_paydown
   cust_open_acct_paydown:
     dtype: float
     description: customer level paydown on open account. Values below 0.3 are risky.
     risk_threshold: 0.3
     risk_direction: below
+    concept: capacity_paydown
   gam_clr_erly_risk_score:
     dtype: string
     description: Clear early risk score. Values below 785 are risky. Stored in CSV
@@ -249,23 +288,36 @@ columns:
     dtype_pending_review: true
     risk_threshold: 785
     risk_direction: below
+    concept: [third_party_score, bureau_derived]
   cust_lexis_nexis_blended_score:
     dtype: int
     description: score merges business and owner credit data. Values below 693 are
       risky.
     risk_threshold: 693
     risk_direction: below
+    concept: [third_party_score, bureau_derived]
   cust_sbfe_score:
     dtype: int
     description: Business credit score. Values below 863 are risky.
     risk_threshold: 863
     risk_direction: below
+    concept: third_party_score
   cust_dnb_paydex_score:
     dtype: int
     description: Paydex score measures payment performance. Values below 61 are risky.
     risk_threshold: 61
     risk_direction: below
+    concept: third_party_score
   one_expsr_usd_currency_amt:
     dtype: float
     description: One-exposure amount in USD currency (raw per-transaction value).
     description_pending: true
+    concept: exposure_leverage
+  business_revenue:
+    dtype: float
+    description: Reported annual revenue of the customer's business in USD (per-transaction
+      value; often blank on the transaction table).
+    description_pending: true
+    concept: capacity_paydown
+    aliases:
+    - business_revenue
