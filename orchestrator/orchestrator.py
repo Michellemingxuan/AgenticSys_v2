@@ -12,7 +12,6 @@ from agent_factories.app_context import AppContext
 from agent_factories.distiller_agent import build_distiller_agent
 from agent_factories.orchestrator_agent import build_orchestrator_agent
 from agent_factories.report_agent import build_report_agent
-from agent_factories.general_specialist import build_general_specialist
 from agent_factories.specialist_agent import build_specialist_agent
 from llm.firewall_stack import redact_payload
 from logger.event_logger import EventLogger
@@ -54,7 +53,6 @@ class Orchestrator:
                 for d in domain_names if load_domain_skill(d) is not None
             ]
             self.report_agent_obj = build_report_agent(model=clients.model)
-            self.general_agent = build_general_specialist(model=clients.model)
             # Second-pass extractor of reusable knowledge points after each
             # specialist run. Stateless; one instance shared by every
             # specialist's redacting_tool wrapper via AppContext._distiller.
@@ -62,7 +60,6 @@ class Orchestrator:
             self.orchestrator_agent = build_orchestrator_agent(
                 specialists=specialists,
                 report_agent=self.report_agent_obj,
-                general_specialist=self.general_agent,
                 model=clients.model,
                 catalog=self.catalog,
                 pillar_config=self.pillar_config,
@@ -117,9 +114,6 @@ class Orchestrator:
             out = item.output
             if agent_name == "report_agent":
                 report_draft = out
-            elif agent_name == "general_specialist":
-                # General specialist's review is informational; skip in fallback
-                continue
             else:
                 specialist_outputs.append((agent_name, out))
 

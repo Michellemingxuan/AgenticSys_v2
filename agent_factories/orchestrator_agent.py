@@ -1,4 +1,8 @@
-"""Orchestrator Agent factory — A1 maximal: specialists + report + general as tools."""
+"""Orchestrator Agent factory — specialists + report as tools.
+
+Coherence review is enforced SERVER-SIDE (``server._run_review`` builds its own
+``general_specialist``); the orchestrator no longer self-calls a reviewer tool.
+"""
 from __future__ import annotations
 
 import os
@@ -81,36 +85,24 @@ def _compose_orchestrator_instructions(
         # ── § PROTOCOL (applies to all rounds) ──────────────────────
         (
             "§ PROTOCOL\n\n"
-            "★ `general_specialist` rules ★\n"
-            "Count UNIQUE DOMAIN specialists called this turn "
-            "(exclude `report_agent` and `general_specialist`).\n\n"
-            "  • count = 1 → DO NOT call `general_specialist`. Go directly "
-            "to FinalAnswer after R1. Report-vs-specialist conflicts are "
-            "resolved by YOU in synthesis, NOT by general_specialist.\n"
-            "  • count ≥ 2, overlapping angles → call `general_specialist` "
-            "after R1 to compare and resolve contradictions. Then scan "
-            "`resolved.corrected_specialist` → re-invoke.\n"
-            "  • count ≥ 2, fully orthogonal → still call "
-            "`general_specialist` but with sub_question: "
-            "\"Orthogonal specialists — no shared angles. Quick pass.\" "
-            "This lets it emit a brief trace entry confirming no "
-            "contradictions, without doing full comparison work. "
-            "Orthogonal = specialists answered non-overlapping aspects "
-            "with no shared columns, time windows, or concepts (e.g. "
-            "crossbu=cards + spend_payments=totals for a case overview).\n\n"
-            "Decide overlapping vs orthogonal at team construction time "
-            "based on whether the specialists' data_hints tables overlap "
-            "or their sub-questions touch the same columns/concepts.\n\n"
+            "Cross-specialist coherence review is handled SERVER-SIDE after "
+            "your dispatch round — you do NOT call any reviewer tool. Dispatch "
+            "the specialists you need, then synthesize. If the server detects a "
+            "cross-specialist contradiction it injects a `[REVIEW DIRECTIVE]` "
+            "user turn and re-runs you; incorporate that directive when it is "
+            "present in your input. Report-vs-specialist conflicts are resolved "
+            "by YOU in synthesis.\n\n"
             "Round protocol:\n"
             "  1 specialist:  R1 → specialist + report_agent → R2 → FinalAnswer\n"
-            "  2+ overlapping: R1 → specialists + report_agent → R2 → "
-            "general_specialist (full) → R3 → FinalAnswer\n"
-            "  2+ orthogonal: R1 → specialists + report_agent → R2 → "
-            "general_specialist (quick pass) → R3 → FinalAnswer\n\n"
+            "  2+ specialists: R1 → specialists + report_agent → R2 → FinalAnswer\n\n"
             "TOOL-USE DISCIPLINE: Before FinalAnswer, MUST have called "
             "BOTH (1) report_agent and (2) at least one domain specialist. "
-            "PARALLEL EXECUTION: Emit report_agent + every domain "
-            "specialist in a SINGLE response so they run in parallel."
+            "You are the manager. Dispatch the team by judgment (see the "
+            "team_construction Dispatch-shape guidance): prefer parallel for "
+            "independent sub-questions; collapse a causal dependency into one "
+            "cross-querying specialist when possible; sequence only when an "
+            "anchor needs another specialist's deep analysis first. Emit "
+            "independent specialist calls together so they run in parallel."
         ),
         # ── § SYNTHESIS (how to produce FinalAnswer — read every round) ─
         "§ SYNTHESIS\n\n" + _load_skill(_WORKFLOW_DIR / "synthesis.md").body,
@@ -158,7 +150,6 @@ def _describe_specialist(agent: Agent) -> str:
 def build_orchestrator_agent(
     specialists: list[Agent],
     report_agent: Agent,
-    general_specialist: Agent,
     model,
     catalog=None,
     pillar_config: dict | None = None,
@@ -186,11 +177,6 @@ def build_orchestrator_agent(
         # wall-clock.
         timeout_s=float(os.environ.get("REPORT_AGENT_TIMEOUT_S", "100")),
         max_turns=int(os.environ.get("REPORT_AGENT_MAX_TURNS", "4")),
-    ))
-    tools.append(redacting_tool(
-        general_specialist,
-        name="general_specialist",
-        description="Compare specialist outputs and surface contradictions.",
     ))
 
     full_prompt = _compose_orchestrator_instructions(

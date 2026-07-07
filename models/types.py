@@ -165,11 +165,25 @@ class Conflict(BaseModel):
     evidence_from_both: list[str] = Field(default_factory=list)
 
 
+class ReviewDirective(BaseModel):
+    """The reviewer's advisory output. The orchestrator ACTS on it; the
+    reviewer never dispatches. See docs/superpowers/specs/
+    2026-07-03-orchestrator-plan-review-dispatch-design.md."""
+    kind: Literal["coherent", "needs_redispatch", "qualified_release"] = "coherent"
+    # needs_redispatch:
+    specialist: str | None = None          # who to re-run
+    anchor: str | None = None              # window/event to anchor to, e.g. "2025-05"
+    why: str | None = None                 # one line; feeds the sub-question + flags
+    # qualified_release:
+    release_specialist: str | None = None  # whose output is sufficient to ship
+
+
 class ReviewReport(BaseModel):
     resolved: list[Resolution] = Field(default_factory=list)
     open_conflicts: list[Conflict] = Field(default_factory=list)
     cross_domain_insights: list[str] = Field(default_factory=list)
     data_requests_made: list[dict] = Field(default_factory=list)
+    directive: ReviewDirective | None = None
 
 
 class DataGap(BaseModel):

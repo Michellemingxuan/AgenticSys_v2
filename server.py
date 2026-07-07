@@ -903,6 +903,274 @@ def _get_or_create_session(case_id: str) -> CaseSession:
         return sess
 
 
+# ── Plan-review phased-run helpers (Task 6) ─────────────────────────────────
+#
+# These implement the server-enforced coherence-review gate on MULTI-specialist
+# turns (design: docs/superpowers/specs/
+# 2026-07-03-orchestrator-plan-review-dispatch-design.md; SDK mechanic:
+# 2026-07-03-phased-run-spike.md). The signatures are fixed — Task 7's
+# early-release path reuses them verbatim.
+#
+# Aux tools that are NOT domain specialists (they never count toward the
+# multi-specialist gate or the review's specialist_outputs).
+_AUX_REVIEW_TOOLS = {"report_agent", "general_specialist"}
+
+
+def _is_multi_specialist_turn(ctx) -> bool:
+    """True iff ≥ 2 DISTINCT domain specialists were dispatched this turn.
+
+    Reads ``ctx._domain_specialists_called`` (a set the redacting_tool wrapper
+    populates as each domain specialist runs). The server-enforced review +
+    re-dispatch machinery only engages on multi-specialist turns; single-
+    specialist turns keep the current single-run path (zero added latency).
+    Defensive against a partially-constructed ctx (missing attribute → False).
+    """
+    called = getattr(ctx, "_domain_specialists_called", None) or set()
+    return len(called) >= 2
+
+
+def _dispatch_count(ctx) -> int:
+    """Return the number of dispatch rounds driven this turn (accessor)."""
+    return int(getattr(ctx, "_dispatch_count", 0) or 0)
+
+
+def _bump_dispatch_count(ctx) -> int:
+    """Increment the dispatch-round counter, clamped at the ≤ 2 cap.
+
+    The design allows at most 2 dispatch rounds per turn (initial dispatch +
+    ONE server-enforced re-dispatch). This never returns > 2; callers still
+    guard on ``_dispatch_count(ctx) < 2`` BEFORE requesting a re-dispatch, but
+    the clamp here is a defensive backstop so the cap can't be exceeded even
+    on a double-call.
+    """
+    ctx._dispatch_count = min(_dispatch_count(ctx) + 1, 2)
+    return ctx._dispatch_count
+
+
+async def _run_review(sess, ctx, question: str, specialist_outputs: dict):
+    """Invoke ``general_specialist`` (review-only) in SERVER code and return
+    its ``ReviewReport``, or ``None`` on ANY failure.
+
+    This is the guaranteed, un-skippable coherence gate on multi-specialist
+    turns. It is wrapped in ``asyncio.wait_for`` on an existing timeout budget
+    (``_ORCH_PLAN_TIMEOUT_S`` — a single-LLM-call fence) and swallows every
+    exception (timeout included), logging ``review_failed``. The turn must
+    NEVER block on the reviewer: a None return degrades gracefully to
+    synthesis from whatever specialist outputs already exist (design §8).
+
+    ``specialist_outputs`` maps specialist name → its (redacted) payload; it is
+    serialized into the reviewer's input alongside the question so the reviewer
+    judges coherence / anchoring and emits a ``ReviewDirective``.
+    """
+    try:
+        from agent_factories.general_specialist import build_general_specialist
+        reviewer = build_general_specialist(sess.clients.model)
+        review_input = json.dumps(
+            {"question": question, "specialist_outputs": specialist_outputs},
+            default=str,
+        )
+        result = await asyncio.wait_for(
+            Runner.run(reviewer, review_input, context=ctx),
+            timeout=_ORCH_PLAN_TIMEOUT_S,
+        )
+        report = getattr(result, "final_output", None)
+        try:
+            report = redact_payload(report) if report is not None else None
+        except Exception:  # noqa: BLE001 — redaction is best-effort here
+            pass
+        return report
+    except Exception as exc:  # noqa: BLE001 — reviewer must never wedge a turn
+        try:
+            sess.logger.log("review_failed", {
+                "exception_type": type(exc).__name__,
+                "message": str(exc)[:300],
+                "n_specialist_outputs": len(specialist_outputs or {}),
+            })
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
+
+async def _invalidate_specialist_distillation(ctx, specialist: str, turn_id) -> dict:
+    """Before re-dispatching ``specialist``, discard its now-superseded phase-1
+    distillation for THIS turn so the corrected re-dispatch repopulates the KB
+    cleanly (re-dispatch KB hygiene). Topic-supersession does NOT cover this: a
+    mis-anchored phase-1 driver KP (e.g. ``..._2024_09``) has a different topic
+    than the corrected one (``..._2025_05``), so both would otherwise stay active.
+
+    Two steps, scoped strictly to ``specialist`` and this ``turn_id``:
+      1. Cancel any in-flight ``distill-{specialist}`` / ``autochart-{specialist}``
+         tasks in ``ctx._pending_distillers`` (a still-running phase-1 distiller
+         must not persist a stale KP), and drop the specialist's tasks from the
+         pending list.
+      2. Remove ``ctx._specialist_kb[specialist]`` entries whose
+         ``captured_at_turn == turn_id`` — this turn's phase-1 KPs (already
+         persisted before we cancelled). Prior turns' KPs and OTHER specialists'
+         KPs are untouched.
+    Returns a small stats dict for logging.
+    """
+    stats = {"tasks_cancelled": 0, "kps_removed": 0}
+    target_names = {f"distill-{specialist}", f"autochart-{specialist}"}
+
+    pending = getattr(ctx, "_pending_distillers", None)
+    if isinstance(pending, list):
+        to_settle: list = []
+        keep: list = []
+        for t in pending:
+            name = t.get_name() if hasattr(t, "get_name") else ""
+            if name in target_names:
+                if not t.done():
+                    t.cancel()
+                    to_settle.append(t)
+                    stats["tasks_cancelled"] += 1
+                # done or now-cancelled: drop from pending (KPs handled in step 2)
+            else:
+                keep.append(t)
+        if to_settle:
+            await asyncio.gather(*to_settle, return_exceptions=True)
+        ctx._pending_distillers = keep
+
+    kb = getattr(ctx, "_specialist_kb", None)
+    if isinstance(kb, dict) and isinstance(kb.get(specialist), list):
+        before = len(kb[specialist])
+        kb[specialist] = [
+            kp for kp in kb[specialist]
+            if not (isinstance(kp, dict) and kp.get("captured_at_turn") == turn_id)
+        ]
+        stats["kps_removed"] = before - len(kb[specialist])
+
+    return stats
+
+
+async def _apply_review_directive(
+    *,
+    sess,
+    ctx,
+    framed_question: str,
+    tool_calls: list,
+    streamed,
+    turn_id: str,
+    run_redispatch_pass_fn,
+) -> "tuple":
+    """Server-enforced coherence review decision (Task 6 / §5.2).
+
+    Calls ``_run_review``; on ``needs_redispatch`` (within the ≤2-round cap)
+    bumps ``_dispatch_count``, injects a ``[REVIEW DIRECTIVE]`` user turn into
+    the phase-1 transcript, and calls ``run_redispatch_pass_fn(resume_input)``
+    for the phase-3 orchestrator re-run.
+
+    Returns ``(new_final: FinalAnswer | None, review_flags: list[str])``.
+
+    ``new_final`` is ``None`` when no re-dispatch occurred (coherent / capped /
+    review failed). The caller is responsible for replacing ``final_answer``
+    when ``new_final is not None``, and for calling ``_drain_specialist_errors``
+    afterwards.
+
+    Extracted from ``_run_turn_streamed`` to make the decision path testable
+    without spinning up a live orchestrator: tests inject a fake
+    ``run_redispatch_pass_fn`` and monkeypatch ``_run_review``.
+    """
+    review_flags: list[str] = []
+    try:
+        specialist_outputs = {
+            c["tool"]: c.get("payload")
+            for c in tool_calls
+            if c.get("tool") not in _AUX_REVIEW_TOOLS and "payload" in c
+        }
+        review = await _run_review(
+            sess, ctx, framed_question, specialist_outputs
+        )
+        directive = getattr(review, "directive", None) if review else None
+        kind = getattr(directive, "kind", None) if directive else None
+        try:
+            sess.logger.log("review_done", {
+                "turn_id": turn_id,
+                "n_domain_specialists": len(
+                    getattr(ctx, "_domain_specialists_called", set()) or set()
+                ),
+                "directive_kind": kind,
+                "review_ran": review is not None,
+            })
+        except Exception:  # noqa: BLE001
+            pass
+        if kind == "needs_redispatch" and getattr(directive, "specialist", None):
+            if _dispatch_count(ctx) < 2:
+                _bump_dispatch_count(ctx)
+                # Inject the directive as an appended user turn and resume
+                # the orchestrator on the full phase-1 transcript (spike §4).
+                _why = (directive.why
+                        or "align the driver analysis to the event it explains.")
+                _anchor = directive.anchor or "(the event window)"
+                resume_input = streamed.to_input_list()
+                resume_input.append({
+                    "role": "user",
+                    "content": (
+                        f"[REVIEW DIRECTIVE] needs_redispatch: re-invoke "
+                        f"`{directive.specialist}` anchored to {_anchor}. "
+                        f"Reason: {_why} "
+                        f"Re-run ONLY that specialist with the anchor folded "
+                        f"into its sub-question, then synthesize the final "
+                        f"answer."
+                    ),
+                })
+                try:
+                    sess.logger.log("review_redispatch", {
+                        "turn_id": turn_id,
+                        "specialist": directive.specialist,
+                        "anchor": directive.anchor,
+                        "dispatch_count": _dispatch_count(ctx),
+                    })
+                except Exception:  # noqa: BLE001
+                    pass
+                # Re-dispatch KB hygiene: discard the re-dispatched specialist's
+                # now-superseded phase-1 distillation for this turn so only the
+                # corrected (anchored) KPs survive. Best-effort — a hygiene
+                # failure must not block the correction itself.
+                try:
+                    _inval = await _invalidate_specialist_distillation(
+                        ctx, directive.specialist, turn_id)
+                    sess.logger.log("review_redispatch_invalidated_distill", {
+                        "turn_id": turn_id,
+                        "specialist": directive.specialist,
+                        **_inval,
+                    })
+                except Exception:  # noqa: BLE001 — best-effort KB hygiene
+                    pass
+                new_final = await run_redispatch_pass_fn(resume_input)
+                review_flags.append(
+                    f"coherence_review: re-dispatched "
+                    f"`{directive.specialist}` anchored to "
+                    f"{directive.anchor or 'the event window'} "
+                    f"({directive.why or 'alignment fix'})."
+                )
+                return new_final, review_flags
+            else:
+                # Cap reached (design §6): synthesize with a residual flag.
+                review_flags.append(
+                    "coherence_review: re-dispatch needed but the ≤2 "
+                    "dispatch-round cap was reached — the driver analysis "
+                    "may not be fully anchored to the event window."
+                )
+                try:
+                    sess.logger.log("review_capped", {
+                        "turn_id": turn_id,
+                        "specialist": getattr(directive, "specialist", None),
+                        "dispatch_count": _dispatch_count(ctx),
+                    })
+                except Exception:  # noqa: BLE001
+                    pass
+    except Exception as exc:  # noqa: BLE001 — never wedge the turn on review
+        try:
+            sess.logger.log("review_phase_error", {
+                "turn_id": turn_id,
+                "exception_type": type(exc).__name__,
+                "message": str(exc)[:300],
+            })
+        except Exception:  # noqa: BLE001
+            pass
+    return None, review_flags
+
+
 # ── Async streaming worker ──────────────────────────────────────────────────
 
 async def _run_turn_streamed(
@@ -1693,6 +1961,123 @@ async def _run_turn_streamed(
     # and stream end).
     _drain_specialist_errors()
 
+    # ── 3.5 Server-enforced coherence review + bounded re-dispatch ─────────
+    # Design §4/§5.2/§6; SDK mechanic per 2026-07-03-phased-run-spike.md.
+    #
+    # ONLY multi-specialist turns (≥2 domain specialists dispatched) enter
+    # this block — the single-specialist path above is left completely
+    # untouched (no reviewer, no extra Runner run → zero added latency).
+    #
+    # The whole block is guarded: ANY failure degrades to the phase-1
+    # `final_answer` we already have, so this can never make the turn worse
+    # than today's behavior. `_run_review` itself already returns None on any
+    # error; the try/except here fences the re-dispatch resume as well.
+    #
+    # Task 7 (early qualified-release via on_tool_end + straggler
+    # cancellation) hangs off the SAME helpers — the seam is intentional.
+    review_flags: list[str] = []
+    if _is_multi_specialist_turn(ctx):
+        # The initial dispatch that already ran counts as dispatch round 1.
+        if _dispatch_count(ctx) < 1:
+            ctx._dispatch_count = 1
+
+        async def _run_redispatch_pass(resume_input) -> "FinalAnswer | None":
+            """Phase-3 resume: re-run the orchestrator seeded with the phase-1
+            transcript + the injected review directive. Re-emits SSE events for
+            any NEW tool calls (alternate_paths_must_replay_full_sse) and
+            returns the re-synthesized FinalAnswer (or None on failure)."""
+            try:
+                async with _open_node(
+                    _NODE_TRACE_STORE, "orchestrator_redispatch", depth=0
+                ) as rnt:
+                    rhooks = (
+                        NodeTraceRunHooks(_NODE_TRACE_STORE, rnt)
+                        if isinstance(rnt, NodeTrace) else None
+                    )
+                    rstream = Runner.run_streamed(
+                        orchestrator.orchestrator_agent, resume_input,
+                        context=ctx, hooks=rhooks,
+                    )
+                    async for ev in rstream.stream_events():
+                        if ev.type != "run_item_stream_event":
+                            continue
+                        it = ev.item
+                        rraw = getattr(it, "raw_item", None)
+                        if isinstance(it, ToolCallItem):
+                            nm = (
+                                getattr(rraw, "name", None)
+                                or (rraw.get("name") if isinstance(rraw, dict) else None)
+                                or "?"
+                            )
+                            cid = (
+                                getattr(rraw, "call_id", None)
+                                or (rraw.get("call_id") if isinstance(rraw, dict) else None)
+                                or str(uuid.uuid4())
+                            )
+                            astr = (
+                                getattr(rraw, "arguments", None)
+                                or (rraw.get("arguments") if isinstance(rraw, dict) else "{}")
+                            )
+                            try:
+                                aargs = json.loads(astr) if isinstance(astr, str) else (astr or {})
+                            except json.JSONDecodeError:
+                                aargs = {"raw": astr}
+                            sq = (aargs.get("sub_question") or aargs.get("input")
+                                  or json.dumps(aargs, default=str))
+                            call_index_by_id[cid] = len(tool_calls)
+                            tool_calls.append({"call_id": cid, "tool": nm, "sub_question": sq})
+                            started_at_by_call[cid] = int(time.time() * 1000)
+                            sess.emit("team_plan", {"turn_id": turn_id,
+                                                    "tool_calls": list(tool_calls)})
+                            sess.emit("agent_started", {
+                                "turn_id": turn_id, "call_id": cid, "tool": nm,
+                                "started_at": started_at_by_call[cid],
+                            })
+                        elif isinstance(it, ToolCallOutputItem):
+                            cid = (
+                                getattr(rraw, "call_id", None)
+                                or (rraw.get("call_id") if isinstance(rraw, dict) else None)
+                                or "?"
+                            )
+                            tl = tool_calls[call_index_by_id[cid]]["tool"] \
+                                if cid in call_index_by_id else "?"
+                            pl = _safe_dump(it.output)
+                            sts = started_at_by_call.get(cid, int(time.time() * 1000))
+                            dms = int(time.time() * 1000) - sts
+                            if cid in call_index_by_id:
+                                tool_calls[call_index_by_id[cid]]["payload"] = pl
+                                tool_calls[call_index_by_id[cid]]["duration_ms"] = dms
+                            sess.emit("agent_completed", {
+                                "turn_id": turn_id, "call_id": cid, "tool": tl,
+                                "payload": pl, "duration_ms": dms,
+                            })
+                            _drain_specialist_errors()
+                rfinal = rstream.final_output
+                try:
+                    return redact_payload(rfinal) if rfinal else None
+                except Exception:  # noqa: BLE001
+                    return rfinal
+            except Exception as exc:  # noqa: BLE001
+                sess.logger.log("review_redispatch_failed", {
+                    "turn_id": turn_id,
+                    "exception_type": type(exc).__name__,
+                    "message": str(exc)[:300],
+                })
+                return None
+
+        new_final, review_flags = await _apply_review_directive(
+            sess=sess,
+            ctx=ctx,
+            framed_question=framed_question,
+            tool_calls=tool_calls,
+            streamed=streamed,
+            turn_id=turn_id,
+            run_redispatch_pass_fn=_run_redispatch_pass,
+        )
+        if new_final is not None:
+            final_answer = new_final
+        _drain_specialist_errors()
+
     # ── 4. Emit final + chat agent message ────────────────────────────────
     # Guard: if orchestrator finished with zero tool calls (skipped all
     # specialists), the answer is ungrounded — treat as a failure and
@@ -1737,6 +2122,12 @@ async def _run_turn_streamed(
         timeline = getattr(final_answer, "timeline", [])
         data_pull = getattr(final_answer, "data_pull_request", None)
 
+    # Fold in any flags produced by the server-enforced coherence review
+    # (re-dispatch note / capped-with-residual) so they land in the audit
+    # trail + Flags section alongside the synthesized answer.
+    if review_flags:
+        flags = list(flags or []) + review_flags
+
     # Server-side provenance: extract report_coverage and specialists from
     # tool_calls so the model doesn't waste tokens restating the full drafts.
     # The FinalAnswer schema tells the model to leave report_draft/team_draft
@@ -1779,66 +2170,13 @@ async def _run_turn_streamed(
         ]
         flags = list(flags or []) + failure_flags
 
-    # Protocol check: when 2+ unique domain specialists were called, the
-    # orchestrator MUST also have called general_specialist (per the
-    # team_construction skill's "HARD GATE"). Surface a flag when it didn't —
-    # the answer still ships so the reviewer isn't stonewalled, but the
-    # violation is visible in the audit trail and the Flags section.
-    _AUX_TOOLS = {"report_agent", "general_specialist"}
-    unique_domain_specialists = {
-        c["tool"] for c in tool_calls if c["tool"] not in _AUX_TOOLS
-    }
-    general_specialist_called = any(
-        c["tool"] == "general_specialist" for c in tool_calls
-    )
-    if len(unique_domain_specialists) >= 2 and not general_specialist_called:
-        # Log for audit but don't flag as a violation — the orchestrator
-        # may have legitimately determined the specialists were orthogonal
-        # (no shared concepts to compare). The protocol allows this.
-        sess.logger.log("general_specialist_skipped", {
-            "turn_id": turn_id,
-            "n_domain_specialists": len(unique_domain_specialists),
-            "domain_specialists": sorted(unique_domain_specialists),
-        })
-    elif len(unique_domain_specialists) == 1 and general_specialist_called:
-        # Converse violation: general_specialist invoked on a 1-specialist
-        # turn — wastes 30-60s and produces an empty ReviewReport (a single
-        # specialist cannot disagree with itself). Flag so the LLM's
-        # training signal sees this is wrong.
-        violation_flag = (
-            f"general_specialist invoked unnecessarily (protocol violation: "
-            f"only 1 domain specialist ran — nothing to cross-compare)"
-        )
-        flags = list(flags or []) + [violation_flag]
-        sess.logger.log("orchestrator_protocol_violation", {
-            "turn_id": turn_id,
-            "violation": "unnecessary_general_specialist",
-            "n_domain_specialists": 1,
-            "domain_specialists": sorted(unique_domain_specialists),
-        })
-
-    # Round 2.5 protocol check: when general_specialist's `resolved` entries
-    # carry a `corrected_specialist`, the orchestrator MUST re-invoke that
-    # specialist with the correction before finalizing (see HARD GATE block
-    # in orchestrator_agent.py). If a re-invocation is missing, the
-    # pre-correction (wrong) specialist output flowed into synthesis —
-    # flag it so the reviewer sees the violation in the audit trail.
-    missing_reanswers = _detect_missing_reanswers(tool_calls)
-    if missing_reanswers:
-        for mr in missing_reanswers:
-            violation_flag = (
-                f"re-answer not invoked (protocol violation: "
-                f"general_specialist flagged `{mr['corrected_specialist']}` "
-                f"for correction to `{mr['corrected_value']}` but the "
-                f"specialist was not re-invoked with that correction)"
-            )
-            flags = list(flags or []) + [violation_flag]
-        sess.logger.log("orchestrator_protocol_violation", {
-            "turn_id": turn_id,
-            "violation": "missing_reanswer",
-            "n_missing": len(missing_reanswers),
-            "missing": missing_reanswers,
-        })
+    # (Removed) Orchestrator general_specialist self-invocation protocol checks
+    # (skipped / unnecessary / missing-reanswer). Obsolete now that the
+    # coherence review is server-enforced (`_run_review` / `_apply_review_directive`)
+    # and the orchestrator no longer calls general_specialist. They fired
+    # misleading `general_specialist_skipped` on every 2+ specialist turn.
+    # `_detect_missing_reanswers` is retained (still unit-tested) but now unused;
+    # a later sweep can drop it.
 
     # ── Emit final answer IMMEDIATELY — don't wait for distiller drain.
     # The user sees the text answer now; charts arrive asynchronously.
