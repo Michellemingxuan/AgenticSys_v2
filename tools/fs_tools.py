@@ -22,6 +22,13 @@ from agent_factories.app_context import AppContext
 # the raw `\d{6,}` form — it only ever sees `$174,897.36`. Same principle
 # as the data path's `aggregate_column` formatting.
 _LONG_NUMERIC_RE = re.compile(r"(\$)?(\d{6,})(\.\d+)?")
+_MAX_SNIPPETS_PER_FILE = 5
+_MAX_SNIPPET_LEN = 200
+
+
+def _truncate(line: str) -> str:
+    line = line.rstrip("\n")
+    return line if len(line) <= _MAX_SNIPPET_LEN else line[:_MAX_SNIPPET_LEN] + "…"
 
 
 def _format_long_numerics(text: str) -> str:
@@ -58,7 +65,12 @@ async def fs_list_files(ctx: RunContextWrapper[AppContext]) -> str:
 
 
 @function_tool
-async def fs_read_file(ctx: RunContextWrapper[AppContext], filename: str) -> str:
+async def fs_read_file(
+    ctx: RunContextWrapper[AppContext],
+    filename: str,
+    start_line: int = 0,
+    end_line: int = 0,
+) -> str:
     folder = ctx.context.case_folder
     if folder is None:
         return "No case folder available."
@@ -70,6 +82,74 @@ async def fs_read_file(ctx: RunContextWrapper[AppContext], filename: str) -> str
         return f"Access denied: '{filename}' is outside the case folder."
     if not target.exists() or not target.is_file():
         return f"File not found: {filename}"
-    raw = target.read_text()
     # Comma-format long numeric runs so they survive boundary redaction.
-    return _format_long_numerics(raw)
+    formatted = _format_long_numerics(target.read_text())
+    # Default (0, 0) → whole file, unchanged.
+    if start_line <= 0 and end_line <= 0:
+        return formatted
+    # Ranged read: 1-based inclusive, clamped to the file extent.
+    lines = formatted.splitlines()
+    n = len(lines)
+    lo = start_line if start_line > 0 else 1
+    hi = end_line if end_line > 0 else n
+    lo = max(1, min(lo, n))
+    hi = max(1, min(hi, n))
+    if lo > hi:
+        lo, hi = hi, lo
+    return "\n".join(lines[lo - 1 : hi])
+
+
+@function_tool
+async def fs_grep(ctx: RunContextWrapper[AppContext], terms: list[str]) -> str:
+    """Search case-folder file CONTENTS for any of `terms` (case-insensitive OR).
+
+    Returns files ranked by how many distinct terms matched, each with a few
+    `L<n>: <line>` snippets (1-based line numbers that line up with
+    fs_read_file's start_line/end_line). Discovery only — read the file (or a
+    slice of it) before drafting.
+
+    Note: file contents are comma-formatted before matching, so numeric search
+    terms must include separators (e.g. `174,897`, not `174897`).
+    """
+    folder = ctx.context.case_folder
+    if folder is None or not folder.exists():
+        return "No case folder available."
+    cleaned = [t for t in (terms or []) if t and t.strip()]
+    if not cleaned:
+        return "No terms provided."
+    patterns = [(t, re.compile(re.escape(t), re.IGNORECASE)) for t in cleaned]
+
+    results = []  # (name, matched_terms:set, matching_lines:int, snippets:list)
+    for p in sorted(folder.iterdir()):
+        if not p.is_file():
+            continue
+        try:
+            text = _format_long_numerics(p.read_text())
+        except (OSError, UnicodeDecodeError):
+            continue  # one unreadable file must not abort discovery
+        matched_terms = set()
+        matching_lines = 0
+        snippets = []  # (lineno, line)
+        for i, line in enumerate(text.splitlines(), start=1):
+            hit_terms = [t for (t, pat) in patterns if pat.search(line)]
+            if hit_terms:
+                matched_terms.update(hit_terms)
+                matching_lines += 1
+                if len(snippets) < _MAX_SNIPPETS_PER_FILE:
+                    snippets.append((i, line))
+        if matched_terms:
+            results.append((p.name, matched_terms, matching_lines, snippets))
+
+    if not results:
+        return "No matches for: [" + ", ".join(cleaned) + "]"
+
+    # rank: more distinct terms first, then more matching lines, then name
+    results.sort(key=lambda r: (-len(r[1]), -r[2], r[0]))
+
+    blocks = []
+    for name, terms_set, n_lines, snippets in results:
+        matched = ", ".join(sorted(terms_set))
+        header = f"{name}  (matched: {matched} | {n_lines} hits)"
+        body = "\n".join(f"  L{n}: {_truncate(line)}" for n, line in snippets)
+        blocks.append(header + ("\n" + body if body else ""))
+    return "\n".join(blocks)

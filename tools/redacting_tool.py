@@ -286,7 +286,11 @@ def redacting_tool(
             kb_obj = getattr(app_ctx, "_specialist_kb", None)
             kb_digest = ""
             kps_for_name: list = []
-            if isinstance(kb_obj, dict):
+            # report_agent retrieves from curated report files via fs_grep /
+            # fs_read_file, not the KB — so it gets no KB digest (and never the
+            # cross-specialist topics, which it can't kb_lookup anyway). Its own
+            # episodic slice (prior report drafts) is still injected below.
+            if name != "report_agent" and isinstance(kb_obj, dict):
                 kps_for_name = kb_obj.get(name, [])
                 kb_digest = _format_kb_digest(
                     kps_for_name, full_kb=kb_obj, self_name=name,
@@ -320,10 +324,11 @@ def redacting_tool(
             if kb_digest:
                 kb_digest_n_kps = len(_active_kps(kps_for_name))
 
-        # Inject the case folder file list for report_agent so it can
-        # use the report_needle skill's concept→file routing table to
-        # pick relevant files by topic. The model calls fs_read_file on
-        # 1-2 relevant files (batched) rather than reading everything.
+        # Inject the case folder file list for report_agent so it can decide
+        # the layout: use the report_needle concept→file table to pick 1-2
+        # curated files, or fs_grep(terms) to locate content in a long
+        # consolidated file, then fs_read_file (optionally a line-range slice)
+        # rather than reading everything.
         if name == "report_agent" and not prior:
             case_folder = getattr(app_ctx, "case_folder", None)
             if (case_folder is not None

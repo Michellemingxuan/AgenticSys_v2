@@ -176,11 +176,16 @@ def build_orchestrator_agent(
         name="report_agent",
         description="Look up prior curated reports for this case.",
         # Auxiliary lookup, on the R1 critical path: a shallow file read,
-        # NOT analysis. Give it a tight budget so a stalled safechain round
-        # fails fast and best-effort (orchestrator continues without the
-        # report draft) instead of dragging the turn toward the 240s fence.
+        # NOT analysis. timeout_s is the real latency fence (a stalled
+        # safechain round fails fast and best-effort — the orchestrator
+        # continues without the draft). max_turns needs enough rounds for
+        # the skill's "read 1-2 files, then emit" flow: worst case is
+        # (list) + read A + read B + emit = 4. A 2-turn budget had zero
+        # margin, so multi-file report questions hit max_turns_exceeded and
+        # returned nothing; 4 covers the flow while timeout_s still bounds
+        # wall-clock.
         timeout_s=float(os.environ.get("REPORT_AGENT_TIMEOUT_S", "100")),
-        max_turns=int(os.environ.get("REPORT_AGENT_MAX_TURNS", "2")),
+        max_turns=int(os.environ.get("REPORT_AGENT_MAX_TURNS", "4")),
     ))
     tools.append(redacting_tool(
         general_specialist,
