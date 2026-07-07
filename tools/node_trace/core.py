@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
 
+from tools.episodic import build_records
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS node_trace (
   id                   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -235,9 +237,14 @@ class NodeTraceStore:
                 sum(len(json.dumps(it, default=str)) for it in input_history)
                 if isinstance(input_history, list) else 0
             )
+            # Store the clean episodic projection the next turn actually
+            # injects (question → sub-answers → final answer), NOT the raw
+            # qa_cache entry. The raw entry also carries per-tool-call
+            # payloads + chart specs (needed for cache-replay), but those are
+            # noise in the "what the next turn remembers" viewer panel.
+            # qa_cache_n above stays the true turn count (len of the cache).
             qa_json = json.dumps(
-                # OrderedDict serializes fine; truncate huge payloads.
-                {k: v for k, v in (qa_cache.items() if hasattr(qa_cache, "items") else [])},
+                build_records(qa_cache, window=qa_n),
                 default=str,
             ) if qa_cache else None
             kb_json = json.dumps(specialist_kb, default=str) if specialist_kb else None

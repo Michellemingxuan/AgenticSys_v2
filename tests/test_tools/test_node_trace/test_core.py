@@ -197,6 +197,48 @@ def test_snapshot_session_persists_and_counts(tmp_path):
     assert row[4] > 0
 
 
+def test_snapshot_stores_clean_episodic_projection_not_raw_qa_cache(tmp_path):
+    """qa_cache_json is the episodic projection (question → sub-answers →
+    final answer), NOT the raw entry: no tool-call payloads, no chart specs."""
+    import json
+    store = NodeTraceStore(str(tmp_path / "traces.db"))
+    qa = {
+        "how did cdss react?": {
+            "turn_seq": 1, "turn_id_origin": "t1",
+            "origin_question": "How did CDSS react?",
+            "answer": "CDSS spiked at 2024-11.",
+            "charts": [{"spec": "VEGA-CHART-NOISE"}],
+            "tool_calls": [{
+                "call_id": "c1", "tool": "modeling",
+                "sub_question": "CDSS trajectory",
+                "payload": '{"domain":"modeling","findings":"CDSS spiked 2024-11.",'
+                           '"evidence":[1]}',
+                "duration_ms": 1234,
+            }],
+        },
+    }
+    row_id = store.snapshot_session(
+        chat_id="C", case_id="X", turn_id="T",
+        qa_cache=qa, specialist_kb={}, input_history=[],
+    )
+    conn = sqlite3.connect(str(tmp_path / "traces.db"))
+    (qa_n, qa_json) = conn.execute(
+        "SELECT qa_cache_n, qa_cache_json FROM session_snapshot WHERE id = ?",
+        (row_id,),
+    ).fetchone()
+    assert qa_n == 1                                   # true turn count preserved
+    records = json.loads(qa_json)
+    assert records[0]["question"] == "How did CDSS react?"
+    assert records[0]["final_answer"] == "CDSS spiked at 2024-11."
+    assert records[0]["sub_answers"][0]["specialist"] == "modeling"
+    assert records[0]["sub_answers"][0]["sub_answer"] == "CDSS spiked 2024-11."
+    # The noisy raw fields must be gone.
+    assert "VEGA-CHART-NOISE" not in qa_json
+    assert "duration_ms" not in qa_json
+    assert "evidence" not in qa_json
+    assert "charts" not in qa_json
+
+
 def test_delete_chat_drops_snapshots_too(tmp_path):
     store = NodeTraceStore(str(tmp_path / "traces.db"))
     store.snapshot_session(
