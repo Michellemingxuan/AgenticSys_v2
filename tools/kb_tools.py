@@ -21,7 +21,7 @@ def _get_kb(ctx: RunContextWrapper) -> dict[str, list] | None:
 def _active_kps(kps: list[dict]) -> list[dict]:
     """Latest KP per topic. The KB list is appended chronologically, so
     iterating in order and keeping the last-seen entry per topic gives the
-    active set. Single source of truth (imported by redacting_tool._runner)."""
+    active set. Single source of truth (imported by agent_tool._runner)."""
     active: dict[str, dict] = {}
     for kp in kps or []:
         topic = kp.get("topic")

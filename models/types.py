@@ -97,7 +97,7 @@ class KnowledgePoint(BaseModel):
     `aggregate_column` queries.
 
     Supersession: when a new KP arrives with the same `topic`, the
-    `_active_kps` filter (in redacting_tool) keeps only the latest one.
+    `_active_kps` filter (in agent_tool) keeps only the latest one.
     Older entries are RETAINED in the KB list as an audit trail — never
     mutated, never deleted — so the case logger can reconstruct what was
     believed at any point in the session.

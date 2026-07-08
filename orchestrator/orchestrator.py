@@ -55,7 +55,7 @@ class Orchestrator:
             self.report_agent_obj = build_report_agent(model=clients.model)
             # Second-pass extractor of reusable knowledge points after each
             # specialist run. Stateless; one instance shared by every
-            # specialist's redacting_tool wrapper via AppContext._distiller.
+            # specialist's agent_tool wrapper via AppContext._distiller.
             self.distiller_agent = build_distiller_agent(model=clients.model)
             self.orchestrator_agent = build_orchestrator_agent(
                 specialists=specialists,

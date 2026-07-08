@@ -12,7 +12,7 @@ class AppContext:
     case_folder: Path
     logger: Any
     # Per-specialist conversation history, keyed by tool name (== specialist
-    # name as registered on the orchestrator). The redacting_tool wrapper
+    # name as registered on the orchestrator). The agent_tool wrapper
     # reads this on each invocation: when a prior history exists for the
     # specialist, the sub-agent is run with that history prepended to the
     # new sub-question, so follow-up calls see what was already asked /
@@ -21,14 +21,14 @@ class AppContext:
     # the cell that constructs a fresh AppContext starts a fresh chain.
     _specialist_histories: dict[str, list] = field(default_factory=dict)
     # Per-turn structured record of specialist invocations that failed inside
-    # the redacting_tool wrapper (timeouts, SDK exceptions, unexpected errors).
+    # the agent_tool wrapper (timeouts, SDK exceptions, unexpected errors).
     # Each entry: {specialist, error_type, error_message, sub_question}.
     # Server-side stream loop drains this to emit typed `error` SSE events and
     # to append failure flags to the FinalAnswer so the reviewer sees the
     # actual cause instead of a silent "specialist did not return".
     _specialist_errors: list[dict] = field(default_factory=list)
     # Names of domain specialists that have been called this turn. Used by
-    # the redacting_tool guard to block general_specialist when < 2 domain
+    # the agent_tool guard to block general_specialist when < 2 domain
     # specialists ran (programmatic enforcement of the HARD GATE).
     _domain_specialists_called: set = field(default_factory=set)
     # Number of dispatch ROUNDS the server has driven this turn (initial
@@ -41,12 +41,12 @@ class AppContext:
     # session. Keyed by specialist name; each value is a chronological list of
     # KnowledgePoint dicts (Pydantic-dumped). The list is owned by
     # `CaseSession.specialist_kb` in the server; this attribute holds the
-    # SAME dict by reference, so writes the redacting_tool makes here persist
+    # SAME dict by reference, so writes the agent_tool makes here persist
     # to the next turn's AppContext automatically. None when not wired (e.g.
     # tests that don't set up a session).
     _specialist_kb: dict[str, list] | None = None
     # Distiller agent (built once at orchestrator construction, shared across
-    # all specialists). The redacting_tool wrapper invokes it after each
+    # all specialists). The agent_tool wrapper invokes it after each
     # specialist run to extract KnowledgePoints. None disables distillation
     # (graceful: the wrapper just skips the second pass and the specialist's
     # answer still flows to the orchestrator).
@@ -54,7 +54,7 @@ class AppContext:
     # Current turn id, threaded so distilled KPs can be tagged with the
     # turn that produced them — useful for audit + chronological supersession.
     _turn_id: str | None = None
-    # Fire-and-forget distiller tasks. Each redacting_tool wrapper schedules
+    # Fire-and-forget distiller tasks. Each agent_tool wrapper schedules
     # distillation as an asyncio.Task here BEFORE returning the specialist's
     # payload to the orchestrator — so the orchestrator gets the answer
     # without waiting on the distiller round-trip. Server.py awaits all
@@ -71,7 +71,7 @@ class AppContext:
     # active session (tests, notebooks); tools must guard the call.
     # Signature: `_emit_event(event_name: str, payload: dict) -> None`.
     _emit_event: Callable[[str, dict], None] | None = None
-    # NodeTraceStore handle threaded through so redacting_tool wrappers can
+    # NodeTraceStore handle threaded through so agent_tool wrappers can
     # open per-specialist + per-distiller NodeTrace blocks without reaching
     # for a global. None outside an active server session.
     _node_trace_store: Any = None
@@ -80,5 +80,5 @@ class AppContext:
     # profile metadata (no LLM extraction needed).
     _catalog: Any = None
     # Episodic record window (built from qa_cache each turn) — this specialist's
-    # own slice is prepended to its sub-question by redacting_tool._runner.
+    # own slice is prepended to its sub-question by agent_tool._runner.
     _episodic_records: list = field(default_factory=list)

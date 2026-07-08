@@ -544,7 +544,7 @@ def render_chart(
     """Render a KnowledgePoint to a PNG. Returns the absolute output path
     as a string, or None on any failure.
 
-    The caller (``redacting_tool._distill_and_persist``) decides what to do
+    The caller (``agent_tool._distill_and_persist``) decides what to do
     with the path (typically: store on the KP and let server.py turn it
     into a markdown image link in the agent's answer).
     """

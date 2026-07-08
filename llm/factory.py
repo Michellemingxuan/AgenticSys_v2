@@ -8,7 +8,7 @@ Two backends supported:
   :class:`llm.safechain_client.SafeChainAsyncOpenAI`, which mimics the
   AsyncOpenAI shape but routes ``chat.completions.create`` through SafeChain.
 
-The agent architecture downstream (Agent, Runner, redacting_tool, β fallback)
+The agent architecture downstream (Agent, Runner, agent_tool, β fallback)
 is *identical* in both cases — only the HTTP client differs.
 """
 

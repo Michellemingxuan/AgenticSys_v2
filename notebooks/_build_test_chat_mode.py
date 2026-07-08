@@ -173,7 +173,7 @@ cells.append(md(
     "## 4. Build the agent graph + ChatAgent\n\n"
     "`Orchestrator(...)` with `clients=` constructs the **same agent graph production "
     "uses**: 7 specialists + report_agent + general_specialist, all wrapped via "
-    "`redacting_tool` and registered as tools on `orchestrator_agent`."
+    "`agent_tool` and registered as tools on `orchestrator_agent`."
 ))
 cells.append(code(
     "from agent_factories.chat_agent import ChatAgent\n"

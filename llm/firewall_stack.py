@@ -23,7 +23,7 @@ from logger.event_logger import EventLogger
 # small semaphore, serializing what should be parallel work and adding
 # tens of seconds per turn.
 #
-# The ContextVar is set to "specialist" inside `redacting_tool` around
+# The ContextVar is set to "specialist" inside `agent_tool` around
 # the inner Runner.run; everywhere else it defaults to "orchestrator".
 # asyncio Tasks inherit the ContextVar context naturally, and the
 # semaphore acquire happens INSIDE the contextvar scope (before

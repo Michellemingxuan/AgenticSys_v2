@@ -5,7 +5,7 @@ redacting_tool decomposition (Task 2 of 5).
 """
 import asyncio
 
-from tools.distiller_pass import _distill_and_persist
+from tools.agent_tools.distiller_pass import _distill_and_persist
 
 
 def test_distill_and_persist_noop_when_distiller_unwired():

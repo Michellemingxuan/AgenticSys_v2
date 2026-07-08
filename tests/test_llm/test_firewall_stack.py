@@ -87,7 +87,7 @@ def test_gate_routes_orchestrator_kind_to_orchestrator_pool(logger):
 
 def test_gate_routes_specialist_kind_to_specialist_pool(logger):
     """When `LLM_CALL_KIND` is set to 'specialist' (typically by
-    redacting_tool), `gate()` acquires the specialist semaphore."""
+    agent_tool), `gate()` acquires the specialist semaphore."""
     fw = FirewallStack(logger=logger)
     orch_before = fw.orchestrator_semaphore._value
     spec_before = fw.specialist_semaphore._value

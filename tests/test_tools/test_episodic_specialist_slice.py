@@ -1,4 +1,4 @@
-from tools.redacting_tool import _compose_specialist_input
+from tools.agent_tools.specialist_input_tool import _compose_specialist_input
 from tools.episodic import select_specialist_episodic, render_specialist_block
 
 

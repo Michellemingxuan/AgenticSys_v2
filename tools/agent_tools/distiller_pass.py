@@ -1,7 +1,7 @@
 """Distiller second-pass: extract reusable KnowledgePoints from a specialist's
 output and persist them to the session KB, filling `numbers` from parsed tool
-outputs. Fire-and-forget; scheduled by redacting_tool._runner. Extracted from
-tools/redacting_tool.py (see the decomposition design spec)."""
+outputs. Fire-and-forget; scheduled by agent_tool._runner. Extracted from
+tools/agent_tool.py (see the decomposition design spec)."""
 from __future__ import annotations
 
 import asyncio
@@ -15,7 +15,7 @@ from agents import Runner
 from llm.firewall_stack import LLM_CALL_KIND
 from logger.process_timer import ProcessTimer
 from tools.node_trace import _open_node, attach_extra, attach_tag
-from tools.series_extract import _parse_series_from_tool_outputs, _fill_kp_numbers
+from tools.agent_tools.series_extract import _parse_series_from_tool_outputs, _fill_kp_numbers
 
 # Wall-clock budget for the second-pass distiller. Distillation is purely
 # text-extraction; should be fast. If it stalls, log + skip — the specialist

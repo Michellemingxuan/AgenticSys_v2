@@ -10,7 +10,7 @@ from pathlib import Path
 
 from agents import Agent, AgentOutputSchema, ModelSettings
 
-from tools.redacting_tool import redacting_tool
+from tools.agent_tools import agent_tool
 from models.types import FinalAnswer
 from skills.domain.loader import load_domain_skill as _load_domain_skill
 from skills.loader import load_skill as _load_skill
@@ -157,12 +157,12 @@ def build_orchestrator_agent(
     tools = []
     for s in specialists:
         _sk = _load_domain_skill(s.name)
-        tools.append(redacting_tool(
+        tools.append(agent_tool(
             s, name=s.name, description=_describe_specialist(s),
             catalog=catalog,
             data_hints=(list(_sk.data_hints) if _sk else None),
         ))
-    tools.append(redacting_tool(
+    tools.append(agent_tool(
         report_agent,
         name="report_agent",
         description="Look up prior curated reports for this case.",

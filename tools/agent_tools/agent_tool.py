@@ -11,9 +11,16 @@ from agents.exceptions import AgentsException, MaxTurnsExceeded
 from logger.process_timer import ProcessTimer
 from llm.firewall_stack import LLM_CALL_KIND, redact_payload, sanitize_message
 from tools.node_trace import _open_node, attach_extra, attach_tag
-from tools.series_extract import _extract_data_tool_outputs
-from tools.distiller_pass import _distill_and_persist
-from tools.auto_chart import _auto_chart_from_tool_outputs
+from tools.agent_tools.series_extract import _extract_data_tool_outputs
+from tools.agent_tools.distiller_pass import _distill_and_persist
+from tools.agent_tools.auto_chart import _auto_chart_from_tool_outputs
+from tools.agent_tools.specialist_input_tool import (
+    _SPECIALIST_HISTORY_KEEP_RECENT_USER_MESSAGES,
+    _ELIDED_SPECIALIST_TOOL_OUTPUT,
+    _compose_specialist_input,
+    _render_directed_variables,
+    _compact_specialist_history,
+)
 from tools.kb_tools import _active_kps, _format_kb_digest
 from tools.episodic import (
     EPISODIC_TURNS, render_specialist_block, select_specialist_episodic,
@@ -36,79 +43,6 @@ _SPECIALIST_MAX_TURNS = 6
 # "is this thing broken?" threshold so we surface the failure instead of
 # letting the SSE stream stall.
 _SPECIALIST_TIMEOUT_S = float(os.environ.get("SPECIALIST_TIMEOUT_S", "240"))
-
-_SPECIALIST_HISTORY_KEEP_RECENT_USER_MESSAGES = 2
-_ELIDED_SPECIALIST_TOOL_OUTPUT = (
-    "(elided - earlier in-turn specialist tool output; rely on the latest "
-    "turn context or re-query only if the value is still needed.)"
-)
-
-
-def _compose_specialist_input(episodic_block: str, kb_digest: str,
-                              sub_question: str, directed_block: str = "") -> str:
-    """Prepend episodic slice, KB digest, and directed-variable block (each
-    non-empty, in that order) before the sub-question. Directed variables sit
-    last (nearest the question) as the most question-specific prefix.
-    Byte-identical to the prior behavior when directed_block is empty."""
-    prefixes = [p for p in (episodic_block, kb_digest, directed_block) if p]
-    if not prefixes:
-        return sub_question
-    return "\n\n".join(prefixes) + f"\n\n--- New question ---\n{sub_question}"
-
-
-def _render_directed_variables(variables: list[dict]) -> str:
-    """Render the compact §DIRECTED VARIABLES block from variables_for_concepts."""
-    if not variables:
-        return ""
-    lines = ["§ DIRECTED VARIABLES (for this question — from the data catalog)"]
-    for v in variables:
-        thr = f"; {v['threshold_text']}" if v.get("threshold_text") else ""
-        lines.append(f"[{v['concept']}] {v['name']} — {v['description_short']}{thr}")
-    return "\n".join(lines)
-
-
-def _compact_specialist_history(
-    history: list,
-    keep_recent_user_messages: int = _SPECIALIST_HISTORY_KEEP_RECENT_USER_MESSAGES,
-) -> tuple[list, dict]:
-    """Elide older tool-result payloads from a specialist transcript.
-
-    The transcript is only reused inside the same outer turn, mainly for
-    follow-up calls and retry salvage. Keeping the latest user-message window
-    intact preserves local continuity while preventing earlier large data-tool
-    outputs from being retained repeatedly in ``AppContext``.
-    """
-    stats = {"items_total": len(history) if isinstance(history, list) else 0,
-             "items_elided": 0, "bytes_saved": 0}
-    if not isinstance(history, list) or not history:
-        return history, stats
-
-    user_idxs = [
-        i for i, item in enumerate(history)
-        if isinstance(item, dict) and item.get("role") == "user"
-    ]
-    if len(user_idxs) <= keep_recent_user_messages:
-        return history, stats
-
-    cutoff_idx = user_idxs[-keep_recent_user_messages]
-    compacted: list = []
-    for i, item in enumerate(history):
-        if i >= cutoff_idx:
-            compacted.append(item)
-            continue
-        if isinstance(item, dict) and item.get("type") == "function_call_output":
-            old_output = item.get("output", "")
-            if isinstance(old_output, str) and old_output != _ELIDED_SPECIALIST_TOOL_OUTPUT:
-                stub = dict(item)
-                stub["output"] = _ELIDED_SPECIALIST_TOOL_OUTPUT
-                compacted.append(stub)
-                stats["items_elided"] += 1
-                stats["bytes_saved"] += max(
-                    0, len(old_output) - len(_ELIDED_SPECIALIST_TOOL_OUTPUT),
-                )
-                continue
-        compacted.append(item)
-    return compacted, stats
 
 
 def _record_failure(app_ctx, name: str, sub_question: str,
@@ -164,7 +98,7 @@ def _normalize_subq(text: str) -> str:
     return " ".join((text or "").strip().lower().split())
 
 
-def redacting_tool(
+def agent_tool(
     agent: Agent,
     name: str,
     description: str,
@@ -174,7 +108,7 @@ def redacting_tool(
     catalog=None,
     data_hints: list[str] | None = None,
 ):
-    """Return a FunctionTool that runs ``agent`` with input/output redaction.
+    """Expose an Agent as a tool, with PII redaction on the input and output boundaries.
 
     ``timeout_s`` / ``max_turns`` override the per-specialist budgets. They
     default to the domain-specialist values (240s / 6 turns); auxiliary agents

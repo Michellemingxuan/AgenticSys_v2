@@ -257,7 +257,7 @@ class CaseSession:
     # KnowledgePoint dicts produced by the distiller agent after each
     # specialist run. Older entries are RETAINED for audit when a newer KP
     # supersedes them; the active set is "latest per topic" (filter happens in
-    # redacting_tool._format_kb_digest). Cleared by /rewind alongside
+    # agent_tool._format_kb_digest). Cleared by /rewind alongside
     # input_history and qa_cache so a session reset wipes everything.
     specialist_kb: dict = field(default_factory=dict)
 
@@ -919,7 +919,7 @@ _AUX_REVIEW_TOOLS = {"report_agent", "general_specialist"}
 def _is_multi_specialist_turn(ctx) -> bool:
     """True iff ≥ 2 DISTINCT domain specialists were dispatched this turn.
 
-    Reads ``ctx._domain_specialists_called`` (a set the redacting_tool wrapper
+    Reads ``ctx._domain_specialists_called`` (a set the agent_tool wrapper
     populates as each domain specialist runs). The server-enforced review +
     re-dispatch machinery only engages on multi-specialist turns; single-
     specialist turns keep the current single-run path (zero added latency).
@@ -1194,7 +1194,7 @@ async def _run_turn_streamed(
     if started_at is None:
         started_at = int(time.time() * 1000)
     # Set the per-turn scope contextvar so `_open_node()` calls anywhere
-    # downstream (chat_agent.screen, redacting_tool, orchestrator) can build
+    # downstream (chat_agent.screen, agent_tool, orchestrator) can build
     # a NodeTrace without passing chat/case/turn IDs through every call site.
     TURN_SCOPE.set(TurnScope(
         chat_id=sess.logger.session_id,
@@ -1432,9 +1432,9 @@ async def _run_turn_streamed(
     # AppContext is per-turn, but two of its attributes (`_specialist_kb` and
     # `_distiller`) need to outlive a single turn. We pass:
     #   • specialist_kb: a SHARED REFERENCE to the session's KB dict — mutating
-    #     it from inside redacting_tool persists to the next turn automatically.
+    #     it from inside agent_tool persists to the next turn automatically.
     #   • distiller: the orchestrator's distiller_agent (stateless), used by
-    #     redacting_tool for second-pass KP extraction.
+    #     agent_tool for second-pass KP extraction.
     #   • turn_id: stamped onto each KP at distill time for audit / chronology.
     # Emit hook for tools that want to publish typed SSE events DURING the
     # run (not just at end-of-turn). Used today by `make_chart` to fire a
@@ -1537,7 +1537,7 @@ async def _run_turn_streamed(
     team_plan_emitted = False
     first_tool_call_logged = False
     # Cursor over ctx._specialist_errors so we emit a typed `error` SSE event
-    # exactly once per failure, as soon as the redacting_tool wrapper records
+    # exactly once per failure, as soon as the agent_tool wrapper records
     # it. Without this, the reviewer would only see a vague `agent_completed`
     # carrying a "[FAILED …]" string and have to read it to figure out what
     # went wrong.
@@ -1733,7 +1733,7 @@ async def _run_turn_streamed(
                             "turn_id": turn_id, "call_id": call_id, "tool": tool,
                             "payload": payload, "duration_ms": duration_ms,
                         })
-                        # If the redacting_tool wrapper recorded a failure for any
+                        # If the agent_tool wrapper recorded a failure for any
                         # specialist this run, fan out typed `error` events now so
                         # the UI can show the real cause beside the vague `[FAILED …]`
                         # payload it just received.

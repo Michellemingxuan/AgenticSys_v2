@@ -1,6 +1,6 @@
 """Distiller Agent — second-pass extractor of reusable knowledge points.
 
-After each specialist run, the redacting_tool wrapper invokes this agent
+After each specialist run, the agent_tool wrapper invokes this agent
 on the SpecialistOutput to pull out atomic, quantitative claims that future
 turns might revisit. The points land in
 ``CaseSession.specialist_kb[<specialist_name>]`` and are prepended (as a

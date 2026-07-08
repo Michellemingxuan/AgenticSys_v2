@@ -1,4 +1,4 @@
-"""Tests for redacting_tool: verifies PII redaction at inter-agent transit boundaries."""
+"""Tests for agent_tool: verifies PII redaction at inter-agent transit boundaries."""
 import asyncio
 import json
 import pytest
@@ -6,11 +6,11 @@ from unittest.mock import AsyncMock, patch
 
 from agents import Agent
 
-from tools.redacting_tool import redacting_tool
+from tools.agent_tools.agent_tool import agent_tool
 
 
 @pytest.mark.asyncio
-async def test_redacting_tool_honors_timeout_override():
+async def test_agent_tool_honors_timeout_override():
     """An auxiliary agent (e.g. report_agent) can get a short wall-clock via
     `timeout_s`; a stalled run fails fast with THAT bound, not the 240s default."""
     from agents import RunContextWrapper
@@ -21,8 +21,8 @@ async def test_redacting_tool_honors_timeout_override():
     async def _stall(*_a, **_kw):
         await asyncio.sleep(5)  # would blow a short budget; must be cut short
 
-    with patch("tools.redacting_tool.Runner.run", new=_stall):
-        wrapped = redacting_tool(
+    with patch("tools.agent_tools.agent_tool.Runner.run", new=_stall):
+        wrapped = agent_tool(
             inner_agent, name="report_agent", description="d",
             timeout_s=0.05, max_turns=1,
         )
@@ -38,16 +38,16 @@ async def test_redacting_tool_honors_timeout_override():
 
 
 @pytest.mark.asyncio
-async def test_redacting_tool_sanitizes_input_to_inner_agent():
+async def test_agent_tool_sanitizes_input_to_inner_agent():
     """Input to inner agent must have PII stripped before Runner.run is called."""
     inner_agent = Agent(name="inner", instructions="x", tools=[])
     fake_result = type("R", (), {"final_output": "all clear"})()
 
     with patch(
-        "tools.redacting_tool.Runner.run",
+        "tools.agent_tools.agent_tool.Runner.run",
         new=AsyncMock(return_value=fake_result),
     ) as mock_run:
-        wrapped = redacting_tool(inner_agent, name="x", description="d")
+        wrapped = agent_tool(inner_agent, name="x", description="d")
         await wrapped.on_invoke_tool(
             None, json.dumps({"sub_question": "Investigate CASE-12345"})
         )
@@ -65,16 +65,16 @@ async def test_redacting_tool_sanitizes_input_to_inner_agent():
 
 
 @pytest.mark.asyncio
-async def test_redacting_tool_redacts_output():
+async def test_agent_tool_redacts_output():
     """Output returned from inner agent must have PII stripped before reaching caller."""
     inner_agent = Agent(name="inner", instructions="x", tools=[])
     fake_result = type("R", (), {"final_output": "Found CASE-99999 issue"})()
 
     with patch(
-        "tools.redacting_tool.Runner.run",
+        "tools.agent_tools.agent_tool.Runner.run",
         new=AsyncMock(return_value=fake_result),
     ):
-        wrapped = redacting_tool(inner_agent, name="x", description="d")
+        wrapped = agent_tool(inner_agent, name="x", description="d")
         out = await wrapped.on_invoke_tool(
             None, json.dumps({"sub_question": "anything"})
         )
@@ -84,26 +84,26 @@ async def test_redacting_tool_redacts_output():
 
 
 @pytest.mark.asyncio
-async def test_redacting_tool_name_and_description():
+async def test_agent_tool_name_and_description():
     """The returned FunctionTool must carry the supplied name and description."""
     inner_agent = Agent(name="inner", instructions="x", tools=[])
-    wrapped = redacting_tool(inner_agent, name="specialist_tool", description="Ask specialist")
+    wrapped = agent_tool(inner_agent, name="specialist_tool", description="Ask specialist")
 
     assert wrapped.name == "specialist_tool"
     assert wrapped.description == "Ask specialist"
 
 
 @pytest.mark.asyncio
-async def test_redacting_tool_passes_inner_agent_to_runner():
+async def test_agent_tool_passes_inner_agent_to_runner():
     """Runner.run must be called with the correct inner agent as first positional arg."""
     inner_agent = Agent(name="inner", instructions="x", tools=[])
     fake_result = type("R", (), {"final_output": "ok"})()
 
     with patch(
-        "tools.redacting_tool.Runner.run",
+        "tools.agent_tools.agent_tool.Runner.run",
         new=AsyncMock(return_value=fake_result),
     ) as mock_run:
-        wrapped = redacting_tool(inner_agent, name="x", description="d")
+        wrapped = agent_tool(inner_agent, name="x", description="d")
         await wrapped.on_invoke_tool(None, json.dumps({"sub_question": "hello"}))
 
     call_args = mock_run.call_args
@@ -112,7 +112,7 @@ async def test_redacting_tool_passes_inner_agent_to_runner():
 
 
 @pytest.mark.asyncio
-async def test_redacting_tool_multi_turn_keeps_specialist_alive():
+async def test_agent_tool_multi_turn_keeps_specialist_alive():
     """When the surrounding context exposes `_specialist_histories`, a second
     call to the wrapped tool must include the prior conversation history,
     so the specialist sub-agent stays "alive" across follow-up turns
@@ -147,8 +147,8 @@ async def test_redacting_tool_multi_turn_keeps_specialist_alive():
     app_ctx = SimpleNamespace(_specialist_histories={})
     wrapper = RunContextWrapper(app_ctx)
 
-    with patch("tools.redacting_tool.Runner.run", new=_fake_run):
-        wrapped = redacting_tool(inner_agent, name="crossbu", description="d")
+    with patch("tools.agent_tools.agent_tool.Runner.run", new=_fake_run):
+        wrapped = agent_tool(inner_agent, name="crossbu", description="d")
 
         # Turn 1: no prior history → input is the bare sub-question string.
         await wrapped.on_invoke_tool(
@@ -181,7 +181,7 @@ async def test_redacting_tool_multi_turn_keeps_specialist_alive():
 
 
 @pytest.mark.asyncio
-async def test_redacting_tool_specialist_histories_isolated_per_specialist():
+async def test_agent_tool_specialist_histories_isolated_per_specialist():
     """Two different specialist tools must NOT share history, even when
     invoked through the same AppContext. Each tool's name is the key."""
     from types import SimpleNamespace
@@ -209,9 +209,9 @@ async def test_redacting_tool_specialist_histories_isolated_per_specialist():
     app_ctx = SimpleNamespace(_specialist_histories={})
     wrapper = RunContextWrapper(app_ctx)
 
-    with patch("tools.redacting_tool.Runner.run", new=_fake_run):
-        a_tool = redacting_tool(inner_a, name="alpha", description="d")
-        b_tool = redacting_tool(inner_b, name="beta", description="d")
+    with patch("tools.agent_tools.agent_tool.Runner.run", new=_fake_run):
+        a_tool = agent_tool(inner_a, name="alpha", description="d")
+        b_tool = agent_tool(inner_b, name="beta", description="d")
 
         await a_tool.on_invoke_tool(wrapper, json.dumps({"sub_question": "for alpha"}))
         await b_tool.on_invoke_tool(wrapper, json.dumps({"sub_question": "for beta"}))
@@ -256,7 +256,7 @@ def _make_failure_ctx():
 
 
 @pytest.mark.asyncio
-async def test_redacting_tool_records_max_turns_exceeded():
+async def test_agent_tool_records_max_turns_exceeded():
     """MaxTurnsExceeded must be caught, logged, and surface as a [FAILED ...]
     payload (not propagate up to function_tool's generic error handler)."""
     from agents import RunContextWrapper
@@ -268,8 +268,8 @@ async def test_redacting_tool_records_max_turns_exceeded():
     async def _raise(*_a, **_kw):
         raise MaxTurnsExceeded("ran out of turns")
 
-    with patch("tools.redacting_tool.Runner.run", new=_raise):
-        wrapped = redacting_tool(inner_agent, name="wcc", description="d")
+    with patch("tools.agent_tools.agent_tool.Runner.run", new=_raise):
+        wrapped = agent_tool(inner_agent, name="wcc", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx), json.dumps({"sub_question": "anything"})
         )
@@ -284,7 +284,7 @@ async def test_redacting_tool_records_max_turns_exceeded():
 
 
 @pytest.mark.asyncio
-async def test_redacting_tool_records_model_behavior_error():
+async def test_agent_tool_records_model_behavior_error():
     """ModelBehaviorError (malformed JSON / output-schema parse failure) must
     be caught with its real class name surfaced, not swallowed."""
     from agents import RunContextWrapper
@@ -296,8 +296,8 @@ async def test_redacting_tool_records_model_behavior_error():
     async def _raise(*_a, **_kw):
         raise ModelBehaviorError("malformed JSON output")
 
-    with patch("tools.redacting_tool.Runner.run", new=_raise):
-        wrapped = redacting_tool(inner_agent, name="domain_x", description="d")
+    with patch("tools.agent_tools.agent_tool.Runner.run", new=_raise):
+        wrapped = agent_tool(inner_agent, name="domain_x", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx), json.dumps({"sub_question": "anything"})
         )
@@ -308,7 +308,7 @@ async def test_redacting_tool_records_model_behavior_error():
 
 
 @pytest.mark.asyncio
-async def test_redacting_tool_records_generic_exception():
+async def test_agent_tool_records_generic_exception():
     """Last-resort fence: a generic Exception (e.g., transport error) must
     still be captured rather than escape to the SDK's default handler."""
     from agents import RunContextWrapper
@@ -319,8 +319,8 @@ async def test_redacting_tool_records_generic_exception():
     async def _raise(*_a, **_kw):
         raise RuntimeError("connection reset")
 
-    with patch("tools.redacting_tool.Runner.run", new=_raise):
-        wrapped = redacting_tool(inner_agent, name="domain_y", description="d")
+    with patch("tools.agent_tools.agent_tool.Runner.run", new=_raise):
+        wrapped = agent_tool(inner_agent, name="domain_y", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx), json.dumps({"sub_question": "anything"})
         )
@@ -332,7 +332,7 @@ async def test_redacting_tool_records_generic_exception():
 
 
 @pytest.mark.asyncio
-async def test_redacting_tool_records_timeout():
+async def test_agent_tool_records_timeout():
     """asyncio.wait_for raising TimeoutError must surface as a structured
     failure rather than propagate up the stack."""
     import asyncio as _asyncio
@@ -345,8 +345,8 @@ async def test_redacting_tool_records_timeout():
         raise _asyncio.TimeoutError()
 
     # Patch wait_for itself so we don't have to actually wait the timeout.
-    with patch("tools.redacting_tool.asyncio.wait_for", new=_raise):
-        wrapped = redacting_tool(inner_agent, name="domain_z", description="d")
+    with patch("tools.agent_tools.agent_tool.asyncio.wait_for", new=_raise):
+        wrapped = agent_tool(inner_agent, name="domain_z", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx), json.dumps({"sub_question": "anything"})
         )
@@ -357,7 +357,7 @@ async def test_redacting_tool_records_timeout():
 
 
 @pytest.mark.asyncio
-async def test_redacting_tool_success_does_not_record_error():
+async def test_agent_tool_success_does_not_record_error():
     """The happy path must leave `_specialist_errors` empty."""
     from agents import RunContextWrapper
 
@@ -366,10 +366,10 @@ async def test_redacting_tool_success_does_not_record_error():
     fake_result = type("R", (), {"final_output": "all good"})()
 
     with patch(
-        "tools.redacting_tool.Runner.run",
+        "tools.agent_tools.agent_tool.Runner.run",
         new=AsyncMock(return_value=fake_result),
     ):
-        wrapped = redacting_tool(inner_agent, name="ok_tool", description="d")
+        wrapped = agent_tool(inner_agent, name="ok_tool", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx), json.dumps({"sub_question": "hi"})
         )
@@ -381,15 +381,15 @@ async def test_redacting_tool_success_does_not_record_error():
 # ── Knowledge-base + distiller tests ────────────────────────────────────────
 #
 # These cover the cross-turn KB plumbing wired in Phase 1 of the memory
-# rework: redacting_tool reads a KB digest before each call, runs a distiller
+# rework: agent_tool reads a KB digest before each call, runs a distiller
 # agent on the SpecialistOutput after, and persists new KnowledgePoints to a
 # session-scoped dict that survives across turns.
 
 
-from tools.redacting_tool import (
+from tools.agent_tools.specialist_input_tool import (
     _compact_specialist_history,
 )
-from tools.distiller_pass import _distill_and_persist
+from tools.agent_tools.distiller_pass import _distill_and_persist
 
 
 def _make_kb_ctx(distiller=None, kb=None):
@@ -441,7 +441,7 @@ def test_compact_specialist_history_elides_old_tool_outputs_only():
 
 
 @pytest.mark.asyncio
-async def test_redacting_tool_prepends_kb_digest_when_no_intra_turn_history():
+async def test_agent_tool_prepends_kb_digest_when_no_intra_turn_history():
     """First call within a turn (no `_specialist_histories[name]`) must see
     the cross-turn KB digest prepended to its sub-question."""
     from agents import RunContextWrapper
@@ -463,8 +463,8 @@ async def test_redacting_tool_prepends_kb_digest_when_no_intra_turn_history():
         ]},
     )
 
-    with patch("tools.redacting_tool.Runner.run", new=_fake_run):
-        wrapped = redacting_tool(inner_agent, name="modeling", description="d")
+    with patch("tools.agent_tools.agent_tool.Runner.run", new=_fake_run):
+        wrapped = agent_tool(inner_agent, name="modeling", description="d")
         await wrapped.on_invoke_tool(
             RunContextWrapper(ctx),
             json.dumps({"sub_question": "show me the delinquency trajectory"}),
@@ -482,7 +482,7 @@ async def test_redacting_tool_prepends_kb_digest_when_no_intra_turn_history():
 
 
 @pytest.mark.asyncio
-async def test_redacting_tool_skips_kb_digest_on_intra_turn_followup():
+async def test_agent_tool_skips_kb_digest_on_intra_turn_followup():
     """Second call within the same turn already has the digest in the
     `_specialist_histories` transcript; re-prepending would double it."""
     from agents import RunContextWrapper
@@ -508,8 +508,8 @@ async def test_redacting_tool_skips_kb_digest_on_intra_turn_followup():
         {"role": "assistant", "content": "prior answer"},
     ]
 
-    with patch("tools.redacting_tool.Runner.run", new=_fake_run):
-        wrapped = redacting_tool(inner_agent, name="modeling", description="d")
+    with patch("tools.agent_tools.agent_tool.Runner.run", new=_fake_run):
+        wrapped = agent_tool(inner_agent, name="modeling", description="d")
         await wrapped.on_invoke_tool(
             RunContextWrapper(ctx),
             json.dumps({"sub_question": "follow-up question"}),
@@ -569,8 +569,8 @@ async def test_distiller_persists_knowledge_points_to_session_kb():
     ctx = _make_kb_ctx(distiller=distiller, kb={})
 
     import asyncio as _asyncio
-    with patch("tools.redacting_tool.Runner.run", new=_fake_run):
-        wrapped = redacting_tool(inner_agent, name="spend_payments", description="d")
+    with patch("tools.agent_tools.agent_tool.Runner.run", new=_fake_run):
+        wrapped = agent_tool(inner_agent, name="spend_payments", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx),
             json.dumps({"sub_question": "what's the spending pattern?"}),
@@ -620,8 +620,8 @@ async def test_distiller_failure_does_not_break_specialist_response():
     ctx = _make_kb_ctx(distiller=distiller, kb={})
 
     import asyncio as _asyncio
-    with patch("tools.redacting_tool.Runner.run", new=_fake_run):
-        wrapped = redacting_tool(inner_agent, name="bureau", description="d")
+    with patch("tools.agent_tools.agent_tool.Runner.run", new=_fake_run):
+        wrapped = agent_tool(inner_agent, name="bureau", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx),
             json.dumps({"sub_question": "any question"}),

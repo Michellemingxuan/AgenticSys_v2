@@ -265,7 +265,7 @@ class NodeTraceRunHooks(RunHooks):
 
     # The hook protocol also wants these methods; we leave them no-op
     # so we don't open extra rows for non-LLM events (we already track
-    # tools / agent boundaries via redacting_tool's wraps).
+    # tools / agent boundaries via agent_tool's wraps).
     async def on_agent_start(self, context, agent) -> None: return
     async def on_agent_end(self, context, agent, output) -> None: return
     async def on_tool_start(self, context, agent, tool) -> None: return
