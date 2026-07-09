@@ -29,52 +29,57 @@ def test_orchestrator_instructions_vp_framing():
 @pytest.mark.asyncio
 async def test_review_skipped_for_single_specialist(monkeypatch):
     import server
+    from runner.turn import review
     calls = {"review": 0}
 
     async def fake_review(*a, **k):
         calls["review"] += 1
         return None
 
-    monkeypatch.setattr(server, "_run_review", fake_review)
+    monkeypatch.setattr(review, "_run_review", fake_review)
     ctx = server.AppContext.__new__(server.AppContext)
     ctx._domain_specialists_called = {"spend_payments"}  # only 1
-    assert server._is_multi_specialist_turn(ctx) is False
+    assert review._is_multi_specialist_turn(ctx) is False
 
 
 @pytest.mark.asyncio
 async def test_review_runs_for_multi_specialist(monkeypatch):
     import server
+    from runner.turn import review
     ctx = server.AppContext.__new__(server.AppContext)
     ctx._domain_specialists_called = {"spend_payments", "modeling"}
-    assert server._is_multi_specialist_turn(ctx) is True
+    assert review._is_multi_specialist_turn(ctx) is True
 
 
 def test_dispatch_cap_blocks_third_dispatch():
     import server
+    from runner.turn import review
     ctx = server.AppContext.__new__(server.AppContext)
     ctx._dispatch_count = 2
-    assert server._dispatch_count(ctx) == 2
+    assert review._dispatch_count(ctx) == 2
     # a re-dispatch request at count 2 must be refused by the caller (asserted
     # in the integration test); here we lock the accessor.
 
 
 def test_dispatch_count_bump_clamps_at_two():
     import server
+    from runner.turn import review
     ctx = server.AppContext.__new__(server.AppContext)
     ctx._dispatch_count = 0
-    assert server._dispatch_count(ctx) == 0
-    assert server._bump_dispatch_count(ctx) == 1
-    assert server._bump_dispatch_count(ctx) == 2
+    assert review._dispatch_count(ctx) == 0
+    assert review._bump_dispatch_count(ctx) == 1
+    assert review._bump_dispatch_count(ctx) == 2
     # cap: never exceeds 2 dispatch rounds per turn
-    assert server._bump_dispatch_count(ctx) == 2
-    assert server._dispatch_count(ctx) == 2
+    assert review._bump_dispatch_count(ctx) == 2
+    assert review._dispatch_count(ctx) == 2
 
 
 def test_is_multi_specialist_turn_missing_attr_is_false():
     import server
+    from runner.turn import review
     ctx = server.AppContext.__new__(server.AppContext)
     # no _domain_specialists_called attribute set at all
-    assert server._is_multi_specialist_turn(ctx) is False
+    assert review._is_multi_specialist_turn(ctx) is False
 
 
 # ── Task 8: Integration — coherence-review → anchored re-dispatch ─────────────
@@ -108,6 +113,7 @@ async def test_causal_question_redispatches_modeling_anchored(monkeypatch):
         bare 2024 drivers).
     """
     import server
+    from runner.turn import review
     from models.types import ReviewReport, ReviewDirective, FinalAnswer
 
     # ── Minimal fake session (logger + silent emit) ───────────────────────────
@@ -179,7 +185,7 @@ async def test_causal_question_redispatches_modeling_anchored(monkeypatch):
             )
         )
 
-    monkeypatch.setattr(server, "_run_review", _fake_review)
+    monkeypatch.setattr(review, "_run_review", _fake_review)
 
     # ── Fake run_redispatch_pass_fn: records resume_input + returns 2025 answer
     redispatch_calls: list = []
@@ -196,7 +202,7 @@ async def test_causal_question_redispatches_modeling_anchored(monkeypatch):
         )
 
     # ── Call the review decision helper directly ──────────────────────────────
-    new_final, review_flags = await server._apply_review_directive(
+    new_final, review_flags = await review._apply_review_directive(
         sess=sess,
         ctx=ctx,
         framed_question=framed_question,
@@ -207,9 +213,9 @@ async def test_causal_question_redispatches_modeling_anchored(monkeypatch):
     )
 
     # ── (b) dispatch count ends at exactly 2 ─────────────────────────────────
-    assert server._dispatch_count(ctx) == 2, (
+    assert review._dispatch_count(ctx) == 2, (
         f"expected _dispatch_count=2 after one re-dispatch, "
-        f"got {server._dispatch_count(ctx)}"
+        f"got {review._dispatch_count(ctx)}"
     )
 
     # ── (a) modeling re-invocation was seeded with anchor "2025-05" ──────────
@@ -250,6 +256,7 @@ async def test_invalidate_specialist_distillation_cancels_and_wipes():
     import asyncio
     import types
     import server
+    from runner.turn import review
 
     turn = "turn-abc"
 
@@ -272,7 +279,7 @@ async def test_invalidate_specialist_distillation_cancels_and_wipes():
         },
     )
 
-    stats = await server._invalidate_specialist_distillation(ctx, "modeling", turn)
+    stats = await review._invalidate_specialist_distillation(ctx, "modeling", turn)
 
     assert stats["tasks_cancelled"] == 2
     assert d_x.cancelled() and a_x.cancelled()
@@ -294,9 +301,10 @@ async def test_invalidate_specialist_distillation_tolerates_missing_state():
     """No pending list / no KB entry → graceful no-op for any specialist."""
     import types
     import server
+    from runner.turn import review
 
     ctx = types.SimpleNamespace()  # no _pending_distillers, no _specialist_kb
-    stats = await server._invalidate_specialist_distillation(ctx, "anything", "t")
+    stats = await review._invalidate_specialist_distillation(ctx, "anything", "t")
     assert stats == {"tasks_cancelled": 0, "kps_removed": 0}
 
 
