@@ -51,6 +51,7 @@ from runner.turn.input_assembly import assemble_orchestrator_input
 from runner.turn.review import (
     _apply_review_directive, _dispatch_count, _is_multi_specialist_turn,
 )
+from runner.turn.sse import map_run_item
 from tools.node_trace import (
     NodeTrace, NodeTraceRunHooks, TURN_SCOPE, TurnScope,
     _open_node, attach_io, attach_latency, attach_tag, attach_usage,
@@ -607,87 +608,22 @@ class TurnRunner:
                         if event.type != "run_item_stream_event":
                             continue
                         item = event.item
-                        raw = getattr(item, "raw_item", None)
-
-                        if isinstance(item, ToolCallItem):
-                            name = (
-                                getattr(raw, "name", None)
-                                or (raw.get("name") if isinstance(raw, dict) else None)
-                                or "?"
-                            )
-                            call_id = (
-                                getattr(raw, "call_id", None)
-                                or (raw.get("call_id") if isinstance(raw, dict) else None)
-                                or str(uuid.uuid4())
-                            )
-                            args_str = (
-                                getattr(raw, "arguments", None)
-                                or (raw.get("arguments") if isinstance(raw, dict) else "{}")
-                            )
-                            try:
-                                args = json.loads(args_str) if isinstance(args_str, str) else (args_str or {})
-                            except json.JSONDecodeError:
-                                args = {"raw": args_str}
-                            sub_q = args.get("sub_question") or args.get("input") or json.dumps(args, default=str)
-
-                            self.call_index_by_id[call_id] = len(self.tool_calls)
-                            self.tool_calls.append({"call_id": call_id, "tool": name, "sub_question": sub_q})
-                            self.started_at_by_call[call_id] = int(time.time() * 1000)
-
-                            # The first tool call IS team construction — this is the
-                            # gap the user reports as "time to team construction stage".
-                            if not self.first_tool_call_logged:
-                                sess.logger.log("turn_phase_first_tool_call", {
-                                    "turn_id": turn_id,
-                                    "duration_ms_since_orch_start":
-                                        int((time.time() - orch_t0) * 1000),
-                                    "first_tool": name,
-                                })
-                                self.first_tool_call_logged = True
-
-                            # First tool call → emit team_plan once (the orchestrator may add more
-                            # later; we send team_plan again on subsequent calls for incremental UX).
-                            self.team_plan_emitted = True
-                            sess.emit("team_plan", {"turn_id": turn_id, "tool_calls": list(self.tool_calls)})
-                            sess.emit("agent_started", {
-                                "turn_id": turn_id, "call_id": call_id, "tool": name,
-                                "started_at": self.started_at_by_call[call_id],
-                            })
-
-                        elif isinstance(item, ToolCallOutputItem):
-                            call_id = (
-                                getattr(raw, "call_id", None)
-                                or (raw.get("call_id") if isinstance(raw, dict) else None)
-                                or "?"
-                            )
-                            tool = "?"
-                            if call_id in self.call_index_by_id:
-                                tool = self.tool_calls[self.call_index_by_id[call_id]]["tool"]
-                            payload = self._safe_dump(item.output)
-                            started_ts = self.started_at_by_call.get(call_id, int(time.time() * 1000))
-                            duration_ms = int(time.time() * 1000) - started_ts
-                            # Stash the payload back onto `tool_calls` so a late-stage
-                            # orchestrator failure (ModelBehaviorError on FinalAnswer
-                            # parsing, etc.) can still synthesize a partial fallback
-                            # answer from the specialists' outputs the reviewer paid for.
-                            if call_id in self.call_index_by_id:
-                                self.tool_calls[self.call_index_by_id[call_id]]["payload"] = payload
-                                self.tool_calls[self.call_index_by_id[call_id]]["duration_ms"] = duration_ms
-                            sess.emit("agent_completed", {
-                                "turn_id": turn_id, "call_id": call_id, "tool": tool,
-                                "payload": payload, "duration_ms": duration_ms,
-                            })
-                            # If the agent_tool wrapper recorded a failure for any
-                            # specialist this run, fan out typed `error` events now so
-                            # the UI can show the real cause beside the vague `[FAILED …]`
-                            # payload it just received.
-                            self._drain_specialist_errors()
-                            # Stamp the time of the LAST agent_completed so we can
-                            # attribute the gap-to-end-of-stream to synthesis.
-                            last_agent_completed_at = time.time()
-
-                        elif isinstance(item, MessageOutputItem):
-                            pass  # handled by .final_output below
+                        (
+                            self.team_plan_emitted,
+                            self.first_tool_call_logged,
+                            _last_agent_completed_at,
+                        ) = map_run_item(
+                            item, sess=sess, turn_id=turn_id, orch_t0=orch_t0,
+                            tool_calls=self.tool_calls,
+                            call_index_by_id=self.call_index_by_id,
+                            started_at_by_call=self.started_at_by_call,
+                            team_plan_emitted=self.team_plan_emitted,
+                            first_tool_call_logged=self.first_tool_call_logged,
+                            safe_dump=self._safe_dump,
+                            drain_specialist_errors=self._drain_specialist_errors,
+                        )
+                        if _last_agent_completed_at is not None:
+                            last_agent_completed_at = _last_agent_completed_at
 
                 # Drain complete — pull the final structured output. The
                 # gap between the last `agent_completed` and HERE is the
