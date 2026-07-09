@@ -28,7 +28,7 @@ from typing import Any
 
 from agents import Runner
 from agents.exceptions import AgentsException, ModelBehaviorError
-from agents.items import MessageOutputItem, ToolCallItem, ToolCallOutputItem
+from agents.items import ToolCallItem, ToolCallOutputItem
 
 from agent_factories.app_context import AppContext
 from llm.firewall_stack import redact_payload

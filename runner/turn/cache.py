@@ -21,7 +21,7 @@ def _normalize_q(q: str) -> str:
     return " ".join((q or "").strip().lower().split())
 
 
-def _get_cached_qa(sess: CaseSession, cache_key: str | None) -> dict | None:
+def _get_cached_qa(sess, cache_key: str | None) -> dict | None:
     """Return a QA-cache entry and refresh its insertion order.
 
     ``dict`` preserves insertion order on supported Python versions, so a
@@ -40,7 +40,7 @@ def _get_cached_qa(sess: CaseSession, cache_key: str | None) -> dict | None:
     return cached
 
 
-def _store_cached_qa(sess: CaseSession, cache_key: str | None, value: dict) -> int:
+def _store_cached_qa(sess, cache_key: str | None, value: dict) -> int:
     """Store a QA-cache entry and evict oldest entries beyond the cap.
 
     Returns the number of entries evicted. The cache is a speed optimization,
