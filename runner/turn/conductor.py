@@ -69,6 +69,12 @@ from server import (  # noqa: E402
     _store_cached_qa,
     _synthesize_fallback_answer,
 )
+# NOTE: `PILLAR`, `_SCREEN_TIMEOUT_S`, `_ORCH_PLAN_TIMEOUT_S`, `_REPORTS_DIR`,
+# and `_NODE_TRACE_STORE` are plain module-level values, bound here by value
+# at import time. `monkeypatch.setattr(server, "_SCREEN_TIMEOUT_S", ...)` (etc.)
+# rebinds the name on the `server` module only — it does NOT reach the copies
+# already bound into this module's namespace, so such patches will not affect
+# the turn body below. Patch `runner.turn.conductor.<NAME>` directly instead.
 
 
 class TurnRunner:
