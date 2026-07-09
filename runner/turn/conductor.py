@@ -34,6 +34,14 @@ from agent_factories.app_context import AppContext
 from llm.firewall_stack import redact_payload
 from logger.process_timer import ProcessTimer
 from models.types import FinalAnswer
+from runner.config import (
+    PILLAR,
+    _NODE_TRACE_STORE,
+    _ORCH_PLAN_TIMEOUT_S,
+    _PRIOR_QUESTIONS_FOR_SCREEN,
+    _REPORTS_DIR,
+    _SCREEN_TIMEOUT_S,
+)
 from runner.orchestrator import Orchestrator
 from runner.turn.input_assembly import assemble_orchestrator_input
 from runner.turn.review import (
@@ -44,20 +52,14 @@ from tools.node_trace import (
     _open_node, attach_io, attach_latency, attach_tag, attach_usage,
 )
 
-# Server-local helpers, constants, and the planning-watchdog helpers reused
-# verbatim. `server.py` imports THIS module only lazily (inside the thin
+# Server-local helpers and the planning-watchdog helpers reused verbatim.
+# `server.py` imports THIS module only lazily (inside the thin
 # `_run_turn_streamed` wrapper), so there is no module-load cycle: importing
 # `server` here always finds it fully defined. `_PlanningTimeout` /
 # `_next_planning_event` stay defined in `server.py` (tests reference them as
 # `server._next_planning_event`) and are imported here for use in the stream
 # drive.
 from server import (  # noqa: E402
-    PILLAR,
-    _NODE_TRACE_STORE,
-    _ORCH_PLAN_TIMEOUT_S,
-    _PRIOR_QUESTIONS_FOR_SCREEN,
-    _REPORTS_DIR,
-    _SCREEN_TIMEOUT_S,
     _PlanningTimeout,
     _TurnAborted,
     _collect_turn_charts,
@@ -70,11 +72,12 @@ from server import (  # noqa: E402
     _synthesize_fallback_answer,
 )
 # NOTE: `PILLAR`, `_SCREEN_TIMEOUT_S`, `_ORCH_PLAN_TIMEOUT_S`, `_REPORTS_DIR`,
-# and `_NODE_TRACE_STORE` are plain module-level values, bound here by value
-# at import time. `monkeypatch.setattr(server, "_SCREEN_TIMEOUT_S", ...)` (etc.)
-# rebinds the name on the `server` module only — it does NOT reach the copies
-# already bound into this module's namespace, so such patches will not affect
-# the turn body below. Patch `runner.turn.conductor.<NAME>` directly instead.
+# and `_NODE_TRACE_STORE` (imported from `runner.config` above) are plain
+# module-level values, bound here by value at import time.
+# `monkeypatch.setattr(server, "_SCREEN_TIMEOUT_S", ...)` (etc.) rebinds the
+# name on the `server` module only — it does NOT reach the copies already
+# bound into this module's namespace, so such patches will not affect the
+# turn body below. Patch `runner.turn.conductor.<NAME>` directly instead.
 
 
 class TurnRunner:
