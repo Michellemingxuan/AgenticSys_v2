@@ -4,11 +4,13 @@ and the node-trace singleton. A neutral module both `server.py` and
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
-from main import _REPORTS_DIR
 from tools.node_trace import NodeTraceStore
 
 PILLAR = os.environ.get("PILLAR", "credit_risk")
+
+_REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
 
 # Round-1 (team-planning) watchdog. The orchestrator's first LLM call decides
 # which specialists to dispatch; it normally returns in ~3s, but under heavy
