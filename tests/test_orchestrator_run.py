@@ -9,7 +9,7 @@ from llm.factory import build_session_clients
 from llm.firewall_stack import FirewallStack
 from logger.event_logger import EventLogger
 from models.types import FinalAnswer
-from orchestrator.orchestrator import Orchestrator
+from runner.orchestrator import Orchestrator
 
 
 @pytest.mark.asyncio
@@ -28,7 +28,7 @@ async def test_orchestrator_run_returns_final_answer(tmp_path):
     fake_result = MagicMock()
     fake_result.final_output = fake_answer
 
-    with patch("orchestrator.orchestrator.Runner.run", new=AsyncMock(return_value=fake_result)):
+    with patch("runner.orchestrator.Runner.run", new=AsyncMock(return_value=fake_result)):
         result = await orch.run(
             question="Is this case high risk?",
             case_folder=tmp_path,

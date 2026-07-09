@@ -11,7 +11,7 @@ from llm.factory import build_session_clients
 from llm.firewall_stack import FirewallStack
 from logger.event_logger import EventLogger
 from models.types import FinalAnswer, ReportDraft, SpecialistOutput
-from orchestrator.orchestrator import Orchestrator
+from runner.orchestrator import Orchestrator
 
 
 @pytest.mark.asyncio
@@ -56,7 +56,7 @@ async def test_balance_fallback_recovers_partial_drafts(tmp_path):
     exc = MaxTurnsExceeded("simulated turn exhaustion")
     exc.run_data = fake_run_data
 
-    with patch("orchestrator.orchestrator.Runner.run", new=AsyncMock(side_effect=exc)):
+    with patch("runner.orchestrator.Runner.run", new=AsyncMock(side_effect=exc)):
         result = await orch.run(question="q", case_folder=tmp_path, report_agent=None)
 
     assert isinstance(result, FinalAnswer)
@@ -83,7 +83,7 @@ async def test_balance_fallback_no_partials_returns_blocked_message(tmp_path):
     exc = MaxTurnsExceeded("simulated")
     exc.run_data = fake_run_data
 
-    with patch("orchestrator.orchestrator.Runner.run", new=AsyncMock(side_effect=exc)):
+    with patch("runner.orchestrator.Runner.run", new=AsyncMock(side_effect=exc)):
         result = await orch.run(question="q", case_folder=tmp_path, report_agent=None)
 
     assert isinstance(result, FinalAnswer)

@@ -179,7 +179,7 @@ cells.append(code(
     "from agent_factories.chat_agent import ChatAgent\n"
     "from agent_factories.helper_tools import build_helper_tools\n"
     "from config.pillar_loader import PillarLoader\n"
-    "from orchestrator.orchestrator import Orchestrator\n\n"
+    "from runner.orchestrator import Orchestrator\n\n"
     "pillar_yaml = PillarLoader().load(PILLAR) or {}\n"
     "helper_tools = build_helper_tools()\n"
     "chat_agent = ChatAgent(chat_llm, logger, tools=helper_tools)\n\n"

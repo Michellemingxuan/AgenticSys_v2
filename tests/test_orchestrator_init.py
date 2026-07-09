@@ -3,7 +3,7 @@ from openai import AsyncOpenAI
 from llm.factory import build_session_clients
 from llm.firewall_stack import FirewallStack
 from logger.event_logger import EventLogger
-from orchestrator.orchestrator import Orchestrator
+from runner.orchestrator import Orchestrator
 
 
 def test_orchestrator_constructs_agent_graph():
