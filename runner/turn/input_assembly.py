@@ -76,10 +76,11 @@ def assemble_orchestrator_input(sess, verdict, ctx) -> str:
         episodic_window = build_records(sess.qa_cache)
         episodic_block = render_orchestrator_block(
             select_episodic(episodic_window, EPISODIC_TURNS))
-    except Exception:  # noqa: BLE001 — episodic assembly must never break a turn
+    except Exception as _epi_exc:  # noqa: BLE001 — episodic assembly must never break a turn
         episodic_window, episodic_block = [], ""
         sess.logger.log("episodic_assembly_failed",
-                        {"turn_id": getattr(ctx, "_turn_id", None)})
+                        {"turn_id": getattr(ctx, "_turn_id", None),
+                         "error": repr(_epi_exc)})
     ctx._episodic_records = episodic_window
     return _compose_framed_question(
         episodic_block, warmth_hint, verdict.redacted_question)
