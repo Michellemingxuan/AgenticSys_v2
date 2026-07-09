@@ -38,6 +38,52 @@ def _render_directed_variables(variables: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def assemble_specialist_input(app_ctx, name, redacted_in, concepts, catalog,
+                              data_hints, logger) -> tuple[str, int]:
+    """Layer 5 — build a specialist's first-call input: episodic + KB digest +
+    directed variables + sub-question. Returns (contextual_in, kb_digest_n_kps)."""
+    from tools.kb_tools import _active_kps, _format_kb_digest
+    from tools.episodic import (
+        EPISODIC_TURNS, render_specialist_block, select_specialist_episodic,
+    )
+    kb_digest, kps_for_name = "", []
+    kb_obj = getattr(app_ctx, "_specialist_kb", None)
+    # report_agent retrieves from curated report files via fs_grep /
+    # fs_read_file, not the KB — so it gets no KB digest (and never the
+    # cross-specialist topics, which it can't kb_lookup anyway). Its own
+    # episodic slice (prior report drafts) is still injected below.
+    if name != "report_agent" and isinstance(kb_obj, dict):
+        kps_for_name = kb_obj.get(name, [])
+        kb_digest = _format_kb_digest(kps_for_name, full_kb=kb_obj, self_name=name)
+    try:
+        _recs = getattr(app_ctx, "_episodic_records", None) or []
+        _episodic_block = render_specialist_block(
+            select_specialist_episodic(_recs, name, EPISODIC_TURNS))
+    except Exception as _epi_exc:  # noqa: BLE001 — never break the specialist call
+        _episodic_block = ""
+        if logger is not None:
+            logger.log("episodic_specialist_assembly_failed",
+                       {"specialist": name, "error": repr(_epi_exc)})
+    _directed_block = ""
+    if concepts and catalog is not None and data_hints:
+        try:
+            _vars = catalog.variables_for_concepts(data_hints, concepts)
+            _directed_block = _render_directed_variables(_vars)
+            if _directed_block and logger is not None:
+                logger.log("directed_variables_injected",
+                           {"specialist": name, "concepts": concepts,
+                            "count": len(_vars)})
+        except Exception as _dv_exc:  # noqa: BLE001 — never break the call
+            _directed_block = ""
+            if logger is not None:
+                logger.log("directed_variables_assembly_failed",
+                           {"specialist": name, "concepts": concepts,
+                            "error": repr(_dv_exc)})
+    contextual_in = _compose_specialist_input(
+        _episodic_block, kb_digest, redacted_in, _directed_block)
+    return contextual_in, (len(_active_kps(kps_for_name)) if kb_digest else 0)
+
+
 def _compact_specialist_history(
     history: list,
     keep_recent_user_messages: int = _SPECIALIST_HISTORY_KEEP_RECENT_USER_MESSAGES,

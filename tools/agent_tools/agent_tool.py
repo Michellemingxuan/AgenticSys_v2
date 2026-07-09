@@ -17,13 +17,8 @@ from tools.agent_tools.auto_chart import _auto_chart_from_tool_outputs
 from tools.agent_tools.specialist_input_tool import (
     _SPECIALIST_HISTORY_KEEP_RECENT_USER_MESSAGES,
     _ELIDED_SPECIALIST_TOOL_OUTPUT,
-    _compose_specialist_input,
-    _render_directed_variables,
     _compact_specialist_history,
-)
-from tools.kb_tools import _active_kps, _format_kb_digest
-from tools.episodic import (
-    EPISODIC_TURNS, render_specialist_block, select_specialist_episodic,
+    assemble_specialist_input,
 )
 
 
@@ -217,46 +212,8 @@ def agent_tool(
         contextual_in = redacted_in
         kb_digest_n_kps = 0
         if not prior:
-            kb_obj = getattr(app_ctx, "_specialist_kb", None)
-            kb_digest = ""
-            kps_for_name: list = []
-            # report_agent retrieves from curated report files via fs_grep /
-            # fs_read_file, not the KB — so it gets no KB digest (and never the
-            # cross-specialist topics, which it can't kb_lookup anyway). Its own
-            # episodic slice (prior report drafts) is still injected below.
-            if name != "report_agent" and isinstance(kb_obj, dict):
-                kps_for_name = kb_obj.get(name, [])
-                kb_digest = _format_kb_digest(
-                    kps_for_name, full_kb=kb_obj, self_name=name,
-                )
-            try:
-                _recs = getattr(app_ctx, "_episodic_records", None) or []
-                _episodic_block = render_specialist_block(
-                    select_specialist_episodic(_recs, name, EPISODIC_TURNS))
-            except Exception as _epi_exc:  # noqa: BLE001 — never break the specialist call
-                _episodic_block = ""
-                if logger is not None:
-                    logger.log("episodic_specialist_assembly_failed",
-                               {"specialist": name, "error": repr(_epi_exc)})
-            _directed_block = ""
-            if concepts and catalog is not None and data_hints:
-                try:
-                    _vars = catalog.variables_for_concepts(data_hints, concepts)
-                    _directed_block = _render_directed_variables(_vars)
-                    if _directed_block and logger is not None:
-                        logger.log("directed_variables_injected",
-                                   {"specialist": name, "concepts": concepts,
-                                    "count": len(_vars)})
-                except Exception as _dv_exc:  # noqa: BLE001 — never break the call
-                    _directed_block = ""
-                    if logger is not None:
-                        logger.log("directed_variables_assembly_failed",
-                                   {"specialist": name, "concepts": concepts,
-                                    "error": repr(_dv_exc)})
-            contextual_in = _compose_specialist_input(
-                _episodic_block, kb_digest, redacted_in, _directed_block)
-            if kb_digest:
-                kb_digest_n_kps = len(_active_kps(kps_for_name))
+            contextual_in, kb_digest_n_kps = assemble_specialist_input(
+                app_ctx, name, redacted_in, concepts, catalog, data_hints, logger)
 
         # Inject the case folder file list for report_agent so it can decide
         # the layout: use the report_needle concept→file table to pick 1-2
