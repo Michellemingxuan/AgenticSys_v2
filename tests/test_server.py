@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(_HERE))
 import server  # noqa: E402
 
 from runner.turn import cache  # noqa: E402
+from runner.turn import conductor  # noqa: E402
 from runner.turn import finalize  # noqa: E402
 from runner.turn.input_assembly import _format_kb_warmth_hint  # noqa: E402
 
@@ -136,8 +137,8 @@ def test_turn_aborted_class_is_a_distinct_exception():
     a different reason) and from `_TurnAborted` getting swept up by
     a bare `except Exception` somewhere upstream."""
     import asyncio
-    assert issubclass(server._TurnAborted, Exception)
-    assert not issubclass(server._TurnAborted, asyncio.CancelledError)
+    assert issubclass(conductor._TurnAborted, Exception)
+    assert not issubclass(conductor._TurnAborted, asyncio.CancelledError)
 
 
 # ── Prewarm path ────────────────────────────────────────────────────────────
@@ -866,14 +867,14 @@ async def test_planning_event_raises_on_stall():
     """A round-1 call that exceeds the planning budget raises _PlanningTimeout."""
     it = _SlowAiter(delay=5.0).__aiter__()
     deadline = _time.monotonic() + 0.05  # 50ms budget vs 5s "call"
-    with pytest.raises(server._PlanningTimeout):
-        await server._next_planning_event(it, deadline, first_tool_seen=False)
+    with pytest.raises(conductor._PlanningTimeout):
+        await conductor._next_planning_event(it, deadline, first_tool_seen=False)
 
 
 async def test_planning_event_returns_when_fast():
     it = _SlowAiter(delay=0.0).__aiter__()
     deadline = _time.monotonic() + 1.0
-    ev = await server._next_planning_event(it, deadline, first_tool_seen=False)
+    ev = await conductor._next_planning_event(it, deadline, first_tool_seen=False)
     assert ev == "event"
 
 
@@ -882,14 +883,14 @@ async def test_planning_deadline_disarmed_after_first_tool():
     with an already-expired deadline — specialists run under the turn fence."""
     it = _SlowAiter(delay=0.05).__aiter__()
     expired = _time.monotonic() - 10
-    ev = await server._next_planning_event(it, expired, first_tool_seen=True)
+    ev = await conductor._next_planning_event(it, expired, first_tool_seen=True)
     assert ev == "event"
 
 
 async def test_planning_event_no_deadline_passes_through():
     """Final attempt (plan_deadline=None) never times out the planning phase."""
     it = _SlowAiter(delay=0.05).__aiter__()
-    ev = await server._next_planning_event(it, None, first_tool_seen=False)
+    ev = await conductor._next_planning_event(it, None, first_tool_seen=False)
     assert ev == "event"
 
 
@@ -898,4 +899,4 @@ async def test_planning_event_propagates_stop_async_iteration():
     await it.__anext__()  # exhaust it
     deadline = _time.monotonic() + 1.0
     with pytest.raises(StopAsyncIteration):
-        await server._next_planning_event(it, deadline, first_tool_seen=False)
+        await conductor._next_planning_event(it, deadline, first_tool_seen=False)

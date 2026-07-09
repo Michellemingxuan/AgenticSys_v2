@@ -56,18 +56,6 @@ from tools.node_trace import (
     _open_node, attach_io, attach_latency, attach_tag, attach_usage,
 )
 
-# Server-local helpers and the planning-watchdog helpers reused verbatim.
-# `server.py` imports THIS module only lazily (inside the thin
-# `_run_turn_streamed` wrapper), so there is no module-load cycle: importing
-# `server` here always finds it fully defined. `_PlanningTimeout` /
-# `_next_planning_event` stay defined in `server.py` (tests reference them as
-# `server._next_planning_event`) and are imported here for use in the stream
-# drive.
-from server import (  # noqa: E402
-    _PlanningTimeout,
-    _TurnAborted,
-    _next_planning_event,
-)
 # NOTE: `PILLAR`, `_SCREEN_TIMEOUT_S`, `_ORCH_PLAN_TIMEOUT_S`, `_REPORTS_DIR`,
 # and `_NODE_TRACE_STORE` (imported from `runner.config` above) are plain
 # module-level values, bound here by value at import time.
@@ -75,6 +63,41 @@ from server import (  # noqa: E402
 # name on the `server` module only — it does NOT reach the copies already
 # bound into this module's namespace, so such patches will not affect the
 # turn body below. Patch `runner.turn.conductor.<NAME>` directly instead.
+
+
+class _TurnAborted(Exception):
+    """Raised from `_run_turn_streamed` checkpoints when the session's
+    `cancel_in_flight` event is set (typically by `post_rewind`). The
+    `_spawn_turn._runner` outer wrapper catches it, logs the abort,
+    emits a `turn_done` with `outcome="aborted"`, and releases the
+    lock so the next queued turn can proceed."""
+
+
+class _PlanningTimeout(Exception):
+    """Round-1 (team-planning) stalled past ORCH_PLAN_TIMEOUT_S — abort + retry."""
+
+
+async def _next_planning_event(stream_iter, plan_deadline, first_tool_seen):
+    """Await the next orchestrator stream event, bounded by the planning deadline.
+
+    While the orchestrator is still PLANNING (no tool call emitted yet) and a
+    ``plan_deadline`` (``time.monotonic`` seconds) is armed, bound the wait by
+    the remaining budget and raise ``_PlanningTimeout`` if it elapses — so a
+    stalled round-1 call is cancelled and retried with a fresh request instead
+    of dead-waiting. Once the first tool call has landed (``first_tool_seen``)
+    the deadline is disarmed and later events stream under the normal turn
+    wall-clock fence. ``plan_deadline=None`` (the final attempt) also disarms it,
+    so a genuinely slow-but-working env degrades to waiting, not hard failure.
+    """
+    if plan_deadline is not None and not first_tool_seen:
+        budget = plan_deadline - time.monotonic()
+        if budget <= 0:
+            raise _PlanningTimeout()
+        try:
+            return await asyncio.wait_for(stream_iter.__anext__(), timeout=budget)
+        except asyncio.TimeoutError as exc:
+            raise _PlanningTimeout() from exc
+    return await stream_iter.__anext__()
 
 
 class TurnRunner:

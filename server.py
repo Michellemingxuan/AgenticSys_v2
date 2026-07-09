@@ -68,6 +68,12 @@ from runner.config import (
     _REPORTS_DIR,
     _SCREEN_TIMEOUT_S,
 )
+# `_TurnAborted` is defined in `runner.turn.conductor` (the planning-watchdog
+# helpers moved there); `_spawn_turn._runner` catches it below when a
+# phase-boundary checkpoint inside `TurnRunner.run()` propagates it. Safe to
+# import at module level here — `conductor.py` no longer imports `server`
+# (dependency is one-way: server -> runner), so there is no load cycle.
+from runner.turn.conductor import _TurnAborted
 from tools.data_tools import init_tools
 
 
@@ -137,14 +143,6 @@ else:
 _QUEUED_TURN_MAX_WAIT_S = float(
     os.environ.get("QUEUED_TURN_MAX_WAIT_S", "90")
 )
-
-
-class _TurnAborted(Exception):
-    """Raised from `_run_turn_streamed` checkpoints when the session's
-    `cancel_in_flight` event is set (typically by `post_rewind`). The
-    `_spawn_turn._runner` outer wrapper catches it, logs the abort,
-    emits a `turn_done` with `outcome="aborted"`, and releases the
-    lock so the next queued turn can proceed."""
 
 
 # ── Per-case session state ──────────────────────────────────────────────────
@@ -371,33 +369,6 @@ def _sse_data(payload: dict) -> str:
     return json.dumps(_json_safe(payload), default=str)
 
 
-class _PlanningTimeout(Exception):
-    """Round-1 (team-planning) stalled past ORCH_PLAN_TIMEOUT_S — abort + retry."""
-
-
-async def _next_planning_event(stream_iter, plan_deadline, first_tool_seen):
-    """Await the next orchestrator stream event, bounded by the planning deadline.
-
-    While the orchestrator is still PLANNING (no tool call emitted yet) and a
-    ``plan_deadline`` (``time.monotonic`` seconds) is armed, bound the wait by
-    the remaining budget and raise ``_PlanningTimeout`` if it elapses — so a
-    stalled round-1 call is cancelled and retried with a fresh request instead
-    of dead-waiting. Once the first tool call has landed (``first_tool_seen``)
-    the deadline is disarmed and later events stream under the normal turn
-    wall-clock fence. ``plan_deadline=None`` (the final attempt) also disarms it,
-    so a genuinely slow-but-working env degrades to waiting, not hard failure.
-    """
-    if plan_deadline is not None and not first_tool_seen:
-        budget = plan_deadline - time.monotonic()
-        if budget <= 0:
-            raise _PlanningTimeout()
-        try:
-            return await asyncio.wait_for(stream_iter.__anext__(), timeout=budget)
-        except asyncio.TimeoutError as exc:
-            raise _PlanningTimeout() from exc
-    return await stream_iter.__anext__()
-
-
 def _append_charts_to_answer(answer_text: str, charts: list[dict]) -> str:
     """DEPRECATED — superseded by the typed ``chart`` SSE event surfaced in
     the reasoning-trace panel. Retained for backward compat with any
@@ -594,8 +565,10 @@ async def _run_turn_streamed(
     → orchestrator stream → coherence review + re-dispatch → finalize) lives
     there as phase methods; this wrapper just constructs and runs it so
     ``_spawn_turn``'s call site (and its wall-clock fence / cancellation) is
-    unchanged. Imported lazily to avoid a module-load cycle (conductor imports
-    server-local helpers at module top).
+    unchanged. ``TurnRunner`` is imported lazily here (rather than at module
+    top) simply to keep this heavy import off `server.py`'s import path until
+    a turn actually runs; there is no module-load cycle — `conductor.py`
+    does not import `server`.
 
     ``started_at`` is the ms-since-epoch timestamp from when the turn was
     received. ``_spawn_turn`` already emits the visible "new turn" events
