@@ -1,6 +1,6 @@
 import types
 
-from tools.agent_tools.specialist_input_tool import assemble_specialist_input
+from agent_factories.agent_tools.specialist_input_tool import assemble_specialist_input
 
 
 def test_cold_specialist_input_is_bare_question():

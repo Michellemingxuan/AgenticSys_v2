@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from agents import Agent
 
-from tools.agent_tools.agent_tool import agent_tool
+from agent_factories.agent_tools.agent_tool import agent_tool
 
 
 @pytest.mark.asyncio
@@ -21,7 +21,7 @@ async def test_agent_tool_honors_timeout_override():
     async def _stall(*_a, **_kw):
         await asyncio.sleep(5)  # would blow a short budget; must be cut short
 
-    with patch("tools.agent_tools.agent_tool.Runner.run", new=_stall):
+    with patch("agent_factories.agent_tools.agent_tool.Runner.run", new=_stall):
         wrapped = agent_tool(
             inner_agent, name="report_agent", description="d",
             timeout_s=0.05, max_turns=1,
@@ -44,7 +44,7 @@ async def test_agent_tool_sanitizes_input_to_inner_agent():
     fake_result = type("R", (), {"final_output": "all clear"})()
 
     with patch(
-        "tools.agent_tools.agent_tool.Runner.run",
+        "agent_factories.agent_tools.agent_tool.Runner.run",
         new=AsyncMock(return_value=fake_result),
     ) as mock_run:
         wrapped = agent_tool(inner_agent, name="x", description="d")
@@ -71,7 +71,7 @@ async def test_agent_tool_redacts_output():
     fake_result = type("R", (), {"final_output": "Found CASE-99999 issue"})()
 
     with patch(
-        "tools.agent_tools.agent_tool.Runner.run",
+        "agent_factories.agent_tools.agent_tool.Runner.run",
         new=AsyncMock(return_value=fake_result),
     ):
         wrapped = agent_tool(inner_agent, name="x", description="d")
@@ -100,7 +100,7 @@ async def test_agent_tool_passes_inner_agent_to_runner():
     fake_result = type("R", (), {"final_output": "ok"})()
 
     with patch(
-        "tools.agent_tools.agent_tool.Runner.run",
+        "agent_factories.agent_tools.agent_tool.Runner.run",
         new=AsyncMock(return_value=fake_result),
     ) as mock_run:
         wrapped = agent_tool(inner_agent, name="x", description="d")
@@ -147,7 +147,7 @@ async def test_agent_tool_multi_turn_keeps_specialist_alive():
     app_ctx = SimpleNamespace(_specialist_histories={})
     wrapper = RunContextWrapper(app_ctx)
 
-    with patch("tools.agent_tools.agent_tool.Runner.run", new=_fake_run):
+    with patch("agent_factories.agent_tools.agent_tool.Runner.run", new=_fake_run):
         wrapped = agent_tool(inner_agent, name="crossbu", description="d")
 
         # Turn 1: no prior history → input is the bare sub-question string.
@@ -209,7 +209,7 @@ async def test_agent_tool_specialist_histories_isolated_per_specialist():
     app_ctx = SimpleNamespace(_specialist_histories={})
     wrapper = RunContextWrapper(app_ctx)
 
-    with patch("tools.agent_tools.agent_tool.Runner.run", new=_fake_run):
+    with patch("agent_factories.agent_tools.agent_tool.Runner.run", new=_fake_run):
         a_tool = agent_tool(inner_a, name="alpha", description="d")
         b_tool = agent_tool(inner_b, name="beta", description="d")
 
@@ -268,7 +268,7 @@ async def test_agent_tool_records_max_turns_exceeded():
     async def _raise(*_a, **_kw):
         raise MaxTurnsExceeded("ran out of turns")
 
-    with patch("tools.agent_tools.agent_tool.Runner.run", new=_raise):
+    with patch("agent_factories.agent_tools.agent_tool.Runner.run", new=_raise):
         wrapped = agent_tool(inner_agent, name="wcc", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx), json.dumps({"sub_question": "anything"})
@@ -296,7 +296,7 @@ async def test_agent_tool_records_model_behavior_error():
     async def _raise(*_a, **_kw):
         raise ModelBehaviorError("malformed JSON output")
 
-    with patch("tools.agent_tools.agent_tool.Runner.run", new=_raise):
+    with patch("agent_factories.agent_tools.agent_tool.Runner.run", new=_raise):
         wrapped = agent_tool(inner_agent, name="domain_x", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx), json.dumps({"sub_question": "anything"})
@@ -319,7 +319,7 @@ async def test_agent_tool_records_generic_exception():
     async def _raise(*_a, **_kw):
         raise RuntimeError("connection reset")
 
-    with patch("tools.agent_tools.agent_tool.Runner.run", new=_raise):
+    with patch("agent_factories.agent_tools.agent_tool.Runner.run", new=_raise):
         wrapped = agent_tool(inner_agent, name="domain_y", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx), json.dumps({"sub_question": "anything"})
@@ -345,7 +345,7 @@ async def test_agent_tool_records_timeout():
         raise _asyncio.TimeoutError()
 
     # Patch wait_for itself so we don't have to actually wait the timeout.
-    with patch("tools.agent_tools.agent_tool.asyncio.wait_for", new=_raise):
+    with patch("agent_factories.agent_tools.agent_tool.asyncio.wait_for", new=_raise):
         wrapped = agent_tool(inner_agent, name="domain_z", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx), json.dumps({"sub_question": "anything"})
@@ -366,7 +366,7 @@ async def test_agent_tool_success_does_not_record_error():
     fake_result = type("R", (), {"final_output": "all good"})()
 
     with patch(
-        "tools.agent_tools.agent_tool.Runner.run",
+        "agent_factories.agent_tools.agent_tool.Runner.run",
         new=AsyncMock(return_value=fake_result),
     ):
         wrapped = agent_tool(inner_agent, name="ok_tool", description="d")
@@ -386,10 +386,10 @@ async def test_agent_tool_success_does_not_record_error():
 # session-scoped dict that survives across turns.
 
 
-from tools.agent_tools.specialist_input_tool import (
+from agent_factories.agent_tools.specialist_input_tool import (
     _compact_specialist_history,
 )
-from tools.agent_tools.distiller_pass import _distill_and_persist
+from agent_factories.agent_tools.distiller_pass import _distill_and_persist
 
 
 def _make_kb_ctx(distiller=None, kb=None):
@@ -463,7 +463,7 @@ async def test_agent_tool_prepends_kb_digest_when_no_intra_turn_history():
         ]},
     )
 
-    with patch("tools.agent_tools.agent_tool.Runner.run", new=_fake_run):
+    with patch("agent_factories.agent_tools.agent_tool.Runner.run", new=_fake_run):
         wrapped = agent_tool(inner_agent, name="modeling", description="d")
         await wrapped.on_invoke_tool(
             RunContextWrapper(ctx),
@@ -508,7 +508,7 @@ async def test_agent_tool_skips_kb_digest_on_intra_turn_followup():
         {"role": "assistant", "content": "prior answer"},
     ]
 
-    with patch("tools.agent_tools.agent_tool.Runner.run", new=_fake_run):
+    with patch("agent_factories.agent_tools.agent_tool.Runner.run", new=_fake_run):
         wrapped = agent_tool(inner_agent, name="modeling", description="d")
         await wrapped.on_invoke_tool(
             RunContextWrapper(ctx),
@@ -569,7 +569,7 @@ async def test_distiller_persists_knowledge_points_to_session_kb():
     ctx = _make_kb_ctx(distiller=distiller, kb={})
 
     import asyncio as _asyncio
-    with patch("tools.agent_tools.agent_tool.Runner.run", new=_fake_run):
+    with patch("agent_factories.agent_tools.agent_tool.Runner.run", new=_fake_run):
         wrapped = agent_tool(inner_agent, name="spend_payments", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx),
@@ -620,7 +620,7 @@ async def test_distiller_failure_does_not_break_specialist_response():
     ctx = _make_kb_ctx(distiller=distiller, kb={})
 
     import asyncio as _asyncio
-    with patch("tools.agent_tools.agent_tool.Runner.run", new=_fake_run):
+    with patch("agent_factories.agent_tools.agent_tool.Runner.run", new=_fake_run):
         wrapped = agent_tool(inner_agent, name="bureau", description="d")
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx),

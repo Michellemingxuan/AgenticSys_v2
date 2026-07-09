@@ -7,7 +7,7 @@ _fill_kp_numbers, _values_match, _ParsedSeries, or _extract_data_tool_outputs
 by name at the time of extraction — those functions were tested indirectly
 through the higher-level redacting_tool integration tests.
 """
-from tools.agent_tools.series_extract import (  # noqa: F401
+from agent_factories.agent_tools.series_extract import (  # noqa: F401
     _ParsedSeries,
     _extract_data_tool_outputs,
     _fill_kp_numbers,

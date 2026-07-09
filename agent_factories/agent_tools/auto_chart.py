@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tools.agent_tools.series_extract import _ParsedSeries, _parse_series_from_tool_outputs
+from agent_factories.agent_tools.series_extract import _ParsedSeries, _parse_series_from_tool_outputs
 from tools.viz_renderer import kp_to_vega_spec, render_chart, _infer_unit
 
 

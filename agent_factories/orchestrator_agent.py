@@ -10,7 +10,7 @@ from pathlib import Path
 
 from agents import Agent, AgentOutputSchema, ModelSettings
 
-from tools.agent_tools import agent_tool
+from agent_factories.agent_tools import agent_tool
 from models.types import FinalAnswer
 from skills.domain.loader import load_domain_skill as _load_domain_skill
 from skills.loader import load_skill as _load_skill

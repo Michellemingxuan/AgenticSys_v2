@@ -15,7 +15,7 @@ async def test_auto_chart_emits_chart_pending_before_render(tmp_path):
     placeholder. (make_chart already does this; the auto-chart path didn't.)
     """
     from types import SimpleNamespace
-    from tools.agent_tools.auto_chart import _auto_chart_from_tool_outputs
+    from agent_factories.agent_tools.auto_chart import _auto_chart_from_tool_outputs
 
     class _Logger:
         def __init__(self):
@@ -68,7 +68,7 @@ async def test_auto_chart_no_emit_hook_does_not_crash(tmp_path):
     """When the AppContext has no `_emit_event` (legacy callers / notebooks),
     the auto-chart path must still render without raising."""
     from types import SimpleNamespace
-    from tools.agent_tools.auto_chart import _auto_chart_from_tool_outputs
+    from agent_factories.agent_tools.auto_chart import _auto_chart_from_tool_outputs
 
     class _Logger:
         def __init__(self):

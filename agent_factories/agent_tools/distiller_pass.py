@@ -15,7 +15,7 @@ from agents import Runner
 from llm.firewall_stack import LLM_CALL_KIND
 from logger.process_timer import ProcessTimer
 from tools.node_trace import _open_node, attach_extra, attach_tag
-from tools.agent_tools.series_extract import _parse_series_from_tool_outputs, _fill_kp_numbers
+from agent_factories.agent_tools.series_extract import _parse_series_from_tool_outputs, _fill_kp_numbers
 
 # Wall-clock budget for the second-pass distiller. Distillation is purely
 # text-extraction; should be fast. If it stalls, log + skip — the specialist

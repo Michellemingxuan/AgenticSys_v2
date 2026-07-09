@@ -1,4 +1,4 @@
-from tools.agent_tools.specialist_input_tool import _compose_specialist_input, _render_directed_variables
+from agent_factories.agent_tools.specialist_input_tool import _compose_specialist_input, _render_directed_variables
 
 def test_compose_no_regression_without_directed_block():
     # byte-identical to the 3-arg behavior when directed_block omitted
