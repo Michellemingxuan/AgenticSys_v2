@@ -21,6 +21,8 @@ sys.path.insert(0, os.path.dirname(_HERE))
 
 import server  # noqa: E402
 
+from runner.turn.input_assembly import _format_kb_warmth_hint  # noqa: E402
+
 
 # ── KB-warmth hint ──────────────────────────────────────────────────────────
 
@@ -34,7 +36,7 @@ def test_format_kb_warmth_hint_lists_warm_specialists():
                      {"topic": "e", "claim": "v"}],
         "bureau": [],  # empty → must NOT appear in the hint
     }
-    hint = server._format_kb_warmth_hint(kb)
+    hint = _format_kb_warmth_hint(kb)
     assert hint.startswith("[KB-warmth —")
     assert "spend_payments (3 KPs)" in hint
     assert "modeling (2 KPs)" in hint
@@ -49,9 +51,9 @@ def test_format_kb_warmth_hint_lists_warm_specialists():
 def test_format_kb_warmth_hint_empty_when_no_warm_specialists():
     """Empty KB or all-empty values → empty hint, so the orchestrator's
     prompt isn't cluttered on the first turn or after /rewind."""
-    assert server._format_kb_warmth_hint({}) == ""
-    assert server._format_kb_warmth_hint({"x": [], "y": []}) == ""
-    assert server._format_kb_warmth_hint(None) == ""
+    assert _format_kb_warmth_hint({}) == ""
+    assert _format_kb_warmth_hint({"x": [], "y": []}) == ""
+    assert _format_kb_warmth_hint(None) == ""
 
 
 # ── Bounded session memory ──────────────────────────────────────────────────
