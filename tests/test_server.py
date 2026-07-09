@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(_HERE))
 import server  # noqa: E402
 
 from runner.turn import cache  # noqa: E402
+from runner.turn import finalize  # noqa: E402
 from runner.turn.input_assembly import _format_kb_warmth_hint  # noqa: E402
 
 
@@ -210,7 +211,7 @@ def test_collect_turn_charts_filters_by_turn_and_image_path():
              "image_path": "/abs/foo/charts/t-now-delinq.png"},
         ],
     }
-    charts = server._collect_turn_charts(kb, "t-now", "CASE-1")
+    charts = finalize._collect_turn_charts(kb, "t-now", "CASE-1")
     topics = {c["topic"] for c in charts}
     assert topics == {"trend", "delinq"}
     # URL points at the Flask route, not the on-disk path.
@@ -236,7 +237,7 @@ def test_collect_turn_charts_dedupes_same_topic_per_specialist():
              "image_path": "/abs/case/charts/t-now-merchants.png"},
         ],
     }
-    charts = server._collect_turn_charts(kb, "t-now", "C1")
+    charts = finalize._collect_turn_charts(kb, "t-now", "C1")
     topics = sorted(c["topic"] for c in charts)
     assert topics == ["merchants", "monthly_trend"]
     # The dedup target carries the LATEST image_path (the v2 one).
@@ -257,7 +258,7 @@ def test_collect_turn_charts_does_not_dedupe_across_specialists():
              "image_path": "/abs/case/charts/t-x-mod.png"},
         ],
     }
-    charts = server._collect_turn_charts(kb, "t", "C")
+    charts = finalize._collect_turn_charts(kb, "t", "C")
     specialists = sorted(c["specialist"] for c in charts)
     assert specialists == ["modeling", "spend_payments"]
 
@@ -284,7 +285,7 @@ def test_collect_turn_charts_surfaces_table_kps_without_image():
              "viz": {"kind": "trend"}},
         ],
     }
-    charts = server._collect_turn_charts(kb, "t-now", "C1")
+    charts = finalize._collect_turn_charts(kb, "t-now", "C1")
     topics = sorted(c["topic"] for c in charts)
     assert topics == ["tiny_summary", "trend"]
     trend = next(c for c in charts if c["topic"] == "trend")
@@ -294,9 +295,9 @@ def test_collect_turn_charts_surfaces_table_kps_without_image():
 
 
 def test_collect_turn_charts_handles_empty_or_invalid_kb():
-    assert server._collect_turn_charts({}, "t1", "C") == []
-    assert server._collect_turn_charts(None, "t1", "C") == []
-    assert server._collect_turn_charts({"x": "not a list"}, "t1", "C") == []
+    assert finalize._collect_turn_charts({}, "t1", "C") == []
+    assert finalize._collect_turn_charts(None, "t1", "C") == []
+    assert finalize._collect_turn_charts({"x": "not a list"}, "t1", "C") == []
 
 
 def test_append_charts_to_answer_no_op_when_empty():
@@ -388,7 +389,7 @@ def test_chart_payload_carries_trend_dual_kind_and_layered_spec():
 
     # Mirror server.py:1107-1123 — collect, then enrich each chart with
     # the matching KP's metadata.
-    charts = server._collect_turn_charts(kb, "t-now", "CASE-A")
+    charts = finalize._collect_turn_charts(kb, "t-now", "CASE-A")
     assert len(charts) == 1
     c = charts[0]
     kp = cache._find_kp(kb, c["specialist"], c["topic"], "t-now")
@@ -439,7 +440,7 @@ def test_chart_payload_carries_trend_grid_kind_and_vconcat_spec():
             ["tsr", "cdss", "txn_count"], vega_spec)
     ]}
 
-    charts = server._collect_turn_charts(kb, "t-now", "CASE-B")
+    charts = finalize._collect_turn_charts(kb, "t-now", "CASE-B")
     c = charts[0]
     kp = cache._find_kp(kb, c["specialist"], c["topic"], "t-now")
     payload = {
@@ -473,7 +474,7 @@ def test_chart_payload_kind_string_unknown_falls_back_to_empty():
         "image_path": "/abs/charts/t-legacy.png",
         # No `viz`, no `vega_spec`.
     }]}
-    charts = server._collect_turn_charts(kb, "t", "C")
+    charts = finalize._collect_turn_charts(kb, "t", "C")
     kp = cache._find_kp(kb, "modeling", "legacy", "t")
     kind = ((kp or {}).get("viz") or {}).get("kind", "")
     vega = (kp or {}).get("vega_spec")
@@ -682,7 +683,7 @@ def test_chart_payload_carries_table_kind_and_numbers():
 
     # Mirror server.py:1703-1724 — collect, then enrich each chart with
     # the matching KP's metadata (same logic as the trend_dual test above).
-    charts = server._collect_turn_charts(kb, "t-now", "CASE-T")
+    charts = finalize._collect_turn_charts(kb, "t-now", "CASE-T")
     assert len(charts) == 1
     c = charts[0]
     kp = cache._find_kp(kb, c["specialist"], c["topic"], "t-now")
@@ -730,7 +731,7 @@ def test_replay_completed_specialists_emits_team_plan_and_agent_completed():
          "payload": {"findings": "ok"}, "duration_ms": 120},
         {"call_id": "c2", "tool": "report_agent"},  # no payload → skipped
     ]
-    server._replay_completed_specialists(sess, "t1", tool_calls)
+    finalize._replay_completed_specialists(sess, "t1", tool_calls)
 
     names = [n for n, _ in sess.events]
     assert names == ["team_plan", "agent_completed"]
@@ -743,7 +744,7 @@ def test_replay_completed_specialists_emits_team_plan_and_agent_completed():
 
 def test_replay_completed_specialists_noop_when_none_completed():
     sess = _RecordingSess()
-    server._replay_completed_specialists(sess, "t1", [{"call_id": "c1", "tool": "x"}])
+    finalize._replay_completed_specialists(sess, "t1", [{"call_id": "c1", "tool": "x"}])
     assert sess.events == []
 
 
