@@ -1,6 +1,6 @@
 """Render KnowledgePoint viz specs to PNG charts + Vega-Lite specs.
 
-Phase 2 of the memory rework (see ``tasks/prd-memory-management.md``).
+Phase 2 of the memory rework.
 
 Each :class:`models.types.KnowledgePoint` may carry a ``viz`` dict like
 ``{"kind": "trend"|"bar"|"share", "x_field": "period", "y_field": "value"}``
