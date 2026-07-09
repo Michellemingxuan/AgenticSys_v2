@@ -6,7 +6,7 @@ from pathlib import Path
 
 from agents import RunContextWrapper, function_tool
 
-from agent_factories.app_context import AppContext
+from models.app_context import AppContext
 
 
 # Curated case-report .md files often carry raw numeric values that are 6+

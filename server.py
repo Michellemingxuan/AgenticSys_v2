@@ -47,7 +47,7 @@ except ImportError:
 from flask import Flask, Response, abort, jsonify, request, send_from_directory
 from flask_cors import CORS
 
-from agent_factories.app_context import AppContext  # re-exported for tests (server.AppContext)
+from models.app_context import AppContext  # re-exported for tests (server.AppContext)
 from agent_factories.chat_agent import ChatAgent
 from agent_factories.helper_tools import build_helper_tools
 from config.pillar_loader import PillarLoader

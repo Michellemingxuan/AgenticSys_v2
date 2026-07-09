@@ -337,7 +337,7 @@ cells.append(md(
 cells.append(code(
     "from agents import Runner\n"
     "from agents.exceptions import AgentsException\n"
-    "from agent_factories.app_context import AppContext\n"
+    "from models.app_context import AppContext\n"
     "from llm.firewall_stack import redact_payload\n\n"
     "if screened_question is None:\n"
     "    raise SystemExit('Question did not pass screen — nothing to run.')\n\n"

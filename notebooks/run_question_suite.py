@@ -61,7 +61,7 @@ from agents import Runner
 from agents.exceptions import AgentsException
 from agents.items import MessageOutputItem, ToolCallItem, ToolCallOutputItem
 
-from agent_factories.app_context import AppContext
+from models.app_context import AppContext
 from agent_factories.chat_agent import ChatAgent
 from agent_factories.data_manager_agent import DataManagerAgent
 from agent_factories.helper_tools import build_helper_tools

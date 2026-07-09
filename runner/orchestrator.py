@@ -8,7 +8,7 @@ from agents import Runner
 from agents.exceptions import AgentsException
 from agents.items import ToolCallOutputItem
 
-from agent_factories.app_context import AppContext
+from models.app_context import AppContext
 from agent_factories.distiller_agent import build_distiller_agent
 from agent_factories.orchestrator_agent import build_orchestrator_agent
 from agent_factories.report_agent import build_report_agent
