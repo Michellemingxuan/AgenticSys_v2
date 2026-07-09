@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(_HERE))
 
 import server  # noqa: E402
 
+from runner.turn import cache  # noqa: E402
 from runner.turn.input_assembly import _format_kb_warmth_hint  # noqa: E402
 
 
@@ -60,14 +61,14 @@ def test_format_kb_warmth_hint_empty_when_no_warm_specialists():
 
 
 def test_store_cached_qa_evicts_oldest_entry(monkeypatch):
-    monkeypatch.setattr(server, "_QA_CACHE_MAX_ENTRIES", 2)
+    monkeypatch.setattr(cache, "_QA_CACHE_MAX_ENTRIES", 2)
     sess = SimpleNamespace(qa_cache={}, _qa_turn_seq=0)
 
-    server._store_cached_qa(sess, "q1", {"answer": "a1"})
-    server._store_cached_qa(sess, "q2", {"answer": "a2"})
+    cache._store_cached_qa(sess, "q1", {"answer": "a1"})
+    cache._store_cached_qa(sess, "q2", {"answer": "a2"})
     # Touch q1 so q2 becomes the least-recently used entry.
-    assert server._get_cached_qa(sess, "q1")["answer"] == "a1"
-    evicted = server._store_cached_qa(sess, "q3", {"answer": "a3"})
+    assert cache._get_cached_qa(sess, "q1")["answer"] == "a1"
+    evicted = cache._store_cached_qa(sess, "q3", {"answer": "a3"})
 
     assert evicted == 1
     assert list(sess.qa_cache) == ["q1", "q3"]
@@ -347,7 +348,7 @@ def test_find_kp_returns_latest_matching_topic_in_turn():
                 {"layer": []}, turn="t-prev"),
         ],
     }
-    found = server._find_kp(kb, "modeling", "score_vs_dpd", "t-now")
+    found = cache._find_kp(kb, "modeling", "score_vs_dpd", "t-now")
     assert found is not None
     # Latest in-turn entry: vega_spec has the non-empty layer list.
     assert len(found["vega_spec"]["layer"]) == 2
@@ -355,10 +356,10 @@ def test_find_kp_returns_latest_matching_topic_in_turn():
 
 def test_find_kp_returns_none_when_no_match():
     kb = {"modeling": [_kp("a", "trend", ["v"], {"mark": "line"})]}
-    assert server._find_kp(kb, "modeling", "missing", "t-now") is None
-    assert server._find_kp(kb, "other_spec", "a", "t-now") is None
-    assert server._find_kp({}, "modeling", "a", "t-now") is None
-    assert server._find_kp(None, "modeling", "a", "t-now") is None
+    assert cache._find_kp(kb, "modeling", "missing", "t-now") is None
+    assert cache._find_kp(kb, "other_spec", "a", "t-now") is None
+    assert cache._find_kp({}, "modeling", "a", "t-now") is None
+    assert cache._find_kp(None, "modeling", "a", "t-now") is None
 
 
 def test_chart_payload_carries_trend_dual_kind_and_layered_spec():
@@ -390,7 +391,7 @@ def test_chart_payload_carries_trend_dual_kind_and_layered_spec():
     charts = server._collect_turn_charts(kb, "t-now", "CASE-A")
     assert len(charts) == 1
     c = charts[0]
-    kp = server._find_kp(kb, c["specialist"], c["topic"], "t-now")
+    kp = cache._find_kp(kb, c["specialist"], c["topic"], "t-now")
     payload = {
         "specialist": c["specialist"],
         "topic": c["topic"],
@@ -440,7 +441,7 @@ def test_chart_payload_carries_trend_grid_kind_and_vconcat_spec():
 
     charts = server._collect_turn_charts(kb, "t-now", "CASE-B")
     c = charts[0]
-    kp = server._find_kp(kb, c["specialist"], c["topic"], "t-now")
+    kp = cache._find_kp(kb, c["specialist"], c["topic"], "t-now")
     payload = {
         "specialist": c["specialist"],
         "topic": c["topic"],
@@ -473,7 +474,7 @@ def test_chart_payload_kind_string_unknown_falls_back_to_empty():
         # No `viz`, no `vega_spec`.
     }]}
     charts = server._collect_turn_charts(kb, "t", "C")
-    kp = server._find_kp(kb, "modeling", "legacy", "t")
+    kp = cache._find_kp(kb, "modeling", "legacy", "t")
     kind = ((kp or {}).get("viz") or {}).get("kind", "")
     vega = (kp or {}).get("vega_spec")
     assert kind == ""
@@ -684,7 +685,7 @@ def test_chart_payload_carries_table_kind_and_numbers():
     charts = server._collect_turn_charts(kb, "t-now", "CASE-T")
     assert len(charts) == 1
     c = charts[0]
-    kp = server._find_kp(kb, c["specialist"], c["topic"], "t-now")
+    kp = cache._find_kp(kb, c["specialist"], c["topic"], "t-now")
     viz = (kp or {}).get("viz") or {}
     payload = {
         "specialist": c["specialist"],

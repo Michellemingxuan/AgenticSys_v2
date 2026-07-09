@@ -1,4 +1,4 @@
-import server
+from runner.turn import cache
 
 
 def _mk_session():
@@ -11,7 +11,7 @@ def _mk_session():
 
 def test_store_stamps_increasing_turn_seq():
     sess = _mk_session()
-    server._store_cached_qa(sess, "q1", {"answer": "a1"})
-    server._store_cached_qa(sess, "q2", {"answer": "a2"})
+    cache._store_cached_qa(sess, "q1", {"answer": "a1"})
+    cache._store_cached_qa(sess, "q2", {"answer": "a2"})
     seqs = [sess.qa_cache["q1"]["turn_seq"], sess.qa_cache["q2"]["turn_seq"]]
     assert seqs[0] < seqs[1]                      # strictly increasing

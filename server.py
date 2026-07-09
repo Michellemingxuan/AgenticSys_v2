@@ -93,7 +93,6 @@ PING_INTERVAL_S = 5.0  # was 15.0 — tighter pings reduce silent SSE disconnect
 # had silently died during the idle window, so the new turn's events landed in
 # a dead subscriber queue and the UI looked frozen. 5s is well within every
 # common proxy timeout. Cost is trivial — 12 noop frames/min/client.
-_QA_CACHE_MAX_ENTRIES = int(os.environ.get("QA_CACHE_MAX_ENTRIES", "64"))
 _SSE_QUEUE_MAXSIZE = int(os.environ.get("SSE_QUEUE_MAXSIZE", "256"))
 
 # Wall-clock budget for a complete turn (screen + orchestrator + all
@@ -453,59 +452,6 @@ def _replay_completed_specialists(sess, turn_id: str, tool_calls: list[dict]) ->
     #  Follow-up context lives in specialist_kb + KB warmth hint.)
 
 
-def _normalize_q(q: str) -> str:
-    """Normalize a question for the per-session exact-match QA cache.
-
-    Lowercase, strip outer whitespace, collapse internal whitespace. The
-    cache is intentionally exact-match-after-redaction (run_normalize on
-    `verdict.redacted_question`); fuzzy similarity is the orchestrator's
-    job (team_construction.md), not the cache's.
-    """
-    return " ".join((q or "").strip().lower().split())
-
-
-def _get_cached_qa(sess: CaseSession, cache_key: str | None) -> dict | None:
-    """Return a QA-cache entry and refresh its insertion order.
-
-    ``dict`` preserves insertion order on supported Python versions, so a
-    pop/reinsert gives us LRU behavior without changing the stored type or
-    existing tests/fixtures.
-    """
-    if not cache_key:
-        return None
-    cached = sess.qa_cache.get(cache_key)
-    if cached is None:
-        return None
-    try:
-        sess.qa_cache[cache_key] = sess.qa_cache.pop(cache_key)
-    except Exception:
-        pass
-    return cached
-
-
-def _store_cached_qa(sess: CaseSession, cache_key: str | None, value: dict) -> int:
-    """Store a QA-cache entry and evict oldest entries beyond the cap.
-
-    Returns the number of entries evicted. The cache is a speed optimization,
-    not the audit source, so bounding it avoids long sessions retaining every
-    answer payload forever.
-    """
-    if not cache_key:
-        return 0
-    sess._qa_turn_seq += 1
-    value["turn_seq"] = sess._qa_turn_seq
-    sess.qa_cache[cache_key] = value
-    evicted = 0
-    while _QA_CACHE_MAX_ENTRIES > 0 and len(sess.qa_cache) > _QA_CACHE_MAX_ENTRIES:
-        try:
-            oldest = next(iter(sess.qa_cache))
-        except StopIteration:
-            break
-        sess.qa_cache.pop(oldest, None)
-        evicted += 1
-    return evicted
-
-
 def _json_safe(obj):
     """Recursively replace non-finite floats (NaN / Infinity) with None.
 
@@ -671,26 +617,6 @@ def _detect_missing_reanswers(tool_calls: list[dict]) -> list[dict]:
                 "contradiction": str(r.get("contradiction") or "")[:200],
             })
     return out
-
-
-def _find_kp(specialist_kb: dict, specialist: str, topic: str,
-             turn_id: str) -> dict | None:
-    """Return the latest KP for (specialist, topic) captured in this turn,
-    or None when not present. Used to enrich the chart SSE event with the
-    KP's claim / source_call / vega_spec."""
-    if not isinstance(specialist_kb, dict):
-        return None
-    kps = specialist_kb.get(specialist) or []
-    found: dict | None = None
-    for kp in kps:
-        if not isinstance(kp, dict):
-            continue
-        if kp.get("captured_at_turn") != turn_id:
-            continue
-        if kp.get("topic") != topic:
-            continue
-        found = kp  # latest-wins (chronological iteration)
-    return found
 
 
 def _split_cases(case_ids: list[str]) -> dict[str, list[str]]:
