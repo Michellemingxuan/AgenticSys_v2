@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agent_factories.agent_tools.series_extract import _ParsedSeries, _parse_series_from_tool_outputs
-from tools.viz_renderer import kp_to_vega_spec, render_chart, _infer_unit
+from tools.viz_renderer import render_chart, _infer_unit
 
 
 async def _auto_chart_from_tool_outputs(
@@ -311,9 +311,8 @@ def _render_auto_charts(
                 "captured_at_turn": turn_id,
                 "confidence": "high",
             }
-            spec = kp_to_vega_spec(kp_dict)
-            if spec:
-                kp_dict["vega_spec"] = spec
+            # vega_spec is regenerated at emit time (finalize._build_chart_payload),
+            # not stored on the KP — keeps the KB / distilled memory lean.
             _emit_pending(topic, kind)
             img_path = render_chart(kp_dict, charts_dir, turn_id=turn_id, logger=logger)
             if img_path:
@@ -361,9 +360,8 @@ def _render_auto_charts(
             "captured_at_turn": turn_id,
             "confidence": "high",
         }
-        spec = kp_to_vega_spec(kp_dict)
-        if spec:
-            kp_dict["vega_spec"] = spec
+        # vega_spec is regenerated at emit time (finalize._build_chart_payload),
+        # not stored on the KP — keeps the KB / distilled memory lean.
         _emit_pending(topic_slug, "share")
         img_path = render_chart(kp_dict, charts_dir, turn_id=turn_id, logger=logger)
         if img_path:

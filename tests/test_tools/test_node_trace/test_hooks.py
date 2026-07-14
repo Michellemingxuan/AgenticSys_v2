@@ -62,6 +62,76 @@ async def test_hooks_create_round_under_parent(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_hooks_estimate_tokens_when_no_usage(tmp_path: Path):
+    """Backends that return NO usage object (e.g. safechain, which doesn't) must
+    still get token counts on the row — estimated via tiktoken from the stashed
+    input + captured output — and be flagged `tokens_estimated`. Mirrors the
+    private-env orchestrator path where input/output capture but usage is absent.
+    `cached_input_tokens` stays null (no cache rate without real usage).
+    """
+    import json
+
+    store = NodeTraceStore(str(tmp_path / "h.db"))
+    async with NodeTrace(
+        store, chat_id="c", case_id="x", turn_id="T",
+        node="orchestrator", depth=0,
+    ) as parent:
+        hooks = NodeTraceRunHooks(store, parent)
+        fake_agent = SimpleNamespace(model="gpt-4.1")
+        await hooks.on_llm_start(
+            None, fake_agent, "you are the orchestrator; dispatch specialists",
+            [{"role": "user", "content": "did the spending spike and what drove it?"}],
+        )
+        # safechain-style response: NO `usage` attribute.
+        fake_response = SimpleNamespace(
+            usage=None,
+            to_input_items=lambda: [
+                {"type": "function_call", "id": "c1", "call_id": "c1",
+                 "name": "spend_payments", "arguments": '{"sub_question": "spike?"}'},
+            ],
+        )
+        await hooks.on_llm_end(None, fake_agent, fake_response)
+
+    conn = sqlite3.connect(str(tmp_path / "h.db"))
+    p_tok, c_tok, t_tok, cached, extra_json = conn.execute(
+        "SELECT prompt_tokens, completion_tokens, total_tokens, "
+        "cached_input_tokens, extra_json FROM node_trace "
+        "WHERE node='orchestrator.round_1'"
+    ).fetchone()
+    assert p_tok and p_tok > 0            # estimated prompt tokens
+    assert c_tok and c_tok > 0            # estimated completion tokens
+    assert t_tok == p_tok + c_tok
+    assert cached is None                 # no cache rate without real usage
+    assert json.loads(extra_json)["tokens_estimated"] is True
+
+
+@pytest.mark.asyncio
+async def test_hooks_does_not_estimate_when_usage_present(tmp_path: Path):
+    """Dev/OpenAI path is untouched: when `usage` is present the exact counts
+    are used and `tokens_estimated` is False."""
+    import json
+
+    store = NodeTraceStore(str(tmp_path / "h.db"))
+    async with NodeTrace(store, chat_id="c", case_id="x", turn_id="T",
+                         node="orchestrator", depth=0) as parent:
+        hooks = NodeTraceRunHooks(store, parent)
+        fake_agent = SimpleNamespace(model="gpt-4.1")
+        await hooks.on_llm_start(None, fake_agent, "sys", [{"role": "user", "content": "q"}])
+        await hooks.on_llm_end(None, fake_agent, SimpleNamespace(
+            usage=SimpleNamespace(input_tokens=120, output_tokens=18, total_tokens=138,
+                                  input_tokens_details={"cached_tokens": 30},
+                                  output_tokens_details=None),
+            to_input_items=lambda: []))
+
+    conn = sqlite3.connect(str(tmp_path / "h.db"))
+    p_tok, cached, extra_json = conn.execute(
+        "SELECT prompt_tokens, cached_input_tokens, extra_json FROM node_trace "
+        "WHERE node='orchestrator.round_1'").fetchone()
+    assert p_tok == 120 and cached == 30   # exact, from usage
+    assert json.loads(extra_json)["tokens_estimated"] is False
+
+
+@pytest.mark.asyncio
 async def test_hooks_handle_duplicate_start_events(tmp_path: Path):
     """Reproduces the SDK pattern where on_llm_start fires TWICE in rapid
     succession for the same underlying LLM call (once for the streamed

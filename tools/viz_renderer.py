@@ -9,8 +9,10 @@ this module produces:
 
   * a static PNG written to ``reports/<case_id>/charts/<turn_id>-<topic>.png``
     for inline embedding in the agent's markdown answer, and
-  * a minimal Vega-Lite v5 spec stored on the KP itself (``vega_spec``)
-    so downstream tooling / future interactive frontends can re-render.
+  * a minimal Vega-Lite v5 spec (``kp_to_vega_spec``) for interactive
+    frontends. This is NOT stored on the KP — it is regenerated on demand
+    at emit time (``finalize._build_chart_payload``) so the KB / distilled
+    memory that flows across turns stays lean.
 
 Failures (matplotlib import error on a stripped image, malformed numbers,
 unrecognised kind, etc.) are logged but never raised — the caller treats
@@ -177,11 +179,32 @@ def _chart_labels(kp: dict) -> dict:
     if op_m:
         op = op_m.group(1)
 
-    title = _humanize(topic) if topic else ""
-    if table and not title:
-        title = _humanize(table)
-    elif table and title and len(title) < 30:
-        title = f"{title} ({table})"
+    # Build a readable title from structured metadata, KEEPING the variable's
+    # underscores (it is a real column name — humanizing it to spaces makes the
+    # title impossible to map back to the column). Shape:
+    #   "Trend of <variable> by <specialist>"
+    # (`<specialist>` lifted from the auto-chart topic prefix
+    # `<specialist>_<variable>_<kind>`). Falls back to the raw topic when the
+    # pattern doesn't apply (e.g. custom make_chart topics).
+    viz = kp.get("viz") if isinstance(kp, dict) else None
+    viz = viz if isinstance(viz, dict) else {}
+    y_fields = [y for y in (viz.get("y_fields") or []) if y and y != "value"]
+    _KIND_WORD = {
+        "trend": "Trend", "trend_dual": "Trend", "trend_grid": "Trend",
+        "bar": "Breakdown", "share": "Share",
+        "histogram": "Distribution", "kde": "Distribution", "pie": "Share",
+    }
+    kind_word = _KIND_WORD.get(viz.get("kind") or "", "")
+    var = " & ".join(y_fields)
+    title = ""
+    if kind_word and var:
+        title = f"{kind_word} of {var}"
+        if topic and y_fields[0] in topic:
+            head = topic.split(y_fields[0], 1)[0].strip("_")
+            if head and head != topic.strip("_"):
+                title += f" by {head}"
+    if not title:
+        title = topic.strip() if topic else (_humanize(table) if table else "")
 
     y_label = _label_with_unit(value_col, op)
     x_label = (
@@ -1125,12 +1148,18 @@ def kp_to_vega_spec(kp: dict) -> dict | None:
         "data": {"values": numbers},
     }
 
-    # Vega-Lite number format for value labels. ".3~s" gives ~3
-    # significant figures with SI suffix and strips trailing zeros:
-    #   1200 → "1.2k", 12000 → "12k", 1_234_567 → "1.23M". Same idea as
-    # `_format_axis_value` on the matplotlib path, so the PNG and the
-    # interactive SVG read consistently.
-    _LABEL_FMT = ".3~s"
+    # Vega-Lite number format for value labels. ".3~r" = 3 significant
+    # figures in DECIMAL notation, trailing zeros stripped:
+    #   9.174 → "9.17", 0.639 → "0.639", -0.138 → "-0.138", 1200 → "1200".
+    # We deliberately do NOT use the SI specifier (".3~s") here: for sub-1
+    # values d3's SI prefix renders the 10⁻³ range with a "milli" suffix
+    # (0.639 → "639m"), which misreads model scores / shares as unit-bearing
+    # quantities. ".3~r" leaves every ≥1 label byte-identical to the old
+    # output (9.17, 6.69, 3.13, 1.96 …) while showing small decimals
+    # faithfully. Trade-off: values ≥1000 are no longer abbreviated
+    # (1_234_567 → "1230000", not "1.23M"); the matplotlib axis path
+    # (`_format_axis_value`) still abbreviates its own tick labels.
+    _LABEL_FMT = ".3~r"
 
     # Mark policy: single-series kinds keep inline `text` value labels
     # (low collision risk, reads at a glance). Multi-series kinds drop

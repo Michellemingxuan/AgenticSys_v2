@@ -21,7 +21,7 @@ class TestPillarLoader:
         pillar = loader.load("credit_risk")
         assert pillar is not None
         assert pillar["pillar"] == "credit_risk"
-        assert pillar["display_name"] == "Credit & Risk"
+        assert pillar["display_name"] == "Credit & Risk (Commercial / SBS)"
         assert "specialists" in pillar
 
     def test_specialist_has_focus_and_overlay(self, loader: PillarLoader):

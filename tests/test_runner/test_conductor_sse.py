@@ -11,13 +11,14 @@ run degrades to the documented ``_open_node`` no-op path (tools/node_trace/
 core.py: store is None -> _NullNode) instead of writing to the real on-disk
 trace DB — a config-constant swap, not a stub of the code under test.
 """
+import threading
 import types
 
 import pytest
 
 import runner.turn.conductor as conductor
 from runner.turn.cache import _normalize_q
-from runner.turn.conductor import TurnRunner
+from runner.turn.conductor import TurnRunner, _TurnAborted
 
 
 class _FakeVerdict:
@@ -37,6 +38,7 @@ class _FakeSess:
         self.qa_cache = qa_cache
         self.specialist_kb = {}
         self.case_id = "case-1"
+        self.cancel_in_flight = threading.Event()
         self.logger = types.SimpleNamespace(
             log=lambda *a, **k: None, session_id="chat-1",
         )
@@ -127,3 +129,132 @@ async def test_cache_miss_emits_nothing_and_returns_false(monkeypatch):
 
     assert replayed is False
     assert sess.events == []
+
+
+# ── cancellation: _finalize must not emit the fallback answer on a stop ──────
+#
+# When the reviewer stops a turn mid-run, `sess.cancel_in_flight` is set. An
+# aborted SDK run can leave `final_answer=None` and reach `_finalize`; without
+# the guard, `_finalize` would publish the "could not produce a synthesized
+# answer" fallback to a reviewer who is no longer waiting. The guard instead
+# raises `_TurnAborted` so the outer handler renders the clean "Interrupted"
+# path + rewind. This is the exact bug the guard fixes.
+
+
+@pytest.mark.asyncio
+async def test_finalize_aborts_without_fallback_when_cancelled(monkeypatch):
+    monkeypatch.setattr(conductor, "_NODE_TRACE_STORE", None)
+    sess = _FakeSess({})
+    sess.cancel_in_flight.set()  # reviewer pressed Stop
+    runner = TurnRunner(sess, turn_id="tc", question="q")
+    runner.final_answer = None   # aborted mid-synthesis → no structured answer
+    runner.tool_calls = [
+        {"call_id": "c1", "tool": "modeling_specialist",
+         "sub_question": "trend?", "payload": '{"findings": "x"}'},
+    ]
+    runner.review_flags = []
+
+    with pytest.raises(_TurnAborted):
+        await runner._finalize()
+
+    # No fallback answer leaked to the reviewer.
+    assert "final" not in sess.events
+    assert "agent_message" not in sess.events
+
+
+@pytest.mark.asyncio
+async def test_finalize_still_synthesizes_fallback_when_not_cancelled(monkeypatch):
+    """Sanity: with NO cancel in flight, the genuine-error salvage path still
+    fires (an empty FinalAnswer while the reviewer is waiting IS worth
+    surfacing) — the guard must not suppress legitimate fallbacks."""
+    monkeypatch.setattr(conductor, "_NODE_TRACE_STORE", None)
+    monkeypatch.setattr(conductor, "_collect_turn_charts", lambda *a, **k: [])
+    monkeypatch.setattr(conductor, "_store_cached_qa", lambda *a, **k: None)
+    sess = _FakeSess({})  # cancel_in_flight NOT set
+    runner = TurnRunner(sess, turn_id="td", question="q")
+    runner.final_answer = None
+    runner.tool_calls = [
+        {"call_id": "c1", "tool": "modeling_specialist",
+         "sub_question": "trend?", "payload": '{"findings": "x"}'},
+    ]
+    runner.review_flags = []
+
+    await runner._finalize()
+
+    # The salvage path published a final answer + chat message.
+    assert "final" in sess.events
+    assert "agent_message" in sess.events
+
+
+# ── report_agent backstop (_ensure_report_agent) ────────────────────────────
+#
+# report_agent is mandatory every turn; the orchestrator LLM occasionally omits
+# it (terse extraction questions). The backstop re-dispatches ONLY when it is
+# genuinely absent, so it fires rarely and never on turns that already ran it.
+
+
+def _runner_for_backstop(monkeypatch, tool_calls):
+    monkeypatch.setattr(conductor, "_NODE_TRACE_STORE", None)
+    sess = _FakeSess({})
+    runner = TurnRunner(sess, turn_id="tb", question="extract the txns")
+    runner.final_answer = "OLD"
+    runner.tool_calls = tool_calls
+    runner.review_flags = []
+    runner.streamed = types.SimpleNamespace(
+        to_input_list=lambda: [{"role": "user", "content": "q"}])
+    runner._drain_specialist_errors = lambda: None
+    return runner
+
+
+@pytest.mark.asyncio
+async def test_ensure_report_agent_redispatches_when_missing(monkeypatch):
+    runner = _runner_for_backstop(
+        monkeypatch, [{"call_id": "c1", "tool": "spend_payments", "payload": {}}])
+    seen = {}
+
+    async def fake_redispatch(resume_input):
+        seen["input"] = resume_input
+        return "NEW_FINAL"
+
+    runner._run_redispatch_pass = fake_redispatch
+    await runner._ensure_report_agent()
+
+    assert runner.final_answer == "NEW_FINAL"
+    assert seen["input"][-1]["content"].startswith("[REQUIRED report_agent]")
+    assert any("report_agent was dispatched server-side" in f
+               for f in runner.review_flags)
+
+
+@pytest.mark.asyncio
+async def test_ensure_report_agent_skips_when_already_present(monkeypatch):
+    runner = _runner_for_backstop(monkeypatch, [
+        {"tool": "spend_payments", "payload": {}},
+        {"tool": "report_agent", "payload": {}},
+    ])
+    fired = {"n": 0}
+
+    async def fake_redispatch(resume_input):
+        fired["n"] += 1
+        return "NEW"
+
+    runner._run_redispatch_pass = fake_redispatch
+    await runner._ensure_report_agent()
+
+    assert fired["n"] == 0
+    assert runner.final_answer == "OLD"
+
+
+@pytest.mark.asyncio
+async def test_ensure_report_agent_noop_when_nothing_dispatched(monkeypatch):
+    runner = _runner_for_backstop(monkeypatch, [])   # empty → no enforcement
+    fired = {"n": 0}
+
+    async def fake_redispatch(resume_input):
+        fired["n"] += 1
+        return "NEW"
+
+    runner._run_redispatch_pass = fake_redispatch
+    await runner._ensure_report_agent()
+
+    assert fired["n"] == 0
+    assert runner.final_answer == "OLD"

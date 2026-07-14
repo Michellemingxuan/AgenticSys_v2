@@ -17,7 +17,7 @@ columns:
     - Date
   spend_month:
     dtype: date
-    parse_hint: "%B'%Y"
+    parse_hint: '%B''%Y'
     description: Transaction month for this spend (e.g. "January'2024").
     aliases:
     - Month
@@ -26,7 +26,13 @@ columns:
     dtype: date
     parse_hint: '%Y-%m-%d %H:%M:%S.%f'
     description: Full transaction timestamp with millisecond precision (e.g. "2024-01-09
-      12:04:30.036"). Day-grain equivalent of `Date`.
+      12:04:30.036"). Day-grain equivalent of `Date`. JOIN KEY to the per-transaction
+      model tables — to get a spend transaction's model scores + drivers, filter
+      `model_scores_transaction.txn_date_time` (TSR = tot_struct_risk_score, CDSS =
+      credit_loss_prob — the CUSTOMER score) and `score_drivers_transaction.txn_date_time`
+      (top_cdss*/top_tsr* drivers) with this timestamp. An `eq` on the full timestamp
+      matches at SECOND precision, so it isolates the one transaction even though the
+      model table's txn_date_time is second-grain (no milliseconds).
     aliases:
     - Timestamp
     dtype_pending_review: true

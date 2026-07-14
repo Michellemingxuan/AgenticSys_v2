@@ -23,21 +23,16 @@ columns:
   payment_status:
     dtype: categorical
     categories:
-      success: 0.88
-      return: 0.12
-    description: 'Single source of truth for whether a payment cleared. Values ''success''
-
-      (cleared) vs ''return'' (failed). Synthesized by the gateway when
-
-      rbinding payments_success.csv (→ ''success'') and payments_returns.csv
-
-      (→ ''return'') into a single `payments` table; the raw 0/1 `return_flag`
-
-      column from the source CSVs is dropped at the same step to avoid
-
-      two-column confusion.
-
-      '
+      '0': 0.88
+      '1': 0.12
+    description: 'Return flag indicating whether a payment cleared. Matches the real
+      `Return Flag` column, which holds the raw integer code: 0 = payment cleared
+      (successful), 1 = payment returned (failed). Filter on the code — `Return Flag
+      == 0` for successful payments, `Return Flag == 1` for returned ones. NOTE: an
+      earlier revision documented synthesized string values (''success''/''return'')
+      produced by a dev gateway that rbinds payments_success.csv + payments_returns.csv;
+      the real/prod data ships the raw 0/1 flag instead, so filter on 0/1, not the
+      string labels.'
     aliases:
     - Return Flag
     - return_flag

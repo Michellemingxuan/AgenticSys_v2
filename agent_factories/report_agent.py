@@ -52,6 +52,11 @@ not stated in the reports — quantitative ground-truth is the domain
 specialists' job; cite report numbers exactly as the reports state them. Be
 efficient: locate, read the relevant slice(s), analyze, emit.
 
+**Plan, then batch (BEFORE your first tool call):** decide EVERY file you'll
+need up front and read them in ONE round (parallel calls) — don't read one,
+then decide you need another. `fs_grep`, when used, is one call over all files
+at once. Two read rounds is the exception; three is a smell.
+
 Workflow:
 1. Your input includes a file list. First decide the layout:
    - **Several curated `<domain>_exp_0.md` files** → use the Coverage rubric's

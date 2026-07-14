@@ -51,8 +51,10 @@ def _good_points():
 
 @pytest.mark.asyncio
 async def test_make_chart_writes_png_and_persists_kp(tmp_path):
-    """Happy path: tool renders the PNG, builds vega_spec, and writes a
-    KP into ``_specialist_kb[<specialist>]`` with image_path populated."""
+    """Happy path: tool renders the PNG and writes a KP into
+    ``_specialist_kb[<specialist>]`` with image_path populated. The
+    Vega-Lite spec is NOT stored on the KP — it's regenerated at emit time
+    (finalize._build_chart_payload) to keep the KB lean."""
     tool = build_make_chart_tool("spend_payments")
     ctx = _make_ctx(tmp_path)
 
@@ -90,12 +92,10 @@ async def test_make_chart_writes_png_and_persists_kp(tmp_path):
     assert "image_path" in kp
     img = Path(kp["image_path"])
     assert img.exists() and img.suffix == ".png" and img.stat().st_size > 0
-    # Vega spec is layered [line, text] so each datapoint carries an
-    # exact-value label next to it.
-    assert isinstance(kp["vega_spec"]["layer"], list)
-    line_layer = kp["vega_spec"]["layer"][0]
-    line_mark = line_layer["mark"]
-    assert (line_mark["type"] if isinstance(line_mark, dict) else line_mark) == "line"
+    # The KP does NOT carry a vega_spec — it's regenerated on demand at emit
+    # time from viz + numbers (see finalize._build_chart_payload). The spec's
+    # layered [line, text] shape is pinned in test_viz_renderer.
+    assert "vega_spec" not in kp
 
     # Tool-invocation event logged.
     assert any(e[0] == "make_chart_tool_invoked" for e in ctx.logger.events)
@@ -253,8 +253,9 @@ async def test_make_chart_multi_series_renders_one_chart_with_all_fields(tmp_pat
         "kind": "trend", "x_field": "period",
         "y_fields": ["spend", "payment"],
     }
-    # Vega-Lite spec uses fold transform for multi-series.
-    assert kp["vega_spec"]["transform"][0]["fold"] == ["spend", "payment"]
+    # Spec is not stored on the KP (regenerated at emit time); the
+    # multi-series fold transform is pinned in test_viz_renderer.
+    assert "vega_spec" not in kp
     # Single PNG file — not two.
     img = Path(kp["image_path"])
     assert img.exists() and img.stat().st_size > 0
@@ -391,8 +392,9 @@ async def test_trend_grid_requires_two_to_six_y_fields(tmp_path):
 @pytest.mark.asyncio
 async def test_make_chart_trend_dual_end_to_end(tmp_path):
     """Specialist call: kind=trend_dual with 2 y_fields → single PNG,
-    KP persisted with viz spec carrying y_fields verbatim and vega_spec
-    using `resolve.scale.y == 'independent'`."""
+    KP persisted with viz spec carrying y_fields verbatim. The vega_spec
+    (independent-y resolve) is regenerated at emit time, not stored — its
+    shape is pinned in test_viz_renderer."""
     tool = build_make_chart_tool("modeling")
     ctx = _make_ctx(tmp_path)
     points = [
@@ -423,14 +425,16 @@ async def test_make_chart_trend_dual_end_to_end(tmp_path):
     }
     img = Path(kp["image_path"])
     assert img.exists() and img.stat().st_size > 0
-    # Vega spec uses independent y resolve.
-    assert kp["vega_spec"]["resolve"]["scale"]["y"] == "independent"
+    # Spec is regenerated at emit time, not stored on the KP.
+    assert "vega_spec" not in kp
 
 
 @pytest.mark.asyncio
 async def test_make_chart_trend_grid_end_to_end(tmp_path):
     """Specialist call: kind=trend_grid with 3 y_fields → single PNG (one
-    file, not three), KP persisted with vconcat-shaped vega_spec."""
+    file, not three), KP persisted. The vconcat-shaped vega_spec is
+    regenerated at emit time, not stored — its shape is pinned in
+    test_viz_renderer."""
     tool = build_make_chart_tool("modeling")
     ctx = _make_ctx(tmp_path)
     points = [
@@ -459,8 +463,8 @@ async def test_make_chart_trend_grid_end_to_end(tmp_path):
     assert kp["viz"]["y_fields"] == ["tsr", "cdss", "txn_count"]
     img = Path(kp["image_path"])
     assert img.exists() and img.stat().st_size > 0
-    # Vega spec is vconcat of 3 line panels.
-    assert len(kp["vega_spec"]["vconcat"]) == 3
+    # Spec is regenerated at emit time, not stored on the KP.
+    assert "vega_spec" not in kp
 
 
 @pytest.mark.asyncio
@@ -584,9 +588,9 @@ async def test_make_chart_table_kind_skips_render_and_persists_kp(tmp_path):
     assert kp["numbers"] == rows
     # No image rendered.
     assert kp.get("image_path") is None
-    # No Vega spec attached (table is HTML-rendered on the frontend, not
-    # via vega-embed).
-    assert kp.get("vega_spec") is None
+    # No Vega spec stored (regenerated at emit time; and a table regenerates
+    # to None anyway — it's HTML-rendered on the frontend, not via vega-embed).
+    assert "vega_spec" not in kp
 
 
 @pytest.mark.asyncio

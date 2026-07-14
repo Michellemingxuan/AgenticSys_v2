@@ -43,6 +43,26 @@ from tools.node_trace.core import (
 from tools.node_trace.pricing import compute_cost
 
 
+def _estimate_tokens(text: str, model: str | None) -> int:
+    """tiktoken token estimate for backends that return NO usage object (e.g.
+    safechain, which explicitly doesn't). Approximate — rows built this way are
+    flagged ``tokens_estimated`` so the count is never mistaken for exact. Falls
+    back to a chars/4 heuristic if tiktoken is unavailable or the model name
+    isn't recognized."""
+    if not text:
+        return 0
+    try:
+        import tiktoken
+        try:
+            enc = (tiktoken.encoding_for_model(model) if model
+                   else tiktoken.get_encoding("cl100k_base"))
+        except Exception:  # noqa: BLE001 — unknown model repr → generic encoding
+            enc = tiktoken.get_encoding("cl100k_base")
+        return len(enc.encode(text))
+    except Exception:  # noqa: BLE001 — tiktoken missing → rough heuristic
+        return max(1, len(text) // 4)
+
+
 def _serialize_items(items: list[Any]) -> list[dict]:
     out: list[dict] = []
     for it in items or []:
@@ -95,7 +115,7 @@ class NodeTraceRunHooks(RunHooks):
         # Stack of (row_id, t0_perf) tuples for in-flight LLM calls.
         # LIFO matching: the most recent on_llm_start gets paired with
         # the next on_llm_end.
-        self._inflight: list[tuple[int, float]] = []
+        self._inflight: list[tuple[int, float, str]] = []
         self._enabled = (
             store is not None
             and isinstance(parent, NodeTrace)
@@ -127,11 +147,13 @@ class NodeTraceRunHooks(RunHooks):
                 started_at=_now_iso(),
                 model=str(agent.model) if getattr(agent, "model", None) else None,
             )
-            self._inflight.append((row_id, t0))
-            # Build the messages payload for the input excerpt + full I/O.
+            # Build the messages payload for the input excerpt + full I/O, and
+            # stash it so on_llm_end can estimate prompt tokens when the backend
+            # returns no usage object (e.g. safechain).
             sys = [{"role": "system", "content": system_prompt}] if system_prompt else []
             payload = sys + _serialize_items(input_items)
             payload_json = json.dumps(payload, default=str)
+            self._inflight.append((row_id, t0, payload_json))
             cap = _io_cap_bytes()
             self._store.update(  # type: ignore[union-attr]
                 row_id,
@@ -151,7 +173,7 @@ class NodeTraceRunHooks(RunHooks):
             return
         # LIFO pair: the most recent on_llm_start matches this on_llm_end.
         # Matches the SDK's synchronous start→end nesting.
-        row_id, t0 = self._inflight.pop()
+        row_id, t0, prompt_text = self._inflight.pop()
         try:
             duration_ms = int((perf_counter() - t0) * 1000)
             # Usage extraction. The SDK's ModelResponse may carry the
@@ -191,12 +213,6 @@ class NodeTraceRunHooks(RunHooks):
                         else getattr(cdet, "reasoning_tokens", None)
                     )
             model = str(agent.model) if getattr(agent, "model", None) else None
-            cost = compute_cost(
-                model=model,
-                prompt_tokens=p_tok,
-                cached_input_tokens=cached,
-                completion_tokens=c_tok,
-            )
             # Output capture: the response carries the items the model
             # produced. Serialize them in the same shape as a chat-completion
             # output_json so the viewer's tool-call extractor still works.
@@ -210,6 +226,23 @@ class NodeTraceRunHooks(RunHooks):
                 out_items = []
             out_payload = _items_to_chatcompletion_shape(out_items)
             out_json = json.dumps(out_payload, default=str) if out_payload else ""
+            # No usage object (e.g. safechain, which doesn't return one) →
+            # estimate tokens from the stashed input + the captured output so the
+            # row still carries counts. Flagged `tokens_estimated`; the OpenAI
+            # path (usage present) is untouched. `cached_input_tokens` can't be
+            # inferred without real usage, so it stays null (no cache rate here).
+            tokens_estimated = False
+            if usage is None:
+                p_tok = _estimate_tokens(prompt_text, model)
+                c_tok = _estimate_tokens(out_json, model)
+                t_tok = p_tok + c_tok
+                tokens_estimated = True
+            cost = compute_cost(
+                model=model,
+                prompt_tokens=p_tok,
+                cached_input_tokens=cached,
+                completion_tokens=c_tok,
+            )
             # Diagnostic: ALWAYS stash the raw response shape so we can
             # see exactly what the SDK handed us — empty output rounds
             # become inspectable via the Extras tab regardless of whether
@@ -226,6 +259,7 @@ class NodeTraceRunHooks(RunHooks):
                 ],
                 "usage_repr": repr(usage)[:300] if usage is not None else None,
                 "packager_recognized": bool(out_payload),
+                "tokens_estimated": tokens_estimated,
             }
             if not out_items:
                 extra["note"] = (

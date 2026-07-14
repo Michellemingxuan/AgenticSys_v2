@@ -10,12 +10,15 @@ from skills.loader import load_skill as _load_skill
 from tools.data_tools import (
     aggregate_column,
     batch_aggregate,
+    batch_query_table,
     batch_summarize_trend,
     get_table_schema,
+    join_table,
     list_available_tables,
     query_table,
     summarize_by_group,
     summarize_trend,
+    transaction_detail,
 )
 from tools.data_viz_tools import build_make_chart_tool, get_chart_guidance
 from tools.kb_tools import kb_list_topics, kb_lookup
@@ -111,6 +114,7 @@ def build_specialist_agent(skill: DomainSkill, pillar: dict, model) -> Agent:
         name=skill.name,
         instructions=_dynamic_instructions,
         tools=[list_available_tables, get_table_schema, query_table,
+               batch_query_table, join_table, transaction_detail,
                aggregate_column, batch_aggregate,
                summarize_trend, batch_summarize_trend, summarize_by_group,
                make_chart, get_chart_guidance,

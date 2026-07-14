@@ -50,7 +50,10 @@ columns:
     dtype: date
     parse_hint: '%Y-%m-%d %H:%M:%S.%f'
     description: Transaction timestamp with time component. Use only when sub-day
-      precision is needed. Join key to model_scores_transaction.
+      precision is needed. JOIN KEY to model_scores_transaction AND to
+      `spends.Timestamp` — filter this column by a spend transaction's Timestamp
+      (`eq` matches at second precision) to pull that transaction's drivers
+      (top_cdss*/top_tsr*).
   appr_deny_cd:
     dtype: int
     description: 'Authorization decision: 0 = approved, 1 = declined.'

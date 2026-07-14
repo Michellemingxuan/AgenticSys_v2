@@ -27,14 +27,36 @@ def _compose_specialist_input(episodic_block: str, kb_digest: str,
     return "\n\n".join(prefixes) + f"\n\n--- New question ---\n{sub_question}"
 
 
-def _render_directed_variables(variables: list[dict]) -> str:
-    """Render the compact §DIRECTED VARIABLES block from variables_for_concepts."""
+# How many representative columns to surface per concept. The concepts are
+# DIRECTIONS, not an exhaustive checklist — a couple of pointers per concept is
+# enough to orient the specialist; it queries what it judges relevant and can
+# get_table_schema for the full set. Keeping this low is what stops the
+# specialist from trending every matched column (the round-count regression).
+_DIRECTED_VARS_PER_CONCEPT = 2
+
+
+def _render_directed_variables(
+    variables: list[dict], per_concept: int = _DIRECTED_VARS_PER_CONCEPT,
+) -> str:
+    """Render the §DIRECTED VARIABLES block as DIRECTIONAL hints grouped by
+    concept — a few representative columns per concept, framed as starting
+    points (NOT an exhaustive checklist). The orchestrator conveys 2-3 concepts
+    as directions; this must not turn them into a to-do list of every matched
+    column."""
     if not variables:
         return ""
-    lines = ["§ DIRECTED VARIABLES (for this question — from the data catalog)"]
+    by_concept: dict[str, list[dict]] = {}
     for v in variables:
-        thr = f"; {v['threshold_text']}" if v.get("threshold_text") else ""
-        lines.append(f"[{v['concept']}] {v['name']} — {v['description_short']}{thr}")
+        by_concept.setdefault(v["concept"], []).append(v)
+    lines = [
+        "§ DIRECTED VARIABLES — directional starting points for this question "
+        "(NOT a checklist: begin here, query what you judge relevant, you need "
+        "not cover every one):",
+    ]
+    for concept, vs in by_concept.items():
+        for v in vs[:per_concept]:
+            thr = f"; {v['threshold_text']}" if v.get("threshold_text") else ""
+            lines.append(f"[{concept}] {v['name']} — {v['description_short']}{thr}")
     return "\n".join(lines)
 
 

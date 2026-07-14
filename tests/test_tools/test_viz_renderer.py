@@ -236,6 +236,57 @@ def test_kp_to_vega_spec_emits_minimal_lite_v5_for_trend():
     assert json.loads(json.dumps(spec)) == spec
 
 
+def test_kp_to_vega_spec_value_labels_use_decimal_not_si_format():
+    """Regression: sub-1 values must NOT render with d3's SI "milli" suffix.
+
+    The old ".3~s" specifier turned model scores like -0.639 into "-639m"
+    (d3 renders the 10⁻³ range as a milli prefix), which reads as a bogus
+    unit. Value labels + tooltips must use the decimal ".3~r" specifier so
+    small scores show faithfully (-0.639 → "-0.639") while ≥1 labels stay
+    unchanged.
+    """
+    kp = {
+        "topic": "modeling_cust_eff_se_cdss_5_180_day_score_trend",
+        "viz": {"kind": "trend", "x_field": "period", "y_field": "score"},
+        "numbers": [
+            {"period": "2024-01", "score": -0.639},
+            {"period": "2024-07", "score": 9.174},
+        ],
+    }
+    spec = kp_to_vega_spec(kp)
+    text_fmt = spec["layer"][1]["encoding"]["text"]["format"]
+    tooltip_fmt = spec["layer"][0]["encoding"]["tooltip"][1]["format"]
+    assert text_fmt == ".3~r", f"expected decimal format, got {text_fmt!r}"
+    assert tooltip_fmt == ".3~r"
+    # Guard against any SI-suffix specifier sneaking back in — "s" produces
+    # the milli/kilo/mega prefixes this test exists to prevent.
+    assert "s" not in text_fmt
+
+
+def test_chart_title_is_trend_of_variable_by_specialist():
+    """Title reads 'Trend of <variable> by <specialist>', keeping the variable's
+    underscores (a real column name). Built from viz.kind + viz.y_fields with the
+    specialist lifted from the topic prefix."""
+    from tools.viz_renderer import _chart_labels
+    title = _chart_labels({
+        "topic": "modeling_cust_eff_se_cdss_5_180_day_score_trend",
+        "viz": {"kind": "trend", "x_field": "period",
+                "y_fields": ["cust_eff_se_cdss_5_180_day_score"]},
+    })["title"]
+    assert title == "Trend of cust_eff_se_cdss_5_180_day_score by modeling"
+
+
+def test_chart_title_falls_back_to_raw_topic_without_viz():
+    """No structured viz to build from → keep the raw topic (underscores
+    preserved); never humanize the variable name to spaces."""
+    from tools.viz_renderer import _chart_labels
+    title = _chart_labels({
+        "topic": "modeling_cust_enhnc_one_way_spend_concentration_30day_rt1_trend",
+    })["title"]
+    assert "cust_enhnc_one_way_spend_concentration_30day_rt1" in title
+    assert "one way spend concentration" not in title   # NOT humanized to spaces
+
+
 def test_kp_to_vega_spec_share_uses_horizontal_layout():
     """`share` kind maps to a bar mark with x/y swapped (horizontal bar),
     layered with a text mark that prints the value at the end of each

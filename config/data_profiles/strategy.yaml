@@ -3,9 +3,9 @@ description: 'Internal credit-strategy action log — discrete decisions the fir
   on the customer''s account (global-limit changes, RLA / Risk Line Action events,
   portfolio actions). Each row is one deliberate intervention; the set tells the firm''s
   historical risk view of this account. Sourced from the strategy-action management
-  system (real, not simulated). An older-vintage extract ships the same table as
-  `rla.csv` with snake_case names (`act_nm`, `portfo_nm`, `crnt_glbl_lmt_am`, ...);
-  those are carried as aliases below so both formats resolve to this profile.
+  system (real, not simulated). An older-vintage extract ships the same table as `rla.csv`
+  with snake_case names (`act_nm`, `portfo_nm`, `crnt_glbl_lmt_am`, ...); those are
+  carried as aliases below so both formats resolve to this profile.
 
   '
 aliases:

@@ -1,19 +1,19 @@
 table: bureau
 description: Credit bureau data — monthly case-level snapshots spanning the ~18-month
-  window before the customer defaulted on their business credit card. One row per case
-  per month. Each row carries the case-level bureau scores (FICO, SBFE, LN, CSS, FSS,
-  Paydex) plus commercial (SBFE), D&B, consumer-trade, and public-record (judgement/lien)
+  window before the customer defaulted on their business credit card. One row per
+  case per month. Each row carries the case-level bureau scores (FICO, SBFE, LN, CSS,
+  FSS, Paydex) plus commercial (SBFE), D&B, consumer-trade, and public-record (judgement/lien)
   aggregates for that month.
-rows_per_case: 18  # TUNE: months in the review window (real data ships monthly snapshots)
+rows_per_case: 18
 one_row_per_case: false
 aliases:
 - bureau_data
 columns:
   month:
     dtype: date
-    parse_hint: "%B'%Y"
-    description: Monthly snapshot date for this bureau record (e.g. "July'2023"). One
-      row per case per month across the review window.
+    parse_hint: '%B''%Y'
+    description: Monthly snapshot date for this bureau record (e.g. "July'2023").
+      One row per case per month across the review window.
     description_pending: false
     aliases:
     - month
@@ -73,7 +73,8 @@ columns:
     std: 40000
     min: 0
     max: 500000
-    description: Total outstanding balance on all external commercial credit lines (USD).
+    description: Total outstanding balance on all external commercial credit lines
+      (USD).
     aliases:
     - SBFE Commercial Exposure (USD)
     - Overall External Exposure (USD)
@@ -126,7 +127,7 @@ columns:
     risk_threshold: 694
     risk_direction: below
   ln_business_value:
-    dtype: string
+    dtype: int
     distribution: normal
     mean: 1500000
     std: 500000
@@ -249,7 +250,8 @@ columns:
     min: 0
     max: 1000000
     description: Total monetary value of court judgments filed against the business
-      (USD) — unresolved legal debt obligations; indicates the severity of credit stress.
+      (USD) — unresolved legal debt obligations; indicates the severity of credit
+      stress.
     aliases:
     - Judgements Amount (USD)
   liens_amount:

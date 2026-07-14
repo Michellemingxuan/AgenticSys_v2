@@ -52,8 +52,11 @@ columns:
     parse_hint: '%Y-%m-%d %H:%M:%S.%f'
     description: Transaction timestamp with time component (e.g. 2024-01-01 15:25:20.602).
       Do NOT default to this for retrieval; use only when sub-day precision is needed
-      (within-day ordering, time-of-day, exact moment). eq on a bare date drops the
-      time on both sides.
+      (within-day ordering, time-of-day, exact moment). `eq` on a bare DATE matches the
+      whole day (day grain); `eq` on a FULL timestamp matches at SECOND precision. JOIN
+      KEY from `spends.Timestamp` — to look up a spend transaction's TSR
+      (tot_struct_risk_score) / CDSS (credit_loss_prob — the CUSTOMER score),
+      filter this column by that spend's Timestamp.
   appr_deny_cd:
     dtype: int
     description: 'Authorization decision: 0 = approved, 1 = declined. Filter with
@@ -80,8 +83,10 @@ columns:
     concept: bureau_derived
   cust_eff_se_cdss_5_180_day_score:
     dtype: float
-    description: A metric that summarizes the customer's CDSS risk scores over a historical
-      window (from 5 to 180 days ago). Values above 2 are risky.
+    description: MERCHANT CDSS — NOT the customer's CDSS (that is
+      `credit_loss_prob`); the merchant's adjusted CDSS risk aggregated over
+      5–180 days, so it does not change within a day. Values above 2 are risky.
+      (Full definition in the pillar glossary "Scores" note.)
     risk_threshold: 2
     risk_direction: above
     concept: spend_pattern
@@ -91,7 +96,9 @@ columns:
       3.15 are risky.
     risk_threshold: 3.15
     risk_direction: above
-    concept: [oop, exposure_leverage]
+    concept:
+    - oop
+    - exposure_leverage
   se_no_norm_wtd_pd_unpaid_amt:
     dtype: float
     description: normalised accum amount weighted by merchant percentage. Values above
@@ -110,7 +117,9 @@ columns:
     description: Out of Pattern Spend index wrt to Exposure. Values above 28 are risky.
     risk_threshold: 28
     risk_direction: above
-    concept: [oop, spend_pattern]
+    concept:
+    - oop
+    - spend_pattern
   sum_tot_rsky_evnt:
     dtype: int
     description: total risky events
@@ -133,21 +142,27 @@ columns:
     description: hcam balance trend index. Values above 2.65 are risky.
     risk_threshold: 2.65
     risk_direction: above
-    concept: [trends_tenure, exposure_leverage]
+    concept:
+    - trends_tenure
+    - exposure_leverage
   avutil_exrvlv_balgt50:
     dtype: float
     description: Average utilization in all the external consumer revolving trades
       with balance more than US$ 50. Values above 75 are risky.
     risk_threshold: 75
     risk_direction: above
-    concept: [external_delinquency, exposure_leverage]
+    concept:
+    - external_delinquency
+    - exposure_leverage
   cust_expr_to_arb_inc_ratio:
     dtype: float
     description: Total exposure to arbitrated income ratio. Values above 0.08 are
       risky.
     risk_threshold: 0.08
     risk_direction: above
-    concept: [capacity_paydown, exposure_leverage]
+    concept:
+    - capacity_paydown
+    - exposure_leverage
   lvrg_debt_remit:
     dtype: float
     description: leverage commercial debt
@@ -166,7 +181,9 @@ columns:
   tot_cons_comm_trds_g75:
     dtype: int
     description: total consumer and commercial trades greater than 75
-    concept: [external_delinquency, exposure_leverage]
+    concept:
+    - external_delinquency
+    - exposure_leverage
   cust_pymt_chan_risk_score:
     dtype: float
     description: Customer payment channel risk score. Values above 0.05 are considered
@@ -230,7 +247,9 @@ columns:
     description: average remit (USD). Stored as string with "thousands" suffix (e.g.
       "221.4 thousands" → 221400.0).
     dtype_pending_review: true
-    concept: [capacity_paydown, oop]
+    concept:
+    - capacity_paydown
+    - oop
   credit_loss_prob:
     dtype: float
     description: CDSS — ML model score predicting likelihood of default in next 18
@@ -261,7 +280,9 @@ columns:
     description: FICO Trend Index. Values below -19 are risky.
     risk_threshold: -19
     risk_direction: below
-    concept: [bureau_derived, trends_tenure]
+    concept:
+    - bureau_derived
+    - trends_tenure
   tpf_cust_hi_rvlv_line_am:
     dtype: int
     description: The amount of a customer's highest revolving lines. Values below
@@ -288,14 +309,18 @@ columns:
     dtype_pending_review: true
     risk_threshold: 785
     risk_direction: below
-    concept: [third_party_score, bureau_derived]
+    concept:
+    - third_party_score
+    - bureau_derived
   cust_lexis_nexis_blended_score:
     dtype: int
     description: score merges business and owner credit data. Values below 693 are
       risky.
     risk_threshold: 693
     risk_direction: below
-    concept: [third_party_score, bureau_derived]
+    concept:
+    - third_party_score
+    - bureau_derived
   cust_sbfe_score:
     dtype: int
     description: Business credit score. Values below 863 are risky.

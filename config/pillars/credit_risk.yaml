@@ -1,5 +1,5 @@
 pillar: credit_risk
-display_name: "Credit & Risk"
+display_name: "Credit & Risk (Commercial / SBS)"
 focus: "Delinquency risk, bureau scores, cross-BU exposure, internal model scores and score drivers, spend patterns, WCC flags, capacity & affordability"
 
 # Data collection cut-off — "recent" is relative to this date
@@ -11,6 +11,13 @@ cut_off_date: "2025-07-01"
 concept_glossary: |
   ═══ CREDIT-RISK CONCEPT VOCABULARY (reference; verify against data) ═══
 
+  ── CUSTOMER CONTEXT ──
+  This is the COMMERCIAL / SBS credit-&-risk pillar: the customer under review
+  is a MERCHANT (a business), using merchant / business cards (the 'SBS'
+  card_portfolio; `card_name` often contains "BUSINESS"). So "the customer" IS a
+  merchant — merchant-level model scores describe this customer directly (see the
+  CDSS note under Scores below).
+
   Consumer vs commercial cards — `crossbu_cards.card_portfolio`:
     'CPS' ≈ consumer (personal/individual/retail). 'SBS' ≈ commercial
     (business/SMB). Other codes may exist; probe before filtering.
@@ -21,10 +28,27 @@ concept_glossary: |
     spend / charged / transaction volume → `spends_data.Amount` (spend_payments).
     payment amount → `payments.Payment Amount` (spend_payments).
 
-  Payment status — `payments.payment_status` (canonical, values:
-    'success' / 'return'). The raw 0/1 `return_flag` column from the source
-    CSV is dropped at gateway-load time; always filter on `payment_status`.
-    Verify the actual values in this case.
+  Do NOT compare spend volume to payment volume to infer repayment adequacy,
+    "unpaid balances", or liquidity risk — in ANY window. Spend is continuous
+    and payment is lumpy and LAGS the billing cycle (this month's charges are
+    paid next cycle), and the two are pulled over different windows, so a
+    spend-vs-payment magnitude ratio ("spend is ~Nx payment", "spend outpaced
+    payments") is a timing artifact, NOT a solvency signal. Here total payment
+    (~$4.8M) actually EXCEEDS total spend (~$3.9M) and the monthly ratio is
+    ~1.1x — a "4x spend > payment" claim is a fabrication that contradicts the
+    data. Any spend-vs-payment figure MUST be arithmetic on same-window tool
+    numbers; never assert spend outpaces payment when the numbers show
+    otherwise, and never let a "distressed case" prior override them.
+    Repayment adequacy → the model ratio `cust_expsr_avg_rem_12m_ratio`
+    (modeling); unpaid balance / outstanding → `crossbu_cards.balance` (crossbu).
+
+  Payment success / return — the real column is `Return Flag` (aliases:
+    `payment_status`, `return_flag`). It is an INTEGER code, NOT a string:
+    0 = payment succeeded (cleared), 1 = payment returned (failed). Filter on the
+    code — `Return Flag == 0` for successful payments, `Return Flag == 1` for
+    returned — NOT the strings 'success' / 'return' (those do NOT exist in the
+    real data). Confirm via `get_table_schema('payments')`: its declared_values
+    show 0 / 1.
 
   Scores: bureau (`bureau_data`, owned by `bureau`) vs internal model
     (`modelling_data`, owned by `modeling`). Independent — don't conflate.
@@ -32,11 +56,19 @@ concept_glossary: |
     refers to these INTERNAL ML risk-scoring models — not the agent
     system, not a process, not a generic abstraction. Subject "the model"
     → route to `modeling`.
-    Internal model scores are ML outputs (risk scores). Known examples:
-      CDSS = Credit Decision Support System. TSR  = Total Structural Risk.
-    Other internal scores may also be present (cbr_score, credit_loss_prob,
-    gam_*_risk_score, etc.) — probe `modelling_data` schema to see what's
-    in this case.
+    Internal model scores are ML outputs (risk scores). The two headline scores
+    — AUTHORITATIVE column mapping, use these names everywhere:
+      • CDSS (Credit Decision Support System) — the CUSTOMER's CDSS is the
+        `credit_loss_prob` column. When a question says "CDSS", this is it.
+      • TSR (Total Structural Risk) — `tot_struct_risk_score` column.
+      • `cust_eff_se_cdss_5_180_day_score` is a MERCHANT CDSS, NOT the customer's
+        — the merchant's adjusted CDSS risk, aggregated over 5–180 days from the
+        CDSS scores of all spending at that merchant. Because the customer here
+        IS a merchant (see CUSTOMER CONTEXT), it is this customer's own risk
+        viewed AS a merchant; as a 5–180-day merchant aggregate it does NOT
+        change within a day. Only cite it for merchant-side risk.
+    Other internal scores may also be present (cbr_score, gam_*_risk_score,
+    etc.) — probe `modelling_data` schema to see what's in this case.
     Score drivers — `score_drivers_data` — list the variables most
     contributing to each ML score per `trans_month`. Columns
     `top_<score>{1..5}` push the score up; `bottom_<score>{1..5}` push it

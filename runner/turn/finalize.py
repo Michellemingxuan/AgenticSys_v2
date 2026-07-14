@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from tools.viz_renderer import kp_to_vega_spec
+
 
 def _synthesize_fallback_answer(
     tool_calls: list[dict],
@@ -111,6 +113,49 @@ def _replay_completed_specialists(sess, turn_id: str, tool_calls: list[dict]) ->
         })
 
 
+def _chart_signature(kp: dict) -> tuple | None:
+    """A content fingerprint for a chart — independent of which specialist made
+    it, how the y-column is named, or injected thresholds. Two specialists that
+    trend the SAME table/column over the SAME window produce the SAME figure;
+    this lets the turn show it once. Signature = ``(kind, {(x_value, y_value)})``
+    over the numeric cells, floats rounded to swallow repr noise. Returns
+    ``None`` when there's nothing fingerprintable (e.g. no numbers)."""
+    viz = kp.get("viz") if isinstance(kp, dict) else None
+    viz = viz if isinstance(viz, dict) else {}
+    kind = viz.get("kind")
+    numbers = kp.get("numbers")
+    if not kind or not isinstance(numbers, list) or not numbers:
+        return None
+    x = viz.get("x_field") or ""
+    if not x:
+        return None
+    pairs: set = set()
+    y_values: set = set()
+    x_seen = False
+    for row in numbers:
+        if not isinstance(row, dict) or x not in row:
+            continue
+        x_seen = True
+        xv = str(row.get(x))
+        for k, v in row.items():
+            if k == x or (isinstance(k, str) and k.startswith("threshold")):
+                continue
+            try:
+                yv = round(float(v), 6)
+            except (TypeError, ValueError):
+                continue
+            pairs.add((xv, yv))
+            y_values.add(yv)
+    # Only fingerprint when the match is UNAMBIGUOUS: a real x-axis present in
+    # the rows AND a non-flat series (>= 2 distinct y-values). A flat/constant
+    # series (many sparse features are all-zero) or an x-less chart yields a
+    # signature too weak to tell two DISTINCT metrics apart — so we return None
+    # and never risk deduping those away. Erring toward keeping charts.
+    if not x_seen or len(y_values) < 2:
+        return None
+    return (kind, frozenset(pairs))
+
+
 def _collect_turn_charts(specialist_kb: dict, turn_id: str, case_id: str) -> list[dict]:
     """Find every KP captured in this turn that surfaces in the Plots panel.
 
@@ -124,11 +169,15 @@ def _collect_turn_charts(specialist_kb: dict, turn_id: str, case_id: str) -> lis
 
     Deduped by ``(specialist, topic)`` — when both the `make_chart` tool
     and the auto-distiller produce an entry for the same topic in one
-    turn, the latest one wins (chronological iteration order).
+    turn, the latest one wins (chronological iteration order) — AND by
+    content fingerprint across specialists, so two specialists plotting the
+    SAME figure (e.g. modeling and spend_payments both charting the monthly
+    spend trend) surface it only once. First occurrence wins.
     """
     if not isinstance(specialist_kb, dict):
         return []
     by_key: dict[tuple[str, str], dict] = {}
+    kp_by_key: dict[tuple[str, str], dict] = {}
     for spec_name, kps in specialist_kb.items():
         if not isinstance(kps, list):
             continue
@@ -155,4 +204,52 @@ def _collect_turn_charts(specialist_kb: dict, turn_id: str, case_id: str) -> lis
             # the KB's chronological list means the last appended entry
             # naturally overwrites the earlier one for the same key.
             by_key[(spec_name, topic)] = entry
-    return list(by_key.values())
+            kp_by_key[(spec_name, topic)] = kp
+
+    # Cross-specialist content dedup: drop a later chart whose data fingerprint
+    # matches one already kept (same figure from a different specialist). Charts
+    # with no fingerprint (empty/non-numeric) are never deduped away.
+    seen: set = set()
+    deduped: list[dict] = []
+    for key, entry in by_key.items():
+        sig = _chart_signature(kp_by_key[key])
+        if sig is not None:
+            if sig in seen:
+                continue
+            seen.add(sig)
+        deduped.append(entry)
+    return deduped
+
+
+def _build_chart_payload(kp: dict | None, chart: dict) -> dict:
+    """Build the ``chart`` SSE payload from a KP + its collected chart meta.
+
+    Single source of truth for the payload the frontend receives — both the
+    live end-of-turn emit and the QA-cache replay flow through here (the
+    payload is what gets stored in the cache and re-emitted verbatim).
+
+    The Vega-Lite spec is REGENERATED here via ``kp_to_vega_spec(kp)`` rather
+    than read off the KP. We deliberately do NOT persist ``vega_spec`` on the
+    KP: it roughly duplicates ``numbers`` plus a lot of Vega scaffolding, and
+    the KP flows into ``specialist_kb`` → distilled memory → cross-turn
+    context, so storing it there bloats everything downstream. Regeneration
+    is cheap and keeps the interactive-chart contract intact. Returns ``None``
+    for the spec on non-viz-able KPs (e.g. ``table`` kind, empty numbers),
+    exactly as before.
+    """
+    viz = (kp or {}).get("viz") or {}
+    kind = viz.get("kind", "") if isinstance(viz, dict) else ""
+    payload: dict = {
+        "specialist": chart["specialist"],
+        "topic": chart["topic"],
+        "url": chart["url"],
+        "claim": (kp or {}).get("claim", ""),
+        "source_call": (kp or {}).get("source_call", ""),
+        "kind": kind,
+        "vega_spec": kp_to_vega_spec(kp) if kp else None,
+    }
+    if kind == "table":
+        payload["numbers"] = (kp or {}).get("numbers") or []
+        payload["x_field"] = viz.get("x_field", "") if isinstance(viz, dict) else ""
+        payload["y_fields"] = viz.get("y_fields") or [] if isinstance(viz, dict) else []
+    return payload

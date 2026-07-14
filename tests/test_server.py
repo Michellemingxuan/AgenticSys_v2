@@ -246,9 +246,10 @@ def test_collect_turn_charts_dedupes_same_topic_per_specialist():
     assert monthly["url"].endswith("t-now-monthly_trend-v2.png")
 
 
-def test_collect_turn_charts_does_not_dedupe_across_specialists():
-    """Two specialists charting the same topic in the same turn → both
-    appear (different `(specialist, topic)` keys)."""
+def test_collect_turn_charts_does_not_dedupe_when_no_fingerprint():
+    """Two specialists with the same topic but NO fingerprintable content
+    (no viz/numbers) both appear — same topic name ≠ same figure, and there is
+    no data to compare, so nothing is deduped."""
     kb = {
         "spend_payments": [
             {"topic": "x", "captured_at_turn": "t",
@@ -262,6 +263,55 @@ def test_collect_turn_charts_does_not_dedupe_across_specialists():
     charts = finalize._collect_turn_charts(kb, "t", "C")
     specialists = sorted(c["specialist"] for c in charts)
     assert specialists == ["modeling", "spend_payments"]
+
+
+def test_collect_turn_charts_dedupes_same_figure_across_specialists():
+    """Two specialists plotting the SAME data (e.g. modeling AND spend_payments
+    both charting the monthly spend trend) surface as ONE chart — deduped by
+    content fingerprint, not topic name. Different data is NOT deduped."""
+    numbers = [{"period": "2024-11", "value": 300},
+               {"period": "2024-12", "value": 500}]
+    kb = {
+        # dispatch order: spend_payments first → it wins the dedup.
+        "spend_payments": [_kp("monthly_spend_trend", "trend", ["value"], numbers)],
+        "modeling": [_kp("spend_amount_trend", "trend", ["value"], list(numbers))],
+    }
+    charts = finalize._collect_turn_charts(kb, "t-now", "CASE-D")
+    assert len(charts) == 1
+    assert charts[0]["specialist"] == "spend_payments"
+
+    # Different data → two distinct figures, both kept.
+    kb["modeling"] = [_kp("tsr_trend", "trend", ["value"],
+                          [{"period": "2024-11", "value": 10},
+                           {"period": "2024-12", "value": 20}])]
+    assert len(finalize._collect_turn_charts(kb, "t-now", "CASE-D")) == 2
+
+
+def test_collect_turn_charts_never_dedupes_flat_series():
+    """False-positive guard: two DIFFERENT all-constant (e.g. all-zero) metrics
+    have identical weak signatures — but a flat series is too weak to tell them
+    apart, so they are NEVER deduped. Both survive."""
+    flat_a = [{"period": "2024-11", "value": 0}, {"period": "2024-12", "value": 0}]
+    flat_b = [{"period": "2024-11", "value": 0}, {"period": "2024-12", "value": 0}]
+    kb = {
+        "modeling": [_kp("dead_feature_a", "trend", ["value"], flat_a)],
+        "spend_payments": [_kp("dead_feature_b", "trend", ["value"], flat_b)],
+    }
+    assert len(finalize._collect_turn_charts(kb, "t-now", "C")) == 2
+
+
+def test_collect_turn_charts_never_dedupes_when_x_field_absent():
+    """False-positive guard: when the x-axis column isn't present in the rows,
+    the signature would collapse to a y-only set (different windows collide) —
+    so such charts are never deduped."""
+    # x_field is "period" (from _kp) but the rows key it as "month".
+    a = [{"month": "2024-01", "value": 1}, {"month": "2024-02", "value": 2}]
+    b = [{"month": "2024-07", "value": 1}, {"month": "2024-08", "value": 2}]
+    kb = {
+        "modeling": [_kp("m_a", "trend", ["value"], a)],
+        "spend_payments": [_kp("m_b", "trend", ["value"], b)],
+    }
+    assert len(finalize._collect_turn_charts(kb, "t-now", "C")) == 2
 
 
 def test_collect_turn_charts_surfaces_table_kps_without_image():
@@ -309,17 +359,23 @@ def test_append_charts_to_answer_no_op_when_empty():
 
 # ── SSE chart payload enrichment via _find_kp ───────────────────────────────
 #
-# The chart SSE event the frontend consumes (server.py ~line 1115) blends
+# The chart SSE event the frontend consumes (conductor.py) blends
 # _collect_turn_charts (URL + topic + specialist) with _find_kp (claim,
-# source_call, kind, vega_spec). These tests pin the contract that the new
-# multi-variable kinds (`trend_dual`, `trend_grid`) reach the frontend with
-# the right `kind` string AND the right `vega_spec` shape (layered+independent
-# y resolve, or vconcat) — i.e., everything an interactive Vega-Lite renderer
-# needs to reproduce the chart from the PNG-free spec.
+# source_call, viz) via finalize._build_chart_payload, which REGENERATES the
+# Vega-Lite spec from viz + numbers (the spec is not stored on the KP). These
+# tests pin the contract that the multi-variable kinds (`trend_dual`,
+# `trend_grid`) reach the frontend with the right `kind` string AND a
+# regenerated interactive spec. The detailed spec shape lives in
+# test_viz_renderer; here we assert the payload-level contract.
 
 
-def _kp(topic, kind, y_fields, vega_spec, turn="t-now"):
-    """Minimal KP shape that _collect_turn_charts + _find_kp consume."""
+def _kp(topic, kind, y_fields, numbers=None, turn="t-now"):
+    """Minimal KP shape that _collect_turn_charts + _find_kp consume.
+
+    NB: `vega_spec` is intentionally NOT stored on the KP — it is regenerated
+    at emit time from `viz` + `numbers` by finalize._build_chart_payload. So
+    the KP carries `numbers`, and payload tests assert the REGENERATED spec.
+    """
     return {
         "topic": topic,
         "captured_at_turn": turn,
@@ -327,7 +383,7 @@ def _kp(topic, kind, y_fields, vega_spec, turn="t-now"):
         "claim": f"{topic} claim",
         "source_call": f"summarize_trend('{topic}', ...)",
         "viz": {"kind": kind, "x_field": "period", "y_fields": y_fields},
-        "vega_spec": vega_spec,
+        "numbers": numbers if numbers is not None else [],
     }
 
 
@@ -338,132 +394,86 @@ def test_find_kp_returns_latest_matching_topic_in_turn():
     kb = {
         "modeling": [
             _kp("score_vs_dpd", "trend_dual", ["score", "dpd"],
-                {"layer": [], "resolve": {"scale": {"y": "independent"}}}),
+                [{"period": "2024-10", "score": 700, "dpd": 1}]),
             # Different topic same turn — unrelated.
-            _kp("other", "trend", ["value"], {"mark": "line"}),
-            # Same topic, same turn — should win (latest).
+            _kp("other", "trend", ["value"], [{"period": "2024-10", "value": 1}]),
+            # Same topic, same turn — should win (latest); distinct numbers.
             _kp("score_vs_dpd", "trend_dual", ["score", "dpd"],
-                {"layer": [{"mark": "line"}, {"mark": "line"}],
-                 "resolve": {"scale": {"y": "independent"}}}),
+                [{"period": "2024-11", "score": 720, "dpd": 3},
+                 {"period": "2024-12", "score": 715, "dpd": 5}]),
             # Same topic, EARLIER turn — should NOT match.
             _kp("score_vs_dpd", "trend_dual", ["score", "dpd"],
-                {"layer": []}, turn="t-prev"),
+                [], turn="t-prev"),
         ],
     }
     found = cache._find_kp(kb, "modeling", "score_vs_dpd", "t-now")
     assert found is not None
-    # Latest in-turn entry: vega_spec has the non-empty layer list.
-    assert len(found["vega_spec"]["layer"]) == 2
+    # Latest in-turn entry wins (last appended for the same key).
+    assert len(found["numbers"]) == 2
+    assert found["numbers"][0]["period"] == "2024-11"
 
 
 def test_find_kp_returns_none_when_no_match():
-    kb = {"modeling": [_kp("a", "trend", ["v"], {"mark": "line"})]}
+    kb = {"modeling": [_kp("a", "trend", ["v"])]}
     assert cache._find_kp(kb, "modeling", "missing", "t-now") is None
     assert cache._find_kp(kb, "other_spec", "a", "t-now") is None
     assert cache._find_kp({}, "modeling", "a", "t-now") is None
     assert cache._find_kp(None, "modeling", "a", "t-now") is None
 
 
-def test_chart_payload_carries_trend_dual_kind_and_layered_spec():
+def test_chart_payload_carries_trend_dual_kind_and_regenerated_spec():
     """End-to-end shape: build a KB with a `trend_dual` KP, run the same
-    collect+enrich logic the server runs before sess.emit('chart', ...),
-    and verify the payload the frontend receives carries both `kind ==
-    'trend_dual'` AND a Vega-Lite spec with `resolve.scale.y ==
-    'independent'`. This is what tells the frontend it's looking at a
-    dual-axis chart."""
-    vega_spec = {
-        "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
-        "data": {"values": [{"period": "2024-11", "score": 720, "dpd": 0}]},
-        "layer": [
-            {"mark": "line", "encoding": {
-                "x": {"field": "period", "type": "ordinal"},
-                "y": {"field": "score", "type": "quantitative"}}},
-            {"mark": "line", "encoding": {
-                "x": {"field": "period", "type": "ordinal"},
-                "y": {"field": "dpd", "type": "quantitative"}}},
-        ],
-        "resolve": {"scale": {"y": "independent"}},
-    }
+    collect + payload-build logic the conductor runs before
+    sess.emit('chart', ...), and verify the payload carries both `kind ==
+    'trend_dual'` AND a REGENERATED Vega-Lite spec with `resolve.scale.y ==
+    'independent'` (the signal it's a dual-axis chart). The spec is rebuilt
+    from viz+numbers — it is NOT stored on the KP."""
     kb = {"modeling": [
-        _kp("score_vs_dpd", "trend_dual", ["score", "dpd"], vega_spec)
+        _kp("score_vs_dpd", "trend_dual", ["score", "dpd"],
+            [{"period": "2024-10", "score": 700, "dpd": 1},
+             {"period": "2024-11", "score": 720, "dpd": 0},
+             {"period": "2024-12", "score": 690, "dpd": 4},
+             {"period": "2025-01", "score": 710, "dpd": 2}])
     ]}
 
-    # Mirror server.py:1107-1123 — collect, then enrich each chart with
-    # the matching KP's metadata.
     charts = finalize._collect_turn_charts(kb, "t-now", "CASE-A")
     assert len(charts) == 1
     c = charts[0]
     kp = cache._find_kp(kb, c["specialist"], c["topic"], "t-now")
-    payload = {
-        "specialist": c["specialist"],
-        "topic": c["topic"],
-        "url": c["url"],
-        "claim": (kp or {}).get("claim", ""),
-        "source_call": (kp or {}).get("source_call", ""),
-        "kind": ((kp or {}).get("viz") or {}).get("kind", ""),
-        "vega_spec": (kp or {}).get("vega_spec"),
-    }
+    payload = finalize._build_chart_payload(kp, c)
 
     assert payload["kind"] == "trend_dual"
     assert payload["url"].endswith("t-now-score_vs_dpd.png")
     assert payload["claim"] == "score_vs_dpd claim"
-    # Frontend's interactive-renderer contract — these are the keys an
-    # embed call (e.g. vega-embed) needs to render the dual-axis chart.
+    # Frontend's interactive-renderer contract: a regenerated dual-axis spec
+    # with independent y-scales and two line groups. Deep shape is pinned in
+    # test_viz_renderer.
+    assert payload["vega_spec"] is not None
     assert payload["vega_spec"]["resolve"]["scale"]["y"] == "independent"
     assert len(payload["vega_spec"]["layer"]) == 2
-    assert payload["vega_spec"]["layer"][0]["encoding"]["y"]["field"] == "score"
-    assert payload["vega_spec"]["layer"][1]["encoding"]["y"]["field"] == "dpd"
 
 
 def test_chart_payload_carries_trend_grid_kind_and_vconcat_spec():
     """Same end-to-end check for `trend_grid` — the payload kind reaches
-    the frontend as 'trend_grid' AND the vega_spec is a `vconcat` of N
-    single-series specs sharing the x-axis."""
-    vega_spec = {
-        "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
-        "data": {"values": [
-            {"period": "2024-11", "tsr": 720, "cdss": 680, "txn_count": 42}
-        ]},
-        "vconcat": [
-            {"mark": "line", "encoding": {
-                "x": {"field": "period", "type": "ordinal"},
-                "y": {"field": "tsr", "type": "quantitative"}}},
-            {"mark": "line", "encoding": {
-                "x": {"field": "period", "type": "ordinal"},
-                "y": {"field": "cdss", "type": "quantitative"}}},
-            {"mark": "line", "encoding": {
-                "x": {"field": "period", "type": "ordinal"},
-                "y": {"field": "txn_count", "type": "quantitative"}}},
-        ],
-    }
+    the frontend as 'trend_grid' AND the regenerated vega_spec is a
+    `vconcat` of N single-series panels sharing the x-axis."""
     kb = {"modeling": [
-        _kp("credit_risk_panel", "trend_grid",
-            ["tsr", "cdss", "txn_count"], vega_spec)
+        _kp("credit_risk_panel", "trend_grid", ["tsr", "cdss", "txn_count"],
+            [{"period": "2024-10", "tsr": 700, "cdss": 680, "txn_count": 42},
+             {"period": "2024-11", "tsr": 720, "cdss": 690, "txn_count": 47}])
     ]}
 
     charts = finalize._collect_turn_charts(kb, "t-now", "CASE-B")
     c = charts[0]
     kp = cache._find_kp(kb, c["specialist"], c["topic"], "t-now")
-    payload = {
-        "specialist": c["specialist"],
-        "topic": c["topic"],
-        "url": c["url"],
-        "kind": ((kp or {}).get("viz") or {}).get("kind", ""),
-        "vega_spec": (kp or {}).get("vega_spec"),
-    }
+    payload = finalize._build_chart_payload(kp, c)
 
     assert payload["kind"] == "trend_grid"
+    # Regenerated spec is a vconcat of one panel per y_field. Deep panel
+    # shape (x/y encodings, ordering) is pinned in test_viz_renderer.
+    assert payload["vega_spec"] is not None
     assert isinstance(payload["vega_spec"]["vconcat"], list)
     assert len(payload["vega_spec"]["vconcat"]) == 3
-    # Each sub-spec shares the x-axis with the same field.
-    for sub in payload["vega_spec"]["vconcat"]:
-        assert sub["mark"] == "line"
-        assert sub["encoding"]["x"]["field"] == "period"
-    # Y fields appear in y_fields order — the panel order the frontend
-    # renders top-to-bottom matches the specialist's y_fields ordering.
-    y_fields = [sub["encoding"]["y"]["field"]
-                for sub in payload["vega_spec"]["vconcat"]]
-    assert y_fields == ["tsr", "cdss", "txn_count"]
 
 
 def test_chart_payload_kind_string_unknown_falls_back_to_empty():
@@ -473,14 +483,14 @@ def test_chart_payload_kind_string_unknown_falls_back_to_empty():
     kb = {"modeling": [{
         "topic": "legacy", "captured_at_turn": "t",
         "image_path": "/abs/charts/t-legacy.png",
-        # No `viz`, no `vega_spec`.
+        # No `viz`, no `numbers`.
     }]}
     charts = finalize._collect_turn_charts(kb, "t", "C")
     kp = cache._find_kp(kb, "modeling", "legacy", "t")
-    kind = ((kp or {}).get("viz") or {}).get("kind", "")
-    vega = (kp or {}).get("vega_spec")
-    assert kind == ""
-    assert vega is None
+    payload = finalize._build_chart_payload(kp, charts[0])
+    assert payload["kind"] == ""
+    # No viz → nothing to regenerate → no interactive spec.
+    assert payload["vega_spec"] is None
     # Charts still emit — the PNG path is the fallback when interactive
     # rendering isn't possible.
     assert charts[0]["url"].endswith(".png")
@@ -682,26 +692,12 @@ def test_chart_payload_carries_table_kind_and_numbers():
         }]
     }
 
-    # Mirror server.py:1703-1724 — collect, then enrich each chart with
-    # the matching KP's metadata (same logic as the trend_dual test above).
+    # Collect, then build the payload via the same helper the conductor runs.
     charts = finalize._collect_turn_charts(kb, "t-now", "CASE-T")
     assert len(charts) == 1
     c = charts[0]
     kp = cache._find_kp(kb, c["specialist"], c["topic"], "t-now")
-    viz = (kp or {}).get("viz") or {}
-    payload = {
-        "specialist": c["specialist"],
-        "topic": c["topic"],
-        "url": c["url"],
-        "claim": (kp or {}).get("claim", ""),
-        "source_call": (kp or {}).get("source_call", ""),
-        "kind": viz.get("kind", "") if isinstance(viz, dict) else "",
-        "vega_spec": (kp or {}).get("vega_spec"),
-    }
-    if payload["kind"] == "table":
-        payload["numbers"] = (kp or {}).get("numbers") or []
-        payload["x_field"] = viz.get("x_field", "") if isinstance(viz, dict) else ""
-        payload["y_fields"] = viz.get("y_fields") or [] if isinstance(viz, dict) else []
+    payload = finalize._build_chart_payload(kp, c)
 
     assert payload["kind"] == "table"
     assert payload["url"] == ""          # no PNG; row data flows via numbers

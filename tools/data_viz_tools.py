@@ -23,7 +23,7 @@ from typing import Any
 
 from agents import RunContextWrapper, function_tool
 
-from tools.viz_renderer import kp_to_vega_spec, render_chart
+from tools.viz_renderer import render_chart
 
 
 _VALID_KINDS = ("trend", "bar", "share", "trend_dual", "trend_grid", "table",
@@ -271,10 +271,10 @@ def build_make_chart_tool(specialist_name: str):
                         for p in points:
                             p[th_key] = th_val
 
-        # Vega-Lite spec for downstream / interactive consumers.
-        spec = kp_to_vega_spec(kp_dict)
-        if spec is not None:
-            kp_dict["vega_spec"] = spec
+        # NB: the Vega-Lite spec is NOT stored on the KP — it roughly
+        # duplicates `numbers` and would bloat the KB / distilled memory that
+        # flows across turns. It is regenerated on demand at emit time in
+        # `finalize._build_chart_payload`. See that helper for the rationale.
 
         # Render PNG. Failures from the renderer log + return None — we
         # surface that to the LLM as a structured error so it can re-try

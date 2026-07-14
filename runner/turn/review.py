@@ -16,8 +16,18 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
+import uuid
 
 from agents import Runner
+
+from tools.node_trace import (
+    NodeTrace,
+    NodeTraceRunHooks,
+    _open_node,
+    attach_io,
+    attach_tag,
+)
 
 from llm.firewall_stack import redact_payload
 
@@ -85,10 +95,24 @@ async def _run_review(sess, ctx, question: str, specialist_outputs: dict):
             {"question": question, "specialist_outputs": specialist_outputs},
             default=str,
         )
-        result = await asyncio.wait_for(
-            Runner.run(reviewer, review_input, context=ctx),
-            timeout=_ORCH_PLAN_TIMEOUT_S,
-        )
+        # Capture the reviewer run as a `general_specialist` node in the
+        # node-trace, mirroring the orchestrator wrapping in conductor.py.
+        # `_open_node` returns a null node when the store/scope is absent
+        # (e.g. tests), so this stays a no-op there. The SDK RunHooks record
+        # one child row per LLM round — the reviewer was previously invisible
+        # in the node-trace because its Runner.run passed no hooks.
+        store = getattr(ctx, "_node_trace_store", None)
+        async with _open_node(store, "general_specialist", depth=0) as gs_nt:
+            attach_tag("review")
+            attach_io(messages_json=review_input)
+            hooks = (
+                NodeTraceRunHooks(store, gs_nt)
+                if isinstance(gs_nt, NodeTrace) else None
+            )
+            result = await asyncio.wait_for(
+                Runner.run(reviewer, review_input, context=ctx, hooks=hooks),
+                timeout=_ORCH_PLAN_TIMEOUT_S,
+            )
         report = getattr(result, "final_output", None)
         try:
             report = redact_payload(report) if report is not None else None
@@ -158,6 +182,72 @@ async def _invalidate_specialist_distillation(ctx, specialist: str, turn_id) -> 
     return stats
 
 
+def _review_trace_payload(review, kind: str | None) -> dict:
+    """Compact, PII-safe payload describing the coherence review for the
+    reasoning-trace / orchestration-flow panels. ``review`` is the already-
+    redacted ``ReviewReport`` (or ``None`` on timeout/error)."""
+    if review is None:
+        return {
+            "verdict": "review_failed",
+            "summary": "Coherence review did not complete (timeout or error).",
+        }
+
+    def _count(attr: str) -> int:
+        try:
+            return len(getattr(review, attr, None) or [])
+        except Exception:  # noqa: BLE001
+            return 0
+
+    try:
+        insights = [str(x) for x in
+                    (getattr(review, "cross_domain_insights", None) or [])][:5]
+    except Exception:  # noqa: BLE001
+        insights = []
+
+    payload: dict = {
+        "verdict": kind or "coherent",
+        "resolved": _count("resolved"),
+        "open_conflicts": _count("open_conflicts"),
+        "cross_domain_insights": insights,
+    }
+    directive = getattr(review, "directive", None)
+    if directive is not None:
+        payload["directive"] = {
+            "kind": getattr(directive, "kind", None),
+            "specialist": getattr(directive, "specialist", None),
+            "why": getattr(directive, "why", None),
+            "anchor": getattr(directive, "anchor", None),
+        }
+    return payload
+
+
+def _emit_reviewer_trace(sess, turn_id, tool_calls, call_id, payload,
+                         started_at: int) -> None:
+    """Surface the coherence reviewer as a ``general_specialist`` node in the
+    reasoning trace + orchestration-flow figure. Appends a synthetic tool-call
+    record to ``tool_calls`` (which is what the QA cache stores and the
+    cache-hit path replays, so the node survives cache replay too) and emits
+    the matching ``agent_completed`` + refreshed ``team_plan``. Best-effort:
+    a trace-emit failure must never wedge the turn."""
+    try:
+        duration_ms = max(0, int(time.time() * 1000) - started_at)
+        tool_calls.append({
+            "call_id": call_id,
+            "tool": "general_specialist",
+            "payload": payload,
+            "duration_ms": duration_ms,
+        })
+        sess.emit("agent_completed", {
+            "turn_id": turn_id, "call_id": call_id,
+            "tool": "general_specialist",
+            "payload": payload, "duration_ms": duration_ms,
+        })
+        sess.emit("team_plan", {"turn_id": turn_id,
+                                "tool_calls": list(tool_calls)})
+    except Exception:  # noqa: BLE001 — trace emission is never load-bearing
+        pass
+
+
 async def _apply_review_directive(
     *,
     sess,
@@ -193,11 +283,32 @@ async def _apply_review_directive(
             for c in tool_calls
             if c.get("tool") not in _AUX_REVIEW_TOOLS and "payload" in c
         }
+        # Surface the reviewer in the reasoning trace. `agent_started` fires
+        # now (before the run); the matching `agent_completed` + `team_plan`
+        # + tool_calls record are emitted below once the verdict is known.
+        # `specialist_outputs` was built ABOVE from the pre-review tool_calls,
+        # so appending our own `general_specialist` record can't feed the
+        # reviewer its own output. (general_specialist is in every aux-tool
+        # exclusion set, so it never counts toward the ≥2-specialist gate or
+        # answer synthesis — it is trace-only.)
+        gs_call_id = str(uuid.uuid4())
+        gs_started_at = int(time.time() * 1000)
+        try:
+            sess.emit("agent_started", {
+                "turn_id": turn_id, "call_id": gs_call_id,
+                "tool": "general_specialist", "started_at": gs_started_at,
+            })
+        except Exception:  # noqa: BLE001 — trace emission is never load-bearing
+            pass
         review = await _run_review(
             sess, ctx, framed_question, specialist_outputs
         )
         directive = getattr(review, "directive", None) if review else None
         kind = getattr(directive, "kind", None) if directive else None
+        _emit_reviewer_trace(
+            sess, turn_id, tool_calls, gs_call_id,
+            _review_trace_payload(review, kind), gs_started_at,
+        )
         try:
             sess.logger.log("review_done", {
                 "turn_id": turn_id,

@@ -5,7 +5,7 @@ type: workflow
 owner: [base_specialist]
 mode: inline
 replaces: [BASE_INSTRUCTIONS]
-tools: [list_available_tables, get_table_schema, query_table, aggregate_column, batch_aggregate, summarize_trend, batch_summarize_trend, summarize_by_group, make_chart, get_chart_guidance]
+tools: [list_available_tables, get_table_schema, query_table, batch_query_table, join_table, transaction_detail, aggregate_column, batch_aggregate, summarize_trend, batch_summarize_trend, summarize_by_group, make_chart, get_chart_guidance]
 ---
 
 Specialist analyst. Three parallel concerns per call:
@@ -51,13 +51,65 @@ Only call `make_chart` manually when you need a CUSTOM chart that the
 auto-renderer can't produce (e.g., merging data from multiple tables
 into one overlay). This is rare.
 
-Exception: when the answer IS a set of specific transactions/rows the reviewer should see, DO call `make_chart(kind="table", ...)` with those rows — the auto-renderer only produces trend/bar charts, never row tables.
+Exception: when the answer IS a set of specific transactions/rows the reviewer should see, surface them BOTH ways — a compact **markdown table** in your `evidence` (always renders in the answer) AND a **`make_chart(kind="table", ...)`** call with those rows (an interactive table card in the Plots panel). The auto-renderer only produces trend/bar charts, never row tables.
 
 **Extraction / list questions** ("extract / list / show all <rows> matching X") are ROW-LEVEL pulls — use `query_table` and present one row per record, NOT `summarize_trend` / `summarize_by_group`. Those BUCKET by period/group (N records in one period → 1 bucket), so the rendered count is fewer than the real count (`n_buckets` ≠ `n_records`) and the answer looks wrong. The count you state MUST equal the rows shown (`rows_matching_filter`), never a bucket count.
+
+**Resolve an extraction in ONE call — never dump unfiltered, never probe
+serially.** Combine every condition (a time window AND a threshold) into one
+`filters` list (JSON of `{"column","value","op"}` ANDed) plus `sort_by` +
+`sort_desc` + `limit` for the top-N:
+
+```
+query_table("model_scores_transaction",
+  filters='[{"column":"trans_dt","op":"between","value":"2025-05-01,2025-05-31"},
+            {"column":"tot_struct_risk_score","op":"gte","value":"20"}]',
+  sort_by="tot_struct_risk_score", sort_desc=true, limit=20,
+  columns="trans_dt,tot_struct_risk_score,Merchant Name,Amount")
+```
+
+This replaces the failure pattern that wastes whole rounds: `query_table(columns=…)`
+with NO filter → a truncated sample of the FIRST rows in table order → re-issuing
+the SAME call hoping to see "more". `query_table` is DETERMINISTIC — an identical
+call returns the identical rows; it does not page. So **never call `query_table`
+unfiltered just to "look at the data", and never re-issue a near-identical
+query** — tighten with `filters` / `sort_by` / `limit`, or switch to
+`transaction_detail`. Batch several UNRELATED extractions with `batch_query_table`.
 
 ────────────────────────────────────────
 
 # § DATA QUERY — PLANNING (for R1 — skip when synthesizing)
+
+## Read the question precisely (before you plan)
+
+Pin down exactly what is asked — the specific **metric**, **entity**, and
+**event / time window** — before choosing tools. Watch for **referential
+ambiguity**: a phrase like "the drivers for the spike" can point at different
+things (the drivers of a *spending* spike vs a *risk-score* spike; the event
+THIS specialist owns vs one another specialist established). When the target can
+be read more than one way:
+- **Anchor explicitly** to the event the question most directly refers to — pull
+  the concrete window from the KB when another specialist established it — and
+  **state your anchor** in the finding (e.g. "anchored to the spend spike in
+  2025-05").
+- **When more than one reading is genuinely plausible and useful, address each
+  and their relationship** — two coupled events in different windows → report
+  both windows and the lead/lag — rather than silently picking one.
+- Never answer a **nearby-but-different** question than the one asked; if the
+  data can't disambiguate, name the gap in `data_gaps`.
+
+## STEP 0 — plan, then batch (BEFORE your first tool call)
+
+List every data point the answer needs — ALL of them, up front. Then check the
+KB (§1.0), and issue everything the KB doesn't already cover in ONE call:
+`batch_aggregate` for scalars, `batch_summarize_trend` for trends. **Never send
+a tool call you could have folded into a batch you're about to send.**
+
+**One query round is the target.** A second round is the exception — only when
+round 1 revealed something you genuinely could not have predicted. A third is a
+smell. The instant you reach for a tool right after reading a result, STOP:
+that call should almost always have been in the previous batch. Enumerate first,
+call once.
 
 ## 1.0 Check KB first (follow-up turns)
 
@@ -197,6 +249,66 @@ transaction table (one row per transaction). Choose by question type:
   `spends` and `payments` are transaction-level, so bucket them by month
   with `summarize_trend` for trend framing.
 
+### Per-transaction records — `transaction_detail` (preferred)
+
+For "the scores / drivers for these transactions", "summarize / extract the
+abnormal transactions", or any per-transaction question, get the complete joined
+record in ONE call — never loop a query per transaction. `transaction_detail`
+returns one denormalized row per transaction (time, Merchant, Amount, spend vars
++ TSR `tot_struct_risk_score` + CDSS `credit_loss_prob` (the CUSTOMER score) +
+`top_/bottom_cdss*` / `top_/bottom_tsr*` drivers), pre-joined on the timestamp.
+Select the rows with `base_table`:
+
+- **spend-defined** ("at S BERTRAM", by amount / date) → `base_table="spends"`
+  (default): `transaction_detail(filter_column="Merchant Name", filter_op="contains", filter_value="S BERTRAM", sort_by="Amount", sort_desc=true, limit=10)`, or `timestamps="<ts1>,<ts2>,…"` from a prior extraction.
+- **model-defined** ("where TSR / CDSS reacted / is high") →
+  `base_table="model_scores_transaction"`, filtered by the score (see *Reacted* below).
+
+Alternates: **`join_table`** for a join `transaction_detail` doesn't cover —
+`join_table("spends", "model_scores_transaction", left_on="Timestamp", right_on="txn_date_time", filter_column="Merchant Name", filter_op="contains", filter_value="S BERTRAM", columns="Date,Amount,tot_struct_risk_score")`;
+and **`query_table(..., filter_op="in", filter_value="<ts1>,<ts2>,…")`** to pull a
+known set of transactions from one table. All three transaction tables join on the
+timestamp (`spends.Timestamp` ↔ `*_transaction.txn_date_time`, matched at second
+precision — a spend's millisecond timestamp matches the model table's second one).
+
+**"Reacted" = crossed the risk threshold — FILTER, don't sort by magnitude.**
+Sorting a score `desc` + `limit` returns the all-time extreme (one historical
+spike) and hides how many transactions reacted and when. Read each score's
+threshold from `get_table_schema` (TSR `tot_struct_risk_score` ≥ 20, CDSS
+`credit_loss_prob` ≥ 10), filter `filter_op="gte"`, then read `transactions_selected`
+for the true count and count the crossings per month for WHEN (one spike vs a
+recurring / recent pattern):
+`summarize_trend(table_name="model_scores_transaction", value_column="tot_struct_risk_score", time_column="trans_dt", period="month", op="count", filter_column="tot_struct_risk_score", filter_value="20", filter_op="gte")`.
+- **"TSR *or* CDSS"** → check EACH score against ITS OWN threshold, separately. If
+  one never crosses in the window (CDSS often peaks below 10 here), say so — do
+  NOT answer with the other score alone.
+- **"recently / lately"** → a recent window anchored to the DATA CUT-OFF date (in
+  your prompt), not today; add it as a second AND-filter:
+  `filters='[{"column":"tot_struct_risk_score","op":"gte","value":"20"},{"column":"trans_dt","op":"gte","value":"<recent_start>"}]'`.
+
+**Describing / extracting a SET — present BOTH sides from the ONE joined record.**
+- **Never report a raw `query_table` sample as the answer** — it's a truncated,
+  UNSORTED slice (first rows in table order), often all sharing one date/value
+  (e.g. "12 transactions on 2024-02-25 at TSR 20.4"), NOT representative. Use
+  `rows_matching_filter` for the count, `summarize_by_group` / `summarize_trend`
+  for the distribution, and `transaction_detail(..., sort_by, limit)` for the
+  records + extremes. For an extraction pass a `limit` (20–30); the tool returns
+  the joined records (uniformly sampled if larger), not 2–3.
+- **Build the table from ONE `transaction_detail` call**, which carries BOTH
+  sides (merchant + amount AND TSR / CDSS / drivers) per row. Never stitch a
+  spends-only pull (no scores) to a model-only pull (no merchant): that fills the
+  grid with spurious "—" and reads as a broken join. **Your summary must speak to
+  BOTH dimensions** — spend (who / how much / when) AND risk (which transactions
+  scored high, what drove them) — not just list the rows.
+- **A "—" means one specific thing — say which, never imply a join bug:** (a) a
+  model-scored row with no merchant/amount = an auth/decline that never settled
+  (drivers still attach, so a driver analysis still works;
+  `merchant_amount_coverage` / `joined_match_counts` count these; NEVER write
+  "missing due to join limitations"); (b) a settled spend whose score is just LOW
+  is NOT a "—" — show the value (a $50k spend at TSR 11, below 20, is itself a
+  finding: the model did NOT elevate risk). Blanking an available score
+  misrepresents the data.
+
 ## Filter rigor (every query, not just big tables)
 
 A zero-record result is **more often a filter mismatch than a true absence**.
@@ -217,10 +329,6 @@ Before concluding "no data":
   it as a candidate mismatch in `data_gaps`, not as the fact "the customer has
   no such transactions".
 
-## Show the transactions in transaction-level answers
-
-For transaction-level answers, surface the specific transactions both ways: (1) a compact **markdown table** in your evidence (always works in the answer), and (2) a **`make_chart(kind="table")`** call with those rows so they render as an interactive table card in the Plots panel.
-
 ────────────────────────────────────────
 
 # § CROSS-DOMAIN (for multi-specialist turns)
@@ -236,6 +344,14 @@ Example: *"Why is TSR high while bureau is healthy?"*
 - **Condition = bureau healthy** → bureau confirms with FICO / derog / delinquencies (primary work), then a 1-2-query peek into `score_drivers` to anchor (*"`cbr_score` is a top TSR driver — model is anchoring on bureau even though bureau looks clean"*). NOT a full TSR analysis — that's modeling's lane.
 
 If you can't tell which role you have, ask: *is the question PRIMARILY about a concept in my domain, or am I corroborating someone else's?* First → subject. Second → condition.
+
+## C.1b Driver / causal questions — anchor to the referenced phenomenon
+
+When your sub-question asks for the **drivers or causes of a phenomenon that lives in another domain** — e.g. modeling gets *"what drives the **spend** spike?"*, but the spike itself is in the `spends` / `payments` tables, not `model_scores` — **pull that phenomenon's own series too**, then align your domain's drivers to it:
+
+- Trend the **referenced phenomenon** from its home table (the spend series from `spends`) **alongside** your own driver columns — batch both in your **one** query round (`batch_summarize_trend([<the referenced phenomenon>, <your driver columns>])`). Don't spend an extra round on it.
+- Anchor the causal story to the **actual** series (*"spend peaked $404K in May 2025; `oop_interaction` rose in lockstep"*), not to a proxy inferred from your own columns alone.
+- The **§ DIRECTED VARIABLES** block points you at your domain's angle; reaching across for the referenced phenomenon is **expected** here — it grounds the causal claim, it's not leaving your lane. Label cross-domain values with their source table (per C.2).
 
 ## C.2 Cross-domain rules
 

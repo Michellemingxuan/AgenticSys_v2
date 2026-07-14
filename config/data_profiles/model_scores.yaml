@@ -28,7 +28,7 @@ columns:
     aliases:
     - cbr_score_max
   exp_pif_max:
-    dtype: string
+    dtype: float
     description: Pay-In-Full exposure (max over scoring window). Stored as string
       with a "thousands" suffix (e.g. "188.8 thousands" → 188800.0) to dodge firewall
       masking on 6+digit runs.
@@ -85,7 +85,9 @@ columns:
     max: 10.0
     description: Customer Exposure / (Average Remit In 2-12 Months). Values above
       3.15 are risky.
-    concept: [oop, exposure_leverage]
+    concept:
+    - oop
+    - exposure_leverage
     aliases:
     - cust_expsr_avg_rem_12m_ratio_max
     risk_threshold: 3.15
@@ -170,7 +172,9 @@ columns:
     max: 100.0
     description: Average utilization in all the external consumer revolving trades
       with balance more than US$ 50. Values above 75 are risky.
-    concept: [external_delinquency, exposure_leverage]
+    concept:
+    - external_delinquency
+    - exposure_leverage
     aliases:
     - avutil_exrvlv_balgt50_max
     risk_threshold: 75
@@ -194,7 +198,9 @@ columns:
     min: -50.0
     max: 50.0
     description: FICO Trend Index. Values below -19 are risky.
-    concept: [bureau_derived, trends_tenure]
+    concept:
+    - bureau_derived
+    - trends_tenure
     risk_threshold: -19
     risk_direction: below
     aliases:
@@ -281,7 +287,9 @@ columns:
     max: 300000
     description: average remit (USD). Stored as string with "thousands" suffix (e.g.
       "221.4 thousands" → 221400.0) to dodge firewall masking on 6+digit runs.
-    concept: [capacity_paydown, oop]
+    concept:
+    - capacity_paydown
+    - oop
     aliases:
     - avg_remit_minus_max_max
     dtype_pending_review: true
@@ -317,7 +325,9 @@ columns:
     min: 0.0
     max: 50.0
     description: Out of Pattern Spend index wrt to Exposure. Values above 28 are risky.
-    concept: [oop, spend_pattern]
+    concept:
+    - oop
+    - spend_pattern
     aliases:
     - oop_interaction_max
     risk_threshold: 28
@@ -343,7 +353,9 @@ columns:
     min: -10.0
     max: 20.0
     description: hcam balance trend index. Values above 2.65 are risky.
-    concept: [trends_tenure, exposure_leverage]
+    concept:
+    - trends_tenure
+    - exposure_leverage
     aliases:
     - hcam_bal_trnd_indx_max
     risk_threshold: 2.65
@@ -390,8 +402,10 @@ columns:
     std: 1.5
     min: -10.0
     max: 5.0
-    description: A metric that summarizes the customer's CDSS risk scores over a historical
-      window (from 5 to 180 days ago). Values above 2 are risky.
+    description: MERCHANT CDSS — NOT the customer's CDSS (that is
+      `credit_loss_prob`); the merchant's adjusted CDSS risk aggregated over
+      5–180 days. Values above 2 are risky. (Full definition in the pillar
+      glossary "Scores" note.)
     concept: spend_pattern
     aliases:
     - cust_eff_se_cdss_5_180_day_score_max
@@ -406,7 +420,9 @@ columns:
     max: 0.5
     description: Total exposure to arbitrated income ratio. Values above 0.08 are
       risky.
-    concept: [capacity_paydown, exposure_leverage]
+    concept:
+    - capacity_paydown
+    - exposure_leverage
     aliases:
     - cust_expr_to_arb_inc_ratio_max
     risk_threshold: 0.08
@@ -590,7 +606,9 @@ columns:
     max: 1000.0
     description: Clear early risk score. Values below 785 are risky. Stored in CSV
       with comma-separated thousands (e.g. "9,005.00") — strip commas before parsing.
-    concept: [third_party_score, bureau_derived]
+    concept:
+    - third_party_score
+    - bureau_derived
     aliases:
     - gam_clr_erly_risk_score_min
     dtype_pending_review: true
@@ -645,7 +663,9 @@ columns:
     max: 900
     description: score merges business and owner credit data. Values below 693 are
       risky.
-    concept: [third_party_score, bureau_derived]
+    concept:
+    - third_party_score
+    - bureau_derived
     aliases:
     - cust_lexis_nexis_blended_score_min
     risk_threshold: 693
@@ -683,7 +703,9 @@ columns:
     min: 0
     max: 15
     description: total consumer and commercial trades greater than 30
-    concept: [external_delinquency, exposure_leverage]
+    concept:
+    - external_delinquency
+    - exposure_leverage
     aliases:
     - tot_cons_comm_trds_g75_max
   overall_exposure:

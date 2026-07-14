@@ -45,7 +45,8 @@ from runner.config import (
 from runner.orchestrator import Orchestrator
 from runner.turn.cache import _find_kp, _get_cached_qa, _normalize_q, _store_cached_qa
 from runner.turn.finalize import (
-    _collect_turn_charts, _replay_completed_specialists, _synthesize_fallback_answer,
+    _build_chart_payload, _collect_turn_charts, _replay_completed_specialists,
+    _synthesize_fallback_answer,
 )
 from runner.turn.input_assembly import assemble_orchestrator_input
 from runner.turn.review import (
@@ -72,6 +73,18 @@ class _TurnAborted(Exception):
     `_spawn_turn._runner` outer wrapper catches it, logs the abort,
     emits a `turn_done` with `outcome="aborted"`, and releases the
     lock so the next queued turn can proceed."""
+
+
+# Injected to resume the orchestrator when it emitted FinalAnswer without ever
+# calling report_agent (see `_ensure_report_agent`).
+_REPORT_AGENT_DIRECTIVE = (
+    "[REQUIRED report_agent] You emitted FinalAnswer without calling "
+    "`report_agent`, which is MANDATORY on every turn — including pure "
+    "extraction / list questions. Call `report_agent` now for this question, "
+    "then re-emit FinalAnswer incorporating whatever it returns. If the curated "
+    "reports do not cover this question, report_agent will say so ('not covered "
+    "by the reports') — surface that briefly rather than omitting it."
+)
 
 
 class _PlanningTimeout(Exception):
@@ -704,6 +717,16 @@ class TurnRunner:
                 continue
 
             except AgentsException as exc:
+                # User cancelled mid-run. An aborted SDK run can surface as an
+                # AgentsException (e.g. the background run task raising as it
+                # unwinds) rather than a clean CancelledError. Do NOT retry and
+                # do NOT synthesize the "could not produce a synthesized answer"
+                # fallback — the reviewer stopped waiting. Re-raise as an abort so
+                # the outer handler emits the clean "Interrupted" path and the
+                # rewind restores the pre-question state.
+                if sess.cancel_in_flight.is_set():
+                    raise _TurnAborted("cancelled during orchestrator run") from exc
+
                 # Retry-once on ``ModelBehaviorError`` BEFORE falling through to
                 # the fallback synthesis. A malformed FinalAnswer (truncated
                 # JSON / schema validation failure / hallucinated tool name)
@@ -970,6 +993,52 @@ class TurnRunner:
                 self.final_answer = new_final
             self._drain_specialist_errors()
 
+    # ── Phase 3.6: guarantee report_agent ran ─────────────────────────────
+
+    async def _ensure_report_agent(self) -> None:
+        """report_agent is MANDATORY on every answered turn — it is the curated-
+        report lookup, and a "not covered by the reports" result is a required,
+        auditable outcome, not a reason to skip. The orchestrator LLM
+        occasionally omits it (typically on terse extraction/list questions)
+        despite the PROTOCOL rule; when it does, re-run one round to call it and
+        re-synthesize the FinalAnswer so its finding is reflected.
+
+        Fires only when report_agent is genuinely absent (rare), so the extra
+        round is paid on those turns alone. Runs AFTER the coherence review so a
+        review re-dispatch that already called report_agent isn't duplicated.
+        Best-effort: any failure degrades to the answer we already have.
+        """
+        # Nothing to enforce on empty/no-dispatch turns (screen-reject already
+        # returned earlier) or if we somehow have no stream to resume from.
+        if self.final_answer is None or not self.tool_calls or self.streamed is None:
+            return
+        if any(c.get("tool") == "report_agent" for c in self.tool_calls):
+            return
+        try:
+            self.sess.logger.log("report_agent_backstop_fired", {
+                "turn_id": self.turn_id,
+                "n_tool_calls": len(self.tool_calls),
+            })
+            resume_input = self.streamed.to_input_list()
+            resume_input.append({"role": "user", "content": _REPORT_AGENT_DIRECTIVE})
+            new_final = await self._run_redispatch_pass(resume_input)
+            if new_final is not None:
+                self.final_answer = new_final
+                self.review_flags.append(
+                    "report_agent was dispatched server-side (the initial "
+                    "round omitted it)."
+                )
+            self._drain_specialist_errors()
+        except Exception as exc:  # noqa: BLE001 — never wedge the turn on the backstop
+            try:
+                self.sess.logger.log("report_agent_backstop_failed", {
+                    "turn_id": self.turn_id,
+                    "exception_type": type(exc).__name__,
+                    "message": str(exc)[:200],
+                })
+            except Exception:  # noqa: BLE001
+                pass
+
     # ── Phase 4: emit final + chat agent message ──────────────────────────
 
     async def _finalize(self) -> None:
@@ -981,6 +1050,14 @@ class TurnRunner:
         tool_calls = self.tool_calls
         cache_key = self.cache_key
         verdict = self.verdict
+        # Cooperative-cancellation checkpoint (post-orchestrator). If the user
+        # stopped the turn while the orchestrator/review ran, abort BEFORE
+        # emitting anything — especially before the `final_answer is None`
+        # salvage below would otherwise publish the "could not produce a
+        # synthesized answer" fallback to a reviewer who is no longer waiting.
+        # The outer handler renders the clean "Interrupted" path + rewind.
+        if sess.cancel_in_flight.is_set():
+            raise _TurnAborted("rewind before finalize")
         # Guard: if orchestrator finished with zero tool calls (skipped all
         # specialists), the answer is ungrounded — treat as a failure and
         # log it. This happens on safechain where tool_choice="required"
@@ -1128,23 +1205,7 @@ class TurnRunner:
         if turn_charts:
             for c in turn_charts:
                 kp = _find_kp(sess.specialist_kb, c["specialist"], c["topic"], turn_id)
-                viz = (kp or {}).get("viz") or {}
-                payload = {
-                    "specialist": c["specialist"],
-                    "topic": c["topic"],
-                    "url": c["url"],
-                    "claim": (kp or {}).get("claim", ""),
-                    "source_call": (kp or {}).get("source_call", ""),
-                    "kind": viz.get("kind", "") if isinstance(viz, dict) else "",
-                    "vega_spec": (kp or {}).get("vega_spec"),
-                }
-                if payload["kind"] == "table":
-                    payload["numbers"] = (kp or {}).get("numbers") or []
-                    payload["x_field"] = viz.get("x_field", "") if isinstance(viz, dict) else ""
-                    payload["y_fields"] = (
-                        viz.get("y_fields") or [] if isinstance(viz, dict) else []
-                    )
-                chart_payloads.append(payload)
+                chart_payloads.append(_build_chart_payload(kp, c))
             for p in chart_payloads:
                 sess.emit("chart", {**p, "turn_id": turn_id})
             sess.logger.log("turn_charts_emitted", {
@@ -1240,5 +1301,15 @@ class TurnRunner:
         self._assemble_input()
         if not await self._run_orchestrator():
             return
+        # Cooperative-cancellation checkpoints between the post-orchestrator
+        # phases. The review re-dispatch and report-agent backstop each issue
+        # fresh LLM calls; if the reviewer stopped the turn, skip straight to
+        # the clean-abort path instead of spending more work + emitting a stale
+        # answer. `_finalize` carries the final guard before it emits anything.
+        if self.sess.cancel_in_flight.is_set():
+            raise _TurnAborted("rewind after orchestrator")
         await self._review_and_redispatch()
+        if self.sess.cancel_in_flight.is_set():
+            raise _TurnAborted("rewind after coherence review")
+        await self._ensure_report_agent()
         await self._finalize()

@@ -8,6 +8,22 @@ import asyncio
 from agent_factories.agent_tools.distiller_pass import _distill_and_persist
 
 
+def test_slug_topic_is_readable_and_deterministic():
+    """Narrow-output KPs get a readable topic from the sub-question, not an
+    opaque hash — same question → same slug (KB dedup), empty → hash fallback."""
+    from agent_factories.agent_tools.distiller_pass import _slug_topic
+    t = _slug_topic("what is the total spend and payment status", "spend_payments")
+    assert t == "total_spend_payment_status"
+    # deterministic
+    assert _slug_topic("what is the total spend and payment status",
+                       "spend_payments") == t
+    # no opaque {name}_q_<hash> for a normal question
+    assert "_q_" not in t
+    # empty sub-question → name-scoped hash fallback (never a bare/empty topic)
+    fb = _slug_topic("", "spend_payments")
+    assert fb.startswith("spend_payments_q_") and len(fb) > len("spend_payments_q_")
+
+
 def test_distill_and_persist_noop_when_distiller_unwired():
     """Tests / legacy paths without _distiller or _specialist_kb must behave
     like the legacy single-turn flow — no errors, no KB updates."""

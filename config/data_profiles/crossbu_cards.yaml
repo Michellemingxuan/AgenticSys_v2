@@ -18,12 +18,13 @@ aliases:
 - crossbu_cards_data
 columns:
   cm11:
-    dtype: string
+    dtype: int
     description: Card member / account identifier for this card (numeric 11-digit
       id, e.g. "37675218257").
     description_pending: true
     aliases:
     - cm11
+    dtype_pending_review: true
   Month:
     dtype: date
     parse_hint: '%b-%Y'

@@ -176,6 +176,367 @@ def test_query_missing():
     assert "unavailable" in result.lower()
 
 
+def test_query_table_dedup_guard_short_circuits_identical_repeat():
+    """Within a turn, re-issuing the EXACT same query_table returns a directive
+    to change the query — not another full re-dump. (Fixes the observed trickle
+    where a specialist ran the same unfiltered query 4 rounds in a row.)"""
+    from tools.node_trace.core import TURN_SCOPE, TurnScope
+    # Reset the module-level guard state so the test is order-independent.
+    data_tools._recent_call_turn = None
+    data_tools._recent_call_sigs = {}
+    token = TURN_SCOPE.set(TurnScope(chat_id="c", case_id="CASE-00001", turn_id="T-DEDUP"))
+    try:
+        first = json.loads(data_tools._query_table_impl("bureau_full"))
+        assert "repeated_call" not in first          # first call: real data
+        assert first["rows_matching_filter"] == 2
+        second = json.loads(data_tools._query_table_impl("bureau_full"))
+        assert second.get("repeated_call") is True    # identical repeat: directive
+        assert "IDENTICAL" in second["message"]
+        # A DIFFERENT query in the same turn is NOT blocked.
+        other = json.loads(
+            data_tools._query_table_impl("bureau_full", filter_column="score", filter_value=720))
+        assert "repeated_call" not in other
+    finally:
+        TURN_SCOPE.reset(token)
+        data_tools._recent_call_turn = None
+        data_tools._recent_call_sigs = {}
+
+
+def test_query_table_dedup_guard_inert_without_turn_scope():
+    """With no active turn scope (unit tests / ad-hoc), the guard is inert — the
+    same query twice returns real data both times, never the directive."""
+    a = json.loads(data_tools._query_table_impl("bureau_full"))
+    b = json.loads(data_tools._query_table_impl("bureau_full"))
+    assert "repeated_call" not in a and "repeated_call" not in b
+
+
+def test_query_table_unsorted_truncation_samples_evenly_not_head():
+    """Systemic anti-truncation-misread: a large UNSORTED result is sampled
+    EVENLY across the match set, so the shown rows SPAN the full range instead of
+    clustering on the first rows' value. Regression for the recurring 'reported N
+    transactions on one date at one score' hallucination."""
+    pad = "p" * 60
+    early = [{"trans_dt": "2024-02-25", "score": 20.4, "pad": pad} for _ in range(30)]
+    later = [{"trans_dt": f"2025-{(i % 12) + 1:02d}-15", "score": 30 + i, "pad": pad}
+             for i in range(100)]
+    case_data = {"CASE-TR": {"txns": early + later}}
+    gw = LocalDataGateway(case_data=case_data)
+    gw.set_case("CASE-TR")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+
+    out = json.loads(data_tools._query_table_impl("txns"))       # no filter, no sort
+    assert out["rows_matching_filter"] == 130
+    assert out["truncated"] is True
+    dates = {r["trans_dt"] for r in out["rows"]}
+    assert len(dates) > 1                                          # spread, not a cluster
+    assert any(d.startswith("2025") for d in dates)               # reaches the far end
+    assert "EVENLY-SPACED" in out["truncation_note"]
+
+
+def test_query_table_sorted_truncation_keeps_top_n_head():
+    """When the caller sorted, truncation keeps the HEAD (the intended top-N),
+    NOT an even sample — sort intent wins."""
+    pad = "p" * 60
+    rows = [{"v": i, "pad": pad} for i in range(200)]
+    gw = LocalDataGateway(case_data={"CASE-S": {"t": rows}})
+    gw.set_case("CASE-S")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    out = json.loads(data_tools._query_table_impl("t", sort_by="v", sort_desc=True))
+    assert out["truncated"] is True
+    # highest values first, contiguous (head of the sorted list), not spread out
+    top = [r["v"] for r in out["rows"]]
+    assert top[0] == 199 and top == list(range(199, 199 - len(top), -1))
+
+
+def _setup_txn_fixture():
+    """A transaction-like table (date + score) for compound-filter / sort /
+    limit tests — mirrors the extraction question that previously thrashed."""
+    case_data = {
+        "CASE-TXN": {
+            "txns": [
+                {"trans_dt": "2025-05-03", "tsr": 25.0, "amt": 100},
+                {"trans_dt": "2025-05-10", "tsr": 30.0, "amt": 200},
+                {"trans_dt": "2025-05-20", "tsr": 15.0, "amt": 300},
+                {"trans_dt": "2025-04-15", "tsr": 40.0, "amt": 400},  # out of window
+                {"trans_dt": "2025-05-25", "tsr": 22.0, "amt": 500},
+            ],
+        },
+    }
+    gateway = LocalDataGateway(case_data=case_data)
+    gateway.set_case("CASE-TXN")
+    data_tools.init_tools(gateway, DataCatalog(profile_dir="config/data_profiles"))
+
+
+def test_query_table_compound_filters_are_anded():
+    """`filters` ANDs multiple conditions in ONE call — the fix for the
+    extraction thrash (date window AND threshold, previously impossible)."""
+    _setup_txn_fixture()
+    out = json.loads(data_tools._query_table_impl(
+        "txns",
+        filters=json.dumps([
+            {"column": "trans_dt", "op": "between", "value": "2025-05-01,2025-05-31"},
+            {"column": "tsr", "op": "gt", "value": "20"},
+        ]),
+    ))
+    # May-2025 AND tsr>20 → rows with tsr 25/30/22 (not the 15, not the April 40).
+    assert out["rows_matching_filter"] == 3
+    assert " AND " in out["filter"]
+
+
+def test_query_table_sort_and_limit_returns_top_n():
+    _setup_txn_fixture()
+    out = json.loads(data_tools._query_table_impl(
+        "txns",
+        filter_column="trans_dt", filter_value="2025-05-01,2025-05-31",
+        filter_op="between", sort_by="tsr", sort_desc=True, limit=2,
+    ))
+    assert out["rows_matching_filter"] == 4     # true match count, BEFORE the limit
+    assert out["limit"] == 2
+    assert out["sort"] == "tsr desc"
+    assert [r["tsr"] for r in out["rows"]] == [30.0, 25.0]   # top-2 by tsr desc
+
+
+def test_batch_query_table_runs_multiple_queries():
+    _setup_txn_fixture()
+    specs = [
+        {"table_name": "txns", "filter_column": "tsr", "filter_op": "gt", "filter_value": "30"},
+        {"table_name": "txns", "filters": [{"column": "trans_dt", "op": "contains", "value": "2025-05"}]},
+    ]
+    out = json.loads(data_tools._batch_query_table_impl(json.dumps(specs)))
+    assert len(out["results"]) == 2
+    assert json.loads(out["results"][0]["result"])["rows_matching_filter"] == 1  # tsr>30 → only the 40
+    assert json.loads(out["results"][1]["result"])["rows_matching_filter"] == 4  # 4 May rows
+
+
+def test_batch_query_table_invalid_json():
+    out = json.loads(data_tools._batch_query_table_impl("not json"))
+    assert out["error"] == "invalid_json"
+
+
+def test_filter_eq_timestamp_matches_at_second_precision():
+    """A spend's millisecond `Timestamp` must join to the model table's
+    second-precision `txn_date_time`, matching the ONE transaction at that
+    second — not the whole day. Regression: `_date_key` collapsed both to day
+    grain, so an exact-timestamp score lookup returned every same-day row and
+    the specialist reported 'no transaction-level scores found'.
+    """
+    rows = [
+        {"txn_date_time": "2025-05-14 11:35:35", "tsr": 11.0},   # S BERTRAM
+        {"txn_date_time": "2025-05-14 09:57:07", "tsr": 5.0},
+        {"txn_date_time": "2025-05-13 11:35:35", "tsr": 9.0},
+    ]
+    res = data_tools._apply_filter(
+        rows, "txn_date_time", "2025-05-14 11:35:35.101", "eq")
+    assert [r["tsr"] for r in res] == [11.0]
+
+
+def test_filter_eq_date_only_still_matches_whole_day():
+    """Date-only filters keep day-grain matching (a `2025-05-14` filter matches
+    a `2025-05-14 HH:MM:SS` cell) — the second-precision path must not regress
+    this behavior the catalog relies on."""
+    rows = [
+        {"txn_date_time": "2025-05-14 11:35:35", "tsr": 11.0},
+        {"txn_date_time": "2025-05-14 09:57:07", "tsr": 5.0},
+        {"txn_date_time": "2025-05-13 11:35:35", "tsr": 9.0},
+    ]
+    res = data_tools._apply_filter(rows, "txn_date_time", "2025-05-14", "eq")
+    assert sorted(r["tsr"] for r in res) == [5.0, 11.0]
+
+
+def test_filter_in_op_matches_any_of_list():
+    """`in` is the multi-key `eq`: look up several transactions in one call.
+    A millisecond value in the list matches a second-precision cell."""
+    _setup_txn_fixture()
+    out = json.loads(data_tools._query_table_impl(
+        "txns", filter_column="trans_dt",
+        filter_value="2025-05-03,2025-05-20", filter_op="in"))
+    assert out["rows_matching_filter"] == 2  # the 05-03 and 05-20 rows
+
+
+def _setup_join_fixture(case="CASE-J", extra_spend=None):
+    spend = [
+        {"Timestamp": "2025-05-14 11:35:35.101", "merchant": "S BERTRAM", "amount": 50220},
+        {"Timestamp": "2025-05-27 08:52:15.925", "merchant": "FRAYLICH", "amount": 37430},
+    ]
+    if extra_spend:
+        spend.append(extra_spend)
+    case_data = {case: {
+        "spend": spend,
+        "scores": [
+            {"txn_date_time": "2025-05-14 11:35:35", "tsr": 11.0},   # no ms
+            {"txn_date_time": "2025-05-27 08:52:15", "tsr": 4.3},
+        ],
+    }}
+    gw = LocalDataGateway(case_data=case_data)
+    gw.set_case(case)
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+
+
+def test_join_table_attaches_right_columns_by_timestamp():
+    """Inner join across the ms↔second timestamp — attaches model scores to
+    each spend in ONE call (the manual-join pattern, coded)."""
+    _setup_join_fixture()
+    out = json.loads(data_tools._join_table_impl(
+        "spend", "scores", left_on="Timestamp", right_on="txn_date_time",
+        columns="merchant,amount,tsr"))
+    assert out["matched_rows"] == 2
+    assert {r["merchant"]: r["tsr"] for r in out["rows"]} == {
+        "S BERTRAM": 11.0, "FRAYLICH": 4.3}
+
+
+def test_join_table_inner_drops_unmatched_left():
+    """A left row with no matching score is dropped by an inner join, kept by
+    a left join."""
+    _setup_join_fixture(
+        extra_spend={"Timestamp": "2025-05-01 00:00:00.000", "merchant": "NOSCORE", "amount": 10})
+    inner = json.loads(data_tools._join_table_impl(
+        "spend", "scores", left_on="Timestamp", right_on="txn_date_time"))
+    assert inner["matched_rows"] == 2
+    left = json.loads(data_tools._join_table_impl(
+        "spend", "scores", left_on="Timestamp", right_on="txn_date_time", how="left"))
+    assert left["matched_rows"] == 3  # unmatched NOSCORE row kept
+
+
+def test_join_table_missing_table():
+    _setup_join_fixture()
+    out = data_tools._join_table_impl("spend", "no_such", left_on="Timestamp")
+    assert "unavailable" in out.lower()
+
+
+def _setup_txn_detail_fixture():
+    """spends + per-transaction scores + drivers, joinable on the timestamp —
+    named with the canonical table names the tool resolves."""
+    case_data = {"CASE-TD": {
+        "spends": [
+            {"Timestamp": "2025-05-14 11:35:35.101", "Date": "2025-05-14",
+             "Merchant Name": "S BERTRAM", "Amount": 50220},
+            {"Timestamp": "2025-05-27 08:52:15.925", "Date": "2025-05-27",
+             "Merchant Name": "FRAYLICH", "Amount": 37430},
+        ],
+        "model_scores_transaction": [
+            # CDSS = credit_loss_prob (the customer score); cust_eff_se_cdss is a
+            # separate MERCHANT score and is NOT in transaction_detail's default set.
+            {"txn_date_time": "2025-05-14 11:35:35", "tot_struct_risk_score": 11.0,
+             "credit_loss_prob": 0.9},
+            {"txn_date_time": "2025-05-27 08:52:15", "tot_struct_risk_score": 4.3,
+             "credit_loss_prob": 0.4},
+        ],
+        "score_drivers_transaction": [
+            {"txn_date_time": "2025-05-14 11:35:35.101", "top_cdss1": "cashA", "top_tsr1": "pdA"},
+            {"txn_date_time": "2025-05-27 08:52:15.925", "top_cdss1": "cashB", "top_tsr1": "pdB"},
+        ],
+    }}
+    gw = LocalDataGateway(case_data=case_data)
+    gw.set_case("CASE-TD")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+
+
+def test_transaction_detail_by_timestamps_merges_scores_and_drivers():
+    _setup_txn_detail_fixture()
+    out = json.loads(data_tools._transaction_detail_impl(
+        timestamps="2025-05-14 11:35:35.101,2025-05-27 08:52:15.925"))
+    assert out["transactions_selected"] == 2
+    assert out["with_model_scores"] == 2
+    by_m = {r["Merchant Name"]: r for r in out["rows"]}
+    assert by_m["S BERTRAM"]["tot_struct_risk_score"] == 11.0        # ms↔second join
+    assert by_m["S BERTRAM"]["credit_loss_prob"] == 0.9              # CDSS = customer score
+    assert "cust_eff_se_cdss_5_180_day_score" not in by_m["S BERTRAM"]  # merchant score excluded
+    assert by_m["S BERTRAM"]["top_cdss1"] == "cashA"                  # drivers merged
+    assert by_m["FRAYLICH"]["top_tsr1"] == "pdB"
+
+
+def test_transaction_detail_by_spend_filter():
+    _setup_txn_detail_fixture()
+    out = json.loads(data_tools._transaction_detail_impl(
+        filter_column="Merchant Name", filter_op="contains", filter_value="FRAYLICH"))
+    assert out["transactions_selected"] == 1
+    r = out["rows"][0]
+    assert r["Amount"] == 37430 and r["tot_struct_risk_score"] == 4.3
+    assert r["top_tsr1"] == "pdB"
+
+
+def test_transaction_detail_base_model_selects_by_score_and_left_joins():
+    """base_table='model_scores_transaction' selects by a MODEL metric (TSR) and
+    LEFT-joins spends + drivers. A model-scored txn with no settled spend keeps
+    its scores/drivers; merchant/amount is simply absent (NOT a failure), and
+    joined_match_counts reports coverage. (Fixes "unable to retrieve drivers or
+    merchant/amount due to missing data in the join" for TSR-selected txns.)"""
+    case_data = {"CASE-M": {
+        "spends": [
+            {"Timestamp": "2025-05-14 11:35:35.101", "Date": "2025-05-14",
+             "Merchant Name": "S BERTRAM", "Amount": 50220},
+        ],
+        "model_scores_transaction": [
+            {"txn_date_time": "2025-05-14 11:35:35", "tot_struct_risk_score": 39.6,
+             "credit_loss_prob": 2.4},   # has a settled spend
+            {"txn_date_time": "2025-05-20 08:00:00", "tot_struct_risk_score": 25.0,
+             "credit_loss_prob": 1.1},   # model-only (auth/decline) — NO spend
+        ],
+        "score_drivers_transaction": [
+            {"txn_date_time": "2025-05-14 11:35:35", "top_cdss1": "cbr_score", "top_tsr1": "cbr_score"},
+            {"txn_date_time": "2025-05-20 08:00:00", "top_cdss1": "times_30_dpd", "top_tsr1": "times_30_dpd"},
+        ],
+    }}
+    gw = LocalDataGateway(case_data=case_data)
+    gw.set_case("CASE-M")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    out = json.loads(data_tools._transaction_detail_impl(
+        base_table="model_scores_transaction",
+        filter_column="tot_struct_risk_score", filter_op="gt", filter_value="20",
+        sort_by="tot_struct_risk_score", sort_desc=True))
+    assert out["transactions_selected"] == 2                                  # both TSR>20
+    assert out["joined_match_counts"]["score_drivers_transaction"] == 2       # drivers for BOTH
+    assert out["joined_match_counts"]["spends"] == 1                          # only one settled
+    rows = out["rows"]
+    assert rows[0]["tot_struct_risk_score"] == 39.6                           # highest first
+    assert rows[0]["Merchant Name"] == "S BERTRAM" and rows[0]["top_cdss1"] == "cbr_score"
+    # model-only txn: scores + drivers + time present, merchant/amount absent (not a failure)
+    assert "Merchant Name" not in rows[1] and rows[1]["top_cdss1"] == "times_30_dpd"
+    assert rows[1]["txn_date_time"] == "2025-05-20 08:00:00"
+
+
+def test_transaction_detail_extraction_returns_many_rows_and_coverage():
+    """Regression: extracting the abnormal TSR-reacted transactions must return a
+    USABLE number of joined rows, not collapse to ~3 under the size cap — and it
+    must not drop every settled spend when sorted by TSR desc (the extreme rows
+    are model-only declines). Reproduces "merchant/amount missing due to join
+    limitations": here the TOP-TSR rows are declines (no spend) and the settled
+    rows sit lower; head-truncation kept only the declines. Even-sampling + the
+    bigger cap keep settled rows, and `merchant_amount_coverage` states the split.
+    """
+    # Settled and decline transactions span the SAME TSR range (20-39), as in the
+    # real book — so a TSR-desc top-N selection includes BOTH, and the test checks
+    # that even-sampling doesn't silently drop the settled (merchant-bearing) ones.
+    spends = [
+        {"Timestamp": f"2025-04-{d:02d} 10:00:00", "Date": f"2025-04-{d:02d}",
+         "Merchant Name": f"MERCH {d}", "Amount": 100 + d}
+        for d in range(1, 41)
+    ]
+    model = (
+        [{"txn_date_time": f"2025-04-{d:02d} 10:00:00",
+          "tot_struct_risk_score": 20.0 + d * 0.45, "credit_loss_prob": 1.0}
+         for d in range(1, 41)]                                   # settled, TSR ~20-38
+        + [{"txn_date_time": f"2025-04-{d:02d} 22:00:00",
+            "tot_struct_risk_score": 20.2 + d * 0.45, "credit_loss_prob": 2.0}
+           for d in range(1, 41)]                                 # declines, TSR ~20-38
+    )
+    gw = LocalDataGateway(case_data={"CASE-X": {"spends": spends,
+                                                "model_scores_transaction": model}})
+    gw.set_case("CASE-X")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    out = json.loads(data_tools._transaction_detail_impl(
+        base_table="model_scores_transaction",
+        filter_column="tot_struct_risk_score", filter_op="gte", filter_value="20",
+        sort_by="tot_struct_risk_score", sort_desc=True, limit=40))
+    assert out["transactions_selected"] == 80
+    # Far more than the old ~3-row collapse.
+    assert out["rows_returned"] >= 15
+    # Coverage is reported from the full join, and the impl must NOT have dropped
+    # every settled spend: at least some returned rows carry a merchant.
+    assert "merchant_amount_coverage" in out
+    assert sum(1 for r in out["rows"] if r.get("Merchant Name")) >= 1
+
+
 def test_batch_aggregate_runs_multiple_scalars_in_one_call():
     specs = [
         {"table_name": "bureau_full", "column": "score", "op": "count"},
@@ -355,6 +716,65 @@ def test_summarize_trend_date_range_narrowing():
     assert "2024-11" not in periods
     assert "2024-12" not in periods
     assert {"2025-02", "2025-03"} <= periods
+
+
+def _setup_long_series_fixture(period_kind: str):
+    """Build a synthetic series long enough to blow past _TREND_MAX_CHARS.
+
+    `period_kind` = 'month' → 120 monthly rows (10 years); 'day' → 4000 daily
+    rows. Each row a distinct date + a varying value so buckets are unique.
+    """
+    rows = []
+    if period_kind == "month":
+        for i in range(120):
+            y = 2016 + i // 12
+            m = i % 12 + 1
+            rows.append({"Date": f"{y:04d}-{m:02d}-15", "Amount": float(100 + i)})
+    else:  # day
+        import datetime
+        base = datetime.date(2016, 1, 1)
+        for i in range(4000):
+            d = base + datetime.timedelta(days=i)
+            rows.append({"Date": d.isoformat(), "Amount": float(100 + i)})
+    gateway = LocalDataGateway(case_data={"CASE-LONG": {"spends_data": rows}})
+    gateway.set_case("CASE-LONG")
+    catalog = DataCatalog(profile_dir="config/data_profiles")
+    data_tools.init_tools(gateway, catalog)
+
+
+def test_summarize_trend_monthly_never_downsampled():
+    """Coarse-grain (month) series must survive WHOLE, even past the size cap —
+    down-sampling drops interior months the specialist then can't narrate."""
+    _setup_long_series_fixture("month")
+    raw = data_tools._summarize_trend_impl(
+        table_name="spends_data", value_column="Amount", time_column="Date",
+        period="month", op="sum",
+    )
+    assert len(raw) > data_tools._TREND_MAX_CHARS  # genuinely over the budget
+    payload = json.loads(raw)
+    # Every one of the 120 months is present; nothing sampled away.
+    assert payload["summary"]["n_buckets"] == 120
+    assert len(payload["series"]) == 120
+    assert "series_note" not in payload
+    assert payload["series"][0]["period"] == "2016-01"
+    assert payload["series"][-1]["period"] == "2025-12"
+
+
+def test_summarize_trend_daily_still_downsampled():
+    """Day-grain can explode unboundedly, so it still falls back to uniform
+    down-sampling — but keeps the first & last bucket (full range preserved)."""
+    _setup_long_series_fixture("day")
+    raw = data_tools._summarize_trend_impl(
+        table_name="spends_data", value_column="Amount", time_column="Date",
+        period="day", op="sum",
+    )
+    payload = json.loads(raw)
+    assert len(raw) <= data_tools._TREND_MAX_CHARS
+    assert "series_note" in payload
+    assert len(payload["series"]) < payload["summary"]["n_buckets"]
+    # First & last survive the sampling → date range intact.
+    assert payload["series"][0]["period"] == "2016-01-01"
+    assert payload["series"][-1]["period"] == "2026-12-13"
 
 
 def test_batch_summarize_trend_runs_multiple_trends_in_one_call():

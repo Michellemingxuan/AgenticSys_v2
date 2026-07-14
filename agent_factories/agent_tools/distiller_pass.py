@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import time
 
 from agents import Runner
@@ -44,6 +45,30 @@ _SERIES_KEYWORDS = frozenset({
     "hhi", "top1_share", "top3_share", "concentration",
     "trend", "trajectory", "missing_periods",
 })
+
+# Narrow-output KPs skip the distiller LLM, so they don't get an LLM-named
+# topic. Derive a readable, deterministic topic from the sub-question instead
+# of an opaque `{name}_q_<hash>` — so kb_lookup and the KB digest stay
+# meaningful. Stopwords are dropped so the slug carries the actual metric.
+_TOPIC_STOPWORDS = frozenset({
+    "the", "a", "an", "is", "are", "was", "were", "did", "do", "does", "what",
+    "how", "why", "when", "which", "who", "of", "for", "to", "in", "on", "at",
+    "and", "or", "over", "this", "that", "there", "any", "all", "its", "it",
+    "with", "by", "be", "as", "has", "have", "had", "their", "they", "customer",
+    "case", "many", "much", "were",
+})
+
+
+def _slug_topic(sub_question: str, name: str, max_tokens: int = 5) -> str:
+    """Readable, deterministic topic slug from a sub-question (narrow-output
+    path). Same sub-question → same slug, so KB dedup still works; falls back to
+    the old name-scoped hash only when no usable tokens remain."""
+    toks = re.findall(r"[a-z0-9]+", (sub_question or "").lower())
+    keep = [t for t in toks if t not in _TOPIC_STOPWORDS and len(t) > 1]
+    slug = "_".join(keep[:max_tokens])
+    if slug:
+        return slug
+    return f"{name}_q_{hashlib.md5((sub_question or '').encode()).hexdigest()[:8]}"
 
 
 def _is_narrow_output(specialist_output, sub_question: str = "") -> bool:
@@ -109,9 +134,8 @@ async def _distill_and_persist(
     # so it's visible in the trace viewer.
     if _is_narrow_output(specialist_output, sub_question):
         findings = getattr(specialist_output, "findings", "") or ""
-        sq_hash = hashlib.md5(sub_question.encode()).hexdigest()[:8]
         kp_dict = {
-            "topic": f"{name}_q_{sq_hash}",
+            "topic": _slug_topic(sub_question, name),
             "claim": findings,
             "numbers": [],
             "source_call": "",

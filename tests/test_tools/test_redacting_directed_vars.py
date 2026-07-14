@@ -27,3 +27,22 @@ def test_render_directed_variables_format():
 
 def test_render_empty_is_blank():
     assert _render_directed_variables([]) == ""
+
+
+def test_render_directed_variables_caps_per_concept_and_frames_directional():
+    """Concepts are DIRECTIONS, not a checklist: at most N columns per concept
+    plus a directional caveat, so the specialist doesn't trend every matched
+    column (the round-count regression fix)."""
+    from agent_factories.agent_tools.specialist_input_tool import (
+        _DIRECTED_VARS_PER_CONCEPT,
+    )
+    vars = [{"concept": "spend_pattern", "name": f"sp_{i}",
+             "description_short": f"d{i}", "threshold_text": ""} for i in range(5)]
+    vars += [{"concept": "output_score", "name": f"os_{i}",
+              "description_short": f"e{i}", "threshold_text": ""} for i in range(3)]
+    block = _render_directed_variables(vars)
+    # framed as directions, not a to-do list
+    assert "NOT a checklist" in block
+    # capped per concept — not all 5 / all 3 columns
+    assert block.count("[spend_pattern]") == _DIRECTED_VARS_PER_CONCEPT
+    assert block.count("[output_score]") == _DIRECTED_VARS_PER_CONCEPT

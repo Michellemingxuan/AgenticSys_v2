@@ -7,7 +7,7 @@ import os
 # here from `server.py` alongside the function that is its only consumer —
 # it isn't a shared cross-module constant, so it doesn't belong in
 # `runner/config.py`.
-_QA_CACHE_MAX_ENTRIES = int(os.environ.get("QA_CACHE_MAX_ENTRIES", "64"))
+_QA_CACHE_MAX_ENTRIES = int(os.environ.get("QA_CACHE_MAX_ENTRIES", "1024"))
 
 
 def _normalize_q(q: str) -> str:
@@ -67,7 +67,8 @@ def _find_kp(specialist_kb: dict, specialist: str, topic: str,
              turn_id: str) -> dict | None:
     """Return the latest KP for (specialist, topic) captured in this turn,
     or None when not present. Used to enrich the chart SSE event with the
-    KP's claim / source_call / vega_spec."""
+    KP's claim / source_call and to regenerate its Vega-Lite spec at emit
+    time (see ``finalize._build_chart_payload``)."""
     if not isinstance(specialist_kb, dict):
         return None
     kps = specialist_kb.get(specialist) or []

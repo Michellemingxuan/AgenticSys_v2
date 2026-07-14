@@ -9,7 +9,7 @@ mode: inline
 Given data from tool results, produce a `SpecialistOutput`:
 
 - `findings`: 1-2 sentence summary — the main takeaway. Numbers > prose.
-- `evidence`: ≤3 specific citations (e.g., "payment_status=return: count=5").
+- `evidence`: ≤3 specific citations (e.g., "Return Flag=1 (returned): count=5").
   Quote dates and amounts verbatim. Skip if findings already contains them.
 - `data_gaps`: flag only gaps that materially affect THIS answer.
 

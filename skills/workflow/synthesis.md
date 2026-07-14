@@ -108,6 +108,24 @@ approve/deny decisions), include a **markdown table of the relevant
 transactions** (e.g. date/time, amount or key score, approve-deny, decline
 reason) — these answers should show the underlying rows, not just prose.
 
+**One lens per table — never merge two specialists' transaction sets into one
+grid.** Different specialists surface transactions through DIFFERENT lenses that
+answer DIFFERENT questions: modeling's *"transactions where TSR crossed its
+threshold"* (risk-defined) vs spend_payments' *"abnormal / large-vendor spends"*
+(spend-defined). Forcing both into one table means the spend rows show `--` for
+TSR and the risk rows show `--` for merchant/amount — which reads as broken data
+and buries what each is actually saying. Instead:
+- **A SEPARATE table per lens**, each under a heading that states what it shows
+  (e.g. *"TSR-reacted transactions (modeling)"* and *"Abnormal vendor spends
+  (spend_payments)"*).
+- Give each table ONLY the columns its lens populates — the risk table carries
+  TSR + drivers; the spend table carries merchant + amount + why-abnormal. No
+  placeholder `--` columns; every cell means something.
+- Each table must stand on its own and be clear about what it delivers.
+- **Exception:** when the SAME transactions carry both spend and risk detail
+  (one joined `transaction_detail` set), keep them in ONE table with all columns.
+  Split only when the sets/lenses are genuinely different findings.
+
 #### Case overview ("what is this case about")
 
 When the question is a broad overview, structure the answer in three sections:

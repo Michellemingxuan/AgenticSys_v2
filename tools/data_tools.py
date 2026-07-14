@@ -48,7 +48,76 @@ except NameError:
     _schema_cache: dict[tuple[str | None, str], str] = {}
 
 _MAX_CHARS = 3000
+# A trend `series` is load-bearing — auto_chart parses it to render the plotted
+# chart — so it gets a larger budget than generic row dumps, and when it is
+# STILL too long it is down-sampled across the full range (see
+# `_downsample_trend_series`) rather than truncated at one end. The old shared
+# 3000-char cap + head-truncation silently dropped the most-recent months from
+# the chart.
+_TREND_MAX_CHARS = 8000
+# `transaction_detail` returns wide DENORMALIZED rows (timestamp + merchant +
+# amount + spend vars + 2 scores + 6 drivers ≈ 16 cols, ~900 chars each). At the
+# generic 3000-char cap only ~3 rows survive — useless for "extract the abnormal
+# transactions", and if the surviving rows happen to be model-only auths/declines
+# (no settled spend), merchant/amount look "missing" and the specialist wrongly
+# blames the join. Give it a much larger budget so a real extraction (limit 20-30)
+# comes back whole, and sample uniformly (not head-truncate) when it must shrink.
+_TXN_DETAIL_MAX_CHARS = 16000
 _LOG_PREVIEW_CHARS = 500  # how much of tool output to snapshot in tool_result events
+
+# ── Duplicate-call guard ────────────────────────────────────────────────────
+#
+# The read tools are DETERMINISTIC within a turn — the case data doesn't change,
+# so an identical call returns identical rows. Specialists nonetheless sometimes
+# re-issue the EXACT same query several rounds in a row (e.g. an unfiltered
+# `query_table` dump, hoping to page or see "more"), burning ~30-45s of LLM
+# latency per wasted round. This tracks call signatures within the CURRENT turn
+# so the tool can short-circuit an exact repeat with a directive to change the
+# query, instead of silently re-dumping the same sample and letting the loop run.
+_recent_call_sigs: dict[tuple, int] = {}
+_recent_call_turn: Any = None
+
+
+def _seen_this_turn(tool: str, signature: tuple) -> int:
+    """Times this exact (tool, signature) was already seen THIS turn (0 = first).
+
+    Turn-scoped via the node-trace ``TURN_SCOPE`` contextvar; resets whenever the
+    turn changes. When NO turn scope is active (unit tests, ad-hoc calls) it is
+    INERT and always returns 0 — so it never dedups across tests or across turns
+    that lack a scope.
+    """
+    global _recent_call_turn, _recent_call_sigs
+    turn = None
+    try:  # lazy import — avoids any load-order coupling with node_trace
+        from tools.node_trace.core import current_turn_scope
+        ts = current_turn_scope()
+        turn = ts.turn_id if ts else None
+    except Exception:  # noqa: BLE001
+        turn = None
+    if turn is None:
+        return 0  # no active turn → inert (never a false positive)
+    if turn != _recent_call_turn:
+        _recent_call_turn = turn
+        _recent_call_sigs = {}
+    key = (tool, signature)
+    n = _recent_call_sigs.get(key, 0)
+    _recent_call_sigs[key] = n + 1
+    return n
+
+
+def _even_sample(items: list, max_items: int) -> list:
+    """Uniformly sub-sample ``items`` to ``<= max_items``, always keeping the
+    FIRST and LAST element and spreading the rest evenly across the list. Used
+    both to down-sample a trend series (preserve the full x-range) and to
+    truncate a large `query_table` result to a REPRESENTATIVE sample that spans
+    the whole match set — instead of the first N rows, which cluster on one
+    date/value and get mistaken for the full result. Returns ``items`` unchanged
+    when it already fits or ``max_items < 2``."""
+    n = len(items)
+    if n <= max_items or max_items < 2:
+        return items
+    idx = sorted({round(i * (n - 1) / (max_items - 1)) for i in range(max_items)})
+    return [items[i] for i in idx]
 
 _FILTER_OPS: dict[str, Callable[[Any, Any], bool]] = {
     "eq": operator.eq,
@@ -365,8 +434,32 @@ def _is_strict_number(v: Any) -> bool:
     return bool(_STRICT_NUMBER_RE.match(str(v).strip()))
 
 
+# Datetime WITH a time-of-day component, e.g. "2025-05-14 11:35:35.101",
+# "2025-05-14T11:35:35", "2025-05-14 11:35:35". Captures down to the SECOND and
+# ignores any fractional seconds / timezone suffix — so two representations of
+# the SAME instant at different precision (a spend's millisecond `Timestamp`
+# vs the model table's second-precision `txn_date_time`) compare equal.
+_DT_SECOND_RE = re.compile(
+    r"^\s*(\d{4})[-/](\d{1,2})[-/](\d{1,2})[ T](\d{1,2}):(\d{2}):(\d{2})"
+)
+
+
+def _second_key(x: Any) -> tuple[int, ...] | None:
+    """Return a ``(Y, M, D, h, m, s)`` tuple when ``x`` carries a time-of-day,
+    else ``None``. Used to compare timestamps at SECOND precision so an exact-
+    timestamp lookup isolates a single transaction. Date-only values (no
+    ``HH:MM:SS``) return ``None`` and fall through to ``_date_key`` day grain."""
+    if x is None:
+        return None
+    m = _DT_SECOND_RE.match(str(x))
+    if not m:
+        return None
+    return tuple(int(g) for g in m.groups())
+
+
 def _coerce_pair(a: Any, b: Any) -> tuple[Any, Any]:
-    """Best-effort comparable coercion: numeric → date-tuple → string.
+    """Best-effort comparable coercion: numeric → second-tuple → date-tuple →
+    string.
 
     Ensures ISO dates, YYYY-MM month strings, plain years, and the
     ``MonthName'YYYY`` format all compare chronologically. For everything
@@ -376,13 +469,41 @@ def _coerce_pair(a: Any, b: Any) -> tuple[Any, Any]:
     #    columns ("007", zip codes, "1e3") and inf/nan don't get coerced.
     if _is_strict_number(a) and _is_strict_number(b):
         return float(a), float(b)
-    # 2) date-ish — only if BOTH sides parse, so a mixed pair doesn't
-    #    quietly mis-compare.
+    # 2) datetime with time-of-day on BOTH sides → compare at SECOND precision
+    #    so an exact-timestamp lookup pinpoints one transaction (e.g. joining a
+    #    spend's millisecond `Timestamp` to the model table's second-precision
+    #    `txn_date_time`). Without this, `_date_key` below collapses BOTH to day
+    #    grain and the lookup returns every transaction that day.
+    at, bt = _second_key(a), _second_key(b)
+    if at is not None and bt is not None:
+        return at, bt
+    # 3) date-ish (day grain) — only if BOTH sides parse, so a mixed pair
+    #    doesn't quietly mis-compare. A date-only bound (e.g. "2024-01-01")
+    #    still matches a datetime cell at day grain (intended).
     ak, bk = _date_key(a), _date_key(b)
     if ak is not None and bk is not None:
         return ak, bk
-    # 3) string fallback
+    # 4) string fallback
     return (str(a) if a is not None else ""), (str(b) if b is not None else "")
+
+
+def _join_key(x: Any) -> tuple | None:
+    """Normalize ONE value to a hashable join key, mirroring `_coerce_pair`'s
+    coercion order (numeric → second-precision datetime → day-date → text). Two
+    representations of the same key (a spend's millisecond `Timestamp` and the
+    model table's second-precision `txn_date_time`) normalize identically, so
+    they join. Returns ``None`` for null cells (never join)."""
+    if x is None:
+        return None
+    if _is_strict_number(x):
+        return ("n", float(x))
+    sk = _second_key(x)
+    if sk is not None:
+        return ("dt", sk)
+    dk = _date_key(x)
+    if dk is not None:
+        return ("d", dk)
+    return ("s", str(x).strip().casefold())
 
 
 def render_catalog_tree(
@@ -684,6 +805,29 @@ def _apply_filter(
                 continue
             if needle in str(cell).casefold():
                 out.append(r)
+        return out
+
+    if op == "in":
+        # Match ANY of a comma-separated value list — the multi-key form of
+        # `eq`, using the same forgiving comparison (numeric coercion,
+        # second-precision timestamps, case/space-insensitive text). Lets a
+        # specialist look up N transactions' scores in ONE call, e.g.
+        # `txn_date_time in "<ts1>,<ts2>,<ts3>"`, instead of N separate queries.
+        parts = [v.strip() for v in str(value).split(",") if v.strip()]
+        if not parts:
+            return rows
+        out = []
+        for r in rows:
+            cell = r.get(column)
+            if cell is None:
+                continue
+            for v in parts:
+                a, b = _coerce_pair(cell, v)
+                if isinstance(a, str) and isinstance(b, str):
+                    a, b = a.strip().casefold(), b.strip().casefold()
+                if a == b:
+                    out.append(r)
+                    break
         return out
 
     cmp = _FILTER_OPS.get(op)
@@ -990,6 +1134,10 @@ def _query_table_impl(
     filter_value: str = "",
     filter_op: str = "eq",
     columns: str = "",
+    filters: str = "",
+    sort_by: str = "",
+    sort_desc: bool = False,
+    limit: int = 0,
 ) -> str:
     """Query a data table for the current case. All data is scoped to the active case.
 
@@ -1019,7 +1167,8 @@ def _query_table_impl(
             "<low>,<high>" (inclusive). For ISO dates (YYYY-MM-DD) and YYYY-MM
             strings, lexicographic order matches chronological order.
         filter_op: one of "eq" (default), "ne", "gt", "gte", "lt", "lte",
-            "between", "contains" (case-insensitive substring match).
+            "between", "contains" (case-insensitive substring match), "in"
+            (match any of a comma-separated value list — the multi-key eq).
             Use range ops for time windows — e.g. for payments in the 3 months
             before cut-off 2025-12-01, call:
                 query_table("payments", filter_column="payment_date",
@@ -1040,6 +1189,31 @@ def _query_table_impl(
         "filter_op": filter_op if (filter_column and filter_value) else None,
         "columns": columns,
     })
+
+    # Deterministic within a turn: an exact repeat returns the exact same rows.
+    # Short-circuit it with a directive to CHANGE the query rather than re-dump.
+    _sig = (table_name, filter_column, filter_value, filter_op, columns,
+            filters, sort_by, bool(sort_desc), limit)
+    _repeat = _seen_this_turn("query_table", _sig)
+    if _repeat >= 1:
+        out = json.dumps({
+            "table": table_name,
+            "repeated_call": True,
+            "message": (
+                f"You already ran this IDENTICAL query_table call {_repeat + 1} "
+                "times this turn. query_table is deterministic — re-issuing it "
+                "returns the SAME rows; it does not page or reveal new rows. To "
+                "get DIFFERENT rows, CHANGE the query: add `filters` (a JSON "
+                "AND-list of {column,value,op}), or `sort_by`+`sort_desc`+`limit` "
+                "for the true top-N, or use `summarize_by_group` / "
+                "`summarize_trend` to characterize the set. If you already have "
+                "what you need, STOP querying and emit SpecialistOutput."
+            ),
+        }, indent=2)
+        _log_result("query_table", result=out,
+                    extra={"reason": "duplicate_call", "repeat": _repeat + 1,
+                           "table_name": table_name})
+        return out
 
     if _gateway is None:
         out = (
@@ -1069,22 +1243,66 @@ def _query_table_impl(
         table_name = real_table
 
     total_rows_in_table = len(rows)
-    filter_descriptor: str | None = None
-    resolved_filter_column: str | None = None
-    if filter_column and filter_value:
-        # Resolve case/space variants ('return_flag' → 'Return Flag') against
-        # the real CSV headers before filtering. Without this, a specialist
-        # following the skill's snake_case names silently gets 0 rows.
-        resolved_filter_column = _resolve_real_column(rows, filter_column, table_name)
-        rows = _apply_filter(rows, resolved_filter_column, str(filter_value), filter_op)
-        if resolved_filter_column != filter_column:
-            filter_descriptor = (
-                f"{resolved_filter_column} {filter_op} {filter_value!r} "
-                f"(resolved from '{filter_column}')"
-            )
-        else:
-            filter_descriptor = f"{filter_column} {filter_op} {filter_value!r}"
+
+    # Build the AND'd condition list. The single filter_column/value/op is the
+    # simple case; `filters` (a JSON list of {"column","value","op"}) adds
+    # compound conditions so ONE call can express e.g. a date window AND a
+    # threshold — a single filter_column cannot, which used to force
+    # specialists into many serial single-filter probes (and MaxTurns fails).
+    conditions: list[tuple[str, str, str]] = []
+    if filter_column and filter_value != "":
+        conditions.append((filter_column, str(filter_value), filter_op or "eq"))
+    if filters:
+        try:
+            parsed_filters = json.loads(filters)
+        except (ValueError, TypeError):
+            parsed_filters = None
+        if isinstance(parsed_filters, list):
+            for f in parsed_filters:
+                if not isinstance(f, dict):
+                    continue
+                fc = f.get("column", f.get("filter_column"))
+                fv = f.get("value", f.get("filter_value"))
+                fo = f.get("op", f.get("filter_op", "eq"))
+                if fc is None or fv is None:
+                    continue
+                conditions.append((str(fc), str(fv), str(fo or "eq")))
+
+    # Resolve case/space variants ('return_flag' → 'Return Flag') against the
+    # real CSV headers before filtering. Without this, a specialist following
+    # the skill's snake_case names silently gets 0 rows.
+    filter_parts: list[str] = []
+    for fc, fv, fo in conditions:
+        rc = _resolve_real_column(rows, fc, table_name)
+        rows = _apply_filter(rows, rc, fv, fo)
+        filter_parts.append(
+            f"{rc} {fo} {fv!r} (resolved from '{fc}')" if rc != fc
+            else f"{fc} {fo} {fv!r}"
+        )
+    filter_descriptor: str | None = " AND ".join(filter_parts) if filter_parts else None
     rows_matching_filter = len(rows)
+
+    # Sort + top-N limit (optional) — lets "top 20 by tsr in May-2025" resolve
+    # in ONE call instead of dumping 1000+ truncated rows the model can't rank.
+    # `rows_matching_filter` above is the TRUE match count (before the limit);
+    # the limit only bounds which rows are returned.
+    sort_descriptor: str | None = None
+    if sort_by and rows:
+        rc_sort = _resolve_real_column(rows, sort_by, table_name)
+
+        def _sort_key(r):
+            v = r.get(rc_sort)
+            try:
+                return (0, float(v))
+            except (TypeError, ValueError):
+                return (1, str(v))
+
+        rows = sorted(rows, key=_sort_key, reverse=bool(sort_desc))
+        sort_descriptor = f"{rc_sort} {'desc' if sort_desc else 'asc'}"
+    limit_applied: int | None = None
+    if limit and limit > 0 and len(rows) > limit:
+        rows = rows[:limit]
+        limit_applied = limit
 
     # Column projection — select only requested columns (with the same
     # case/space resolution as the filter column).
@@ -1118,13 +1336,33 @@ def _query_table_impl(
             rows = [{k: row[k] for k in keep_keys if k in row} for row in rows]
             truncation_notes.append(f"showing {len(keep_keys)}/{total_cols} columns")
 
-        # Step 2: reduce rows until JSON fits, leaving room for the wrapper
+        # Step 2: reduce rows until JSON fits. For an UNSORTED, unlimited result
+        # the first N rows are arbitrary and cluster on one date/value (which the
+        # model mistakes for the whole match set) — so sample EVENLY across the
+        # full set instead of taking the head. When the caller sorted or limited,
+        # the head IS the intended top-N, so keep it in order.
+        _even = not sort_descriptor and limit_applied is None
+        _full_rows = list(rows)
         text = json.dumps(rows, indent=2, default=str)
         while len(text) > _MAX_CHARS - 500 and len(rows) > 1:
-            rows = rows[: len(rows) // 2]
+            target = max(1, len(rows) // 2)
+            rows = _even_sample(_full_rows, target) if _even else rows[:target]
             text = json.dumps(rows, indent=2, default=str)
-        if len(rows) < rows_matching_filter:
-            truncation_notes.append(f"showing {len(rows)}/{rows_matching_filter} rows")
+        if limit_applied is not None:
+            note = (f"top {min(limit_applied, rows_matching_filter)} of "
+                    f"{rows_matching_filter} matching rows")
+            if sort_descriptor:
+                note += f" sorted by {sort_descriptor}"
+            if len(rows) < limit_applied:
+                note += (f" — only {len(rows)} shown due to size, "
+                         "narrow with `columns`")
+            truncation_notes.append(note)
+        elif len(rows) < rows_matching_filter:
+            truncation_notes.append(
+                f"showing {len(rows)}/{rows_matching_filter} rows"
+                + (" (an EVENLY-SPACED sample across the whole match set, NOT the "
+                   "full set — use summarize_by_group / sort_by+limit to "
+                   "characterize)" if _even else ""))
 
     rows_returned = len(rows)
     truncated = bool(truncation_notes)
@@ -1132,6 +1370,8 @@ def _query_table_impl(
     response: dict[str, Any] = {
         "table": table_name,
         "filter": filter_descriptor,
+        "sort": sort_descriptor,
+        "limit": limit_applied,
         "columns_requested": requested_cols,
         "total_rows_in_table": total_rows_in_table,
         "rows_matching_filter": rows_matching_filter,
@@ -1141,10 +1381,20 @@ def _query_table_impl(
     }
     if truncated:
         response["truncation_note"] = ", ".join(truncation_notes)
-        response["count_advice"] = (
-            "rows_matching_filter is the true count; the rows array below is a "
-            "display sample — do NOT count its entries for 'how many' questions."
+        advice = (
+            "rows_matching_filter is the TRUE count; the rows array is a display "
+            "sample — do NOT count its entries, and do NOT describe the full "
+            "match set from it."
         )
+        if not sort_descriptor and limit_applied is None:
+            advice += (
+                " These sample rows are the FIRST rows in TABLE ORDER (arbitrary "
+                "— they can ALL share one date/value and are NOT representative "
+                "of the matches). To characterize the matches, use "
+                "`summarize_by_group` for the distribution, or `sort_by`+`limit` "
+                "for the true top-N — never report this raw sample as the answer."
+            )
+        response["count_advice"] = advice
 
     out = json.dumps(response, indent=2, default=str)
     _log_result(
@@ -1167,26 +1417,48 @@ def query_table(
     filter_value: str = "",
     filter_op: str = "eq",
     columns: str = "",
+    filters: str = "",
+    sort_by: str = "",
+    sort_desc: bool = False,
+    limit: int = 0,
 ) -> str:
     """Query a data table for the current case. All data is scoped to the active case.
 
-    Returns a JSON object: {table, filter, total_rows_in_table,
+    Returns a JSON object: {table, filter, sort, limit, total_rows_in_table,
     rows_matching_filter, rows_returned, truncated, rows: [...]}.
 
     For 'how many' / count questions: ALWAYS read `rows_matching_filter` from
     the response. The `rows` array is a display sample that may be truncated
     when the table is large — counting its entries gives the wrong answer.
 
+    EXTRACTION questions ("show the abnormal transactions where X is high around
+    May 2025") — resolve them in ONE call: combine conditions with `filters`,
+    then `sort_by` + `limit` for the top-N. Do NOT issue many serial single-
+    filter queries on a truncated dump — that thrashes and blows the round cap.
+
     Args:
         table_name: the table to query.
-        filter_column: column to filter on (optional).
+        filter_column: single column to filter on (optional; the simple case).
         filter_value: value(s) for the filter. For ``filter_op="between"`` pass
             "<low>,<high>" (inclusive). For ISO dates (YYYY-MM-DD) and YYYY-MM
             strings, lexicographic order matches chronological order.
         filter_op: one of "eq" (default), "ne", "gt", "gte", "lt", "lte",
-            "between", "contains" (case-insensitive substring match).
+            "between", "contains" (case-insensitive substring match), "in"
+            (match any of a comma-separated value list — the multi-key eq).
         columns: comma-separated list of column names to return (e.g.
             "fico_score,derog_count"). Leave empty to return all columns.
+            Pair with `limit` to keep the top-N rows within the size budget.
+        filters: JSON list of compound AND conditions, each
+            ``{"column": ..., "value": ..., "op": ...}`` (op defaults to "eq").
+            ANDed together with filter_column. Use this to express e.g. a date
+            window AND a threshold in a single call — e.g.
+            ``'[{"column":"trans_dt","op":"between","value":"2025-05-01,2025-05-31"},
+               {"column":"tot_struct_risk_score","op":"gt","value":"20"}]'``.
+        sort_by: column to sort the matching rows by (optional).
+        sort_desc: True for descending (largest first) — use with `sort_by` +
+            `limit` to pull the top-N (e.g. highest-risk transactions).
+        limit: return only the first N rows after sorting (top-N). 0 = no limit.
+            `rows_matching_filter` still reports the TRUE match count.
     """
     return _query_table_impl(
         table_name=table_name,
@@ -1194,6 +1466,527 @@ def query_table(
         filter_value=filter_value,
         filter_op=filter_op,
         columns=columns,
+        filters=filters,
+        sort_by=sort_by,
+        sort_desc=sort_desc,
+        limit=limit,
+    )
+
+
+def _batch_query_table_impl(specs_json: str) -> str:
+    """Run multiple ``query_table`` queries in one tool call. See
+    ``batch_query_table`` for the contract."""
+    _log_call("batch_query_table", {"specs_json": specs_json[:1000]})
+    try:
+        specs = json.loads(specs_json)
+    except json.JSONDecodeError as exc:
+        out = json.dumps({
+            "error": "invalid_json",
+            "message": str(exc),
+            "expected": "JSON list of query_table argument objects",
+        }, indent=2)
+        _log_result("batch_query_table", result=out, extra={"reason": "invalid_json"})
+        return out
+    if not isinstance(specs, list):
+        out = json.dumps({
+            "error": "invalid_specs",
+            "message": "specs_json must decode to a list",
+        }, indent=2)
+        _log_result("batch_query_table", result=out, extra={"reason": "not_list"})
+        return out
+
+    results: list[dict[str, Any]] = []
+    for idx, spec in enumerate(specs[:6]):
+        if not isinstance(spec, dict):
+            results.append({"index": idx, "error": "spec must be an object"})
+            continue
+        raw_filters = spec.get("filters")
+        filters_arg = (
+            json.dumps(raw_filters)
+            if isinstance(raw_filters, (list, dict))
+            else str(raw_filters or "")
+        )
+        result = _query_table_impl(
+            table_name=str(spec.get("table_name") or spec.get("table") or ""),
+            filter_column=str(spec.get("filter_column") or ""),
+            filter_value=str(spec.get("filter_value") or ""),
+            filter_op=str(spec.get("filter_op") or "eq"),
+            columns=str(spec.get("columns") or ""),
+            filters=filters_arg,
+            sort_by=str(spec.get("sort_by") or ""),
+            sort_desc=bool(spec.get("sort_desc") or False),
+            limit=int(spec.get("limit") or 0),
+        )
+        results.append({"index": idx, "result": result})
+
+    payload: dict[str, Any] = {"results": results}
+    if len(specs) > 6:
+        payload["truncated"] = f"ran first 6 of {len(specs)} requested queries"
+    out = json.dumps(payload, indent=2, default=str)
+    _log_result("batch_query_table", result=out,
+                extra={"n_requested": len(specs), "n_run": len(results)})
+    return out
+
+
+@function_tool
+def batch_query_table(specs_json: str) -> str:
+    """Run multiple INDEPENDENT ``query_table`` queries in one tool call.
+
+    Use when a question needs several UNRELATED row-extractions from the same
+    case (e.g. pull the abnormal transactions from two different tables, or the
+    same table under two disjoint windows). Batching them saves one LLM round
+    per query and keeps the specialist from blowing its per-turn round budget
+    with serial calls.
+
+    ``specs_json`` is a JSON list; each item accepts the same arguments as
+    ``query_table`` (including ``filters``, ``sort_by``, ``sort_desc``,
+    ``limit``). Example:
+
+    ``[{"table_name": "modelling_data_transaction",
+        "filters": [{"column":"trans_dt","op":"between","value":"2025-05-01,2025-05-31"},
+                    {"column":"tot_struct_risk_score","op":"gt","value":"20"}],
+        "sort_by": "tot_struct_risk_score", "sort_desc": true, "limit": 10,
+        "columns": "trans_dt,tot_struct_risk_score"}]``
+
+    NOTE: for ONE query that needs several AND'd conditions, use ``query_table``
+    with ``filters`` directly — batch is only for MULTIPLE separate queries.
+    Runs at most 6.
+    """
+    return _batch_query_table_impl(specs_json)
+
+
+def _join_table_impl(
+    left_table: str,
+    right_table: str,
+    left_on: str,
+    right_on: str = "",
+    columns: str = "",
+    how: str = "inner",
+    filter_column: str = "",
+    filter_value: str = "",
+    filter_op: str = "eq",
+) -> str:
+    """Join two tables on a key column for the current case. See ``join_table``."""
+    _log_call("join_table", {
+        "left_table": left_table, "right_table": right_table,
+        "left_on": left_on, "right_on": right_on, "how": how,
+        "filter": (f"{filter_column} {filter_op} {filter_value}"
+                   if filter_column else None),
+    })
+    if _gateway is None:
+        out = ("Data unavailable: data layer is not initialized for this session "
+               "(no gateway bound). This is an infrastructure error, not a finding.")
+        _log_result("join_table", result=out, extra={"reason": "no_gateway_bound"})
+        return out
+
+    right_on = right_on or left_on
+    how = (how or "inner").lower()
+    lt = _resolve_real_table(left_table)
+    rt = _resolve_real_table(right_table)
+    lrows = _gateway.query(lt, filters=None)
+    rrows = _gateway.query(rt, filters=None)
+    if lrows is None or rrows is None:
+        missing = left_table if lrows is None else right_table
+        out = f"Data unavailable: table '{missing}' not found for current case."
+        _log_result("join_table", result=out, extra={"missing": missing})
+        return out
+
+    # Narrow the LEFT table BEFORE joining (keeps the join small + fast). The
+    # common pattern: filter left to the transactions of interest, then join
+    # the right table's scores/drivers onto them.
+    if filter_column and filter_value != "":
+        lcol = _resolve_real_column(lrows, filter_column, lt)
+        lrows = _apply_filter(lrows, lcol, str(filter_value), filter_op)
+    left_n = len(lrows)
+
+    l_on = _resolve_real_column(lrows, left_on, lt) if lrows else left_on
+    r_on = _resolve_real_column(rrows, right_on, rt) if rrows else right_on
+
+    # Index the right table by join key (normalized so ms-vs-second timestamps,
+    # numeric strings, and case/space text variants all match).
+    index: dict = {}
+    for rr in rrows:
+        k = _join_key(rr.get(r_on))
+        if k is not None:
+            index.setdefault(k, []).append(rr)
+
+    merged: list[dict] = []
+    for lr in lrows:
+        k = _join_key(lr.get(l_on))
+        matches = index.get(k, []) if k is not None else []
+        if not matches:
+            if how == "left":
+                merged.append(dict(lr))
+            continue
+        for rr in matches:
+            row = dict(lr)
+            for col, val in rr.items():
+                if col == r_on and r_on == l_on:
+                    continue  # don't duplicate the shared join column
+                # Prefix a colliding right column so no data is lost.
+                row[col if col not in lr else f"{right_table}.{col}"] = val
+            merged.append(row)
+    matched_n = len(merged)
+
+    requested_cols: list[str] | None = None
+    if columns and merged:
+        requested = [c.strip() for c in columns.split(",") if c.strip()]
+
+        def _pick(row: dict, name: str) -> str | None:
+            for cand in (name, f"{right_table}.{name}"):
+                if cand in row:
+                    return cand
+            return None
+
+        if requested:
+            requested_cols = requested
+            merged = [
+                {name: row[_pick(row, name)]
+                 for name in requested if _pick(row, name) is not None}
+                for row in merged
+            ]
+
+    truncation_notes: list[str] = []
+    if merged:
+        text = json.dumps(merged, indent=2, default=str)
+        while len(text) > _MAX_CHARS - 500 and len(merged) > 1:
+            merged = merged[: len(merged) // 2]
+            text = json.dumps(merged, indent=2, default=str)
+        if len(merged) < matched_n:
+            truncation_notes.append(f"showing {len(merged)}/{matched_n} joined rows")
+
+    response: dict[str, Any] = {
+        "left_table": lt,
+        "right_table": rt,
+        "join": f"{l_on} = {r_on} ({how})",
+        "left_rows_after_filter": left_n,
+        "matched_rows": matched_n,
+        "rows_returned": len(merged),
+        "columns_requested": requested_cols,
+        "truncated": bool(truncation_notes),
+        "rows": merged,
+    }
+    if truncation_notes:
+        response["truncation_note"] = ", ".join(truncation_notes)
+        response["count_advice"] = (
+            "matched_rows is the true join count; the rows array is a display "
+            "sample and may be truncated."
+        )
+    out = json.dumps(response, indent=2, default=str)
+    _log_result("join_table", result=out,
+                extra={"left_table": lt, "right_table": rt,
+                       "left_after_filter": left_n, "matched": matched_n})
+    return out
+
+
+@function_tool
+def join_table(
+    left_table: str,
+    right_table: str,
+    left_on: str,
+    right_on: str = "",
+    columns: str = "",
+    how: str = "inner",
+    filter_column: str = "",
+    filter_value: str = "",
+    filter_op: str = "eq",
+) -> str:
+    """Join two tables on a key column, for the current case — one call instead
+    of a manual "query A, then look each key up in B" loop.
+
+    Canonical use: attach per-transaction model scores / drivers to a set of
+    spend transactions. Filter the LEFT table to the transactions you care
+    about (via filter_column/value/op), then join the RIGHT table onto them:
+
+    ``join_table("spends", "model_scores_transaction",
+                 left_on="Timestamp", right_on="txn_date_time",
+                 filter_column="Merchant Name", filter_op="contains",
+                 filter_value="S BERTRAM",
+                 columns="Date,Merchant Name,Amount,tot_struct_risk_score,credit_loss_prob")``
+
+    Key matching is tolerant: a spend's millisecond `Timestamp` matches the
+    model table's second-precision `txn_date_time`; numeric and case/space text
+    variants also match.
+
+    Args:
+        left_table / right_table: tables to join.
+        left_on / right_on: join key columns (right_on defaults to left_on).
+        columns: comma-separated output columns from EITHER side (empty = all).
+            A right column whose name collides with a left one is prefixed
+            ``<right_table>.<col>``.
+        how: "inner" (default — only matched rows) or "left" (keep unmatched
+            left rows, right columns absent).
+        filter_column / filter_value / filter_op: optional filter applied to the
+            LEFT table BEFORE the join — always narrow first on high-volume
+            tables. Returns {left_table, right_table, join, left_rows_after_filter,
+            matched_rows, rows_returned, rows: [...]}.
+    """
+    return _join_table_impl(
+        left_table=left_table, right_table=right_table,
+        left_on=left_on, right_on=right_on, columns=columns, how=how,
+        filter_column=filter_column, filter_value=filter_value,
+        filter_op=filter_op,
+    )
+
+
+# Canonical schema for the per-transaction "detail" join: spend identity +
+# model scores + top drivers, all keyed on the transaction timestamp. Column
+# names are resolved leniently and any that are absent for a case are simply
+# omitted, so a case missing (say) the drivers table still returns scores.
+_TXN_DETAIL_CFG = {
+    "score_table": "model_scores_transaction",
+    "driver_table": "score_drivers_transaction",
+    "spend_key": "Timestamp",
+    "txn_key": "txn_date_time",
+    # A full per-transaction record: time + merchant + amount + spend variables
+    # (from spends) + risk scores (from model_scores_transaction) + top score
+    # drivers (from score_drivers_transaction). Columns absent for a case are
+    # skipped; pass `columns` to override the set entirely.
+    "spend_cols": ["Timestamp", "Merchant Name", "Merchant Industry", "Amount",
+                   "Spend Concentration", "RNN Spend Score",
+                   "Spend Divergence Index"],
+    "score_cols": ["tot_struct_risk_score", "credit_loss_prob"],
+    # Drivers are per-score AND directional: `top_*` push the score UP (raise
+    # risk), `bottom_*` push it DOWN (mitigate). CDSS and TSR have DIFFERENT
+    # drivers, so keep them separate.
+    "driver_cols": ["top_cdss1", "top_cdss2", "bottom_cdss1",
+                    "top_tsr1", "top_tsr2", "bottom_tsr1"],
+}
+
+
+# Timestamp join column per transaction table (all three share the same
+# instant at different precision — matched via `_join_key` at second grain).
+_TXN_TABLE_KEYS = {
+    "spends": "Timestamp",
+    "model_scores_transaction": "txn_date_time",
+    "score_drivers_transaction": "txn_date_time",
+}
+
+
+def _transaction_detail_impl(
+    filter_column: str = "",
+    filter_value: str = "",
+    filter_op: str = "eq",
+    filters: str = "",
+    timestamps: str = "",
+    sort_by: str = "",
+    sort_desc: bool = False,
+    limit: int = 0,
+    columns: str = "",
+    base_table: str = "spends",
+) -> str:
+    """One-call denormalized per-transaction record. See ``transaction_detail``."""
+    _log_call("transaction_detail", {
+        "base_table": base_table,
+        "filter": (f"{filter_column} {filter_op} {filter_value}"
+                   if filter_column else None),
+        "filters": filters[:300] if filters else None,
+        "timestamps": (timestamps[:120] if timestamps else None),
+        "sort_by": sort_by, "limit": limit,
+    })
+    if _gateway is None:
+        out = ("Data unavailable: data layer is not initialized for this session "
+               "(no gateway bound). Infrastructure error, not a finding.")
+        _log_result("transaction_detail", result=out, extra={"reason": "no_gateway"})
+        return out
+
+    cfg = _TXN_DETAIL_CFG
+    base_table = base_table or "spends"
+    base_key_name = _TXN_TABLE_KEYS.get(base_table, "Timestamp")
+    base_t = _resolve_real_table(base_table)
+    brows = _gateway.query(base_t, filters=None)
+    if brows is None:
+        out = f"Data unavailable: base table '{base_table}' not found for current case."
+        _log_result("transaction_detail", result=out, extra={"reason": "no_base"})
+        return out
+
+    # ── select the transactions of interest FROM the base table ──
+    if timestamps:
+        key = _resolve_real_column(brows, base_key_name, base_t)
+        brows = _apply_filter(brows, key, timestamps, "in")
+    else:
+        conds: list[tuple[str, str, str]] = []
+        if filter_column and filter_value != "":
+            conds.append((filter_column, str(filter_value), filter_op or "eq"))
+        if filters:
+            try:
+                parsed = json.loads(filters)
+            except (ValueError, TypeError):
+                parsed = None
+            if isinstance(parsed, list):
+                for f in parsed:
+                    if not isinstance(f, dict):
+                        continue
+                    fc = f.get("column", f.get("filter_column"))
+                    fv = f.get("value", f.get("filter_value"))
+                    fo = f.get("op", f.get("filter_op", "eq"))
+                    if fc is not None and fv is not None:
+                        conds.append((str(fc), str(fv), str(fo or "eq")))
+        for fc, fv, fo in conds:
+            rc = _resolve_real_column(brows, fc, base_t)
+            brows = _apply_filter(brows, rc, fv, fo)
+    n_txn = len(brows)
+
+    if sort_by and brows:
+        rc_sort = _resolve_real_column(brows, sort_by, base_t)
+
+        def _sort_key(r):
+            v = r.get(rc_sort)
+            try:
+                return (0, float(v))
+            except (TypeError, ValueError):
+                return (1, str(v))
+
+        brows = sorted(brows, key=_sort_key, reverse=bool(sort_desc))
+    if limit and limit > 0 and len(brows) > limit:
+        brows = brows[:limit]
+
+    # ── index the OTHER two transaction tables by their timestamp column ──
+    def _index(table_name: str, key_name: str) -> dict:
+        rows = _gateway.query(_resolve_real_table(table_name), filters=None)
+        idx: dict = {}
+        if rows:
+            rc = _resolve_real_column(rows, key_name, table_name)
+            for rr in rows:
+                k = _join_key(rr.get(rc))
+                if k is not None:
+                    idx.setdefault(k, rr)  # first row wins on a rare collision
+        return idx
+
+    join_tables = [t for t in ("spends", cfg["score_table"], cfg["driver_table"])
+                   if t != base_table]
+    idxs = {t: _index(t, _TXN_TABLE_KEYS.get(t, "txn_date_time")) for t in join_tables}
+    base_key = (_resolve_real_column(brows, base_key_name, base_t)
+                if brows else base_key_name)
+
+    want = ([c.strip() for c in columns.split(",") if c.strip()] if columns
+            else cfg["spend_cols"] + cfg["score_cols"] + cfg["driver_cols"])
+    # Always surface a timestamp: for a model/driver base the row's own
+    # `txn_date_time` is the time (Timestamp only appears when a spend joins).
+    if not columns and base_key_name not in want:
+        want = [base_key_name] + want
+
+    # ── merge one record per transaction (LEFT join from the base table) ──
+    out_rows: list[dict] = []
+    match_counts = {t: 0 for t in join_tables}
+    for br in brows:
+        k = _join_key(br.get(base_key))
+        merged = dict(br)
+        for t in join_tables:
+            m = idxs[t].get(k) if k is not None else None
+            if m:
+                merged.update(m)
+                match_counts[t] += 1
+        out_rows.append({name: merged[name] for name in want if name in merged})
+
+    matched_n = len(out_rows)
+    # Coverage of the merchant/amount side across the FULL selected set (before
+    # any size truncation) — so "N of M rows carry a settled spend" is reported
+    # from the real join, and merchant-less rows read as auths/declines that
+    # never settled, NOT as a broken join.
+    _spend_tbl = cfg.get("spend_table", "spends")
+    n_with_merchant = match_counts.get(_spend_tbl, 0) if base_table != _spend_tbl else matched_n
+    truncation_notes: list[str] = []
+    if out_rows:
+        text = json.dumps(out_rows, indent=2, default=str)
+        # Uniformly sub-sample (keep first & last, spread the middle) rather than
+        # head-halving: head-halving keeps the FIRST rows, so a TSR-desc sort left
+        # only the extreme model-only rows and dropped every settled spend.
+        if len(text) > _TXN_DETAIL_MAX_CHARS:
+            target = len(out_rows)
+            while len(text) > _TXN_DETAIL_MAX_CHARS and target > 1:
+                target = max(1, int(target * 0.75))
+                out_rows = _even_sample(out_rows, target)
+                text = json.dumps(out_rows, indent=2, default=str)
+        if len(out_rows) < matched_n:
+            truncation_notes.append(
+                f"showing {len(out_rows)}/{matched_n} transactions "
+                "(uniformly sampled across the selection)"
+            )
+
+    # `with_model_scores` retained for back-compat; joined_match_counts gives the
+    # full picture so a partial join reads as "N of M had a settled spend", not
+    # a failure.
+    with_scores = (n_txn if base_table == cfg["score_table"]
+                   else match_counts.get(cfg["score_table"], 0))
+    response: dict[str, Any] = {
+        "base_table": base_t,
+        "transactions_selected": n_txn,
+        "with_model_scores": with_scores,
+        "joined_match_counts": {t: match_counts[t] for t in join_tables},
+        "merchant_amount_coverage": (
+            f"{n_with_merchant} of {matched_n} selected transactions have a "
+            f"settled spend (so carry Merchant Name + Amount); the other "
+            f"{matched_n - n_with_merchant} are model-scored auths/declines that "
+            f"never settled — merchant/amount are legitimately absent for those, "
+            f"NOT a join failure. Report the merchant/amount you DO have."),
+        "rows_returned": len(out_rows),
+        "schema_note": (
+            "one row per transaction, joined on the transaction timestamp: time + "
+            "merchant + amount + spend variables + risk scores (TSR = "
+            "tot_struct_risk_score, CDSS = credit_loss_prob, the customer score) + "
+            "score drivers — `top_*` raise the score, `bottom_*` lower it; CDSS "
+            "and TSR have DIFFERENT drivers (top_/bottom_cdss* vs top_/bottom_tsr*). "
+            "A transaction in the base table but "
+            "absent from a joined table (e.g. a model-scored auth with no settled "
+            "spend) keeps the columns it HAS — the missing side is simply absent, "
+            "NOT a failure; see merchant_amount_coverage / joined_match_counts."),
+        "truncated": bool(truncation_notes),
+        "rows": out_rows,
+    }
+    if truncation_notes:
+        response["truncation_note"] = ", ".join(truncation_notes)
+    out = json.dumps(response, indent=2, default=str)
+    _log_result("transaction_detail", result=out,
+                extra={"base_table": base_t, "transactions": n_txn,
+                       "coverage": {t: match_counts[t] for t in join_tables}})
+    return out
+
+
+@function_tool
+def transaction_detail(
+    filter_column: str = "",
+    filter_value: str = "",
+    filter_op: str = "eq",
+    filters: str = "",
+    timestamps: str = "",
+    sort_by: str = "",
+    sort_desc: bool = False,
+    limit: int = 0,
+    columns: str = "",
+    base_table: str = "spends",
+) -> str:
+    """ONE-CALL denormalized per-transaction record: time + merchant + amount +
+    spend variables + risk scores + top & bottom score drivers, pre-joined on the transaction
+    timestamp across `spends` / `model_scores_transaction` /
+    `score_drivers_transaction`. Replaces the manual 3-way join — just read a
+    complete record and analyze it.
+
+    Pick where the transactions are SELECTED FROM with `base_table`, then filter
+    that table:
+    - `base_table="spends"` (default) — select by a spend attribute
+      (`filter_column="Merchant Name", filter_op="contains", filter_value="S BERTRAM"`,
+      or a compound `filters` list), or by `timestamps` from a prior extraction.
+    - `base_table="model_scores_transaction"` — select by a MODEL metric, e.g.
+      "transactions where TSR reacted": `transaction_detail(base_table="model_scores_transaction",
+      filter_column="tot_struct_risk_score", filter_op="gt", filter_value="20",
+      sort_by="tot_struct_risk_score", sort_desc=true, limit=20)`. The score
+      table covers more transactions than spends (auths/declines that never
+      settle), so some rows will have NO merchant/amount — that is expected, not
+      a failure; drivers still attach. `joined_match_counts` reports coverage.
+
+    `sort_by`/`sort_desc`/`limit` apply to the base table (top-N). Each row
+    carries the columns it HAS (missing joins are simply absent). CDSS is the
+    CUSTOMER score `credit_loss_prob`; the merchant CDSS
+    `cust_eff_se_cdss_5_180_day_score` is excluded by default (add via `columns`).
+    Returns {base_table, transactions_selected, with_model_scores,
+    joined_match_counts, rows: [...]}.
+    """
+    return _transaction_detail_impl(
+        filter_column=filter_column, filter_value=filter_value,
+        filter_op=filter_op, filters=filters, timestamps=timestamps,
+        sort_by=sort_by, sort_desc=sort_desc, limit=limit, columns=columns,
+        base_table=base_table,
     )
 
 
@@ -1494,7 +2287,7 @@ def batch_aggregate(specs_json: str) -> str:
     as ``aggregate_column``:
 
     ``{"table_name": "payments", "column": "payment_date", "op": "count",
-       "filter_column": "payment_status", "filter_value": "success"}``
+       "filter_column": "Return Flag", "filter_value": "1"}``  # 1 = returned, 0 = successful
 
     Returns JSON:
     ``{"results": [{"index": 0, "result": "count(...) = ..."}, ...]}``
@@ -1879,12 +2672,30 @@ def _summarize_trend_impl(
     }
 
     out = json.dumps(payload, indent=2, default=str)
-    if len(out) > _MAX_CHARS:
-        # Trim the series tail rather than the summary block — summary is
-        # the load-bearing part for the LLM's narrative.
-        keep = max(1, n_buckets // 2)
-        payload["series"] = series[:keep] + [{"…": f"{n_buckets - keep} more periods truncated"}]
-        out = json.dumps(payload, indent=2, default=str)
+    # Coarse grains (month / quarter / year) have inherently bounded bucket
+    # counts — even a decade of months is ~120 buckets (~18 KB). Down-sampling
+    # them drops INTERIOR periods that the specialist then can't narrate (the
+    # "trend truncated to <month>" symptom) even though the chart, rebuilt from
+    # the full KP series, stays complete. So NEVER down-sample a coarse-grain
+    # series: emit it whole regardless of the char budget. Only day / week can
+    # explode without bound, so those still fall back to uniform down-sampling.
+    _coarse_grain = period in ("month", "quarter", "year")
+    if len(out) > _TREND_MAX_CHARS and not _coarse_grain:
+        # The series renders the chart, so DON'T cut a contiguous block — the
+        # old `series[:keep]` kept the earliest half and silently dropped the
+        # most-recent months (the chart lost its right end). Down-sample
+        # uniformly, preserving the first & last bucket so the full date range
+        # survives; shrink until it fits.
+        target = n_buckets
+        while len(out) > _TREND_MAX_CHARS and target > 2:
+            target = max(2, int(target * 0.75))
+            sampled = _even_sample(series, target)
+            payload["series"] = sampled
+            payload["series_note"] = (
+                f"down-sampled to {len(sampled)} of {n_buckets} periods to fit the "
+                "size cap — full date range preserved (first & last kept)"
+            )
+            out = json.dumps(payload, indent=2, default=str)
 
     _log_result(
         "summarize_trend", result=out,
