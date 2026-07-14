@@ -1,0 +1,267 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1520 940"
+     font-family="ui-sans-serif, -apple-system, 'Segoe UI', system-ui, Helvetica, sans-serif">
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.2"/>
+      <feOffset dy="1.5"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.14"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="ar-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 Z" fill="#3D6BA8"/></marker>
+    <marker id="ar-blue-sm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 Z" fill="#3D6BA8"/></marker>
+    <marker id="ar-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 Z" fill="#9A9387"/></marker>
+    <marker id="ar-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 Z" fill="#3F7D5A"/></marker>
+    <marker id="ar-slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 Z" fill="#5C5044"/></marker>
+  </defs>
+
+  <rect width="1520" height="940" fill="#FAF9F5"/>
+
+  <!-- ===== HEADER ===== -->
+  <text x="36" y="40" font-size="22" font-weight="700" fill="#2D2D2D" letter-spacing="-0.3">Layer 1 Memory — Distiller &amp; Deterministic KB Assembly</text>
+  <line x1="36" y1="56" x2="1484" y2="56" stroke="#E5E0D2"/>
+
+  <!-- ============================================================== -->
+  <!-- left: cycle · right: three parts (arrows drawn last, above bg)  -->
+  <!-- ============================================================== -->
+  <g transform="translate(0,0)">
+
+    <!-- LEFT: Orchestrator cycle -->
+    <text x="36" y="98" font-size="10" font-weight="700" fill="#A89B7C" letter-spacing="2">ORCHESTRATOR ⇄ SPECIALIST CYCLE</text>
+    <rect x="36" y="106" width="468" height="806" rx="12" fill="#F4F0E6" stroke="#D4C5A9" stroke-width="1" opacity="0.45"/>
+
+    <g filter="url(#shadow)">
+      <rect x="180" y="120" width="180" height="52" rx="8" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8"/>
+      <path d="M180,128 a8,8 0 0 1 8,-8 h164 a8,8 0 0 1 8,8 v13 h-180 z" fill="#3D6BA8"/>
+      <text x="270" y="136" font-size="12" font-weight="700" fill="#FFFFFF" text-anchor="middle">Orchestrator</text>
+      <text x="270" y="158" font-size="8.5" fill="#7A7569" text-anchor="middle" font-style="italic">dispatches ×N specialists</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="150" y="210" width="240" height="52" rx="8" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8"/>
+      <path d="M150,218 a8,8 0 0 1 8,-8 h224 a8,8 0 0 1 8,8 v13 h-240 z" fill="#3D6BA8"/>
+      <text x="270" y="226" font-size="12" font-weight="700" fill="#FFFFFF" text-anchor="middle">Specialist · Round 1</text>
+      <text x="270" y="248" font-size="8.5" fill="#5C5044" text-anchor="middle">output → tool_calls (JSON)</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="180" y="300" width="180" height="48" rx="8" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8"/>
+      <path d="M180,308 a8,8 0 0 1 8,-8 h164 a8,8 0 0 1 8,8 v13 h-180 z" fill="#5C5044"/>
+      <text x="270" y="316" font-size="12" font-weight="700" fill="#FFFFFF" text-anchor="middle">Tools execute</text>
+      <text x="270" y="337" font-size="8.5" fill="#5C5044" text-anchor="middle">query data gateway</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="60" y="388" width="414" height="188" rx="7" fill="#222A35" stroke="#3A4453"/>
+      <rect x="60" y="388" width="414" height="20" rx="7" fill="#2E3846"/>
+      <rect x="60" y="400" width="414" height="8" fill="#2E3846"/>
+      <text x="72" y="402" font-size="9" font-weight="700" fill="#9FB3C9">Tool Output · JSON</text>
+      <text x="462" y="402" font-size="8" fill="#7A8699" text-anchor="end" font-style="italic">step-2 input</text>
+      <g font-family="'SF Mono','Menlo','Consolas',monospace" font-size="9.5" fill="#C7CEDA">
+        <text x="72" y="424">"groups": [</text>
+        <text x="84" y="440">{"group":"AMAZON",  "raw_value":<tspan fill="#E5B567">45200</tspan>},</text>
+        <text x="84" y="456">{"group":"WALMART", "raw_value":<tspan fill="#E5B567">32100</tspan>},</text>
+        <text x="84" y="472">{"group":"COSTCO",  "raw_value":<tspan fill="#E5B567">28500</tspan>},</text>
+        <text x="84" y="488">{"group":"TARGET",  "raw_value":<tspan fill="#E5B567">15300</tspan>},</text>
+        <text x="84" y="504">{"group":"SHELL",   "raw_value":<tspan fill="#E5B567"> 9800</tspan>} ],</text>
+        <text x="72" y="520">"concentration":{"hhi":<tspan fill="#E5B567">0.27</tspan>,"top1":<tspan fill="#E5B567">0.34</tspan>,"top3":<tspan fill="#E5B567">0.80</tspan>},</text>
+        <text x="72" y="536">"group_column":<tspan fill="#A6D189">"merchant"</tspan>, "table":<tspan fill="#A6D189">"spends"</tspan></text>
+      </g>
+      <text x="267" y="562" font-size="8" fill="#7FBF9A" text-anchor="middle" font-style="italic">raw_value = ground-truth numbers (never re-touched by an LLM)</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="150" y="624" width="240" height="52" rx="8" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8"/>
+      <path d="M150,632 a8,8 0 0 1 8,-8 h224 a8,8 0 0 1 8,8 v13 h-240 z" fill="#3D6BA8"/>
+      <text x="270" y="640" font-size="12" font-weight="700" fill="#FFFFFF" text-anchor="middle">Specialist · Round 2</text>
+      <text x="270" y="662" font-size="8.5" fill="#5C5044" text-anchor="middle">reads tool output → SpecialistOutput</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="48" y="716" width="430" height="188" rx="7" fill="#222A35" stroke="#3A4453"/>
+      <rect x="48" y="716" width="430" height="20" rx="7" fill="#2E3846"/>
+      <rect x="48" y="728" width="430" height="8" fill="#2E3846"/>
+      <text x="60" y="730" font-size="9" font-weight="700" fill="#9FB3C9">SpecialistOutput</text>
+      <text x="466" y="730" font-size="8" fill="#7A8699" text-anchor="end" font-style="italic">step-2 output</text>
+      <g font-family="'SF Mono','Menlo','Consolas',monospace" font-size="9.5" fill="#C7CEDA">
+        <text x="60" y="752">domain   = <tspan fill="#A6D189">"spend_payments"</tspan></text>
+        <text x="60" y="766">mode     = <tspan fill="#A6D189">"chat"</tspan></text>
+        <text x="60" y="780">findings = <tspan fill="#A6D189">"Spend moderately concentrated:</tspan></text>
+        <text x="60" y="794"><tspan fill="#A6D189">           AMAZON leads $45,200 (34%),</tspan></text>
+        <text x="60" y="808"><tspan fill="#A6D189">           top-3 = 80% (HHI 0.27)."</tspan></text>
+        <text x="60" y="822">evidence = [</text>
+      </g>
+      <rect x="66" y="827" width="300" height="14" rx="3" fill="#2F4A3A"/>
+      <g font-family="'SF Mono','Menlo','Consolas',monospace" font-size="9.5">
+        <text x="70" y="838" fill="#B7E3B0">"AMAZON $45,200 = 34% of total spend",</text>
+        <text x="70" y="853" fill="#C7CEDA">"top-3 (AMAZON,WALMART,COSTCO) = 80%",</text>
+        <text x="70" y="867" fill="#C7CEDA">"HHI 0.27; 5 merchants total" ],</text>
+        <text x="60" y="882" fill="#C7CEDA">data_gaps = [] ;  raw_data = {}</text>
+      </g>
+      <text x="263" y="898" font-size="8" fill="#7FBF9A" text-anchor="middle" font-style="italic">green = the one anchor number the LLM actually wrote</text>
+    </g>
+
+    <!-- RIGHT panels (bg first) -->
+    <rect x="528" y="118" width="956" height="150" rx="12" fill="#F4F0E6" stroke="#D4C5A9" stroke-width="1" opacity="0.5"/>
+    <rect x="528" y="288" width="956" height="398" rx="12" fill="#E9EEF4" stroke="#C3D2E4" stroke-width="1" opacity="0.75"/>
+    <rect x="528" y="706" width="956" height="204" rx="12" fill="#E4EFE8" stroke="#A9CDB8" stroke-width="1" opacity="0.7"/>
+
+    <!-- ROW 1 · Orchestrator Synthesis -->
+    <g filter="url(#shadow)">
+      <rect x="544" y="132" width="330" height="122" rx="8" fill="#FFFFFF" stroke="#9A9387" stroke-width="1"/>
+      <path d="M544,140 a8,8 0 0 1 8,-8 h314 a8,8 0 0 1 8,8 v13 h-330 z" fill="#9A9387"/>
+      <text x="709" y="148" font-size="11" font-weight="700" fill="#FFFFFF" text-anchor="middle">Orchestrator · Synthesis</text>
+      <text x="556" y="170" font-size="9" fill="#5C5044">Consumes every specialist's findings + evidence</text>
+      <line x1="556" y1="180" x2="862" y2="180" stroke="#E5E0D2"/>
+      <text x="556" y="197" font-size="9" fill="#5C5044">▸ resolves contradictions   ▸ grounds claims in data</text>
+      <text x="556" y="213" font-size="9" fill="#5C5044">▸ treats absence-of-data as its own signal</text>
+      <text x="556" y="238" font-size="8.5" fill="#7A7569" font-style="italic">the live answer path — parallel to Distiller &amp; Auto-chart</text>
+    </g>
+    <g filter="url(#shadow)">
+      <rect x="968" y="166" width="232" height="54" rx="12" fill="#DCE7F4" stroke="#3D6BA8" stroke-width="1.4"/>
+      <text x="1084" y="190" font-size="12" font-weight="700" fill="#1F3A5F" text-anchor="middle">FinalAnswer</text>
+      <text x="1084" y="206" font-size="8.5" fill="#4F6B8C" text-anchor="middle" font-style="italic">streamed to Reviewer</text>
+    </g>
+    <text x="1240" y="184" font-size="8.5" fill="#9A9387" font-style="italic">the answer path —</text>
+    <text x="1240" y="197" font-size="8.5" fill="#9A9387" font-style="italic">runs in parallel and</text>
+    <text x="1240" y="210" font-size="8.5" fill="#9A9387" font-style="italic">writes nothing to the KB</text>
+
+    <!-- ROW 2 · Distiller -->
+    <g filter="url(#shadow)">
+      <rect x="544" y="302" width="300" height="52" rx="8" fill="#FFFFFF" stroke="#C3D2E4" stroke-width="0.8"/>
+      <path d="M544,310 a8,8 0 0 1 8,-8 h284 a8,8 0 0 1 8,8 v13 h-300 z" fill="#3D6BA8"/>
+      <text x="694" y="320" font-size="12" font-weight="700" fill="#FFFFFF" text-anchor="middle">Distiller</text>
+      <text x="694" y="340" font-size="7.5" fill="#5C5044" text-anchor="middle" font-family="'SF Mono','Menlo',monospace">input: { specialist · sub_question · specialist_output }</text>
+    </g>
+    <g filter="url(#shadow)">
+      <rect x="1236" y="302" width="232" height="150" rx="8" fill="#FFFFFF" stroke="#C3D2E4" stroke-width="0.8"/>
+      <text x="1250" y="321" font-size="10" font-weight="700" fill="#3F7D5A">Why parse, not prompt?</text>
+      <line x1="1250" y1="328" x2="1454" y2="328" stroke="#E5E0D2"/>
+      <text x="1250" y="346" font-size="9" font-weight="700" fill="#5C5044">a · avoid the firewall</text>
+      <text x="1250" y="359" font-size="8.5" fill="#7A7569">raw numbers never re-enter an LLM</text>
+      <text x="1250" y="382" font-size="9" font-weight="700" fill="#5C5044">b · faithfulness</text>
+      <text x="1250" y="395" font-size="8.5" fill="#7A7569">KB values exactly equal tool output</text>
+      <text x="1250" y="406" font-size="8.5" fill="#7A7569">— no drift, no hallucinated figure</text>
+      <text x="1250" y="432" font-size="8" fill="#9A9387" font-style="italic">parsed_series is the midterm</text>
+      <text x="1250" y="443" font-size="8" fill="#9A9387" font-style="italic">product that proves the path</text>
+    </g>
+    <g filter="url(#shadow)">
+      <rect x="544" y="372" width="306" height="150" rx="8" fill="#FFFFFF" stroke="#3D6BA8" stroke-width="1"/>
+      <path d="M544,380 a8,8 0 0 1 8,-8 h290 a8,8 0 0 1 8,8 v13 h-306 z" fill="#3D6BA8"/>
+      <text x="697" y="386" font-size="11" font-weight="700" fill="#FFFFFF" text-anchor="middle">① Agent Skeleton — LLM</text>
+      <g font-family="'SF Mono','Menlo','Consolas',monospace" font-size="9.5">
+        <text x="558" y="416" fill="#5C5044">{</text>
+        <text x="570" y="431" fill="#5C5044">"topic":   <tspan fill="#3D6BA8">‹LLM›</tspan>,</text>
+        <text x="570" y="446" fill="#5C5044">"claim":   <tspan fill="#3D6BA8">‹LLM›</tspan>,</text>
+        <text x="570" y="461" fill="#5C5044">"numbers": <tspan fill="#9A9387">∅</tspan> <tspan fill="#3F7D5A" font-style="italic">← deterministic</tspan></text>
+        <text x="570" y="476" fill="#5C5044">"viz":     <tspan fill="#9A9387">∅</tspan> <tspan fill="#3F7D5A" font-style="italic">← auto-chart</tspan></text>
+        <text x="558" y="491" fill="#5C5044">}</text>
+      </g>
+      <text x="697" y="511" font-size="8" fill="#7A7569" text-anchor="middle" font-style="italic">LLM writes topic &amp; claim from findings/evidence</text>
+    </g>
+    <g filter="url(#shadow)">
+      <rect x="874" y="372" width="346" height="150" rx="7" fill="#222A35" stroke="#3A4453"/>
+      <rect x="874" y="372" width="346" height="20" rx="7" fill="#2E3846"/>
+      <rect x="874" y="384" width="346" height="8" fill="#2E3846"/>
+      <text x="886" y="386" font-size="9" font-weight="700" fill="#8FB7A6">② _ParsedSeries — no LLM</text>
+      <text x="1210" y="386" font-size="7.5" fill="#7A8699" text-anchor="end" font-style="italic">midterm product</text>
+      <g font-family="'SF Mono','Menlo','Consolas',monospace" font-size="9.5" fill="#C7CEDA">
+        <text x="886" y="408">column_name = <tspan fill="#A6D189">"amount_by_merchant"</tspan></text>
+        <text x="886" y="423">key_field   = <tspan fill="#A6D189">"group"</tspan></text>
+        <text x="886" y="438">table_name  = <tspan fill="#A6D189">"spends"</tspan></text>
+        <text x="886" y="453">lookup = {<tspan fill="#A6D189">"AMAZON"</tspan>:<tspan fill="#E5B567">45200</tspan>, <tspan fill="#A6D189">"WALMART"</tspan>:<tspan fill="#E5B567">32100</tspan>,</text>
+        <text x="886" y="468">          <tspan fill="#A6D189">"COSTCO"</tspan>:<tspan fill="#E5B567">28500</tspan>, <tspan fill="#A6D189">"TARGET"</tspan>:<tspan fill="#E5B567">15300</tspan>,</text>
+        <text x="886" y="483">          <tspan fill="#A6D189">"SHELL"</tspan>:<tspan fill="#E5B567">9800</tspan>}</text>
+      </g>
+      <text x="1047" y="506" font-size="8" fill="#7FBF9A" text-anchor="middle" font-style="italic">summarize by group → key + raw_value</text>
+    </g>
+    <g filter="url(#shadow)">
+      <rect x="544" y="542" width="676" height="134" rx="7" fill="#222A35" stroke="#3A4453"/>
+      <rect x="544" y="542" width="676" height="20" rx="7" fill="#2E3846"/>
+      <rect x="544" y="554" width="676" height="8" fill="#2E3846"/>
+      <text x="556" y="556" font-size="9" font-weight="700" fill="#9FB3C9">kp_dict → KB numbers</text>
+      <text x="1208" y="556" font-size="8" fill="#7A8699" text-anchor="end" font-style="italic">skeleton (LLM) + numbers (deterministic)</text>
+      <g font-family="'SF Mono','Menlo','Consolas',monospace" font-size="9.5" fill="#C7CEDA">
+        <text x="556" y="578">"topic": <tspan fill="#8FB7E8">"spend_by_merchant"</tspan>,</text>
+        <text x="556" y="593">"claim": <tspan fill="#8FB7E8">"AMAZON leads $45,200 (34%); top-3 = 80% (HHI 0.27)"</tspan>,</text>
+        <text x="556" y="608">"numbers": [</text>
+      </g>
+      <rect x="568" y="613" width="250" height="15" rx="3" fill="#2F4A3A"/>
+      <g font-family="'SF Mono','Menlo','Consolas',monospace" font-size="9.5">
+        <text x="572" y="624" fill="#B7E3B0">{"group":"AMAZON", "value":45200},</text>
+        <text x="830" y="624" fill="#7A8699">← anchor, LLM knew</text>
+        <text x="572" y="640" fill="#C7CEDA">{"group":"WALMART","value":<tspan fill="#7FBF9A">32100</tspan>}, {"group":"COSTCO","value":<tspan fill="#7FBF9A">28500</tspan>},</text>
+        <text x="572" y="655" fill="#C7CEDA">{"group":"TARGET","value":<tspan fill="#7FBF9A">15300</tspan>}, {"group":"SHELL","value":<tspan fill="#7FBF9A">9800</tspan>} ],</text>
+        <text x="556" y="670" fill="#C7CEDA">"viz": {"kind":<tspan fill="#A6D189">"share"</tspan>, "x_field":<tspan fill="#A6D189">"group"</tspan>, "y_fields":[<tspan fill="#A6D189">"value"</tspan>]}</text>
+      </g>
+      <text x="960" y="640" font-size="8" fill="#7FBF9A" font-style="italic">green = None → filled from lookup</text>
+    </g>
+
+    <!-- ROW 3 · Auto-chart -->
+    <g filter="url(#shadow)">
+      <rect x="544" y="718" width="392" height="50" rx="8" fill="#FFFFFF" stroke="#A9CDB8" stroke-width="1"/>
+      <path d="M544,726 a8,8 0 0 1 8,-8 h376 a8,8 0 0 1 8,8 v13 h-392 z" fill="#3F7D5A"/>
+      <text x="740" y="734" font-size="12" font-weight="700" fill="#FFFFFF" text-anchor="middle">Auto-Chart Pipeline</text>
+      <text x="740" y="754" font-size="8.5" fill="#5C5044" text-anchor="middle">triggered by Tool Output · fully deterministic · no model call</text>
+    </g>
+    <g font-size="9.5" fill="#5C5044">
+      <circle cx="556" cy="790" r="9" fill="#3F7D5A"/><text x="556" y="793" font-size="9" font-weight="700" fill="#FFFFFF" text-anchor="middle">1</text>
+      <text x="574" y="787" font-weight="700" fill="#2D2D2D">Validate</text><text x="640" y="787" font-size="8.5" fill="#7A7569">tool-output schema (groups / concentration)</text>
+      <circle cx="556" cy="818" r="9" fill="#3F7D5A"/><text x="556" y="821" font-size="9" font-weight="700" fill="#FFFFFF" text-anchor="middle">2</text>
+      <text x="574" y="815" font-weight="700" fill="#2D2D2D">Wire SSE</text><text x="640" y="815" font-size="8.5" fill="#7A7569">stream the chart spec to the UI as it renders</text>
+      <circle cx="556" cy="846" r="9" fill="#3F7D5A"/><text x="556" y="849" font-size="9" font-weight="700" fill="#FFFFFF" text-anchor="middle">3</text>
+      <text x="574" y="843" font-weight="700" fill="#2D2D2D">Inject threshold</text><text x="674" y="843" font-size="8.5" fill="#7A7569">reference lines from the data catalog</text>
+      <circle cx="556" cy="874" r="9" fill="#3F7D5A"/><text x="556" y="877" font-size="9" font-weight="700" fill="#FFFFFF" text-anchor="middle">4</text>
+      <text x="574" y="871" font-weight="700" fill="#2D2D2D">Push image path → KB "viz"</text><text x="730" y="871" font-size="8.5" fill="#7A7569">by-path — the KB stores a pointer, not pixels</text>
+    </g>
+    <g filter="url(#shadow)">
+      <rect x="968" y="720" width="500" height="176" rx="8" fill="#FFFFFF" stroke="#A9CDB8" stroke-width="0.8"/>
+      <text x="982" y="738" font-size="9.5" font-weight="700" fill="#2D2D2D">spend share by merchant</text>
+      <text x="1454" y="738" font-size="8" fill="#9A9387" text-anchor="end" font-style="italic">kind: share</text>
+      <g font-size="8.5" fill="#5C5044">
+        <text x="982" y="758">AMAZON</text><rect x="1048" y="750" width="250" height="10" rx="2" fill="#3F7D5A"/><text x="1304" y="758" fill="#7A7569">$45.2k</text>
+        <text x="982" y="778">WALMART</text><rect x="1048" y="770" width="178" height="10" rx="2" fill="#5E9E79"/><text x="1232" y="778" fill="#7A7569">$32.1k</text>
+        <text x="982" y="798">COSTCO</text><rect x="1048" y="790" width="158" height="10" rx="2" fill="#5E9E79"/><text x="1212" y="798" fill="#7A7569">$28.5k</text>
+        <text x="982" y="818">TARGET</text><rect x="1048" y="810" width="85" height="10" rx="2" fill="#8FBFA3"/><text x="1139" y="818" fill="#7A7569">$15.3k</text>
+        <text x="982" y="838">SHELL</text><rect x="1048" y="830" width="54" height="10" rx="2" fill="#8FBFA3"/><text x="1108" y="838" fill="#7A7569">$9.8k</text>
+      </g>
+      <line x1="1232" y1="746" x2="1232" y2="844" stroke="#C85250" stroke-width="1" stroke-dasharray="3,2"/>
+      <text x="1236" y="856" font-size="7.5" fill="#C85250" font-style="italic">threshold (from catalog, step 3)</text>
+      <text x="982" y="878" font-size="8" fill="#9A9387" font-style="italic">saved → /charts/spend_by_merchant_share.png</text>
+      <text x="982" y="890" font-size="8" fill="#3F7D5A" font-style="italic">this path is written into KB "viz"</text>
+    </g>
+
+    <!-- ARROWS (drawn last, above the panel backgrounds) -->
+    <!-- cycle vertical connectors -->
+    <line x1="270" y1="172" x2="270" y2="208" stroke="#3D6BA8" stroke-width="2" marker-end="url(#ar-blue-sm)"/>
+    <line x1="270" y1="262" x2="270" y2="298" stroke="#3D6BA8" stroke-width="2" marker-end="url(#ar-blue-sm)"/>
+    <text x="278" y="284" font-size="8" fill="#7A7569" font-style="italic">execute</text>
+    <line x1="270" y1="348" x2="270" y2="386" stroke="#5C5044" stroke-width="2" marker-end="url(#ar-slate)"/>
+    <line x1="270" y1="576" x2="270" y2="622" stroke="#3D6BA8" stroke-width="2" marker-end="url(#ar-blue-sm)"/>
+    <text x="278" y="600" font-size="8" fill="#4F6B8C" font-style="italic">feeds round 2 · tools{type:function}</text>
+    <line x1="270" y1="676" x2="270" y2="714" stroke="#3D6BA8" stroke-width="2" marker-end="url(#ar-blue-sm)"/>
+    <path d="M48,748 H26 V150 H178" stroke="#3D6BA8" stroke-width="1.6" stroke-dasharray="5,3" fill="none" marker-end="url(#ar-blue)"/>
+    <text x="40" y="130" font-size="8" fill="#1F3A5F" font-style="italic">↩ SpecialistOutput returns to Orchestrator</text>
+
+    <!-- synthesis internal -->
+    <line x1="874" y1="193" x2="964" y2="193" stroke="#3D6BA8" stroke-width="2" marker-end="url(#ar-blue-sm)"/>
+    <text x="919" y="185" font-size="8" fill="#4F6B8C" text-anchor="middle" font-style="italic">produces</text>
+
+    <!-- distiller internal -->
+    <line x1="850" y1="447" x2="872" y2="447" stroke="#3F7D5A" stroke-width="1.6" marker-end="url(#ar-green)"/>
+    <line x1="697" y1="522" x2="697" y2="540" stroke="#3D6BA8" stroke-width="1.6" marker-end="url(#ar-blue-sm)"/>
+    <line x1="1047" y1="522" x2="1047" y2="540" stroke="#3F7D5A" stroke-width="1.8" marker-end="url(#ar-green)"/>
+
+    <!-- FAN — cycle outputs feed the three parts -->
+    <path d="M478,760 H512 V196 H540" stroke="#9A9387" stroke-width="1.6" stroke-dasharray="5,3" fill="none" marker-end="url(#ar-gray)"/>
+    <text x="482" y="164" font-size="8" fill="#7A7569" font-style="italic">findings +</text>
+    <text x="482" y="175" font-size="8" fill="#7A7569" font-style="italic">evidence →</text>
+    <path d="M478,800 H520 V440 H540" stroke="#3D6BA8" stroke-width="2" fill="none" marker-end="url(#ar-blue)"/>
+    <text x="482" y="424" font-size="8" fill="#1F3A5F" font-style="italic">findings +</text>
+    <text x="482" y="435" font-size="8" fill="#1F3A5F" font-style="italic">evidence →</text>
+    <path d="M474,470 H516 V366 H876 V376" stroke="#3F7D5A" stroke-width="2" fill="none" marker-end="url(#ar-green)"/>
+    <text x="700" y="360" font-size="8" fill="#3F7D5A" font-style="italic">raw numbers (deterministic)</text>
+    <path d="M474,510 H524 V812 H540" stroke="#3F7D5A" stroke-width="2" fill="none" marker-end="url(#ar-green)"/>
+    <text x="528" y="804" font-size="8" fill="#3F7D5A" font-style="italic">auto-trigger · no LLM</text>
+
+  </g>
+</svg>

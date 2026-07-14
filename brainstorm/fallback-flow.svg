@@ -1,0 +1,159 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1360 1247" font-family="ui-sans-serif, -apple-system, 'Segoe UI', system-ui, Helvetica, sans-serif">
+<defs>
+<filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur in="SourceAlpha" stdDeviation="1.1"/><feOffset dy="1.3"/><feComponentTransfer><feFuncA type="linear" slope="0.13"/></feComponentTransfer><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<marker id="ar-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 Z" fill="#5E7E58"/></marker>
+<marker id="ar-retry" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 Z" fill="#B0842F"/></marker>
+<marker id="ar-salvage" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 Z" fill="#B4623A"/></marker>
+<marker id="ar-error" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 Z" fill="#A64438"/></marker>
+<marker id="ar-skip" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 Z" fill="#8C8578"/></marker>
+<marker id="ar-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 Z" fill="#3D6BA8"/></marker>
+</defs>
+<rect x="0" y="0" width="1360" height="1247" fill="#F4F0E6"/>
+<text x="56" y="46" font-size="22" font-weight="700" fill="#2D2D2D" letter-spacing="-0.3">Turn fallback &amp; error flow</text>
+<text x="56" y="70" font-size="12" fill="#7A7569">What happens when a case-review turn goes wrong — the branch conditions and the exact message the reviewer sees.  Rule: degrade, don’t fail.</text>
+<rect x="56" y="87" width="11" height="11" rx="3" fill="#3D6BA8"/>
+<text x="73" y="96" font-size="10.5" fill="#5C5044">happy path / phase</text>
+<rect x="203" y="87" width="11" height="11" rx="3" fill="#5E7E58"/>
+<text x="220" y="96" font-size="10.5" fill="#5C5044">answer delivered</text>
+<rect x="339" y="87" width="11" height="11" rx="3" fill="#B0842F"/>
+<text x="356" y="96" font-size="10.5" fill="#5C5044">retry</text>
+<rect x="412" y="87" width="11" height="11" rx="3" fill="#B4623A"/>
+<text x="429" y="96" font-size="10.5" fill="#5C5044">degraded — partial answer</text>
+<rect x="599" y="87" width="11" height="11" rx="3" fill="#A64438"/>
+<text x="616" y="96" font-size="10.5" fill="#5C5044">no answer — hard error</text>
+<rect x="769" y="87" width="11" height="11" rx="3" fill="#8C8578"/>
+<text x="786" y="96" font-size="10.5" fill="#5C5044">fail-open / silent</text>
+<rect x="56" y="118" width="1248" height="104" rx="9" fill="#FBF2F0" stroke="#A64438" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="72" y="140" font-size="10" font-weight="700" letter-spacing="1.5" fill="#A64438">SERVER FENCES  —  CAN FIRE ANY TIME, ABORT THE TURN WITH AN ERROR AND NO ANSWER</text>
+<rect x="72" y="144" width="116" height="19" rx="9.5" fill="#FFFFFF" stroke="#E4C9C4"/>
+<text x="130" y="157" font-size="9.5" font-weight="700" fill="#8A3A31" text-anchor="middle">queue timeout</text>
+<text x="200" y="157" font-size="10" fill="#7A7569">Prior turn hasn’t released after {N}s — try again, or rewind.</text>
+<rect x="72" y="166" width="116" height="19" rx="9.5" fill="#FFFFFF" stroke="#E4C9C4"/>
+<text x="130" y="179" font-size="9.5" font-weight="700" fill="#8A3A31" text-anchor="middle">wall-clock timeout</text>
+<text x="200" y="179" font-size="10" fill="#7A7569">Turn exceeded the {N}s budget — likely a hung LLM call. Lock released.</text>
+<rect x="72" y="188" width="116" height="19" rx="9.5" fill="#FFFFFF" stroke="#E4C9C4"/>
+<text x="130" y="201" font-size="9.5" font-weight="700" fill="#8A3A31" text-anchor="middle">abort / rewind</text>
+<text x="200" y="201" font-size="10" fill="#7A7569">Interrupted — the answer was stopped. Ask another question whenever ready.</text>
+<line x1="174" y1="316" x2="174" y2="1079" stroke="#3D6BA8" stroke-width="2.5" opacity="0.3"/>
+<rect x="56" y="284" width="236" height="64" rx="12" fill="#3D6BA8" filter="url(#shadow)"/>
+<text x="72" y="304" font-size="9" font-weight="700" letter-spacing="1.5" fill="#DCE7F4">PHASE 1</text>
+<text x="72" y="322" font-size="14.5" font-weight="700" fill="#FFFFFF">Screen</text>
+<text x="72" y="337" font-size="9.5" fill="#DCE7F4">redact + relevance gate</text>
+<line x1="292" y1="316" x2="364" y2="316" stroke="#D4C5A9" stroke-width="1"/>
+<rect x="366" y="244" width="938" height="48" rx="8" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8" filter="url(#shadow)"/>
+<rect x="372" y="251" width="4" height="34" rx="2" fill="#A64438"/>
+<rect x="1225" y="259" width="67" height="18" rx="9" fill="#EFD9D3" stroke="#A64438"/>
+<text x="1258" y="271" font-size="9" font-weight="700" fill="#A64438" text-anchor="middle">rejected</text>
+<text x="388" y="263" font-size="11" font-weight="700" fill="#5C5044">Out of scope  <tspan font-size="9.5" font-weight="400" fill="#9A9387">verdict.passed = false</tspan></text>
+<text x="388" y="279" font-size="9.5" fill="#7A7569">[rejected] {reason}</text>
+<rect x="366" y="301" width="938" height="48" rx="8" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8" filter="url(#shadow)"/>
+<rect x="372" y="308" width="4" height="34" rx="2" fill="#A64438"/>
+<rect x="1219" y="316" width="73" height="18" rx="9" fill="#EFD9D3" stroke="#A64438"/>
+<text x="1256" y="328" font-size="9" font-weight="700" fill="#A64438" text-anchor="middle">no answer</text>
+<text x="388" y="320" font-size="11" font-weight="700" fill="#5C5044">Screen timeout  <tspan font-size="9.5" font-weight="400" fill="#9A9387">&gt; SCREEN_TIMEOUT_S</tspan></text>
+<text x="388" y="336" font-size="9.5" fill="#7A7569">Question-check exceeded the {N}s budget — try again; rewind can unstick it.</text>
+<rect x="366" y="358" width="938" height="30" rx="8" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8" filter="url(#shadow)"/>
+<rect x="372" y="365" width="4" height="16" rx="2" fill="#8C8578"/>
+<rect x="1219" y="364" width="73" height="18" rx="9" fill="#ECE7DC" stroke="#8C8578"/>
+<text x="1256" y="376" font-size="9" font-weight="700" fill="#8C8578" text-anchor="middle">fail-open</text>
+<text x="388" y="377" font-size="11" font-weight="700" fill="#5C5044">Firewall block / JSON parse fail  <tspan font-size="9.5" font-weight="400" fill="#9A9387">redact · relevance</tspan></text>
+<rect x="56" y="406" width="236" height="64" rx="12" fill="#3D6BA8" filter="url(#shadow)"/>
+<text x="72" y="426" font-size="9" font-weight="700" letter-spacing="1.5" fill="#DCE7F4">PHASE 1.5</text>
+<text x="72" y="444" font-size="14.5" font-weight="700" fill="#FFFFFF">Cache lookup</text>
+<text x="72" y="459" font-size="9.5" fill="#DCE7F4">exact + near-duplicate</text>
+<line x1="292" y1="438" x2="364" y2="438" stroke="#D4C5A9" stroke-width="1"/>
+<rect x="366" y="414" width="938" height="48" rx="8" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8" filter="url(#shadow)"/>
+<rect x="372" y="421" width="4" height="34" rx="2" fill="#5E7E58"/>
+<rect x="1236" y="429" width="56" height="18" rx="9" fill="#E6EBDF" stroke="#5E7E58"/>
+<text x="1264" y="441" font-size="9" font-weight="700" fill="#5E7E58" text-anchor="middle">answer</text>
+<text x="388" y="433" font-size="11" font-weight="700" fill="#5C5044">Exact / near-dup hit  <tspan font-size="9.5" font-weight="400" fill="#9A9387">_get_cached_qa</tspan></text>
+<text x="388" y="449" font-size="9.5" fill="#7A7569">{cached answer}  — Reused from a prior identical question (no fresh pull).</text>
+<rect x="56" y="585" width="236" height="64" rx="12" fill="#3D6BA8" filter="url(#shadow)"/>
+<text x="72" y="605" font-size="9" font-weight="700" letter-spacing="1.5" fill="#DCE7F4">PHASE 3</text>
+<text x="72" y="623" font-size="14.5" font-weight="700" fill="#FFFFFF">Orchestrate</text>
+<text x="72" y="638" font-size="9.5" fill="#DCE7F4">stream · retry ×2 · then salvage</text>
+<line x1="292" y1="617" x2="364" y2="617" stroke="#D4C5A9" stroke-width="1"/>
+<rect x="366" y="488" width="938" height="48" rx="8" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8" filter="url(#shadow)"/>
+<rect x="372" y="495" width="4" height="34" rx="2" fill="#B0842F"/>
+<rect x="1242" y="503" width="50" height="18" rx="9" fill="#F1E8CF" stroke="#B0842F"/>
+<text x="1267" y="515" font-size="9" font-weight="700" fill="#B0842F" text-anchor="middle">retry</text>
+<text x="388" y="507" font-size="11" font-weight="700" fill="#5C5044">Round-1 planning stall  <tspan font-size="9.5" font-weight="400" fill="#9A9387">_PlanningTimeout</tspan></text>
+<text x="388" y="523" font-size="9.5" fill="#7A7569">Replanning — team planning was slow; retrying with a fresh request.</text>
+<rect x="366" y="545" width="938" height="48" rx="8" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8" filter="url(#shadow)"/>
+<rect x="372" y="552" width="4" height="34" rx="2" fill="#B0842F"/>
+<rect x="1225" y="560" width="67" height="18" rx="9" fill="#F1E8CF" stroke="#B0842F"/>
+<text x="1258" y="572" font-size="9" font-weight="700" fill="#B0842F" text-anchor="middle">retry ×1</text>
+<text x="388" y="564" font-size="11" font-weight="700" fill="#5C5044">Malformed FinalAnswer  <tspan font-size="9.5" font-weight="400" fill="#9A9387">ModelBehaviorError</tspan></text>
+<text x="388" y="580" font-size="9.5" fill="#7A7569">Retrying — the model&#x27;s FinalAnswer didn&#x27;t parse (transient JSON malformity).</text>
+<rect x="366" y="602" width="938" height="30" rx="8" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8" filter="url(#shadow)"/>
+<rect x="372" y="609" width="4" height="16" rx="2" fill="#B0842F"/>
+<rect x="1202" y="608" width="90" height="18" rx="9" fill="#F1E8CF" stroke="#B0842F"/>
+<text x="1247" y="620" font-size="9" font-weight="700" fill="#B0842F" text-anchor="middle">silent retry</text>
+<text x="388" y="621" font-size="11" font-weight="700" fill="#5C5044">Zero specialist calls  <tspan font-size="9.5" font-weight="400" fill="#9A9387">safechain ignored tool_choice</tspan></text>
+<rect x="366" y="641" width="938" height="48" rx="8" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8" filter="url(#shadow)"/>
+<rect x="372" y="648" width="4" height="34" rx="2" fill="#B4623A"/>
+<rect x="1191" y="656" width="101" height="18" rx="9" fill="#F1DDD0" stroke="#B4623A"/>
+<text x="1242" y="668" font-size="9" font-weight="700" fill="#B4623A" text-anchor="middle">partial answer</text>
+<text x="388" y="660" font-size="11" font-weight="700" fill="#5C5044">2 tries fail · firewall · empty final<tspan font-size="9.5" font-weight="400" fill="#9A9387"></tspan></text>
+<text x="388" y="676" font-size="9.5" fill="#7A7569">Could not produce a valid final answer. Returning a partial summary from the specialists that did succeed.</text>
+<rect x="366" y="698" width="938" height="48" rx="8" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8" filter="url(#shadow)"/>
+<rect x="372" y="705" width="4" height="34" rx="2" fill="#B4623A"/>
+<rect x="1174" y="713" width="118" height="18" rx="9" fill="#F1DDD0" stroke="#B4623A"/>
+<text x="1233" y="725" font-size="9" font-weight="700" fill="#B4623A" text-anchor="middle">isolated data-gap</text>
+<text x="388" y="717" font-size="11" font-weight="700" fill="#5C5044">A specialist fails  <tspan font-size="9.5" font-weight="400" fill="#9A9387">max_turns · timeout · empty · redact</tspan></text>
+<text x="388" y="733" font-size="9.5" fill="#7A7569">[FAILED {name}] {reason}  → data-gap + turn_error + flag; orchestrator routes around it.</text>
+<rect x="56" y="812" width="236" height="64" rx="12" fill="#3D6BA8" filter="url(#shadow)"/>
+<text x="72" y="832" font-size="9" font-weight="700" letter-spacing="1.5" fill="#DCE7F4">PHASE 3.5</text>
+<text x="72" y="850" font-size="14.5" font-weight="700" fill="#FFFFFF">Coherence review</text>
+<text x="72" y="865" font-size="9.5" fill="#DCE7F4">only if ≥ 2 specialists</text>
+<line x1="292" y1="844" x2="364" y2="844" stroke="#D4C5A9" stroke-width="1"/>
+<rect x="366" y="772" width="938" height="30" rx="8" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8" filter="url(#shadow)"/>
+<rect x="372" y="779" width="4" height="16" rx="2" fill="#8C8578"/>
+<rect x="1168" y="778" width="124" height="18" rx="9" fill="#ECE7DC" stroke="#8C8578"/>
+<text x="1230" y="790" font-size="9" font-weight="700" fill="#8C8578" text-anchor="middle">use phase-1 answer</text>
+<text x="388" y="791" font-size="11" font-weight="700" fill="#5C5044">Reviewer LLM fails / times out  <tspan font-size="9.5" font-weight="400" fill="#9A9387">_run_review → None</tspan></text>
+<rect x="366" y="811" width="938" height="48" rx="8" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8" filter="url(#shadow)"/>
+<rect x="372" y="818" width="4" height="34" rx="2" fill="#5E7E58"/>
+<rect x="1179" y="826" width="113" height="18" rx="9" fill="#E6EBDF" stroke="#5E7E58"/>
+<text x="1236" y="838" font-size="9" font-weight="700" fill="#5E7E58" text-anchor="middle">corrected answer</text>
+<text x="388" y="830" font-size="11" font-weight="700" fill="#5C5044">needs_redispatch, under cap  <tspan font-size="9.5" font-weight="400" fill="#9A9387">re-run 1 specialist</tspan></text>
+<text x="388" y="846" font-size="9.5" fill="#7A7569">flag: re-dispatched `{specialist}` anchored to {anchor}.</text>
+<rect x="366" y="868" width="938" height="48" rx="8" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8" filter="url(#shadow)"/>
+<rect x="372" y="875" width="4" height="34" rx="2" fill="#B4623A"/>
+<rect x="1191" y="883" width="101" height="18" rx="9" fill="#F1DDD0" stroke="#B4623A"/>
+<text x="1242" y="895" font-size="9" font-weight="700" fill="#B4623A" text-anchor="middle">phase-1 + flag</text>
+<text x="388" y="887" font-size="11" font-weight="700" fill="#5C5044">needs_redispatch, ≤2-round cap hit<tspan font-size="9.5" font-weight="400" fill="#9A9387"></tspan></text>
+<text x="388" y="903" font-size="9.5" fill="#7A7569">flag: re-dispatch needed but the ≤2 dispatch-round cap was reached.</text>
+<rect x="56" y="954" width="236" height="64" rx="12" fill="#3D6BA8" filter="url(#shadow)"/>
+<text x="72" y="974" font-size="9" font-weight="700" letter-spacing="1.5" fill="#DCE7F4">PHASE 4</text>
+<text x="72" y="992" font-size="14.5" font-weight="700" fill="#FFFFFF">Finalize</text>
+<text x="72" y="1006" font-size="9.5" fill="#DCE7F4">emit · drain · charts · cache</text>
+<line x1="292" y1="986" x2="364" y2="986" stroke="#D4C5A9" stroke-width="1"/>
+<rect x="366" y="942" width="938" height="30" rx="8" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8" filter="url(#shadow)"/>
+<rect x="372" y="949" width="4" height="16" rx="2" fill="#8C8578"/>
+<rect x="1208" y="948" width="84" height="18" rx="9" fill="#ECE7DC" stroke="#8C8578"/>
+<text x="1250" y="960" font-size="9" font-weight="700" fill="#8C8578" text-anchor="middle">silent skip</text>
+<text x="388" y="961" font-size="11" font-weight="700" fill="#5C5044">Distiller / chart / cache-store failure  <tspan font-size="9.5" font-weight="400" fill="#9A9387">answer already emitted</tspan></text>
+<rect x="366" y="981" width="938" height="48" rx="8" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8" filter="url(#shadow)"/>
+<rect x="372" y="988" width="4" height="34" rx="2" fill="#B4623A"/>
+<rect x="1248" y="996" width="44" height="18" rx="9" fill="#F1DDD0" stroke="#B4623A"/>
+<text x="1270" y="1008" font-size="9" font-weight="700" fill="#B4623A" text-anchor="middle">flag</text>
+<text x="388" y="1000" font-size="11" font-weight="700" fill="#5C5044">Answered with no specialist calls<tspan font-size="9.5" font-weight="400" fill="#9A9387"></tspan></text>
+<text x="388" y="1016" font-size="9.5" fill="#7A7569">flag: answered without any specialist — may be ungrounded; numbers NOT verified.</text>
+<rect x="56" y="1047" width="236" height="64" rx="12" fill="#5E7E58" filter="url(#shadow)"/>
+<text x="72" y="1067" font-size="9" font-weight="700" letter-spacing="1.5" fill="#DCE7F4">TERMINAL</text>
+<text x="72" y="1085" font-size="14.5" font-weight="700" fill="#FFFFFF">Answer delivered</text>
+<text x="72" y="1100" font-size="9.5" fill="#DCE7F4">final + flags + charts · full SSE replay</text>
+<line x1="292" y1="1079" x2="364" y2="1079" stroke="#D4C5A9" stroke-width="1"/>
+<rect x="366" y="1055" width="938" height="48" rx="8" fill="#FFFFFF" stroke="#D4C5A9" stroke-width="0.8" filter="url(#shadow)"/>
+<rect x="372" y="1062" width="4" height="34" rx="2" fill="#5E7E58"/>
+<rect x="1191" y="1070" width="101" height="18" rx="9" fill="#E6EBDF" stroke="#5E7E58"/>
+<text x="1242" y="1082" font-size="9" font-weight="700" fill="#5E7E58" text-anchor="middle">no empty trace</text>
+<text x="388" y="1074" font-size="11" font-weight="700" fill="#5C5044">Every final-emitting branch replays the trace  <tspan font-size="9.5" font-weight="400" fill="#9A9387">team_plan · agent_started · agent_completed · chart</tspan></text>
+<text x="388" y="1090" font-size="9.5" fill="#7A7569">final-only exceptions: screen reject/timeout · queue / wall-clock timeout · abort</text>
+<rect x="56" y="1129" width="1248" height="92" rx="9" fill="#FBF3EE" stroke="#B4623A" stroke-width="1"/>
+<text x="72" y="1153" font-size="10" font-weight="700" letter-spacing="1.5" fill="#B4623A">THE SALVAGE MACHINERY  —  runner/turn/finalize.py</text>
+<text x="72" y="1175" font-size="11" fill="#5C5044"><tspan font-weight="700">_synthesize_fallback_answer()</tspan>  builds a best-effort markdown answer from whatever specialist outputs carried a payload — a broken synthesis step still yields “[Specialist findings] …”.</text>
+<text x="72" y="1195" font-size="11" fill="#5C5044"><tspan font-weight="700">_replay_completed_specialists()</tspan>  re-emits team_plan + agent_completed before the final, so an error path never leaves the reviewer’s trace panel empty.</text>
+<text x="72" y="1213" font-size="9.5" fill="#7A7569">Read down the blue spine for the happy path; each branch is a way out, colored by what the reviewer ends up with.  Amber → terracotta → brick tracks escalating severity: retry, then a flagged partial answer, then a hard stop.</text>
+</svg>

@@ -1,0 +1,184 @@
+{
+  "_note": "Complete payload for ONE turn, reconstructed to the exact runtime schemas (models/types.py: SpecialistOutput, KnowledgePoint; tool-output shapes from tools/series_extract.py). Content is illustrative; shapes are real. Anchored to a real logged turn in logs/case-366132845011-84fc2d.jsonl (turn_id 6d02a6868cca, specialist=modeling, 4 tool outputs / 6673 chars, 1 KP 'cdss_tsr_trajectory', kb_size_now=1, n_with_charts=0). The JSONL logs store metadata only, not raw content, so per-stage content here is a faithful reconstruction.",
+
+  "turn_id": "6d02a6868cca",
+  "case_id": "366132845011",
+  "mode": "chat",
+
+  "1_intake": {
+    "stage": "ChatAgent · screen the question",
+    "payload": {
+      "question": "How has the model risk score trended recently?",
+      "screen": "pass",
+      "redact": "skipped (no PII in question)",
+      "input_history_len": 0
+    }
+  },
+
+  "2_orchestrator_decide": {
+    "stage": "Orchestrator · team_construction (decide how to answer)",
+    "payload": {
+      "path": "team",
+      "specialists": ["modeling"],
+      "sub_questions": {
+        "modeling": "Trajectory of the CDSS TSR model score over recent months?"
+      },
+      "warmth_hint_present": false,
+      "n_specialists_warm": 0
+    }
+  },
+
+  "3_specialist_round1_tool_calls": {
+    "stage": "Modeling specialist · round 1 output = tool_calls (JSON)",
+    "payload": [
+      {
+        "name": "summarize_trend",
+        "arguments": {
+          "table": "model_scores",
+          "value_column": "cdss_tsr",
+          "period_column": "trans_month"
+        }
+      }
+    ]
+  },
+
+  "4_tool_outputs": {
+    "stage": "Tools execute → tool outputs (round-2 input) · 4 items, 6673 chars total",
+    "n_items": 4,
+    "tool_outputs_chars": 6673,
+    "payload": [
+      {
+        "tool": "summarize_trend",
+        "series": [
+          { "period": "2025-01", "value": "712", "raw_value": 712 },
+          { "period": "2025-02", "value": "705", "raw_value": 705 },
+          { "period": "2025-03", "value": "698", "raw_value": 698 },
+          { "period": "2025-04", "value": "690", "raw_value": 690 },
+          { "period": "2025-05", "value": "679", "raw_value": 679 },
+          { "period": "2025-06", "value": "664", "raw_value": 664 }
+        ],
+        "summary": { "first": 712, "last": 664, "delta": -48, "pct_change": -6.7, "direction": "declining" },
+        "value_column": "cdss_tsr",
+        "table": "model_scores"
+      },
+      {
+        "tool": "get_score_drivers",
+        "table": "score_drivers",
+        "top_drivers": [
+          { "driver": "utilization_trend", "shap": -0.22 },
+          { "driver": "dpd_recent", "shap": -0.18 },
+          { "driver": "inquiry_velocity", "shap": -0.09 }
+        ],
+        "note": "drivers explain the downward CDSS TSR movement"
+      },
+      {
+        "tool": "summarize_trend",
+        "series": [
+          { "period": "2025-01", "value": "0.041", "raw_value": 0.041 },
+          { "period": "2025-06", "value": "0.058", "raw_value": 0.058 }
+        ],
+        "summary": { "first": 0.041, "last": 0.058, "direction": "rising" },
+        "value_column": "pd_12m",
+        "table": "model_scores"
+      },
+      {
+        "tool": "get_table_schema",
+        "table": "model_scores",
+        "columns": { "trans_month": "YYYY-MM-DD", "cdss_tsr": "int", "pd_12m": "float" },
+        "note": "confirmed trans_month format before filtering"
+      }
+    ]
+  },
+
+  "5_specialist_output": {
+    "stage": "Modeling specialist · round 2 output = SpecialistOutput (models/types.py)",
+    "payload": {
+      "domain": "modeling",
+      "mode": "chat",
+      "findings": "CDSS TSR declined steadily from 712 (Jan) to 664 (Jun), -48 pts (-6.7%) over 6 months — a consistent downward trajectory consistent with elevated risk; top drivers are rising utilization and recent DPD.",
+      "evidence": [
+        "CDSS TSR 712->664 over 2025-01..2025-06 (-48 pts, -6.7%)",
+        "monotonic monthly decline, no reversal",
+        "PD_12m rose 0.041 -> 0.058 same window"
+      ],
+      "data_gaps": [],
+      "raw_data": {}
+    }
+  },
+
+  "6_distiller_input": {
+    "stage": "Distiller fires (fire-and-forget, off answer path) · input = SpecialistOutput JSON only",
+    "note": "Raw tool outputs are NOT sent to the distiller LLM (see tools/distiller_pass.py). The distiller only decides topic / claim / viz kind / confidence; numbers are post-filled deterministically.",
+    "prompt": "--- SpecialistOutput (JSON) ---\n{\"domain\":\"modeling\",\"mode\":\"chat\",\"findings\":\"CDSS TSR declined steadily from 712 (Jan) to 664 (Jun)...\",\"evidence\":[\"CDSS TSR 712->664 over 2025-01..2025-06 (-48 pts, -6.7%)\",\"monotonic monthly decline, no reversal\",\"PD_12m rose 0.041 -> 0.058 same window\"],\"data_gaps\":[],\"raw_data\":{}}"
+  },
+
+  "7_distiller_output_raw": {
+    "stage": "Distiller · emits KnowledgePoint (LLM anchors endpoints, leaves interior null, sets viz)",
+    "payload": {
+      "topic": "cdss_tsr_trajectory",
+      "claim": "CDSS TSR declined from 712 (Jan) to 664 (Jun 2025), -48 pts (-6.7%), a steady downward trajectory.",
+      "numbers": [
+        { "period": "2025-01", "value": 712 },
+        { "period": "2025-06", "value": null }
+      ],
+      "viz": { "kind": "line", "x_field": "period", "y_fields": ["value"] },
+      "source_call": "summarize_trend(model_scores, cdss_tsr)",
+      "captured_at_turn": "6d02a6868cca",
+      "confidence": "high"
+    }
+  },
+
+  "8_parsed_series": {
+    "stage": "Deterministic parse of tool outputs (_parse_series_from_tool_outputs) — midterm product",
+    "payload": [
+      {
+        "column_name": "cdss_tsr",
+        "key_field": "period",
+        "table_name": "model_scores",
+        "lookup": { "2025-01": 712, "2025-02": 705, "2025-03": 698, "2025-04": 690, "2025-05": 679, "2025-06": 664 }
+      },
+      {
+        "column_name": "pd_12m",
+        "key_field": "period",
+        "table_name": "model_scores",
+        "lookup": { "2025-01": 0.041, "2025-06": 0.058 }
+      }
+    ]
+  },
+
+  "9_kb_entry_persisted": {
+    "stage": "Post-fill (_fill_kp_numbers ← parsed series) → KnowledgePoint persisted to CaseSession.specialist_kb['modeling']",
+    "payload": {
+      "topic": "cdss_tsr_trajectory",
+      "claim": "CDSS TSR declined from 712 (Jan) to 664 (Jun 2025), -48 pts (-6.7%), a steady downward trajectory.",
+      "numbers": [
+        { "period": "2025-01", "value": 712 },
+        { "period": "2025-02", "value": 705 },
+        { "period": "2025-03", "value": 698 },
+        { "period": "2025-04", "value": 690 },
+        { "period": "2025-05", "value": 679 },
+        { "period": "2025-06", "value": 664 }
+      ],
+      "viz": { "kind": "line", "x_field": "period", "y_fields": ["value"] },
+      "source_call": "summarize_trend(model_scores, cdss_tsr)",
+      "captured_at_turn": "6d02a6868cca",
+      "confidence": "high"
+    },
+    "real_log_lines": [
+      { "event": "distiller_tool_outputs_extracted", "specialist": "modeling", "tool_outputs_chars": 6673, "n_items": 4 },
+      { "event": "distiller_kps_added", "specialist": "modeling", "n_added": 1, "kb_size_now": 1, "topics": ["cdss_tsr_trajectory"], "n_with_charts": 0 }
+    ]
+  },
+
+  "10_general_specialist": {
+    "stage": "General specialist · cross-domain review",
+    "payload": { "event": "general_specialist_skipped", "reason": "single_specialist" }
+  },
+
+  "11_synthesis_answer": {
+    "stage": "Orchestrator · synthesize → ChatAgent · reply → returned to reviewer",
+    "payload": {
+      "answer": "The model risk score (CDSS TSR) has been declining steadily — from 712 in January to 664 in June 2025 (-48 pts, -6.7%), a consistent 6-month downward trajectory that points to elevated/worsening risk. The move is driven mainly by rising utilization and recent delinquency (PD_12m rose 0.041 -> 0.058 over the same window)."
+    }
+  }
+}
