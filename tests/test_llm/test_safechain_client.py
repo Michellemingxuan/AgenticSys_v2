@@ -154,6 +154,79 @@ def test_synthesize_prose_prefixed_finalanswer_yields_clean_json_content():
     assert parsed["data_pull_request"] is None
 
 
+def test_required_round_refuses_stray_final_answer():
+    """tool_choice="required" has no NATIVE enforcement on safechain. A stray
+    FINALANSWER (answer-only schema = the orchestrator skipping dispatch) on a
+    required round must NOT be cleaned into a valid answer — it comes back raw so
+    the SDK rejects it → the turn retries and dispatches. (Multi-field schemas
+    like ReportDraft are NOT rejected — see the report-agent test below.)"""
+    from llm.safechain_client import _extract_tool_calls_and_content
+    fa_schema = {"json_schema": {"schema": {"required": ["answer"]}}}
+    text = ('Here is my answer:\n```json\n'
+            '{"answer": "Low risk.", "flags": []}\n```')
+    tool_calls, content, _ = _extract_tool_calls_and_content(
+        text, tool_choice="required", response_format=fa_schema)
+    assert tool_calls is None
+    assert content == text  # RAW, uncleaned → SDK's FinalAnswer parse fails → retry
+
+
+def test_required_round_does_not_break_multifield_output():
+    """Regression: my required-round enforcement must NOT return a ReportDraft /
+    SpecialistOutput raw (that broke report_agent — answer-as-list stayed a list
+    → ModelBehaviorError). Multi-field schemas are still coerced + accepted."""
+    from llm.safechain_client import _extract_tool_calls_and_content
+    rd_schema = {"json_schema": {"schema": {"required": ["coverage"]}}}
+    text = json.dumps({"coverage": "implicit",
+                       "answer": ["### Scores", "- moved"],
+                       "evidence_excerpts": ["q"], "files_consulted": ["f.md"]})
+    _tc, content, _ = _extract_tool_calls_and_content(
+        text, tool_choice="required", response_format=rd_schema)
+    assert isinstance(json.loads(content)["answer"], str)  # coerced, not rejected
+
+
+def test_required_round_still_honors_a_real_tool_call():
+    """Enforcement must not block a genuine (even prose-wrapped) tool call."""
+    from llm.safechain_client import _extract_tool_calls_and_content
+    text = ('Let me check:\n```json\n'
+            '{"tool_call": {"name": "modeling", "arguments": {"sub_question": "trend?"}}}\n```')
+    tool_calls, _, finish = _extract_tool_calls_and_content(text, tool_choice="required")
+    assert tool_calls and tool_calls[0]["name"] == "modeling"
+    assert finish == "tool_calls"
+
+
+def test_markdown_answer_wrapped_into_finalanswer():
+    """The orchestrator sometimes writes its answer as MARKDOWN (headline +
+    table + 'Flags: []') instead of JSON. On a synthesis round whose schema
+    only requires `answer` (FinalAnswer), wrap the prose so the SDK gets a
+    valid object instead of discarding a grounded answer as ModelBehaviorError."""
+    from llm.safechain_client import _extract_tool_calls_and_content
+    fa_schema = {"json_schema": {"schema": {"required": ["answer"]}}}
+    md = "No prior curated reports.\n\n**TSR 7.5–33.0**\n\n| D | TSR |\n\nFlags: []"
+    _tc, content, _ = _extract_tool_calls_and_content(
+        md, tool_choice=None, response_format=fa_schema)
+    assert json.loads(content)["answer"] == md
+
+
+def test_markdown_not_wrapped_for_multi_field_schema():
+    """A schema needing more than `answer` (SpecialistOutput) must NOT be wrapped
+    — {answer: prose} would falsely look valid; leave it raw so it fails → retry."""
+    from llm.safechain_client import _extract_tool_calls_and_content
+    so_schema = {"json_schema": {"schema": {"required": ["domain", "mode", "findings"]}}}
+    md = "Some prose answer without JSON."
+    _tc, content, _ = _extract_tool_calls_and_content(
+        md, tool_choice=None, response_format=so_schema)
+    assert content == md  # raw, not wrapped
+
+
+def test_non_required_round_still_cleans_direct_answer():
+    """Synthesis rounds (tool_choice != required) keep the clean-up behavior so a
+    direct FinalAnswer object is handed to the SDK as parseable JSON."""
+    from llm.safechain_client import _extract_tool_calls_and_content
+    _tc, content, _ = _extract_tool_calls_and_content(
+        '{"answer": "Low risk.", "flags": []}', tool_choice=None)
+    assert content is not None and json.loads(content)["answer"] == "Low risk."
+
+
 def test_synthesize_coerces_list_answer_to_string():
     """Confirmed report_agent ModelBehaviorError: `answer` emitted as a LIST of
     markdown lines instead of a string. Coerce list→newline-joined string so the

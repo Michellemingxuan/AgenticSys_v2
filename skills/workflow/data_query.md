@@ -31,6 +31,12 @@ Every claim in `findings` / `evidence` / `raw_data` must trace to a tool result 
 - `raw_data` → strict shape `{ <real_table_name>: [<row dict>, ...] }`. Empty `{}` is honest.
 - Catalog metadata is REFERENCE only — never as evidence.
 - Uncertainty → `data_gaps`, never plausible filler.
+- **Tool ERROR → RETRY or report a gap; NEVER answer around it.** If a tool
+  returns an error / "did NOT run" / "no parseable values" (e.g. a malformed
+  `specs_json`), you have NO data from that call — do NOT state, estimate, or
+  recall peaks/trends/values as if it succeeded. Re-issue the call correctly
+  (fix the JSON), or emit a `data_gap`. Fabricating numbers around a failed tool
+  is the worst failure mode: it also poisons the KB for later turns.
 
 ## Output formatting
 

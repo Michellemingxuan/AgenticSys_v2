@@ -596,7 +596,12 @@ class TurnRunner:
         # between attempts so the UI can reset the previous attempt's
         # mid-stream state (team_plan, agent_started) and replace it with
         # the new attempt's events under the same turn_id.
-        _MAX_ORCH_ATTEMPTS = 2  # 1 initial + 1 retry
+        _MAX_ORCH_ATTEMPTS = 2  # ModelBehaviorError: 1 initial + 1 retry
+        # Dispatch is MANDATORY, so the "answered with zero tool calls" case
+        # (safechain can't natively enforce tool_choice="required") gets a
+        # LARGER budget with an escalating directive — R1 planning is cheap
+        # (~3s) and an ungrounded answer is far worse than one extra round.
+        _MAX_DISPATCH_ATTEMPTS = 4
         _orch_attempt = 0
         while True:
             if _orch_attempt > 0:
@@ -728,21 +733,27 @@ class TurnRunner:
                 # specialists entirely), retry once — this is a safechain
                 # flake where tool_choice="required" was ignored.
                 if (not self.tool_calls
-                        and _orch_attempt + 1 < _MAX_ORCH_ATTEMPTS):
+                        and _orch_attempt + 1 < _MAX_DISPATCH_ATTEMPTS):
                     _orch_attempt += 1
                     sess.logger.log("orchestrator_retry_no_tools", {
                         "turn_id": turn_id,
                         "attempt": _orch_attempt,
+                        "max_dispatch_attempts": _MAX_DISPATCH_ATTEMPTS,
                     })
                     # Escalate rather than re-run verbatim: append a hard
                     # directive so the retry actually dispatches a specialist.
                     # run_input is normally the framed-question STRING; support a
-                    # message list too, defensively.
+                    # message list too, defensively. Append once — across
+                    # multiple dispatch retries the directive stays present
+                    # rather than piling up duplicate copies.
                     if isinstance(self.run_input, list):
-                        self.run_input = self.run_input + [
-                            {"role": "user", "content": _NO_TOOLS_RETRY_DIRECTIVE},
-                        ]
-                    else:
+                        if not any(isinstance(m, dict)
+                                   and m.get("content") == _NO_TOOLS_RETRY_DIRECTIVE
+                                   for m in self.run_input):
+                            self.run_input = self.run_input + [
+                                {"role": "user", "content": _NO_TOOLS_RETRY_DIRECTIVE},
+                            ]
+                    elif _NO_TOOLS_RETRY_DIRECTIVE not in str(self.run_input):
                         self.run_input = f"{self.run_input}\n\n{_NO_TOOLS_RETRY_DIRECTIVE}"
                     self.tool_calls = []
                     continue
@@ -797,9 +808,19 @@ class TurnRunner:
                 # non-deterministic. Other AgentsException subclasses (UserError,
                 # guardrail tripwires) are not retried — they reflect a real
                 # protocol or configuration problem, not transient malformity.
+                # A ModelBehaviorError with NO specialists dispatched yet is the
+                # orchestrator SKIPPING DISPATCH: on safechain the required-round
+                # enforcement rejects its stray direct answer, which surfaces
+                # here as an unparseable FinalAnswer (prose/markdown, not JSON).
+                # Treat it like the no-tools case — the LARGER dispatch budget
+                # plus the escalating "call a specialist" directive, not a
+                # verbatim re-run (which just reproduces the same skip → 1 retry
+                # → fallback, the `orchestrator_attempt_failed attempt=1` symptom).
+                _dispatch_phase = not self.tool_calls
+                _cap = _MAX_DISPATCH_ATTEMPTS if _dispatch_phase else _MAX_ORCH_ATTEMPTS
                 if (
                     isinstance(exc, ModelBehaviorError)
-                    and _orch_attempt + 1 < _MAX_ORCH_ATTEMPTS
+                    and _orch_attempt + 1 < _cap
                 ):
                     _orch_attempt += 1
                     self.turn_timer.record(
@@ -813,15 +834,30 @@ class TurnRunner:
                         "attempt": _orch_attempt,
                         "exception_type": type(exc).__name__,
                         "message": str(exc)[:300],
+                        "dispatch_phase": _dispatch_phase,
                         "n_tool_calls_completed": sum(
                             1 for c in self.tool_calls if "payload" in c
                         ),
                     })
+                    if _dispatch_phase:
+                        # Escalate — force a specialist dispatch on the retry.
+                        if isinstance(self.run_input, list):
+                            if not any(isinstance(m, dict)
+                                       and m.get("content") == _NO_TOOLS_RETRY_DIRECTIVE
+                                       for m in self.run_input):
+                                self.run_input = self.run_input + [
+                                    {"role": "user", "content": _NO_TOOLS_RETRY_DIRECTIVE},
+                                ]
+                        elif _NO_TOOLS_RETRY_DIRECTIVE not in str(self.run_input):
+                            self.run_input = f"{self.run_input}\n\n{_NO_TOOLS_RETRY_DIRECTIVE}"
                     sess.emit("orchestrator_retry", {
                         "turn_id": turn_id,
                         "attempt": _orch_attempt,
-                        "reason": "model_behavior_error",
+                        "reason": "dispatch_skip" if _dispatch_phase else "model_behavior_error",
                         "message": (
+                            "Retrying — the orchestrator answered without "
+                            "dispatching a specialist; re-prompting to dispatch."
+                            if _dispatch_phase else
                             "Retrying — the model's FinalAnswer didn't parse "
                             "(typically a transient JSON malformity)."
                         ),

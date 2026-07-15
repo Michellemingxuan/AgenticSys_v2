@@ -310,7 +310,8 @@ def test_batch_query_table_runs_multiple_queries():
 
 def test_batch_query_table_invalid_json():
     out = json.loads(data_tools._batch_query_table_impl("not json"))
-    assert out["error"] == "invalid_json"
+    assert out["error"] == "specs_unparseable"
+    assert "fabricat" in out["REQUIRED"].lower()  # forbids inventing values
 
 
 def test_filter_eq_timestamp_matches_at_second_precision():
@@ -566,7 +567,8 @@ def test_batch_aggregate_runs_multiple_scalars_in_one_call():
 def test_batch_aggregate_rejects_invalid_json():
     result = data_tools._batch_aggregate_impl("not json")
     payload = json.loads(result)
-    assert payload["error"] == "invalid_json"
+    assert payload["error"] == "specs_unparseable"
+    assert "fabricat" in payload["REQUIRED"].lower()
 
 
 # ── summarize_trend ──────────────────────────────────────────────────────
@@ -822,13 +824,36 @@ def test_batch_summarize_trend_caps_at_six_specs():
 def test_batch_summarize_trend_rejects_invalid_json():
     raw = data_tools._batch_summarize_trend_impl("not json")
     payload = json.loads(raw)
-    assert payload["error"] == "invalid_json"
+    assert payload["error"] == "specs_unparseable"
+    assert "fabricat" in payload["REQUIRED"].lower()
 
 
 def test_batch_summarize_trend_rejects_non_list():
     raw = data_tools._batch_summarize_trend_impl(json.dumps({"table_name": "x"}))
     payload = json.loads(raw)
-    assert payload["error"] == "invalid_specs"
+    assert payload["error"] == "specs_unparseable"
+
+
+def test_batch_summarize_trend_truncated_specs_returns_directive_not_fabrication():
+    """The confirmed safechain failure: specs_json arrives TRUNCATED to '['
+    (json.loads → 'Expecting value: line 1 column 2'). The tool must return a
+    hard anti-fabrication directive (so the specialist retries), NOT a neutral
+    error it answers around by inventing peak values."""
+    raw = data_tools._batch_summarize_trend_impl("[")
+    payload = json.loads(raw)
+    assert payload["error"] == "specs_unparseable"
+    assert "did NOT run" in payload["message"]
+    assert "data_gap" in payload["REQUIRED"]
+
+
+def test_salvage_specs_recovers_complete_objects_and_accepts_list():
+    # Already a parsed list (safechain sometimes passes the array, not a string).
+    assert data_tools._salvage_specs_list([{"a": 1}]) == [{"a": 1}]
+    # Truncated after a complete object → recover the complete one, drop the partial.
+    salv = data_tools._salvage_specs_list('[{"table_name":"t","op":"max"},{"table_name":')
+    assert salv == [{"table_name": "t", "op": "max"}]
+    # Bare '[' → nothing complete → empty (caller emits the directive).
+    assert data_tools._salvage_specs_list("[") == []
 
 
 def test_summarize_trend_table_alias_resolves():

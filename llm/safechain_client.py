@@ -404,8 +404,12 @@ class _SafeChainChatCompletions:
         # way it would a real OpenAI SSE stream — the underlying safechain
         # call is non-streaming but we already have the full text in hand.
         if stream:
-            return _FakeAsyncStream(text=text, model=model, tools=tools)
-        return _synthesize_chat_completion(text=text, model=model, tools=tools)
+            return _FakeAsyncStream(
+                text=text, model=model, tools=tools, tool_choice=tool_choice,
+                response_format=response_format)
+        return _synthesize_chat_completion(
+            text=text, model=model, tools=tools, tool_choice=tool_choice,
+            response_format=response_format)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────
@@ -586,6 +590,7 @@ def _build_response_format_hint(response_format: Any) -> str:
 
 def _synthesize_chat_completion(
     *, text: str, model: str, tools: list[dict] | None = None,
+    tool_choice: str | None = None, response_format: Any = None,
 ) -> ChatCompletion:
     """Translate SafeChain's text response into an OpenAI ``ChatCompletion``.
 
@@ -596,8 +601,13 @@ def _synthesize_chat_completion(
     - text parses as ``{"output": {...}}`` → synthesise with the wrapped
       structured answer as ``content``.
     - otherwise → return text as ``content`` verbatim.
+
+    ``tool_choice`` is threaded through so a ``"required"`` round refuses to
+    surface a stray final answer as content (enforcement — see
+    ``_extract_tool_calls_and_content``).
     """
-    tool_calls, content, finish_reason = _extract_tool_calls_and_content(text)
+    tool_calls, content, finish_reason = _extract_tool_calls_and_content(
+        text, tool_choice, response_format)
 
     if tool_calls:
         tool_calls = _validate_and_repair_tool_calls(tool_calls, tools)
@@ -631,8 +641,22 @@ def _synthesize_chat_completion(
     )
 
 
+def _schema_answer_only(response_format: Any) -> bool:
+    """True when the expected structured output's ONLY required field is
+    ``answer`` (i.e. FinalAnswer). Used to safely wrap a plain-prose reply into
+    ``{"answer": <prose>}`` — schemas needing more fields (SpecialistOutput:
+    domain/mode/findings; ReportDraft: coverage) are left to fail → retry."""
+    if not isinstance(response_format, dict):
+        return False
+    schema = response_format.get("json_schema", {})
+    if isinstance(schema, dict):
+        schema = schema.get("schema", {})
+    req = schema.get("required") if isinstance(schema, dict) else None
+    return isinstance(req, list) and set(req) <= {"answer"}
+
+
 def _extract_tool_calls_and_content(
-    text: str,
+    text: str, tool_choice: str | None = None, response_format: Any = None,
 ) -> tuple[list[dict] | None, str | None, str]:
     """Parse safechain's text reply and decide whether it's a tool-call burst,
     a wrapped output, or plain content.
@@ -660,7 +684,10 @@ def _extract_tool_calls_and_content(
        gets parsed individually and merged into one ``tool_calls`` list.
     """
     parsed = _try_parse_json(text)
+    required = tool_choice == "required"
 
+    # ── Tool-call shapes — honored on EVERY round (a prose-wrapped tool_call is
+    #    still a valid tool call). ──
     # 1) Single tool_call.
     if isinstance(parsed, dict) and "tool_call" in parsed:
         tc = parsed["tool_call"]
@@ -675,25 +702,46 @@ def _extract_tool_calls_and_content(
             if calls:
                 return _dedupe_tool_calls(calls), None, "tool_calls"
 
-    # 3) Wrapped output.
-    if isinstance(parsed, dict) and "output" in parsed:
-        out = parsed["output"]
-        return None, (out if isinstance(out, str) else json.dumps(out)), "stop"
-
-    # 4) Multiple concatenated tool_call objects (defensive).
+    # 3) Multiple concatenated tool_call objects (defensive).
     multi = _parse_concatenated_tool_calls(text)
     if multi:
         return _dedupe_tool_calls(multi), None, "tool_calls"
 
-    # Plain content fallback. If the text parsed (possibly via the salvage in
-    # `_try_parse_json`) as a JSON object that ISN'T a tool_call/output wrapper
-    # — e.g. the orchestrator's FinalAnswer `{"answer": ...}` emitted directly
-    # (its response-format hint is suppressed under tool_choice="required") —
-    # hand the SDK the re-serialized clean JSON, NOT the raw text. The raw text
-    # may carry trailing markdown the model spilled after the object, which
-    # would then fail the SDK's strict Pydantic parse (ModelBehaviorError).
+    # ── No tool call found. ──
+    # On a REQUIRED round, safechain has no NATIVE way to enforce
+    # tool_choice="required". The enforcement target is the ORCHESTRATOR
+    # skipping dispatch — i.e. emitting a FinalAnswer (schema whose ONLY
+    # required field is `answer`) instead of a tool call. In that ONE case,
+    # return the raw text so the SDK's parse fails → ModelBehaviorError → the
+    # turn retries and dispatches.
+    #
+    # Do NOT apply this to multi-field structured outputs (ReportDraft:
+    # coverage; SpecialistOutput: domain/mode/findings). Those are the report
+    # agent / specialists emitting a REAL answer that merely needs the list→str
+    # coercion below — returning them raw would spuriously break them (a
+    # regression that surfaced as frequent report_agent ModelBehaviorErrors).
+    if required and _schema_answer_only(response_format):
+        return None, text, "stop"
+
+    # 4) Wrapped output (synthesis / non-required rounds).
+    if isinstance(parsed, dict) and "output" in parsed:
+        out = parsed["output"]
+        return None, (out if isinstance(out, str) else json.dumps(out)), "stop"
+
+    # Plain FinalAnswer object emitted directly (non-required rounds): hand the
+    # SDK the re-serialized clean JSON, NOT the raw text (which may carry
+    # trailing markdown that fails the SDK's strict Pydantic parse).
     if isinstance(parsed, dict):
         return None, json.dumps(_coerce_str_fields(parsed), ensure_ascii=False), "stop"
+
+    # Plain PROSE where a structured FinalAnswer was expected. The orchestrator
+    # sometimes writes its answer as markdown (headline + table + "Flags: []")
+    # instead of JSON — with no constrained decoding safechain can't stop it.
+    # When the schema's only required field is `answer`, wrap the prose so the
+    # SDK gets a valid FinalAnswer instead of a ModelBehaviorError that discards
+    # a perfectly good (grounded) answer.
+    if text and text.strip() and _schema_answer_only(response_format):
+        return None, json.dumps({"answer": text}, ensure_ascii=False), "stop"
 
     # Genuine plain content (no parseable JSON) — pass through verbatim.
     return None, text, "stop"
@@ -882,6 +930,7 @@ def _parse_concatenated_tool_calls(text: str) -> list[dict]:
 
 def _synthesize_chat_chunks(
     *, text: str, model: str, tools: list[dict] | None = None,
+    tool_choice: str | None = None, response_format: Any = None,
 ) -> list[ChatCompletionChunk]:
     """Translate SafeChain's full text response into ChatCompletionChunks.
 
@@ -895,7 +944,8 @@ def _synthesize_chat_chunks(
     2. content / tool_calls — the actual payload
     3. finish chunk         — finish_reason terminator
     """
-    tool_calls, content, finish_reason = _extract_tool_calls_and_content(text)
+    tool_calls, content, finish_reason = _extract_tool_calls_and_content(
+        text, tool_choice, response_format)
 
     if tool_calls:
         tool_calls = _validate_and_repair_tool_calls(tool_calls, tools)
@@ -951,8 +1001,11 @@ class _FakeAsyncStream:
     is async-iterable is treated as a stream by the SDK's handler.
     """
 
-    def __init__(self, *, text: str, model: str, tools: list[dict] | None = None) -> None:
-        self._chunks = _synthesize_chat_chunks(text=text, model=model, tools=tools)
+    def __init__(self, *, text: str, model: str, tools: list[dict] | None = None,
+                 tool_choice: str | None = None, response_format: Any = None) -> None:
+        self._chunks = _synthesize_chat_chunks(
+            text=text, model=model, tools=tools, tool_choice=tool_choice,
+            response_format=response_format)
         self._idx = 0
 
     def __aiter__(self) -> "_FakeAsyncStream":

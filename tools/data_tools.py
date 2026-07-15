@@ -1476,23 +1476,14 @@ def query_table(
 def _batch_query_table_impl(specs_json: str) -> str:
     """Run multiple ``query_table`` queries in one tool call. See
     ``batch_query_table`` for the contract."""
-    _log_call("batch_query_table", {"specs_json": specs_json[:1000]})
-    try:
-        specs = json.loads(specs_json)
-    except json.JSONDecodeError as exc:
-        out = json.dumps({
-            "error": "invalid_json",
-            "message": str(exc),
-            "expected": "JSON list of query_table argument objects",
-        }, indent=2)
-        _log_result("batch_query_table", result=out, extra={"reason": "invalid_json"})
-        return out
-    if not isinstance(specs, list):
-        out = json.dumps({
-            "error": "invalid_specs",
-            "message": "specs_json must decode to a list",
-        }, indent=2)
-        _log_result("batch_query_table", result=out, extra={"reason": "not_list"})
+    _log_call("batch_query_table", {
+        "specs_json": specs_json[:1000] if isinstance(specs_json, str) else str(specs_json)[:1000]})
+    specs = _salvage_specs_list(specs_json)
+    if not specs:
+        out = _unparseable_specs_directive(
+            "batch_query_table", specs_json,
+            '[{"table_name":"spends","columns":"Date,Amount,Merchant Name","limit":20}]')
+        _log_result("batch_query_table", result=out, extra={"reason": "specs_unparseable"})
         return out
 
     results: list[dict[str, Any]] = []
@@ -2227,25 +2218,20 @@ def aggregate_column(
     )
 
 
-def _batch_aggregate_impl(specs_json: str) -> str:
-    _log_call("batch_aggregate", {"specs_json": specs_json[:1000]})
-    try:
-        specs = json.loads(specs_json)
-    except json.JSONDecodeError as exc:
-        out = json.dumps({
-            "error": "invalid_json",
-            "message": str(exc),
-            "expected": "JSON list of aggregate_column argument objects",
-        }, indent=2)
-        _log_result("batch_aggregate", result=out, extra={"reason": "invalid_json"})
-        return out
+_BATCH_AGG_EXAMPLE = (
+    '[{"table_name":"spends","column":"Amount","op":"sum"},'
+    '{"table_name":"payments","column":"Payment Amount","op":"sum"}]'
+)
 
-    if not isinstance(specs, list):
-        out = json.dumps({
-            "error": "invalid_specs",
-            "message": "specs_json must decode to a list",
-        }, indent=2)
-        _log_result("batch_aggregate", result=out, extra={"reason": "not_list"})
+
+def _batch_aggregate_impl(specs_json: str) -> str:
+    _log_call("batch_aggregate", {
+        "specs_json": specs_json[:1000] if isinstance(specs_json, str) else str(specs_json)[:1000]})
+    specs = _salvage_specs_list(specs_json)
+    if not specs:
+        out = _unparseable_specs_directive(
+            "batch_aggregate", specs_json, _BATCH_AGG_EXAMPLE)
+        _log_result("batch_aggregate", result=out, extra={"reason": "specs_unparseable"})
         return out
 
     results: list[dict[str, Any]] = []
@@ -2775,26 +2761,97 @@ def summarize_trend(
     )
 
 
-def _batch_summarize_trend_impl(specs_json: str) -> str:
-    _log_call("batch_summarize_trend", {"specs_json": specs_json[:1000]})
+def _salvage_specs_list(raw) -> list | None:
+    """Best-effort parse of a batch tool's JSON-list argument (``specs_json``).
+
+    On safechain the tool-call arguments are text-parsed with no constrained
+    decoding, so this argument arrives malformed intermittently — most often
+    TRUNCATED (the confirmed failure: ``specs_json`` == "[", which
+    ``json.loads`` rejects with "Expecting value: line 1 column 2"), sometimes
+    already a parsed list, sometimes fence-wrapped. Recover whatever COMPLETE
+    spec objects are present rather than erroring out (which let the specialist
+    fabricate). Returns the list (possibly empty if nothing complete parsed), or
+    None if the input isn't a list at all.
+    """
+    if isinstance(raw, list):
+        return raw
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    t = raw.strip()
+    for fence in ("```json", "```"):
+        if t.startswith(fence):
+            t = t[len(fence):].lstrip("\n")
+            break
+    if t.endswith("```"):
+        t = t[:-3].rstrip()
     try:
-        specs = json.loads(specs_json)
-    except json.JSONDecodeError as exc:
-        out = json.dumps({
-            "error": "invalid_json",
-            "message": str(exc),
-            "expected": "JSON list of summarize_trend argument objects",
-        }, indent=2)
+        v = json.loads(t)
+        return v if isinstance(v, list) else None
+    except (json.JSONDecodeError, ValueError):
+        pass
+    # Truncated list — collect the complete top-level {...} objects inside it.
+    if not t.startswith("["):
+        return None
+    decoder = json.JSONDecoder()
+    objs: list = []
+    i, n = 1, len(t)
+    while i < n:
+        while i < n and t[i] in " \t\r\n,":
+            i += 1
+        if i >= n or t[i] == "]":
+            break
+        try:
+            obj, end = decoder.raw_decode(t, i)
+        except (json.JSONDecodeError, ValueError):
+            break
+        objs.append(obj)
+        i = end
+    return objs
+
+
+_BATCH_TREND_EXAMPLE = (
+    '[{"table_name":"model_scores","value_column":"credit_loss_prob",'
+    '"time_column":"trans_month","period":"month","op":"max"},'
+    '{"table_name":"model_scores","value_column":"tot_struct_risk_score",'
+    '"time_column":"trans_month","period":"month","op":"max"}]'
+)
+
+
+def _unparseable_specs_directive(tool: str, raw, example: str) -> str:
+    """Anti-fabrication error for a batch tool whose specs argument didn't parse.
+
+    The neutral 'invalid_json' error let the specialist HALLUCINATE trend values
+    around the failure. This says, loudly, that no data was produced and forbids
+    inventing numbers — the specialist must re-call with a complete JSON list."""
+    preview = (raw[:120] if isinstance(raw, str) else str(raw)[:120])
+    return json.dumps({
+        "error": "specs_unparseable",
+        "message": (
+            f"specs_json did not parse as a JSON list (looked truncated/"
+            f"malformed: {preview!r}). {tool} did NOT run — you have NO data "
+            "from this call."
+        ),
+        "REQUIRED": (
+            "Do NOT state, estimate, or infer any values (peaks, troughs, "
+            "trends) — with no tool result that is fabrication. Re-call "
+            f"{tool} with a COMPLETE JSON list, e.g. {example} . If it still "
+            "fails, report a data_gap — never invent numbers."
+        ),
+    }, indent=2)
+
+
+def _batch_summarize_trend_impl(specs_json: str) -> str:
+    _log_call("batch_summarize_trend", {
+        "specs_json": specs_json[:1000] if isinstance(specs_json, str) else str(specs_json)[:1000]})
+    specs = _salvage_specs_list(specs_json)
+    # Empty/None → unrecoverable (e.g. the safechain-truncated "[" ). Return a
+    # hard anti-fabrication directive instead of a neutral error the specialist
+    # would answer AROUND with invented peaks.
+    if not specs:
+        out = _unparseable_specs_directive(
+            "batch_summarize_trend", specs_json, _BATCH_TREND_EXAMPLE)
         _log_result("batch_summarize_trend", result=out,
-                    extra={"reason": "invalid_json"})
-        return out
-    if not isinstance(specs, list):
-        out = json.dumps({
-            "error": "invalid_specs",
-            "message": "specs_json must decode to a list",
-        }, indent=2)
-        _log_result("batch_summarize_trend", result=out,
-                    extra={"reason": "not_list"})
+                    extra={"reason": "specs_unparseable"})
         return out
 
     # Cap at 6 — each trend returns a per-period series + summary, so the

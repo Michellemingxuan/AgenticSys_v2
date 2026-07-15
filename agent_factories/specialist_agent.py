@@ -130,12 +130,19 @@ def build_specialist_agent(skill: DomainSkill, pillar: dict, model) -> Agent:
         model_settings=ModelSettings(
             tool_choice="required",
             parallel_tool_calls=True,
-            # Cap output at 500 tokens (was 800). With question and
-            # implications removed, SpecialistOutput is: domain (1 word)
-            # + mode (1 word) + findings (≤50 words) + evidence (≤3×15
-            # words) + data_gaps (≤1×15 words) + raw_data ({}) ≈ 100-200
-            # tokens. 500 gives 2.5x headroom while cutting generation
-            # time on the synthesis round (~5s saved at 50 tok/s).
-            max_tokens=500,
+            # max_tokens is a CEILING, not a target — a short SpecialistOutput
+            # (~100-200 tok) stops at its natural end token regardless, so a
+            # higher ceiling adds NO latency to normal rounds. It only bounds
+            # the worst case. The binding round is the TOOL-CALL round: on
+            # safechain the whole call is emitted as escaped TEXT
+            # (`{"tool_call":{...,"specs_json":"[{...},{...}]"}}`), and a
+            # 500-cap truncated a multi-trend `batch_summarize_trend` mid-
+            # argument → `specs_json="["` → tool error → the specialist
+            # fabricated the peaks. 3000 comfortably covers a 6-spec batch call
+            # (verbose escaped text on safechain) plus any preamble, without
+            # slowing the short synthesis round (ceiling, not target). Confirmed
+            # in the private env: raising to 3000 cleared the truncated-specs
+            # fabrication.
+            max_tokens=3000,
         ),
     )
