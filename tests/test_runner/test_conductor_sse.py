@@ -226,6 +226,42 @@ async def test_ensure_report_agent_redispatches_when_missing(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ensure_report_agent_skips_when_case_has_no_reports(monkeypatch):
+    """A case with no curated reports must NOT be forced through report_agent —
+    there's nothing to look up, so the backstop skips (no wasted / failure-prone
+    round). Regression for 'no reports must not hinder the system working'."""
+    runner = _runner_for_backstop(
+        monkeypatch, [{"call_id": "c1", "tool": "spend_payments", "payload": {}}])
+    runner.has_reports = False
+    fired = {"n": 0}
+
+    async def fake_redispatch(resume_input):
+        fired["n"] += 1
+        return "NEW"
+
+    runner._run_redispatch_pass = fake_redispatch
+    await runner._ensure_report_agent()
+
+    assert fired["n"] == 0                 # backstop did NOT re-dispatch
+    assert runner.final_answer == "OLD"    # kept the specialist-only answer
+
+
+def test_case_has_reports_detects_md_files(monkeypatch, tmp_path):
+    monkeypatch.setattr(conductor, "_REPORTS_DIR", tmp_path)
+    # No folder at all → False.
+    assert conductor._case_has_reports("CASE-NONE") is False
+    # Folder with only a charts/ subdir (generated artifacts) → still False.
+    empty = tmp_path / "CASE-EMPTY"
+    (empty / "charts").mkdir(parents=True)
+    assert conductor._case_has_reports("CASE-EMPTY") is False
+    # Folder with a real .md report → True.
+    withrep = tmp_path / "CASE-REP"
+    withrep.mkdir()
+    (withrep / "payment_spend_exp_0.md").write_text("# report")
+    assert conductor._case_has_reports("CASE-REP") is True
+
+
+@pytest.mark.asyncio
 async def test_ensure_report_agent_skips_when_already_present(monkeypatch):
     runner = _runner_for_backstop(monkeypatch, [
         {"tool": "spend_payments", "payload": {}},

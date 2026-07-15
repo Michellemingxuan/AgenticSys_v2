@@ -86,6 +86,50 @@ _REPORT_AGENT_DIRECTIVE = (
     "by the reports') — surface that briefly rather than omitting it."
 )
 
+# Injected on the no-tools retry. On safechain, `tool_choice="required"` is only
+# a text instruction (no native function-calling), so the orchestrator sometimes
+# emits a direct — and ungrounded — FinalAnswer on round 1 instead of dispatching.
+# Re-running verbatim tends to repeat the mistake, so the retry escalates with a
+# hard, format-specific directive.
+_NO_TOOLS_RETRY_DIRECTIVE = (
+    "[REQUIRED — you called ZERO specialists] Your previous response was a "
+    "direct answer with NO tool call. That answer is UNGROUNDED and forbidden: "
+    "you have not queried any live data. You MUST dispatch at least one domain "
+    "specialist THIS round. Respond with ONLY a tool call — a single JSON object "
+    '`{"tool_call": {"name": "<specialist_name>", "arguments": {"sub_question": '
+    '"<what to investigate>"}}}` (or a `{"tool_calls": [ ... ]}` array for '
+    "several). Do NOT write a prose answer, do NOT wrap it in ```markdown fences, "
+    "and do NOT emit a FinalAnswer this round."
+)
+
+
+# Appended to the orchestrator input when a case has NO curated reports yet, so
+# report_agent (normally MANDATORY) is neither expected nor enforced — a fresh
+# case with no reports must answer smoothly from live specialist data alone.
+_NO_REPORTS_NOTE = (
+    "[NOTE] This case has NO curated reports available yet. Do NOT call "
+    "`report_agent` this turn — there is nothing to look up. Answer from the "
+    "domain specialists' live data only, and prefix the answer with "
+    "\"No prior curated reports — answer is from live specialist analysis only.\""
+)
+
+
+def _case_has_reports(case_id: str) -> bool:
+    """True iff the case has at least one curated report (.md) to look up.
+
+    A case with no reports has either no ``reports/<case_id>`` folder at all, or
+    one holding only generated artifacts (e.g. a ``charts/`` subdir) and no
+    report files. Such cases must not be hindered by the mandatory-report_agent
+    machinery — there is simply nothing to consult.
+    """
+    folder = _REPORTS_DIR / case_id
+    try:
+        return folder.is_dir() and any(
+            p.is_file() and p.suffix == ".md" for p in folder.iterdir()
+        )
+    except OSError:
+        return False
+
 
 class _PlanningTimeout(Exception):
     """Round-1 (team-planning) stalled past ORCH_PLAN_TIMEOUT_S — abort + retry."""
@@ -149,6 +193,7 @@ class TurnRunner:
         self.streamed = None
         self.final_answer: FinalAnswer | None = None
         self.review_flags: list[str] = []
+        self.has_reports = True  # set in _assemble_input from the case's reports
         # ── SSE-emit state (Phase 3) ──────────────────────────────────────
         self.call_index_by_id: dict[str, int] = {}  # call_id → index in tool_calls
         self.tool_calls: list[dict] = []
@@ -481,6 +526,14 @@ class TurnRunner:
         timer_t0 = time.perf_counter()
         framed_question = assemble_orchestrator_input(sess, self.verdict, ctx)
         self.framed_question = framed_question
+        # Cases with no curated reports must work smoothly: tell the orchestrator
+        # up front not to require report_agent (and skip the backstop below), so
+        # a fresh case answers from specialist data without a wasted — and, on
+        # safechain, failure-prone — report_agent round.
+        self.has_reports = _case_has_reports(sess.case_id)
+        if not self.has_reports:
+            framed_question = f"{framed_question}\n\n{_NO_REPORTS_NOTE}"
+            sess.logger.log("case_has_no_reports", {"turn_id": turn_id})
         self.run_input = framed_question
 
         # Each turn starts fresh — no accumulated conversation history.
@@ -681,6 +734,16 @@ class TurnRunner:
                         "turn_id": turn_id,
                         "attempt": _orch_attempt,
                     })
+                    # Escalate rather than re-run verbatim: append a hard
+                    # directive so the retry actually dispatches a specialist.
+                    # run_input is normally the framed-question STRING; support a
+                    # message list too, defensively.
+                    if isinstance(self.run_input, list):
+                        self.run_input = self.run_input + [
+                            {"role": "user", "content": _NO_TOOLS_RETRY_DIRECTIVE},
+                        ]
+                    else:
+                        self.run_input = f"{self.run_input}\n\n{_NO_TOOLS_RETRY_DIRECTIVE}"
                     self.tool_calls = []
                     continue
 
@@ -1013,6 +1076,14 @@ class TurnRunner:
         if self.final_answer is None or not self.tool_calls or self.streamed is None:
             return
         if any(c.get("tool") == "report_agent" for c in self.tool_calls):
+            return
+        # No curated reports for this case → don't force report_agent. There is
+        # nothing to look up, so re-dispatching it only burns a round (and risks
+        # a spurious safechain failure). The answer stands on specialist data.
+        if not getattr(self, "has_reports", True):
+            self.sess.logger.log("report_agent_backstop_skipped_no_reports", {
+                "turn_id": self.turn_id,
+            })
             return
         try:
             self.sess.logger.log("report_agent_backstop_fired", {

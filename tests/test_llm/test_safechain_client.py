@@ -118,6 +118,56 @@ def test_try_parse_json_strips_markdown_fence():
     assert parsed == {"output": {"x": 1}}
 
 
+def test_try_parse_json_extracts_prose_prefixed_fenced_object():
+    """Confirmed orchestrator ModelBehaviorError: a preamble sentence THEN a
+    ```json fenced FinalAnswer. The fence isn't at the start, so it must still
+    be extracted (previously → parse failure → ModelBehaviorError)."""
+    text = (
+        "No prior curated reports — answer is from live specialist analysis only.\n"
+        '```json\n{"answer": "TSR spiked to 39.6", "flags": [], "data_pull_request": null}\n```'
+    )
+    parsed = _try_parse_json(text)
+    assert isinstance(parsed, dict)
+    assert parsed["answer"] == "TSR spiked to 39.6"
+    assert parsed["flags"] == []
+
+
+def test_try_parse_json_extracts_bare_object_after_prose():
+    text = 'Here is the result: {"answer": "ok", "flags": []} — hope that helps!'
+    parsed = _try_parse_json(text)
+    assert parsed == {"answer": "ok", "flags": []}
+
+
+def test_synthesize_prose_prefixed_finalanswer_yields_clean_json_content():
+    """End-to-end: the confirmed orchestrator completion must come back as clean
+    FinalAnswer JSON content (no fence, no preamble) so the SDK can parse it —
+    instead of the raw prose+fence that raised ModelBehaviorError."""
+    text = (
+        "No prior curated reports — answer is from live specialist analysis only.\n"
+        '```json\n{"answer": "Low risk.", "flags": [], "data_pull_request": null}\n```'
+    )
+    cc = _synthesize_chat_completion(text=text, model="gpt-4o")
+    msg = cc.choices[0].message
+    assert msg.tool_calls is None
+    parsed = json.loads(msg.content)                 # must be pure JSON now
+    assert parsed["answer"] == "Low risk."
+    assert parsed["data_pull_request"] is None
+
+
+def test_synthesize_coerces_list_answer_to_string():
+    """Confirmed report_agent ModelBehaviorError: `answer` emitted as a LIST of
+    markdown lines instead of a string. Coerce list→newline-joined string so the
+    ReportDraft/FinalAnswer schema (answer: str) validates."""
+    text = json.dumps({
+        "answer": ["### Spend Pattern", "- Large single-merchant spend", "- Recommendation: monitor"],
+        "flags": [],
+    })
+    cc = _synthesize_chat_completion(text=text, model="gpt-4o")
+    parsed = json.loads(cc.choices[0].message.content)
+    assert isinstance(parsed["answer"], str)
+    assert parsed["answer"] == "### Spend Pattern\n- Large single-merchant spend\n- Recommendation: monitor"
+
+
 def test_try_parse_json_salvages_unclosed_object_with_trailing_markdown():
     # The real safechain failure mode (gpt-4.1, no constrained decoding): a
     # valid JSON object prefix, then the model spills into markdown and never

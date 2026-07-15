@@ -33,6 +33,7 @@ import concurrent.futures
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from typing import Any
@@ -692,10 +693,31 @@ def _extract_tool_calls_and_content(
     # may carry trailing markdown the model spilled after the object, which
     # would then fail the SDK's strict Pydantic parse (ModelBehaviorError).
     if isinstance(parsed, dict):
-        return None, json.dumps(parsed, ensure_ascii=False), "stop"
+        return None, json.dumps(_coerce_str_fields(parsed), ensure_ascii=False), "stop"
 
     # Genuine plain content (no parseable JSON) — pass through verbatim.
     return None, text, "stop"
+
+
+def _coerce_str_fields(obj: dict) -> dict:
+    """Repair a common safechain schema-type slip before the SDK validates it.
+
+    Without constrained decoding the model sometimes emits ``answer`` as a LIST
+    of markdown lines instead of a single string (a confirmed report_agent
+    ModelBehaviorError: ``answer`` is `['### Spend Pattern', '- …']` but
+    ``FinalAnswer`` / ``ReportDraft`` / ``SpecialistOutput`` all type it `str`).
+    Join list→string so Pydantic accepts it instead of raising `string_type`.
+    """
+    if not isinstance(obj, dict):
+        return obj
+    out = obj
+    for field in ("answer",):
+        v = obj.get(field)
+        if isinstance(v, list) and all(isinstance(x, str) for x in v):
+            if out is obj:
+                out = dict(obj)
+            out[field] = "\n".join(v)
+    return out
 
 
 def _dedupe_tool_calls(calls: list[dict]) -> list[dict]:
@@ -1044,4 +1066,52 @@ def _try_parse_json(text: str) -> Any:
                 return json.loads(salvaged)
             except (json.JSONDecodeError, ValueError):
                 pass
+    # Prose-prefixed / fenced JSON. Without constrained decoding the model
+    # sometimes writes a preamble sentence THEN the object — e.g.
+    # `No prior curated reports — …\n```json\n{"answer": …}\n``` ` (a confirmed
+    # orchestrator ModelBehaviorError). The fence isn't at the start, so the
+    # `startswith` strip above misses it. Pull the object out of the text.
+    embedded = _extract_embedded_json(text)
+    if embedded is not None:
+        return embedded
+    return None
+
+
+def _extract_embedded_json(text: str) -> Any:
+    """Extract a JSON object embedded in surrounding prose / markdown fences.
+
+    Handles the two shapes safechain emits when it "chats" around the answer:
+    a ```json … ``` (or bare ```` ``` ````) fenced block anywhere in the reply,
+    and a raw ``{…}`` object preceded by a prose sentence. Returns the parsed
+    object, or None if nothing parseable is found.
+    """
+    if not isinstance(text, str):
+        return None
+    # 1) A fenced code block anywhere (first one wins; repair if truncated).
+    m = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+    if m:
+        inner = m.group(1).strip()
+        for candidate in (inner, _repair_truncated_json(inner)):
+            if not candidate:
+                continue
+            try:
+                return json.loads(candidate)
+            except (json.JSONDecodeError, ValueError):
+                pass
+    # 2) The first balanced {…} object embedded in prose (raw_decode ignores
+    #    trailing text). Only accept one that carries a recognized structural
+    #    key, so a stray `{…}` mentioned inside a genuine prose answer is not
+    #    mistaken for the answer object.
+    _structural = {"tool_call", "tool_calls", "output", "answer"}
+    decoder = json.JSONDecoder()
+    idx = text.find("{")
+    while idx != -1:
+        try:
+            obj, _end = decoder.raw_decode(text, idx)
+        except (json.JSONDecodeError, ValueError):
+            idx = text.find("{", idx + 1)
+            continue
+        if isinstance(obj, dict) and _structural & obj.keys():
+            return obj
+        idx = text.find("{", idx + 1)
     return None

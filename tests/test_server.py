@@ -144,6 +144,45 @@ def test_turn_aborted_class_is_a_distinct_exception():
 # ── Prewarm path ────────────────────────────────────────────────────────────
 
 
+def _fake_sess_for_rescope(case_id, gateway_case):
+    import types
+    gw = types.SimpleNamespace(
+        _case=gateway_case,
+        get_case_id=lambda: gw._case,
+        set_case=lambda c: setattr(gw, "_case", c),
+    )
+    return types.SimpleNamespace(
+        case_id=case_id, gateway=gw,
+        logger=types.SimpleNamespace(log=lambda *a, **k: None),
+    )
+
+
+def test_rescope_to_case_switches_gateway_on_case_change(monkeypatch):
+    """A turn on a case different from the gateway's current case must re-scope
+    the shared gateway (+ re-sync the catalog). This is the fix for 'all cases
+    serve the last-opened case's data / identical trend plots'."""
+    synced = []
+    monkeypatch.setattr(server, "_sync_case_catalog",
+                        lambda cid, gw, cat, log: synced.append(cid))
+    # Gateway is currently on case B; this turn is for case A → must switch.
+    sess = _fake_sess_for_rescope(case_id="CASE-A", gateway_case="CASE-B")
+    server._rescope_to_case(sess)
+    assert sess.gateway.get_case_id() == "CASE-A"   # gateway re-pointed
+    assert synced == ["CASE-A"]                       # catalog re-synced for A
+
+
+def test_rescope_to_case_noop_when_already_scoped(monkeypatch):
+    """Consecutive turns on the SAME case must not re-sync (the catalog reset +
+    reconcile is the costly part) — the guard makes it a no-op."""
+    synced = []
+    monkeypatch.setattr(server, "_sync_case_catalog",
+                        lambda cid, gw, cat, log: synced.append(cid))
+    sess = _fake_sess_for_rescope(case_id="CASE-A", gateway_case="CASE-A")
+    server._rescope_to_case(sess)
+    assert synced == []                                # no re-sync
+    assert sess.gateway.get_case_id() == "CASE-A"
+
+
 def test_prewarm_respects_env_skip(monkeypatch):
     """`LLM_PREWARM=0` makes `_prewarm_clients()` a no-op. Verifies the
     skip path emits the skipped event AND does NOT touch the LLM
