@@ -40,8 +40,8 @@ from typing import Any
 # this — server.py was the missing one. Lazy/optional import so the
 # server still starts if python-dotenv isn't installed (e.g. private env).
 try:
-    from dotenv import load_dotenv as _load_dotenv
-    _load_dotenv()
+    from dotenv import load_dotenv as _load_dotenv, find_dotenv as _find_dotenv
+    _load_dotenv(_find_dotenv(), override=True)
 except ImportError:
     pass
 
@@ -82,7 +82,7 @@ from tools.data_tools import init_tools
 
 MODEL = os.environ.get("MODEL", "gpt-4.1")
 DATA_SOURCE = os.environ.get("DATA_SOURCE", "auto")
-PORT = int(os.environ.get("PORT", 3001))
+PORT = int(os.environ.get("PORT", 49002))
 HOST = os.environ.get("HOST", "127.0.0.1")
 # Per-session ring buffer of recently-emitted SSE events. When a client
 # (re)connects to the stream — initial load, or recovery after a silent
@@ -856,7 +856,7 @@ def _spawn_turn(sess: CaseSession, turn_id: str, question: str) -> None:
 # ── Flask app ───────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": ["http://localhost:5173", "http://127.0.0.1:5173"]}})
+CORS(app, resources={r"/api/*": {"origins": ["http://localhost:59021", "http://127.0.0.1:59021"]}})
 
 
 @app.get("/api/cases")
@@ -1165,7 +1165,7 @@ def _start_trace_viewer() -> None:
 
     Shares the same NODE_TRACE_DB as the main server so traces appear
     in real time without a separate ``python -m tools.node_trace.viewer``
-    process. Runs on port 3002 by default (override with TRACE_VIEWER_PORT).
+    process. Runs on port 49003 by default (override with TRACE_VIEWER_PORT).
     Disable with TRACE_VIEWER_DISABLE=1.
     """
     if os.environ.get("TRACE_VIEWER_DISABLE") == "1":
@@ -1174,7 +1174,7 @@ def _start_trace_viewer() -> None:
         return
     try:
         from tools.node_trace.viewer import app as viewer_app
-        viewer_port = int(os.environ.get("TRACE_VIEWER_PORT", "3002"))
+        viewer_port = int(os.environ.get("TRACE_VIEWER_PORT", "49003"))
         viewer_app.config["NODE_TRACE_DB"] = _NODE_TRACE_DB_PATH
         import threading
         t = threading.Thread(

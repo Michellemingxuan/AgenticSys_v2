@@ -1,14 +1,19 @@
 """Consistency / heavy-traffic test harness.
 
 Runs every seed question in a suite (``questions.json``) **k** times through the
-real reviewer pipeline (screen → orchestrator → format), captures the final
-answer and wall-clock latency of each response, and appends one row per
-response to a CSV. Built to exercise the LLM (gpt-4.1, 2024-06-01) under load —
-e.g. to check answer consistency and response-time spread when the private env
-is busy.
+PRODUCTION reviewer pipeline — ``runner.turn.conductor.TurnRunner``, the exact
+spine ``server.py`` drives (screen → orchestrator retry loop → server-side
+coherence review + re-dispatch → distiller/KB → finalize) — captures the
+reviewer-facing answer (the ``final`` SSE event) and wall-clock latency, and
+appends one row per response to a CSV. Built to exercise the LLM (gpt-4.1) under
+load — e.g. answer consistency and response-time spread when the private env is
+busy.
 
-It mirrors the proven wiring in ``notebooks/run_question_suite.py`` (the same
-``questions.json`` schema), but:
+NOTE: this drives ``TurnRunner``, NOT the legacy ``Orchestrator.run()``
+single-shot path — so the numbers reflect what a reviewer actually gets,
+including the safechain dispatch enforcement + retries, coherence review, and
+distiller/KB. Each response uses a FRESH ``_HarnessSession`` so repeated seed
+questions stay independent (no KB / qa_cache / history bleed).
 
   * only repeats each *seed* question (follow-up chains are skipped), and
   * adds a ``--concurrency`` knob and per-response timing → CSV.
@@ -58,7 +63,9 @@ import csv
 import json
 import os
 import sys
+import threading
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -85,7 +92,12 @@ from datalayer.gateway import LocalDataGateway
 from llm.factory import FirewalledChatShim, build_session_clients
 from llm.firewall_stack import FirewallStack
 from logger.event_logger import EventLogger
-from runner.orchestrator import Orchestrator
+# Drive the PRODUCTION pipeline spine (screen → orchestrator retry loop →
+# coherence review + re-dispatch → distiller/KB → finalize), the same one
+# `server.py` uses — NOT the legacy `Orchestrator.run()` single-shot path. This
+# makes the harness's consistency + latency numbers reflect what a reviewer
+# actually gets, including the safechain dispatch enforcement + retries.
+from runner.turn.conductor import TurnRunner, _NODE_TRACE_STORE
 from tools.data_tools import init_tools
 
 
@@ -104,14 +116,51 @@ CSV_FIELDS = [
 ]
 
 
-# ── Pipeline construction (mirrors notebooks/run_question_suite.main setup) ──
+# ── Headless session for the production pipeline ────────────────────────────
 
-def build_pipeline(suite: dict, *, backend: str, model: str, concurrency_cap: int):
-    """Wire up the full reviewer pipeline once and return the shared pieces.
+class _HarnessSession:
+    """The minimal ``server.CaseSession`` surface `TurnRunner` reads (the 13
+    ``sess.*`` attributes) plus a capturing ``emit``.
 
-    Returns ``(chat_agent, orch, case_folder)``. ``orch.run`` builds a fresh
-    ``AppContext`` per call, so the returned objects are safe to drive
-    concurrently from multiple in-flight requests.
+    Importing the real ``CaseSession`` would boot ``server.py`` (which rebinds
+    ``init_tools`` to its OWN gateway/catalog, defeating the harness's explicit
+    backend/case setup), so we build a lightweight stand-in. A FRESH session per
+    response keeps runs independent — no KB / qa_cache / history bleed across the
+    repeated seed questions.
+    """
+
+    def __init__(self, *, case_id, gateway, catalog, clients, pillar_yaml,
+                 chat_agent, logger):
+        self.case_id = case_id
+        self.gateway = gateway
+        self.catalog = catalog
+        self.clients = clients
+        self.pillar_yaml = pillar_yaml
+        self.chat_agent = chat_agent
+        self.logger = logger
+        # Per-turn state — fresh so each response is independent.
+        self.input_history: list = []
+        self.qa_cache: dict = {}
+        self.specialist_kb: dict = {}
+        self._qa_turn_seq = 0
+        self.cancel_in_flight = threading.Event()
+        # Captured SSE events. The reviewer-facing answer is the `final` event's
+        # `answer` (a rejection also emits `final` with `[rejected] ...`).
+        self.events: list = []
+
+    def emit(self, event_name: str, payload: dict) -> None:
+        self.events.append((event_name, payload))
+
+
+# ── Pipeline construction ───────────────────────────────────────────────────
+
+def build_pipeline(suite: dict, *, backend: str, model: str, concurrency_cap: int) -> dict:
+    """Wire up the shared reviewer pipeline pieces once and return them.
+
+    A FRESH ``_HarnessSession`` wrapping these is built per response in
+    ``run_once`` so ``TurnRunner`` (the production spine) drives each question
+    independently. The shared pieces (gateway/catalog/clients/chat_agent) are
+    safe to reuse concurrently for a single case.
     """
     case_id = suite["case_id"]
     pillar_name = suite["pillar"]
@@ -138,36 +187,38 @@ def build_pipeline(suite: dict, *, backend: str, model: str, concurrency_cap: in
     )
 
     pillar_yaml = PillarLoader().load(pillar_name) or {}
-    chat_agent = ChatAgent(chat_llm, logger, tools=build_helper_tools())
-    orch = Orchestrator(
-        llm=None,
-        logger=logger,
-        registry=None,
-        pillar=pillar_name,
-        pillar_config=pillar_yaml,
-        catalog=catalog,
-        gateway=gw,
-        clients=clients,
+    # Match server.py's ChatAgent construction (pillar_config + node_trace_store)
+    # so screen / relevance behave exactly as they do in production.
+    chat_agent = ChatAgent(
+        chat_llm, logger, tools=build_helper_tools(),
+        pillar_config=pillar_yaml, node_trace_store=_NODE_TRACE_STORE,
     )
-    case_folder = PROJECT_ROOT / "reports" / case_id
-    return chat_agent, orch, case_folder
+    return {
+        "case_id": case_id,
+        "gateway": gw,
+        "catalog": catalog,
+        "clients": clients,
+        "pillar_yaml": pillar_yaml,
+        "chat_agent": chat_agent,
+        "logger": logger,
+    }
 
 
 # ── One response ────────────────────────────────────────────────────────────
 
-async def run_once(
-    name, run_index, question, *, chat_agent, orch, case_folder, timeout=None
-) -> dict:
-    """Drive one question through the reviewer path, timing the whole response.
+async def run_once(name, run_index, question, *, shared, timeout=None) -> dict:
+    """Drive one question through the PRODUCTION pipeline (`TurnRunner`), timing
+    the whole response (screen → orchestrator retry loop → coherence review +
+    re-dispatch → distiller drain → finalize).
 
-    Mirrors ``main.py:_screen_and_run`` — screen (redact + scope) → orchestrator
-    → format — so the captured ``final_answer`` is exactly what a reviewer sees.
+    The captured ``final`` SSE event's ``answer`` is exactly what the reviewer
+    sees — including a ``[rejected] ...`` answer for an out-of-scope screen.
 
     ``timeout`` (seconds, or None/0 to disable) caps the whole response via
     ``asyncio.wait_for``. On expiry the row is marked ``timeout`` and the run
-    continues. Under SafeChain a blocking ``chain.invoke`` can't be cancelled,
-    so the underlying worker thread may stay occupied past this deadline — the
-    cap protects the *test driver* from wedging, not the worker pool.
+    continues. Under SafeChain a blocking call can't be cancelled, so the
+    underlying worker thread may stay occupied past this deadline — the cap
+    protects the *test driver* from wedging, not the worker pool.
     """
     start_dt = datetime.now()
     t0 = time.perf_counter()
@@ -175,18 +226,33 @@ async def run_once(
     error = ""
     final_answer = ""
 
-    async def _pipeline():
-        verdict = await chat_agent.screen(question)
-        if not verdict.passed:
-            return "out_of_scope", f"[rejected] {verdict.reason}"
-        final = await orch.run(verdict.redacted_question, case_folder)
-        return "ok", chat_agent.format(final)
+    sess = _HarnessSession(**shared)
+    turn_id = uuid.uuid4().hex[:12]
+
+    async def _pipeline() -> None:
+        # gateway is already scoped to the single case (build_pipeline), so no
+        # per-turn re-scope is needed for a one-case harness.
+        await TurnRunner(sess, turn_id, question).run()
 
     try:
         if timeout and timeout > 0:
-            outcome, final_answer = await asyncio.wait_for(_pipeline(), timeout=timeout)
+            await asyncio.wait_for(_pipeline(), timeout=timeout)
         else:
-            outcome, final_answer = await _pipeline()
+            await _pipeline()
+        finals = [p for (e, p) in sess.events if e == "final"]
+        if finals:
+            final_answer = finals[-1].get("answer", "") or ""
+            flags = finals[-1].get("flags") or []
+            if isinstance(final_answer, str) and final_answer.startswith("[rejected]"):
+                outcome = "out_of_scope"
+            elif flags:
+                final_answer = f"{final_answer}\n\n[flags] " + " | ".join(map(str, flags))
+        else:
+            # No `final` — an abort/error path ran. Surface the turn_error text.
+            errs = [p for (e, p) in sess.events if e == "turn_error"]
+            outcome = "error"
+            error = (errs[-1].get("message", "") if errs
+                     else "no `final` event emitted (no answer produced)")
     except asyncio.TimeoutError:
         outcome = "timeout"
         error = (
@@ -272,7 +338,7 @@ async def main_async(args) -> None:
     else:
         print(f"OPENAI_API_KEY set: {bool(os.environ.get('OPENAI_API_KEY'))}")
 
-    chat_agent, orch, case_folder = build_pipeline(
+    shared = build_pipeline(
         suite, backend=backend, model=model, concurrency_cap=concurrency_cap
     )
 
@@ -305,8 +371,7 @@ async def main_async(args) -> None:
             async with sem:
                 row = await run_once(
                     name, run_index, question,
-                    chat_agent=chat_agent, orch=orch, case_folder=case_folder,
-                    timeout=args.timeout,
+                    shared=shared, timeout=args.timeout,
                 )
             async with write_lock:
                 writer.writerow(row)

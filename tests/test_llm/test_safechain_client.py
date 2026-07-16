@@ -170,6 +170,35 @@ def test_required_round_refuses_stray_final_answer():
     assert content == text  # RAW, uncleaned → SDK's FinalAnswer parse fails → retry
 
 
+def test_recovers_nested_json_arg_with_unescaped_quotes():
+    """Confirmed specialist failure: the model emits specs_json as a STRING with
+    UNescaped inner quotes → json.loads truncates it to "[" (batch_summarize_trend
+    then errors). The array is valid JSON once unwrapped, so it's bracket-matched
+    back out of the raw text."""
+    from llm.safechain_client import _extract_tool_calls_and_content
+    raw = (
+        '{"tool_call": {"name": "batch_summarize_trend", "arguments": '
+        '{"specs_json": "[{"table_name": "model_scores", "value_column": '
+        '"credit_loss_prob", "op": "max"}, {"table_name": "model_scores", '
+        '"value_column": "tot_struct_risk_score", "op": "max"}]"}}}'
+    )
+    calls, _content, finish = _extract_tool_calls_and_content(raw, tool_choice="required")
+    assert finish == "tool_calls" and calls[0]["name"] == "batch_summarize_trend"
+    specs = json.loads(json.loads(calls[0]["arguments"])["specs_json"])
+    assert [s["value_column"] for s in specs] == ["credit_loss_prob", "tot_struct_risk_score"]
+
+
+def test_recovery_leaves_wellformed_specs_untouched():
+    """No-op when the model escapes correctly (the common/dev case)."""
+    from llm.safechain_client import _extract_tool_calls_and_content
+    good = json.dumps({"tool_call": {"name": "batch_summarize_trend",
+                                     "arguments": {"specs_json": json.dumps(
+                                         [{"table_name": "model_scores", "op": "max"}])}}})
+    calls, _c, _f = _extract_tool_calls_and_content(good, tool_choice="required")
+    specs = json.loads(json.loads(calls[0]["arguments"])["specs_json"])
+    assert specs == [{"table_name": "model_scores", "op": "max"}]
+
+
 def test_required_round_does_not_break_multifield_output():
     """Regression: my required-round enforcement must NOT return a ReportDraft /
     SpecialistOutput raw (that broke report_agent — answer-as-list stayed a list

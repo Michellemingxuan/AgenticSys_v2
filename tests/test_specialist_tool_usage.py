@@ -25,7 +25,7 @@ This file has two independent parts:
         # 1. (optional) start from a clean log dir so only this turn's calls
         #    are present, then ask the question in the app / private env.
         # 2. point the test at the server log written during that turn:
-        TOOL_USAGE_LOG="logs/server-*.jsonl" \
+        TOOL_USAGE_LOG="logs/*.jsonl" \
             python -m pytest tests/test_specialist_tool_usage.py -k from_log -s
 """
 from __future__ import annotations
@@ -154,7 +154,14 @@ def summarize_tool_usage(log_glob: str) -> dict:
     td_calls: list[dict] = []
     n_calls = 0
     specs_unparseable = 0
-    dispatch_skips = 0
+    # Enforcement / retry telemetry — tells us whether the dispatch-skip
+    # enforcement + escalating retries are actually RUNNING (present in the
+    # server process), vs a stale build that never fires them.
+    retry_no_tools = 0          # orchestrator_retry_no_tools (0-tools retry)
+    dispatch_skip_retries = 0   # orchestrator_retry reason=dispatch_skip (my fix)
+    mbe_retries = 0             # orchestrator_retry reason=model_behavior_error
+    no_tool_calls_final = 0     # orchestrator_no_tool_calls (released 0-tools answer)
+    max_attempt = 0
     for f in files:
         with open(f) as fh:
             for line in fh:
@@ -172,8 +179,18 @@ def summarize_tool_usage(log_glob: str) -> dict:
                         td_calls.append(r.get("args", {}))
                 elif e == "tool_result" and r.get("reason") == "specs_unparseable":
                     specs_unparseable += 1
-                elif e in ("orchestrator_no_tool_calls", "orchestrator_retry_no_tools"):
-                    dispatch_skips += 1
+                elif e == "orchestrator_retry_no_tools":
+                    retry_no_tools += 1
+                    max_attempt = max(max_attempt, r.get("attempt", 0))
+                elif e == "orchestrator_retry":
+                    reason = r.get("reason")
+                    if reason == "dispatch_skip":
+                        dispatch_skip_retries += 1
+                    elif reason == "model_behavior_error":
+                        mbe_retries += 1
+                    max_attempt = max(max_attempt, r.get("attempt", 0))
+                elif e == "orchestrator_no_tool_calls":
+                    no_tool_calls_final += 1
     return {
         "files": files,
         "n_tool_calls": n_calls,
@@ -182,7 +199,14 @@ def summarize_tool_usage(log_glob: str) -> dict:
         "transaction_detail_used": bool(td_calls),
         "transaction_detail_calls": td_calls,
         "specs_unparseable": specs_unparseable,
-        "dispatch_skips": dispatch_skips,
+        # enforcement telemetry (0 across the board = enforcement never ran →
+        # the server process is likely on a STALE build; restart it after pull):
+        "enforcement_retries_fired": retry_no_tools + dispatch_skip_retries + mbe_retries,
+        "retry_no_tools": retry_no_tools,
+        "dispatch_skip_retries": dispatch_skip_retries,
+        "mbe_retries": mbe_retries,
+        "max_retry_attempt": max_attempt,
+        "released_ungrounded_answer": no_tool_calls_final,
     }
 
 
@@ -201,7 +225,7 @@ def test_specialist_dispatch_and_tool_usage_from_log():
     """Point at a run's log (private env) and assert the specialist dispatched +
     used transaction_detail correctly for the TSR-reacted-2025 extraction.
 
-        TOOL_USAGE_LOG="logs/server-*.jsonl" python -m pytest \
+        TOOL_USAGE_LOG="logs/*.jsonl" python -m pytest \
             tests/test_specialist_tool_usage.py -k from_log -s
     """
     summary = summarize_tool_usage(os.environ["TOOL_USAGE_LOG"])

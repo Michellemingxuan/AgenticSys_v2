@@ -692,7 +692,9 @@ def _extract_tool_calls_and_content(
     if isinstance(parsed, dict) and "tool_call" in parsed:
         tc = parsed["tool_call"]
         if isinstance(tc, dict):
-            return _dedupe_tool_calls([_to_tool_call_dict(tc)]), None, "tool_calls"
+            calls = _repair_container_args(
+                _dedupe_tool_calls([_to_tool_call_dict(tc)]), text)
+            return calls, None, "tool_calls"
 
     # 2) tool_calls array.
     if isinstance(parsed, dict) and "tool_calls" in parsed:
@@ -700,12 +702,12 @@ def _extract_tool_calls_and_content(
         if isinstance(arr, list) and arr:
             calls = [_to_tool_call_dict(tc) for tc in arr if isinstance(tc, dict)]
             if calls:
-                return _dedupe_tool_calls(calls), None, "tool_calls"
+                return _repair_container_args(_dedupe_tool_calls(calls), text), None, "tool_calls"
 
     # 3) Multiple concatenated tool_call objects (defensive).
     multi = _parse_concatenated_tool_calls(text)
     if multi:
-        return _dedupe_tool_calls(multi), None, "tool_calls"
+        return _repair_container_args(_dedupe_tool_calls(multi), text), None, "tool_calls"
 
     # ── No tool call found. ──
     # On a REQUIRED round, safechain has no NATIVE way to enforce
@@ -877,6 +879,71 @@ def _to_tool_call_dict(tc: dict) -> dict:
         "name": str(tc.get("name", "")),
         "arguments": args_json,
     }
+
+
+def _recover_container_from_text(text: str, arg_name: str) -> str | None:
+    """Bracket-match a ``[...]`` / ``{...}`` container for ``arg_name`` out of the
+    raw model text.
+
+    The safechain failure this repairs: the model emits a nested-JSON argument
+    (``specs_json``, ``filters``, …) as a STRING with UNescaped inner quotes —
+    ``"specs_json": "[{"table_name": …}]"``. ``json.loads`` then terminates the
+    string value at the first inner ``"`` (→ ``specs_json = "["``) and the real
+    array is lost. But the array IS valid JSON once the broken string wrapper is
+    stripped, so we depth-match the container directly from the text.
+    """
+    if not isinstance(text, str):
+        return None
+    m = re.search(r'"' + re.escape(arg_name) + r'"\s*:\s*"?\s*([\[{])', text)
+    if not m:
+        return None
+    open_ch = m.group(1)
+    close_ch = "]" if open_ch == "[" else "}"
+    start = m.end() - 1
+    depth = 0
+    for i in range(start, len(text)):
+        c = text[i]
+        if c == open_ch:
+            depth += 1
+        elif c == close_ch:
+            depth -= 1
+            if depth == 0:
+                candidate = text[start:i + 1]
+                try:
+                    json.loads(candidate)
+                    return candidate
+                except (json.JSONDecodeError, ValueError):
+                    return None
+    return None
+
+
+def _repair_container_args(calls: list[dict], text: str) -> list[dict]:
+    """For each tool call, repair any argument whose value is a TRUNCATED JSON
+    container string (the ``specs_json="["`` failure) by recovering the full
+    container from the raw ``text``. No-op for well-formed calls."""
+    for tc in calls:
+        try:
+            args = json.loads(tc.get("arguments", "{}") or "{}")
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(args, dict):
+            continue
+        changed = False
+        for k, v in list(args.items()):
+            if not (isinstance(v, str) and v.strip() and v.strip()[0] in "[{"):
+                continue
+            try:
+                json.loads(v)          # already a complete container → leave it
+                continue
+            except (json.JSONDecodeError, ValueError):
+                pass
+            recovered = _recover_container_from_text(text, k)
+            if recovered:
+                args[k] = recovered
+                changed = True
+        if changed:
+            tc["arguments"] = json.dumps(args)
+    return calls
 
 
 def _parse_concatenated_tool_calls(text: str) -> list[dict]:
