@@ -13,3 +13,7 @@ rich>=13.0.0,<15.0.0
 pytest>=8.0.0,<9.0.0
 nest_asyncio>=1.5.0,<2.0.0
 pytest-asyncio>=0.24.0,<1.0.0
+# Amem memory integration. Amem itself is installed editable from ../Amem
+# (`pip install -e ../Amem`), which also pulls qdrant-client; this line pins it
+# explicitly for environments that install AgenticSys deps without Amem.
+qdrant-client>=1.18.0,<2.0.0

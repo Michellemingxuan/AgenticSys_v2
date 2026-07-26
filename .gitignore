@@ -16,3 +16,5 @@ venv/
 .venv/
 .claude/
 reports/
+# Qdrant runtime storage (Amem local dev) — never commit runtime data
+.runtime/

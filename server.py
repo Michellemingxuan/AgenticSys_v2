@@ -20,6 +20,7 @@ Run:
 from __future__ import annotations
 
 import asyncio
+import atexit
 import copy
 import json
 import math
@@ -59,7 +60,10 @@ from llm.firewall_stack import FirewallStack
 from logger.event_logger import EventLogger
 from tools.node_trace import NodeTrace, TURN_SCOPE, TurnScope
 from main import _DATA_TABLES_DIR, _resolve_data_source
+from memory import (AmemConfig, build_amem_manager, build_session_brief,
+                    delete_case_memory, delete_turns)
 from models.types import FinalAnswer
+from runner.identity import SERVER_RUN_ID, compose_conversation_id, resolve_user_id
 from runner.config import (
     PILLAR,
     _NODE_TRACE_DB_PATH,
@@ -206,6 +210,18 @@ class CaseSession:
     # agent_tool._format_kb_digest). Cleared by /rewind alongside
     # input_history and qa_cache so a session reset wipes everything.
     specialist_kb: dict = field(default_factory=dict)
+    # Amem session identity (metadata only; reads stay case-scoped/cross-session).
+    # Rotated on full rewind / clear-history so prior sessions become immutable.
+    session_id: str = ""
+    # turn_id of the in-flight turn, for cancel-turn Amem cleanup.
+    current_turn_id: str | None = None
+    # Deterministic conversation identity — restart-invisible node_trace grouping
+    # key. Computed once at session open: compose(case_id, user_id, pillar_id).
+    # Never minted, never rotated by rewind — same case+user+pillar always
+    # resolves to the same conversation_id, across server restarts.
+    conversation_id: str = ""
+    user_id: str = ""
+    pillar_id: str = ""
 
     def emit(self, event_name: str, payload: dict) -> None:
         """Fan out an SSE event to every subscriber of this case."""
@@ -268,6 +284,14 @@ _FIREWALL = FirewallStack(
       )
 _CLIENTS = build_session_clients(_FIREWALL, model_name=MODEL, backend=None)
 _CHAT_LLM = FirewalledChatShim(_CLIENTS)
+
+_AMEM_CFG = AmemConfig.from_env()
+_AMEM = build_amem_manager(
+    _AMEM_CFG,
+    backend=(getattr(_CLIENTS, "backend", None) or os.environ.get("LLM_BACKEND", "openai")),
+    logger=_BOOT_LOGGER,
+)
+atexit.register(lambda: _AMEM.close())
 
 
 def _prewarm_clients() -> None:
@@ -507,6 +531,33 @@ def _sync_case_catalog(case_id: str, gateway, catalog, logger) -> None:
     )
 
 
+def _restore_session_state(sess, case_id: str) -> None:
+    """Restore a case's cross-turn RAM (qa_cache, specialist_kb, input_history)
+    from the latest durable snapshot, so a server restart is invisible.
+    Best-effort; never raises."""
+    if _NODE_TRACE_STORE is None:
+        return
+    try:
+        snap = _NODE_TRACE_STORE.load_latest_snapshot(case_id)
+    except Exception:
+        snap = None
+    if not snap:
+        return
+    try:
+        sess.qa_cache = snap.get("qa_cache") or {}
+        sess.specialist_kb = snap.get("specialist_kb") or {}
+        sess.input_history = snap.get("input_history") or []
+        sess._qa_turn_seq = max(
+            (e.get("turn_seq", 0) for e in sess.qa_cache.values()
+             if isinstance(e, dict)), default=0)
+        sess.logger.log("session_restored", {
+            "case_id": case_id,
+            "qa_entries": len(sess.qa_cache),
+            "kb_specialists": len(sess.specialist_kb)})
+    except Exception:
+        pass
+
+
 def _get_or_create_session(case_id: str) -> CaseSession:
     """Lazily build a CaseSession for this case_id."""
     with SESSIONS_LOCK:
@@ -547,6 +598,26 @@ def _get_or_create_session(case_id: str) -> CaseSession:
             ),
             logger=case_logger,
         )
+        sess.session_id = case_logger.session_id
+        # Attach the Amem handle to the session so the conductor reads it off
+        # `sess` instead of `import server` (which would re-run this bootstrap
+        # under a second module instance and rebind the data tools to an
+        # unscoped gateway — see runner/turn/conductor._assemble_input).
+        sess.amem = _AMEM
+        sess.amem_cfg = _AMEM_CFG
+        # Deterministic conversation identity — same (case, user, pillar) always
+        # resolves to the same conversation_id, across server restarts. This is
+        # what makes node_trace rows restart-invisible for a given case.
+        sess.user_id = resolve_user_id(_AMEM_CFG)
+        sess.pillar_id = PILLAR
+        sess.conversation_id = compose_conversation_id(
+            case_id, sess.user_id, sess.pillar_id)
+        try:
+            brief = build_session_brief(_AMEM, _AMEM_CFG, case_id=case_id)
+            sess.emit("session_brief", {"case_id": case_id, "text": brief})
+        except Exception:
+            pass
+        _restore_session_state(sess, case_id)
         SESSIONS[case_id] = sess
         return sess
 
@@ -757,6 +828,7 @@ def _spawn_turn(sess: CaseSession, turn_id: str, question: str) -> None:
                 # another thread. Race-safe — cancelling a completed
                 # task is a no-op.
                 sess.current_inflight = (loop, task)
+                sess.current_turn_id = turn_id
                 try:
                     loop.run_until_complete(task)
                 except asyncio.TimeoutError:
@@ -848,9 +920,30 @@ def _spawn_turn(sess: CaseSession, turn_id: str, question: str) -> None:
                 except Exception:
                     pass
                 sess.current_inflight = None
+                sess.current_turn_id = None
         finally:
             sess.turn_lock.release()
     threading.Thread(target=_runner, daemon=True, name=f"turn-{turn_id[:8]}").start()
+
+
+def _history_messages(qa_cache: dict) -> list[dict]:
+    """Reconstruct the visible thread from qa_cache, ordered by turn_seq.
+    Two messages per turn: the reviewer question then the agent answer."""
+    entries = sorted(
+        (e for e in (qa_cache or {}).values() if isinstance(e, dict)),
+        key=lambda e: e.get("turn_seq", 0))
+    out: list[dict] = []
+    for e in entries:
+        tid = e.get("turn_id_origin") or ""
+        q = e.get("origin_question") or ""
+        a = e.get("answer") or ""
+        if q:
+            out.append({"id": f"hist:{tid}:reviewer", "role": "reviewer",
+                        "text": q, "turn_id": tid})
+        if a:
+            out.append({"id": f"hist:{tid}:agent", "role": "agent",
+                        "text": a, "turn_id": tid})
+    return out
 
 
 # ── Flask app ───────────────────────────────────────────────────────────────
@@ -888,6 +981,15 @@ def _start_turn(case_id: str):
     turn_id = uuid.uuid4().hex[:12]
     _spawn_turn(sess, turn_id, text)
     return jsonify({"turn_id": turn_id}), 202
+
+
+@app.get("/api/cases/<case_id>/history")
+def get_history(case_id: str):
+    try:
+        sess = _get_or_create_session(case_id)   # triggers restore
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+    return jsonify({"messages": _history_messages(sess.qa_cache)})
 
 
 @app.post("/api/cases/<case_id>/cancel-turn")
@@ -932,6 +1034,13 @@ def post_cancel_turn(case_id: str):
     sess.input_history = []
     with sess.subscribers_lock:
         sess.event_buffer.clear()  # don't replay events from the wiped turn(s)
+
+    if sess.current_turn_id:
+        try:
+            delete_turns(_AMEM, _AMEM_CFG, case_id=case_id,
+                         turn_ids=[sess.current_turn_id])
+        except Exception:
+            pass
 
     # Clear rendered chart files
     n_charts_cleared = 0
@@ -997,6 +1106,24 @@ def post_rewind(case_id: str):
         n_kb_specialists = sum(
             1 for kps in sess.specialist_kb.values() if kps
         )
+        try:
+            delete_turns(_AMEM, _AMEM_CFG, case_id=case_id, turn_ids=remove_turn_ids)
+        except Exception:
+            pass
+        if _NODE_TRACE_STORE is not None:
+            try:
+                _max_seq = max((e.get("turn_seq", 0) for e in sess.qa_cache.values()
+                                if isinstance(e, dict)), default=0)
+                _NODE_TRACE_STORE.snapshot_session(
+                    chat_id=sess.conversation_id, case_id=case_id,
+                    turn_id=f"rewind-{_max_seq}",
+                    qa_cache=sess.qa_cache, specialist_kb=sess.specialist_kb,
+                    input_history=sess.input_history,
+                    conversation_id=sess.conversation_id,
+                    server_run_id=SERVER_RUN_ID, user_id=sess.user_id,
+                    pillar_id=sess.pillar_id)
+            except Exception:
+                pass
     else:
         # Full rewind: clear everything.
         sess.input_history = []
@@ -1006,6 +1133,7 @@ def post_rewind(case_id: str):
         n_kb_specialists = len(sess.specialist_kb)
         n_kb_total = sum(len(v) for v in sess.specialist_kb.values())
         sess.specialist_kb.clear()
+        sess.session_id = f"case-{case_id}-{uuid.uuid4().hex[:6]}"
 
     # Drop replay-buffer frames for the rewound turn(s) so a later (re)connect
     # doesn't resurrect them.
@@ -1070,6 +1198,11 @@ def post_rewind(case_id: str):
                 remove_turn_ids)
         else:
             trace_rows_cleared = _NODE_TRACE_STORE.delete_case(case_id)
+    if not is_partial:
+        try:
+            delete_case_memory(_AMEM, _AMEM_CFG, case_id=case_id)
+        except Exception:
+            pass
     sess.logger.log("rewind", {
         "message_id": msg_id, "case_id": case_id,
         "qa_cache_entries_cleared": n_cached,

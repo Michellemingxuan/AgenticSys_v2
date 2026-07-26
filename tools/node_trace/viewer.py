@@ -126,6 +126,19 @@ def _question_for_turn(conn, chat_id: str, turn_id: str) -> str:
     return ""
 
 
+def _server_run_for_turn(conn, chat_id: str, turn_id: str) -> str:
+    """Diagnostic: which physical server_run_id wrote (the latest rows of)
+    this turn. turn_summary is GROUP BY chat_id/case_id/turn_id and does not
+    expose server_run_id, so this is a small per-turn lookup (mirrors
+    ``_question_for_turn``) rather than a column on that view.
+    """
+    r = conn.execute(
+        "SELECT server_run_id FROM node_trace WHERE chat_id = ? AND turn_id = ? "
+        "AND server_run_id IS NOT NULL ORDER BY started_at DESC LIMIT 1",
+        (chat_id, turn_id)).fetchone()
+    return r["server_run_id"] if r else ""
+
+
 # ── Templates ───────────────────────────────────────────────────────────────
 
 _REFRESH_META = (
@@ -270,11 +283,11 @@ _INDEX = """
 <html><head><meta charset="utf-8">""" + _REFRESH_META + """<title>node_trace</title>""" + _STYLE + """</head>
 <body>""" + _REFRESH_BADGE + """
   <h1>Trace viewer · {{ db }}</h1>
-  <nav><a href="/">chats</a></nav>
-  <h2>Chats ({{ chats|length }})</h2>
+  <nav><a href="/">conversations</a></nav>
+  <h2>Conversations ({{ chats|length }})</h2>
   <table>
     <thead><tr>
-      <th>chat_id</th><th>case_id</th><th class="right">turns</th>
+      <th>conversation</th><th>case_id</th><th class="right">turns</th>
       <th class="right">total tokens</th><th class="right">cost ($)</th>
       <th>last activity (SGT)</th>
       <th>latest question</th>
@@ -309,9 +322,9 @@ _CHAT = """
 <!doctype html>
 <html><head><meta charset="utf-8">""" + _REFRESH_META + """<title>{{ chat_id }} · node_trace</title>""" + _STYLE + """</head>
 <body>""" + _REFRESH_BADGE + """
-  <h1>Chat: {{ chat_id }}</h1>
+  <h1>Conversation: {{ chat_id }}</h1>
   <nav>
-    <a href="/">← chats</a>
+    <a href="/">← conversations</a>
     <a href="/state/{{ chat_id }}">cross-turn state →</a>
   </nav>
   <h2>Turns ({{ turns|length }})</h2>
@@ -326,6 +339,7 @@ _CHAT = """
       <th class="right">cost ($)</th>
       <th class="right">nodes</th>
       <th class="right">failures</th>
+      <th>server run</th>
     </tr></thead>
     <tbody>
     {% for t in turns %}
@@ -340,6 +354,7 @@ _CHAT = """
         <td class="right">{{ "{:.4f}".format(t.total_cost_usd or 0) }}</td>
         <td class="right">{{ t.n_nodes }}</td>
         <td class="right">{{ t.n_failures }}</td>
+        <td class="muted" style="font-size:12px;">{{ t.server_run_id or "—" }}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -405,7 +420,7 @@ _STATE = """
 <body>""" + _REFRESH_BADGE + """
   <h1>Cross-turn state: {{ chat_id }}</h1>
   <nav>
-    <a href="/">← chats</a>
+    <a href="/">← conversations</a>
     <a href="/chat/{{ chat_id }}">← turns</a>
   </nav>
 
@@ -469,14 +484,16 @@ _TURN = _NODE_DETAIL_MACRO + """
       {{ question }}
       <div class="muted" style="font-size:13px;font-weight:normal;margin-top:4px;">
         turn <code>{{ turn_id }}</code> · {{ chat_id }}
+        {% if flat_rows and flat_rows[0].server_run_id %}· <span class="muted">server run {{ flat_rows[0].server_run_id }}</span>{% endif %}
       </div>
     {% else %}
       Turn: {{ turn_id }}
       <span class="muted" style="font-size:14px;font-weight:normal;">— {{ chat_id }}</span>
+      {% if flat_rows and flat_rows[0].server_run_id %}<span class="muted" style="font-size:13px;font-weight:normal;">· server run {{ flat_rows[0].server_run_id }}</span>{% endif %}
     {% endif %}
   </h1>
   <nav>
-    <a href="/">← chats</a>
+    <a href="/">← conversations</a>
     <a href="/chat/{{ chat_id }}">turns list</a>
     <a href="/state/{{ chat_id }}">cross-turn state</a>
   </nav>
@@ -798,6 +815,7 @@ def chat(chat_id: str):
             t["duration_s"] = 0
         t["started_at_sg"] = _iso_to_sgt(s)
         t["question"] = _question_for_turn(conn, chat_id, t["turn_id"])
+        t["server_run_id"] = _server_run_for_turn(conn, chat_id, t["turn_id"])
     if not rows:
         return redirect("/")
     return render_template_string(

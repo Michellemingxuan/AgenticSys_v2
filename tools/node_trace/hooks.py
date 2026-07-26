@@ -146,6 +146,10 @@ class NodeTraceRunHooks(RunHooks):
                 depth=self._parent.depth + 1,        # type: ignore[union-attr]
                 started_at=_now_iso(),
                 model=str(agent.model) if getattr(agent, "model", None) else None,
+                conversation_id=getattr(self._parent, "conversation_id", "") or self._parent.chat_id,  # type: ignore[union-attr]
+                server_run_id=getattr(self._parent, "server_run_id", ""),
+                user_id=getattr(self._parent, "user_id", ""),
+                pillar_id=getattr(self._parent, "pillar_id", ""),
             )
             # Build the messages payload for the input excerpt + full I/O, and
             # stash it so on_llm_end can estimate prompt tokens when the backend

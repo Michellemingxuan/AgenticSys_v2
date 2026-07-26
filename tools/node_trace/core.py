@@ -51,7 +51,11 @@ CREATE TABLE IF NOT EXISTS node_trace (
   outcome              TEXT,
   error_type           TEXT,
   tags                 TEXT,
-  extra_json           TEXT
+  extra_json           TEXT,
+  conversation_id      TEXT,
+  server_run_id        TEXT,
+  user_id              TEXT,
+  pillar_id            TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_chat_turn ON node_trace(chat_id, turn_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_node      ON node_trace(node);
@@ -73,7 +77,12 @@ CREATE TABLE IF NOT EXISTS session_snapshot (
   input_history_chars INTEGER,
   qa_cache_json       TEXT,
   specialist_kb_json  TEXT,
-  input_history_json  TEXT
+  input_history_json  TEXT,
+  qa_cache_raw_json   TEXT,
+  conversation_id     TEXT,
+  server_run_id       TEXT,
+  user_id             TEXT,
+  pillar_id           TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_snapshot_chat_turn ON session_snapshot(chat_id, turn_id, taken_at);
 
@@ -148,6 +157,21 @@ class NodeTraceStore:
                 f"cloud-sync conflict). Delete the file and let it recreate, "
                 f"or point NODE_TRACE_DB to a local path."
             ) from exc
+        # Backfill column for DBs created before qa_cache_raw_json existed.
+        try:
+            self._conn.execute(
+                "ALTER TABLE session_snapshot ADD COLUMN qa_cache_raw_json TEXT")
+        except sqlite3.OperationalError:
+            pass  # already exists
+        # Backfill identity columns for DBs created before conversation_id
+        # existed (mirror the qa_cache_raw_json pattern). ADD COLUMN is
+        # idempotent-by-try: OperationalError => the column is already there.
+        for table in ("node_trace", "session_snapshot"):
+            for col in ("conversation_id", "server_run_id", "user_id", "pillar_id"):
+                try:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
+                except sqlite3.OperationalError:
+                    pass  # already exists
 
     def _setup_journal_mode(self) -> None:
         """Try WAL mode; fall back to DELETE on filesystems that reject it.
@@ -190,16 +214,22 @@ class NodeTraceStore:
         started_at: str,
         model: str | None = None,
         extra_json: str | None = None,
+        conversation_id: str | None = None,
+        server_run_id: str | None = None,
+        user_id: str | None = None,
+        pillar_id: str | None = None,
     ) -> int:
         try:
             with self._lock:
                 cur = self._conn.execute(
                     "INSERT INTO node_trace "
                     "(chat_id, case_id, turn_id, node, parent_id, depth, "
-                    " started_at, model, extra_json) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " started_at, model, extra_json, "
+                    " conversation_id, server_run_id, user_id, pillar_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (chat_id, case_id, turn_id, node, parent_id, depth,
-                     started_at, model, extra_json),
+                     started_at, model, extra_json,
+                     conversation_id, server_run_id, user_id, pillar_id),
                 )
                 return int(cur.lastrowid or -1)
         except Exception as exc:  # noqa: BLE001
@@ -215,6 +245,10 @@ class NodeTraceStore:
         qa_cache: Any,
         specialist_kb: Any,
         input_history: Any,
+        conversation_id: str | None = None,
+        server_run_id: str | None = None,
+        user_id: str | None = None,
+        pillar_id: str | None = None,
     ) -> int:
         """Persist a snapshot of CaseSession's cross-turn state at end of turn.
 
@@ -249,23 +283,60 @@ class NodeTraceStore:
             ) if qa_cache else None
             kb_json = json.dumps(specialist_kb, default=str) if specialist_kb else None
             ih_json = json.dumps(input_history, default=str) if input_history else None
+            qa_raw_json = json.dumps(qa_cache, default=str) if qa_cache else None
             with self._lock:
                 cur = self._conn.execute(
                     "INSERT INTO session_snapshot "
                     "(chat_id, case_id, turn_id, taken_at, "
                     " qa_cache_n, kb_specialists_n, kb_kps_n, "
                     " input_history_items, input_history_chars, "
-                    " qa_cache_json, specialist_kb_json, input_history_json) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " qa_cache_json, specialist_kb_json, input_history_json, "
+                    " qa_cache_raw_json, "
+                    " conversation_id, server_run_id, user_id, pillar_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (chat_id, case_id, turn_id, _now_iso(),
                      qa_n, kb_specialists_n, kb_kps_n,
                      ih_items, ih_chars,
-                     qa_json, kb_json, ih_json),
+                     qa_json, kb_json, ih_json,
+                     qa_raw_json,
+                     conversation_id, server_run_id, user_id, pillar_id),
                 )
                 return int(cur.lastrowid or -1)
         except Exception as exc:  # noqa: BLE001
             self._log_failure("snapshot_session", exc)
             return -1
+
+    def load_latest_snapshot(self, case_id: str) -> dict | None:
+        """Return the most recent snapshot for a case as restorable state, or
+        None. Read-only (no lock). Decodes each JSON column defensively."""
+        try:
+            row = self._conn.execute(
+                "SELECT chat_id, qa_cache_raw_json, specialist_kb_json, "
+                "input_history_json FROM session_snapshot "
+                "WHERE case_id = ? ORDER BY taken_at DESC LIMIT 1",
+                (case_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            chat_id, qa_raw, kb_json, ih_json = row
+
+            def _load(blob, default):
+                if not blob:
+                    return default
+                try:
+                    return json.loads(blob)
+                except Exception:  # noqa: BLE001
+                    return default
+
+            return {
+                "chat_id": chat_id,
+                "qa_cache": _load(qa_raw, {}),
+                "specialist_kb": _load(kb_json, {}),
+                "input_history": _load(ih_json, []),
+            }
+        except Exception as exc:  # noqa: BLE001
+            self._log_failure("load_latest_snapshot", exc)
+            return None
 
     def delete_chat(self, chat_id: str) -> int:
         """Drop every trace row for ``chat_id``. Returns rows removed.
@@ -371,6 +442,10 @@ class TurnScope:
     chat_id: str
     case_id: str
     turn_id: str
+    conversation_id: str = ""
+    server_run_id: str = ""
+    user_id: str = ""
+    pillar_id: str = ""
 
 
 TURN_SCOPE: contextvars.ContextVar["TurnScope | None"] = contextvars.ContextVar(
@@ -443,6 +518,10 @@ class NodeTrace:
         node: str,
         depth: int,
         extra_json: str | None = None,
+        conversation_id: str = "",
+        server_run_id: str = "",
+        user_id: str = "",
+        pillar_id: str = "",
     ) -> None:
         self._store = store
         self.chat_id = chat_id
@@ -451,6 +530,10 @@ class NodeTrace:
         self.node = node
         self.depth = depth
         self._extra_json = extra_json
+        self.conversation_id = conversation_id
+        self.server_run_id = server_run_id
+        self.user_id = user_id
+        self.pillar_id = pillar_id
         self.row_id: int = -1
         self._token: contextvars.Token | None = None
         self._t0: float = 0.0
@@ -490,6 +573,14 @@ class NodeTrace:
 
     async def __aenter__(self) -> "NodeTrace":
         parent = ACTIVE_NODE.get()
+        if parent is not None:
+            self.conversation_id = self.conversation_id or getattr(parent, "conversation_id", "")
+            self.server_run_id = self.server_run_id or getattr(parent, "server_run_id", "")
+            self.user_id = self.user_id or getattr(parent, "user_id", "")
+            self.pillar_id = self.pillar_id or getattr(parent, "pillar_id", "")
+        # conversation_id is the grouping axis; fall back to chat_id so a row
+        # is never left ungrouped (legacy/test call sites that pass only chat_id).
+        self.conversation_id = self.conversation_id or self.chat_id
         self._t0 = perf_counter()
         self.row_id = self._store.insert(
             chat_id=self.chat_id,
@@ -500,6 +591,10 @@ class NodeTrace:
             depth=self.depth,
             started_at=_now_iso(),
             extra_json=self._extra_json,
+            conversation_id=self.conversation_id,
+            server_run_id=self.server_run_id,
+            user_id=self.user_id,
+            pillar_id=self.pillar_id,
         )
         self._token = ACTIVE_NODE.set(self)
         return self
@@ -703,4 +798,8 @@ def _open_node(store: NodeTraceStore | None, node: str, depth: int = 0):
         turn_id=scope.turn_id,
         node=node,
         depth=depth,
+        conversation_id=scope.conversation_id,
+        server_run_id=scope.server_run_id,
+        user_id=scope.user_id,
+        pillar_id=scope.pillar_id,
     )

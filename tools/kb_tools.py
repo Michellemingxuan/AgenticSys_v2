@@ -12,6 +12,8 @@ from typing import Any
 
 from agents import RunContextWrapper, function_tool
 
+from memory import search_kp
+
 
 def _get_kb(ctx: RunContextWrapper) -> dict[str, list] | None:
     app_ctx = ctx.context if ctx else None
@@ -107,23 +109,36 @@ async def kb_lookup(ctx: RunContextWrapper, topic: str) -> str:
     window being asked. A near-miss (e.g. a cached card-count when the
     question asks for balance) is NOT an answer — query the real data and
     never fabricate the asked number from an unrelated cached value."""
+    app_ctx = ctx.context if ctx else None
     kb = _get_kb(ctx)
+    topic_lower = topic.lower().strip()
+    if kb:
+        for spec_name, kps in kb.items():
+            for kp in reversed(kps):  # latest first
+                kp_topic = (kp.get("topic") or "").lower().strip()
+                if kp_topic == topic_lower:
+                    result: dict[str, Any] = {
+                        "topic": kp.get("topic"),
+                        "specialist": spec_name,
+                        "claim": kp.get("claim"),
+                        "confidence": kp.get("confidence"),
+                        "source_call": kp.get("source_call"),
+                    }
+                    numbers = kp.get("numbers")
+                    if numbers:
+                        result["numbers"] = numbers
+                    return json.dumps(result, default=str)
+
+    # Exact-slug miss (or an empty local KB): fall back to Amem's semantic
+    # search over persisted knowledge points for this case before giving up.
+    amem = getattr(app_ctx, "_amem", None)
+    cfg = getattr(app_ctx, "_amem_cfg", None)
+    case_id = getattr(app_ctx, "_case_id", None)
+    if amem is not None and cfg is not None and case_id:
+        hit = await search_kp(amem, cfg, case_id=case_id, topic=topic)
+        if hit:
+            return json.dumps({"topic": topic, "source": "amem_semantic",
+                               "claim": hit}, default=str)
     if not kb:
         return f"Topic '{topic}' not found — KB is empty."
-    topic_lower = topic.lower().strip()
-    for spec_name, kps in kb.items():
-        for kp in reversed(kps):  # latest first
-            kp_topic = (kp.get("topic") or "").lower().strip()
-            if kp_topic == topic_lower:
-                result: dict[str, Any] = {
-                    "topic": kp.get("topic"),
-                    "specialist": spec_name,
-                    "claim": kp.get("claim"),
-                    "confidence": kp.get("confidence"),
-                    "source_call": kp.get("source_call"),
-                }
-                numbers = kp.get("numbers")
-                if numbers:
-                    result["numbers"] = numbers
-                return json.dumps(result, default=str)
     return f"Topic '{topic}' not found in KB."

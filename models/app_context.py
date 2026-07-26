@@ -82,3 +82,13 @@ class AppContext:
     # Episodic record window (built from qa_cache each turn) — this specialist's
     # own slice is prepended to its sub-question by agent_tool._runner.
     _episodic_records: list = field(default_factory=list)
+    # ── Amem integration (set in conductor._assemble_input) ──────────────
+    _amem: Any = None                    # AmemManager or NullAmemManager
+    _amem_cfg: Any = None                # memory.AmemConfig
+    _case_id: str | None = None          # sess.case_id, for scope building
+    _session_id: str | None = None       # sess.session_id, for Amem metadata
+    # Per-specialist data collected DURING the turn for the batched end-of-turn
+    # durable write (see agent_tool._runner + conductor._persist_to_amem).
+    # Keyed by specialist name; each value: {"sub_question", "findings",
+    # "tool_calls"}. report_agent is excluded (not a data specialist).
+    _specialist_turn_records: dict = field(default_factory=dict)

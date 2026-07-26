@@ -33,6 +33,15 @@ from agents.items import ToolCallItem, ToolCallOutputItem
 from models.app_context import AppContext
 from llm.firewall_stack import redact_payload
 from logger.process_timer import ProcessTimer
+from memory import (
+    consolidate_case,
+    kps_for_agent_turn,
+    kps_for_turn,
+    load_case_kps,
+    retrieve_context,
+    write_conversation,
+    write_specialist_memory,
+)
 from models.types import FinalAnswer
 from runner.config import (
     PILLAR,
@@ -42,6 +51,7 @@ from runner.config import (
     _REPORTS_DIR,
     _SCREEN_TIMEOUT_S,
 )
+from runner.identity import SERVER_RUN_ID
 from runner.orchestrator import Orchestrator
 from runner.turn.cache import _find_kp, _get_cached_qa, _normalize_q, _store_cached_qa
 from runner.turn.finalize import (
@@ -172,10 +182,20 @@ class TurnRunner:
         # Set the per-turn scope contextvar so `_open_node()` calls anywhere
         # downstream (chat_agent.screen, agent_tool, orchestrator) can build
         # a NodeTrace without passing chat/case/turn IDs through every call site.
+        # `chat_id` is the deterministic conversation_id (restart-invisible
+        # grouping axis); `server_run_id` is a per-process diagnostic value.
+        # The `sess.logger.session_id` fallback keeps any non-server
+        # construction path (e.g. a unit harness building a bare session)
+        # from writing an empty chat_id.
+        _conv = getattr(sess, "conversation_id", "") or sess.logger.session_id
         TURN_SCOPE.set(TurnScope(
-            chat_id=sess.logger.session_id,
+            chat_id=_conv,
             case_id=sess.case_id,
             turn_id=turn_id,
+            conversation_id=_conv,
+            server_run_id=SERVER_RUN_ID,
+            user_id=getattr(sess, "user_id", ""),
+            pillar_id=getattr(sess, "pillar_id", ""),
         ))
         self.turn_timer = ProcessTimer(
             sess.logger,
@@ -474,7 +494,7 @@ class TurnRunner:
 
     # ── Phase 2: build a fresh orchestrator for this turn ─────────────────
 
-    def _assemble_input(self) -> None:
+    async def _assemble_input(self) -> None:
         sess = self.sess
         turn_id = self.turn_id
         timer_t0 = time.perf_counter()
@@ -501,6 +521,27 @@ class TurnRunner:
         # don't have to. Guard against `sess.emit` raising (closed connection,
         # etc.) so a streaming failure to one client never poisons the agent
         # run for the rest of the session.
+        # Amem handle + config are attached to the session at bootstrap by
+        # server._get_or_create_session. Read them off `sess` — do NOT
+        # `import server` here: server.py runs its gateway/init_tools bootstrap
+        # at MODULE TOP LEVEL, so importing it a second time (this module runs
+        # under __main__ when launched via `python server.py`) re-runs that
+        # bootstrap and rebinds tools.data_tools._gateway to a fresh, UNSCOPED
+        # gateway — which silently breaks every live-data lookup. (Regression
+        # from the earlier lazy `import server`; fixed here.)
+        _amem = getattr(sess, "amem", None)
+        _amem_cfg = getattr(sess, "amem_cfg", None)
+        # Load-once: reconstruct the RAM specialist_kb dict from Amem (the
+        # durable source of truth) at turn start. Only overwrite sess's dict
+        # when Amem actually returns something, so a NullAmemManager or an
+        # empty store never wipes a snapshot-restored dict.
+        if _amem is not None and _amem_cfg is not None and sess.case_id:
+            try:
+                loaded = load_case_kps(_amem, _amem_cfg, case_id=sess.case_id)
+                if loaded:
+                    sess.specialist_kb = loaded
+            except Exception:
+                pass
         ctx = AppContext(
             gateway=sess.gateway,
             case_folder=case_folder,
@@ -511,6 +552,10 @@ class TurnRunner:
             _emit_event=self._emit_event,
             _node_trace_store=_NODE_TRACE_STORE,
             _catalog=sess.catalog,
+            _amem=_amem,
+            _amem_cfg=_amem_cfg,
+            _case_id=sess.case_id,
+            _session_id=sess.session_id,
         )
         self.ctx = ctx
         self.turn_timer.record(
@@ -524,7 +569,15 @@ class TurnRunner:
         # toward reusing warm specialists on in-domain follow-ups. The hint is
         # informational only — the orchestrator retains LLM judgment.
         timer_t0 = time.perf_counter()
-        framed_question = assemble_orchestrator_input(sess, self.verdict, ctx)
+        amem_block = ""
+        _amem = getattr(ctx, "_amem", None)
+        _amem_cfg = getattr(ctx, "_amem_cfg", None)
+        if _amem is not None and _amem_cfg is not None and sess.case_id:
+            amem_block = await retrieve_context(
+                _amem, _amem_cfg, case_id=sess.case_id,
+                question=self.verdict.redacted_question)
+        framed_question = assemble_orchestrator_input(
+            sess, self.verdict, ctx, amem_block=amem_block)
         self.framed_question = framed_question
         # Cases with no curated reports must work smoothly: tell the orchestrator
         # up front not to require report_agent (and skip the backstop below), so
@@ -1148,6 +1201,42 @@ class TurnRunner:
 
     # ── Phase 4: emit final + chat agent message ──────────────────────────
 
+    async def _persist_to_amem(self, answer_text: str) -> None:
+        """Durable conversation + case writes. Best-effort; never raises."""
+        ctx = self.ctx
+        amem = getattr(ctx, "_amem", None)
+        cfg = getattr(ctx, "_amem_cfg", None)
+        if amem is None or cfg is None:
+            return
+        sess = self.sess
+        facts = kps_for_turn(sess.specialist_kb, self.turn_id)
+
+        # Durable per-specialist conversation records (batched write, one
+        # per specialist that ran this turn) — collected during the turn on
+        # ctx._specialist_turn_records by agent_tool._runner.
+        records = getattr(self.ctx, "_specialist_turn_records", None) or {}
+        for name, rec in records.items():
+            kps = kps_for_agent_turn(sess.specialist_kb, name, self.turn_id)
+            await write_specialist_memory(
+                amem, cfg, case_id=sess.case_id, turn_id=self.turn_id,
+                session_id=sess.session_id, agent_id=name,
+                sub_question=rec.get("sub_question", ""),
+                findings=rec.get("findings", ""),
+                kps=kps, tool_calls=rec.get("tool_calls", []),
+            )
+
+        await write_conversation(
+            amem, cfg,
+            question=self.verdict.redacted_question,
+            answer=answer_text,
+            case_id=sess.case_id,
+            turn_id=self.turn_id,
+            session_id=sess.session_id,
+            atomic_facts=facts,
+        )
+        await consolidate_case(amem, cfg, case_id=sess.case_id,
+                               session_id=sess.session_id)
+
     async def _finalize(self) -> None:
         sess = self.sess
         turn_id = self.turn_id
@@ -1378,14 +1467,20 @@ class TurnRunner:
             # qa_cache, specialist_kb (with all KnowledgePoints), input_history.
             # Failures are swallowed by the store; never breaks the turn.
             if _NODE_TRACE_STORE is not None:
+                _conv = getattr(sess, "conversation_id", "") or sess.logger.session_id
                 _NODE_TRACE_STORE.snapshot_session(
-                    chat_id=sess.logger.session_id,
+                    chat_id=_conv,
                     case_id=sess.case_id,
                     turn_id=turn_id,
                     qa_cache=sess.qa_cache,
                     specialist_kb=sess.specialist_kb,
                     input_history=sess.input_history,
+                    conversation_id=_conv,
+                    server_run_id=SERVER_RUN_ID,
+                    user_id=getattr(sess, "user_id", ""),
+                    pillar_id=getattr(sess, "pillar_id", ""),
                 )
+            await self._persist_to_amem(answer_text)
             self.turn_timer.record(
                 "qa_cache_store",
                 int((time.perf_counter() - timer_t0) * 1000),
@@ -1405,7 +1500,7 @@ class TurnRunner:
             return
         if await self._replay_from_cache():
             return
-        self._assemble_input()
+        await self._assemble_input()
         if not await self._run_orchestrator():
             return
         # Cooperative-cancellation checkpoints between the post-orchestrator

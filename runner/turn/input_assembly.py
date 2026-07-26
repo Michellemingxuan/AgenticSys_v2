@@ -57,21 +57,27 @@ def _compose_framed_question(episodic_block: str, warmth_hint: str, question: st
     return "\n\n".join(p for p in (episodic_block, warmth_hint, question) if p)
 
 
-def assemble_orchestrator_input(sess, verdict, ctx) -> str:
+def assemble_orchestrator_input(sess, verdict, ctx, amem_block: str = "") -> str:
     """Build the orchestrator's framed user message and stash episodic records on ctx.
 
+    When *amem_block* (Amem hybrid retrieval) is provided, it replaces the bulk
+    KB-warmth dump — full-claim, relevance-ranked, no 120-char clip. Episodic is
+    kept regardless (it resolves coreference against the immediate thread).
     Returns the framed question string. Side effect: sets ctx._episodic_records.
     """
-    warmth_hint = _format_kb_warmth_hint(sess.specialist_kb)
-    if warmth_hint:
-        sess.logger.log("kb_warmth_hint_emitted", {
-            "turn_id": getattr(ctx, "_turn_id", None),
-            "warm_specialists": [
-                {"name": n, "n_kps": len(kps)}
-                for n, kps in sess.specialist_kb.items() if kps
-            ],
-            "hint_length": len(warmth_hint),
-        })
+    if amem_block:
+        warmth_hint = ""
+    else:
+        warmth_hint = _format_kb_warmth_hint(sess.specialist_kb)
+        if warmth_hint:
+            sess.logger.log("kb_warmth_hint_emitted", {
+                "turn_id": getattr(ctx, "_turn_id", None),
+                "warm_specialists": [
+                    {"name": n, "n_kps": len(kps)}
+                    for n, kps in sess.specialist_kb.items() if kps
+                ],
+                "hint_length": len(warmth_hint),
+            })
     try:
         episodic_window = build_records(sess.qa_cache)
         episodic_block = render_orchestrator_block(
@@ -83,4 +89,4 @@ def assemble_orchestrator_input(sess, verdict, ctx) -> str:
                          "error": repr(_epi_exc)})
     ctx._episodic_records = episodic_window
     return _compose_framed_question(
-        episodic_block, warmth_hint, verdict.redacted_question)
+        episodic_block, amem_block or warmth_hint, verdict.redacted_question)

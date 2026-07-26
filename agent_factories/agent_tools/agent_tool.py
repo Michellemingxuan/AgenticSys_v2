@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 import traceback
@@ -91,6 +92,39 @@ def _normalize_subq(text: str) -> str:
     map to the same key.
     """
     return " ".join((text or "").strip().lower().split())
+
+
+def _extract_tool_calls(result) -> list[dict]:
+    """Extract {func, params} for each function call the specialist made this
+    run, from `result.to_input_list()`. Mirrors the style of
+    `series_extract._extract_data_tool_outputs`, which reads the paired
+    `function_call_output` items — this reads the `function_call` items
+    (func name + JSON-parsed arguments, no payloads). Best-effort: items
+    without a name are skipped; unparseable arguments fall back to
+    `{"_raw": arguments}` rather than dropping the call."""
+    out: list[dict] = []
+    if not hasattr(result, "to_input_list"):
+        return out
+    try:
+        items = result.to_input_list()
+    except Exception:
+        return out
+    for item in items:
+        if not isinstance(item, dict) or item.get("type") != "function_call":
+            continue
+        func_name = item.get("name")
+        if not func_name:
+            continue
+        arguments = item.get("arguments")
+        if isinstance(arguments, str):
+            try:
+                params = json.loads(arguments)
+            except Exception:
+                params = {"_raw": arguments}
+        else:
+            params = arguments or {}
+        out.append({"func": func_name, "params": params})
+    return out
 
 
 def agent_tool(
@@ -447,6 +481,19 @@ def agent_tool(
                     "tool_outputs_chars": len(tool_outputs),
                     "n_items": len(result.to_input_list()) if hasattr(result, "to_input_list") else -1,
                 })
+            # Stash this specialist's turn record (sub-question, findings,
+            # tool calls) on the AppContext for the batched end-of-turn
+            # durable write (conductor._persist_to_amem). report_agent is
+            # excluded — it's a file lookup, not a data specialist.
+            if name != "report_agent" and isinstance(
+                getattr(app_ctx, "_specialist_turn_records", None), dict
+            ):
+                _findings = getattr(result.final_output, "findings", "") or ""
+                app_ctx._specialist_turn_records[name] = {
+                    "sub_question": redacted_in,
+                    "findings": _findings,
+                    "tool_calls": _extract_tool_calls(result),
+                }
             # Fire TWO parallel async tasks:
             # 1. Distiller: extract claims into KB for follow-ups
             # 2. Auto-chart: render charts from tool outputs (no LLM needed)
