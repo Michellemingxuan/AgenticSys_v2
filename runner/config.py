@@ -45,6 +45,13 @@ _PRIOR_QUESTIONS_FOR_SCREEN = int(
     os.environ.get("PRIOR_QUESTIONS_FOR_SCREEN", "12")
 )
 
+# How often to rebuild the durable Amem case summary. `consolidate_case` runs an
+# Amem-side summarization (`aupsert_case_memory`); doing it every turn is wasteful
+# once a case runs long. Refresh every N turns instead — the recent-N episodic
+# window covers the gap between refreshes, and the summary is injected only past
+# that window. Env-tunable.
+_AMEM_CONSOLIDATE_EVERY_N = int(os.environ.get("AMEM_CONSOLIDATE_EVERY_N", "10"))
+
 # NodeTrace SQLite store — one per process, shared across sessions.
 # Set NODE_TRACE_DISABLE=1 to turn the layer off entirely (escape hatch).
 # Expand both ``~`` and ``$VAR`` references so .env values like

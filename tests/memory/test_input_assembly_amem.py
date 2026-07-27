@@ -1,3 +1,5 @@
+"""Orchestrator input composition: case summary (older context, past the
+episodic window) + episodic (recent turns) + KB-warmth (topics) + question."""
 from types import SimpleNamespace
 from runner.turn.input_assembly import assemble_orchestrator_input
 
@@ -10,20 +12,23 @@ def _sess():
     )
 
 
-def test_amem_block_replaces_warmth_hint():
+def test_case_summary_block_injected_alongside_warmth():
     sess = _sess()
     verdict = SimpleNamespace(redacted_question="What about TSR?")
     ctx = SimpleNamespace(_turn_id="t1")
-    amem = "[AMEM — relevant prior knowledge for this case:\n  - [conversation] full claim not truncated\n]"
-    out = assemble_orchestrator_input(sess, verdict, ctx, amem_block=amem)
-    assert "full claim not truncated" in out
-    assert "KB-warmth" not in out          # bulk warmth hint suppressed
+    out = assemble_orchestrator_input(
+        sess, verdict, ctx, case_summary="Case: TSR peaked at 39.6 in Sep 2024")
+    assert "CASE SUMMARY" in out
+    assert "Case: TSR peaked at 39.6 in Sep 2024" in out
+    assert "KB-warmth" in out                 # warmth is always built now
     assert "What about TSR?" in out
 
 
-def test_no_amem_block_uses_legacy_warmth():
+def test_no_case_summary_omits_block():
     sess = _sess()
     verdict = SimpleNamespace(redacted_question="What about TSR?")
     ctx = SimpleNamespace(_turn_id="t1")
-    out = assemble_orchestrator_input(sess, verdict, ctx, amem_block="")
-    assert "KB-warmth" in out               # legacy path intact
+    out = assemble_orchestrator_input(sess, verdict, ctx, case_summary="")
+    assert "CASE SUMMARY" not in out
+    assert "KB-warmth" in out
+    assert "What about TSR?" in out

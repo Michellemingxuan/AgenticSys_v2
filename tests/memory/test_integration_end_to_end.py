@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from tests.memory._fake_amem import FakeAmem, FakeRecord
 from memory.config import AmemConfig
 from memory import delete_turns, build_session_brief
-from memory.reader import retrieve_context
+from memory.reader import load_case_summary
 from memory.writer import write_conversation, consolidate_case, mirror_kp_working
 from memory.null_manager import NullAmemManager
 
@@ -28,14 +28,13 @@ def test_full_loop_with_fake():
                                  case_id="c1", turn_id="t1", session_id="s1",
                                  atomic_facts=["FICO < 620"])
         await consolidate_case(fake, CFG, case_id="c1", session_id="s1")
-        # next-turn retrieval
-        fake.search_results = [FakeRecord(id="c1", content="TSR up (full claim)",
-                                          level="working")]
-        return await retrieve_context(fake, CFG, case_id="c1", question="TSR trend?")
 
-    block = asyncio.run(turn())
-    assert "TSR up (full claim)" in block
+    asyncio.run(turn())
     assert fake.added and fake.conversations and fake.case_upserts == 1
+
+    # next-turn: durable case-summary read (sync) — the condensed "older context"
+    fake.listed = [FakeRecord(id="case_1", content="Case: TSR up (summary)", level="case")]
+    assert load_case_summary(fake, CFG, case_id="c1") == "Case: TSR up (summary)"
 
     # rewind deletes turn t1
     fake.listed = [FakeRecord(id="c1", content="x")]
@@ -54,8 +53,8 @@ def test_null_manager_is_inert():
                                 agent_id="risk", session_id="s1")
         await write_conversation(null, CFG, question="q", answer="a", case_id="c1",
                                  turn_id="t1", session_id="s1", atomic_facts=[])
-        return await retrieve_context(null, CFG, case_id="c1", question="q")
 
-    assert asyncio.run(go()) == ""
+    asyncio.run(go())
+    assert load_case_summary(null, CFG, case_id="c1") == ""     # inert read
     assert delete_turns(null, CFG, case_id="c1", turn_ids=["t1"]) == 0
     assert build_session_brief(null, CFG, case_id="c1").startswith("Welcome")

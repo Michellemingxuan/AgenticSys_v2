@@ -491,6 +491,7 @@ def agent_tool(
                 _findings = getattr(result.final_output, "findings", "") or ""
                 app_ctx._specialist_turn_records[name] = {
                     "sub_question": redacted_in,
+                    "concepts": list(concepts or []),
                     "findings": _findings,
                     "tool_calls": _extract_tool_calls(result),
                 }

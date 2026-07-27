@@ -34,17 +34,19 @@ from models.app_context import AppContext
 from llm.firewall_stack import redact_payload
 from logger.process_timer import ProcessTimer
 from memory import (
+    ACTIVE_KP_THRESHOLD,
     consolidate_case,
     kps_for_agent_turn,
-    kps_for_turn,
+    load_active_kps,
     load_case_kps,
-    retrieve_context,
+    load_case_summary,
     write_conversation,
     write_specialist_memory,
 )
 from models.types import FinalAnswer
 from runner.config import (
     PILLAR,
+    _AMEM_CONSOLIDATE_EVERY_N,
     _NODE_TRACE_STORE,
     _ORCH_PLAN_TIMEOUT_S,
     _PRIOR_QUESTIONS_FOR_SCREEN,
@@ -63,6 +65,7 @@ from runner.turn.review import (
     _apply_review_directive, _dispatch_count, _is_multi_specialist_turn,
 )
 from runner.turn.sse import map_run_item
+from tools.episodic import EPISODIC_TURNS
 from tools.node_trace import (
     NodeTrace, NodeTraceRunHooks, TURN_SCOPE, TurnScope,
     _open_node, attach_io, attach_latency, attach_tag, attach_usage,
@@ -539,6 +542,19 @@ class TurnRunner:
             try:
                 loaded = load_case_kps(_amem, _amem_cfg, case_id=sess.case_id)
                 if loaded:
+                    # At scale, don't hold the whole KB in RAM/context: once a
+                    # case exceeds ACTIVE_KP_THRESHOLD KPs, swap to a
+                    # relevance-scoped subset (top-N KPs for THIS question) so
+                    # the orchestrator warmth + specialist digests stay bounded.
+                    # kb_lookup still reaches the full store via Amem semantic
+                    # fallback, so nothing is lost. If the subset load returns
+                    # nothing (timeout/miss), keep the full load — only ever helps.
+                    if sum(len(v) for v in loaded.values()) > ACTIVE_KP_THRESHOLD:
+                        active = await load_active_kps(
+                            _amem, _amem_cfg, case_id=sess.case_id,
+                            question=self.verdict.redacted_question)
+                        if active:
+                            loaded = active
                     sess.specialist_kb = loaded
             except Exception:
                 pass
@@ -569,15 +585,17 @@ class TurnRunner:
         # toward reusing warm specialists on in-domain follow-ups. The hint is
         # informational only — the orchestrator retains LLM judgment.
         timer_t0 = time.perf_counter()
-        amem_block = ""
+        # Past the episodic window, inject the durable Amem case summary as the
+        # condensed "older context": the recent EPISODIC_TURNS turns are shown
+        # verbatim by the episodic block, everything before that is summarized.
+        case_summary = ""
         _amem = getattr(ctx, "_amem", None)
         _amem_cfg = getattr(ctx, "_amem_cfg", None)
-        if _amem is not None and _amem_cfg is not None and sess.case_id:
-            amem_block = await retrieve_context(
-                _amem, _amem_cfg, case_id=sess.case_id,
-                question=self.verdict.redacted_question)
+        if (_amem is not None and _amem_cfg is not None and sess.case_id
+                and getattr(sess, "_qa_turn_seq", 0) > EPISODIC_TURNS):
+            case_summary = load_case_summary(_amem, _amem_cfg, case_id=sess.case_id)
         framed_question = assemble_orchestrator_input(
-            sess, self.verdict, ctx, amem_block=amem_block)
+            sess, self.verdict, ctx, case_summary=case_summary)
         self.framed_question = framed_question
         # Cases with no curated reports must work smoothly: tell the orchestrator
         # up front not to require report_agent (and skip the backstop below), so
@@ -1209,12 +1227,15 @@ class TurnRunner:
         if amem is None or cfg is None:
             return
         sess = self.sess
-        facts = kps_for_turn(sess.specialist_kb, self.turn_id)
 
-        # Durable per-specialist conversation records (batched write, one
-        # per specialist that ran this turn) — collected during the turn on
-        # ctx._specialist_turn_records by agent_tool._runner.
+        # Durable per-specialist conversation records (batched write, one per
+        # specialist that ran this turn) — collected during the turn on
+        # ctx._specialist_turn_records by agent_tool._runner. Each specialist
+        # record holds its sub-question + answer + distilled KPs. Alongside,
+        # build the orchestrator's round-1 team dispatch (which specialists
+        # were called with what sub-question + concepts).
         records = getattr(self.ctx, "_specialist_turn_records", None) or {}
+        team_dispatch: list[dict] = []
         for name, rec in records.items():
             kps = kps_for_agent_turn(sess.specialist_kb, name, self.turn_id)
             await write_specialist_memory(
@@ -1224,7 +1245,15 @@ class TurnRunner:
                 findings=rec.get("findings", ""),
                 kps=kps, tool_calls=rec.get("tool_calls", []),
             )
+            team_dispatch.append({
+                "specialist": name,
+                "sub_question": rec.get("sub_question", ""),
+                "concepts": rec.get("concepts", []),
+            })
 
+        # Orchestrator record: question + team dispatch (round 1) + final
+        # answer (round 2). The specialists' distilled KPs live on their own
+        # per-specialist records above — they are NOT duplicated here.
         await write_conversation(
             amem, cfg,
             question=self.verdict.redacted_question,
@@ -1232,10 +1261,15 @@ class TurnRunner:
             case_id=sess.case_id,
             turn_id=self.turn_id,
             session_id=sess.session_id,
-            atomic_facts=facts,
+            team_dispatch=team_dispatch,
         )
-        await consolidate_case(amem, cfg, case_id=sess.case_id,
-                               session_id=sess.session_id)
+        # Refresh the durable case summary periodically (not every turn) — an
+        # Amem-side summarization is wasteful per-turn; the recent-N episodic
+        # window covers the gap between refreshes.
+        seq = getattr(sess, "_qa_turn_seq", 0)
+        if seq and seq % _AMEM_CONSOLIDATE_EVERY_N == 0:
+            await consolidate_case(amem, cfg, case_id=sess.case_id,
+                                   session_id=sess.session_id)
 
     async def _finalize(self) -> None:
         sess = self.sess

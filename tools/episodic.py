@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import os
 
-EPISODIC_TURNS = int(os.environ.get("EPISODIC_TURNS", "3"))
+EPISODIC_TURNS = int(os.environ.get("EPISODIC_TURNS", "10"))
 EPISODIC_WINDOW = int(os.environ.get("EPISODIC_WINDOW", "10"))
 EPISODIC_ANSWER_CHARS = int(os.environ.get("EPISODIC_ANSWER_CHARS", "800"))
 EPISODIC_SUBANSWER_CHARS = int(os.environ.get("EPISODIC_SUBANSWER_CHARS", "400"))

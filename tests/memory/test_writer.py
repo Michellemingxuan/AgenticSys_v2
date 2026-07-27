@@ -38,12 +38,38 @@ def test_write_conversation_passes_atomic_facts():
     assert conv["metadata"]["session_id"] == "s1"
 
 
-def test_write_conversation_empty_facts_becomes_none():
+def test_write_conversation_empty_facts_stay_empty_list_not_none():
+    # [] (not None) so Amem does NOT auto-summarize the Q&A into facts;
+    # None would trigger an extra synthesis step + an "Atomic facts:" section.
     fake = FakeAmem()
     asyncio.run(writer.write_conversation(
         fake, CFG, question="q", answer="a", case_id="c1", turn_id="t1",
         session_id="s1", atomic_facts=[]))
-    assert fake.conversations[0]["atomic_facts"] is None
+    assert fake.conversations[0]["atomic_facts"] == []
+
+
+def test_write_conversation_stores_team_dispatch_in_metadata():
+    """Orchestrator record carries the round-1 team dispatch (which specialists
+    were called with what sub-question + concepts), NOT the specialists' KPs."""
+    fake = FakeAmem()
+    dispatch = [{"specialist": "risk", "sub_question": "How risky?",
+                 "concepts": ["fico", "dpd"]}]
+    asyncio.run(writer.write_conversation(
+        fake, CFG, question="q", answer="a", case_id="c1", turn_id="t1",
+        session_id="s1", team_dispatch=dispatch))
+    conv = fake.conversations[0]
+    assert conv["metadata"]["team_dispatch"] == dispatch
+    assert conv["metadata"]["session_id"] == "s1"
+    assert conv["atomic_facts"] == []              # no specialist KPs, no auto-summarize
+    assert conv["scope"].agent_id == "orchestrator"
+
+
+def test_write_conversation_no_team_dispatch_key_when_absent():
+    fake = FakeAmem()
+    asyncio.run(writer.write_conversation(
+        fake, CFG, question="q", answer="a", case_id="c1", turn_id="t1",
+        session_id="s1"))
+    assert "team_dispatch" not in fake.conversations[0]["metadata"]
 
 
 def test_consolidate_case_calls_upsert():

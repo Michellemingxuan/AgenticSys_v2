@@ -43,14 +43,27 @@ async def mirror_kp_working(amem, cfg: AmemConfig, kp_dict: dict, *,
 
 async def write_conversation(amem, cfg: AmemConfig, *, question: str, answer: str,
                              case_id: str, turn_id: str, session_id: str,
-                             atomic_facts: list[str]) -> None:
+                             atomic_facts: list[str] | None = None,
+                             team_dispatch: list[dict] | None = None) -> None:
+    """Durable orchestrator record for a turn: question + team dispatch
+    (round 1: which specialists were called with what sub-question + concepts,
+    in metadata) + final answer (round 2, as raw_answer). The specialists'
+    distilled KPs live on their own per-specialist records — NOT here."""
     async def _do():
+        metadata = base_metadata(session_id)
+        if team_dispatch:
+            metadata["team_dispatch"] = list(team_dispatch)
+        # Pass [] (not None) when there are no facts: Amem treats
+        # atomic_facts=None as "auto-summarize this Q&A into facts" (an extra
+        # synthesis step that also embeds an "Atomic facts:" section into the
+        # record content). The orchestrator record should stay clean —
+        # question + team dispatch + final answer only.
         return await amem.arecord_conversation(
             raw_question=question,
             raw_answer=answer,
             scope=build_scope(cfg, case_id, turn_id=turn_id, agent_id="orchestrator"),
-            atomic_facts=(atomic_facts or None),
-            metadata=base_metadata(session_id),
+            atomic_facts=(atomic_facts or []),
+            metadata=metadata,
         )
     await _guard(_do, cfg.write_timeout_s)
 

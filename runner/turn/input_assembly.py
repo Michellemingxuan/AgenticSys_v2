@@ -5,6 +5,21 @@ from tools.episodic import (
     EPISODIC_TURNS, build_records, render_orchestrator_block, select_episodic,
 )
 
+# Char budget for each KP claim in the orchestrator's KB-warmth digest. This is
+# a FALLBACK view: when Amem hybrid retrieval is available the orchestrator gets
+# full, un-clipped claims instead (see assemble_orchestrator_input). 300
+# preserves whole distiller one-liners (~150-250 chars, incl. both metrics and
+# qualifiers like "not breached") rather than cutting them mid-fact; a trailing
+# "…" marks any real truncation so a cut is visible, not silently misleading.
+_KB_WARMTH_CLAIM_CHARS = 300
+
+
+def _clip_claim(claim: str | None) -> str:
+    claim = (claim or "").strip()
+    if len(claim) <= _KB_WARMTH_CLAIM_CHARS:
+        return claim
+    return claim[:_KB_WARMTH_CLAIM_CHARS].rstrip() + "…"
+
 
 def _format_kb_warmth_hint(specialist_kb: dict) -> str:
     """Build the `[KB-warmth: …]` preface the orchestrator sees on every turn
@@ -36,7 +51,7 @@ def _format_kb_warmth_hint(specialist_kb: dict) -> str:
             continue
         topic_lines = []
         for topic, kp in active.items():
-            claim = (kp.get("claim") or "")[:120]
+            claim = _clip_claim(kp.get("claim"))
             topic_lines.append(f"    - {topic}: {claim}")
         lines.append(f"  {name} ({len(active)} KPs):")
         lines.extend(topic_lines)
@@ -52,32 +67,41 @@ def _format_kb_warmth_hint(specialist_kb: dict) -> str:
     )
 
 
-def _compose_framed_question(episodic_block: str, warmth_hint: str, question: str) -> str:
-    """Order: episodic (coreference) -> KB warmth (topics) -> question. Skip empties."""
-    return "\n\n".join(p for p in (episodic_block, warmth_hint, question) if p)
+def _format_case_summary_block(summary: str) -> str:
+    """Render the durable Amem case summary as the condensed 'older context'
+    block (injected only past the episodic window). Empty -> "" (skipped)."""
+    summary = (summary or "").strip()
+    if not summary:
+        return ""
+    return ("[CASE SUMMARY — condensed older context for this case (turns before "
+            "the recent ones shown below). Background only; the recent turns and "
+            "live data are authoritative:\n" + summary + "\n]")
 
 
-def assemble_orchestrator_input(sess, verdict, ctx, amem_block: str = "") -> str:
+def _compose_framed_question(*parts: str) -> str:
+    """Order: case summary (older) -> episodic (recent) -> KB warmth (topics) ->
+    question. Skip empties."""
+    return "\n\n".join(p for p in parts if p)
+
+
+def assemble_orchestrator_input(sess, verdict, ctx, case_summary: str = "") -> str:
     """Build the orchestrator's framed user message and stash episodic records on ctx.
 
-    When *amem_block* (Amem hybrid retrieval) is provided, it replaces the bulk
-    KB-warmth dump — full-claim, relevance-ranked, no 120-char clip. Episodic is
-    kept regardless (it resolves coreference against the immediate thread).
-    Returns the framed question string. Side effect: sets ctx._episodic_records.
+    Composition (broad -> specific): case summary (condensed older context, only
+    past the episodic window) -> episodic (recent turns verbatim, for coreference)
+    -> KB-warmth (specialist topics + claims) -> question. Returns the framed
+    question string. Side effect: sets ctx._episodic_records.
     """
-    if amem_block:
-        warmth_hint = ""
-    else:
-        warmth_hint = _format_kb_warmth_hint(sess.specialist_kb)
-        if warmth_hint:
-            sess.logger.log("kb_warmth_hint_emitted", {
-                "turn_id": getattr(ctx, "_turn_id", None),
-                "warm_specialists": [
-                    {"name": n, "n_kps": len(kps)}
-                    for n, kps in sess.specialist_kb.items() if kps
-                ],
-                "hint_length": len(warmth_hint),
-            })
+    warmth_hint = _format_kb_warmth_hint(sess.specialist_kb)
+    if warmth_hint:
+        sess.logger.log("kb_warmth_hint_emitted", {
+            "turn_id": getattr(ctx, "_turn_id", None),
+            "warm_specialists": [
+                {"name": n, "n_kps": len(kps)}
+                for n, kps in sess.specialist_kb.items() if kps
+            ],
+            "hint_length": len(warmth_hint),
+        })
     try:
         episodic_window = build_records(sess.qa_cache)
         episodic_block = render_orchestrator_block(
@@ -89,4 +113,5 @@ def assemble_orchestrator_input(sess, verdict, ctx, amem_block: str = "") -> str
                          "error": repr(_epi_exc)})
     ctx._episodic_records = episodic_window
     return _compose_framed_question(
-        episodic_block, amem_block or warmth_hint, verdict.redacted_question)
+        _format_case_summary_block(case_summary),
+        episodic_block, warmth_hint, verdict.redacted_question)

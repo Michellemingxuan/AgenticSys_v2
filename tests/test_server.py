@@ -51,6 +51,21 @@ def test_format_kb_warmth_hint_lists_warm_specialists():
     assert "- d: w" in hint
 
 
+def test_format_kb_warmth_hint_preserves_full_claim_and_marks_truncation():
+    """Claims up to the (raised) limit appear in full — a two-metric claim is
+    no longer cut mid-fact at 120 chars; only genuinely over-long claims are
+    truncated, and then with a visible '…'."""
+    from runner.turn.input_assembly import _KB_WARMTH_CLAIM_CHARS
+    mid = "M" * 200                               # under the limit -> shown whole
+    long = "L" * (_KB_WARMTH_CLAIM_CHARS + 50)    # over the limit -> clipped + "…"
+    kb = {"modeling": [{"topic": "mid", "claim": mid},
+                       {"topic": "long", "claim": long}]}
+    hint = _format_kb_warmth_hint(kb)
+    assert mid in hint                                       # full 200 chars (old 120 would cut)
+    assert ("L" * _KB_WARMTH_CLAIM_CHARS) + "…" in hint      # truncated at limit + ellipsis
+    assert long not in hint                                  # not shown in full
+
+
 def test_format_kb_warmth_hint_empty_when_no_warm_specialists():
     """Empty KB or all-empty values → empty hint, so the orchestrator's
     prompt isn't cluttered on the first turn or after /rewind."""

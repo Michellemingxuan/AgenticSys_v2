@@ -1,69 +1,33 @@
-"""Async, defensive Amem read helpers. On disabled/empty/error they return the
-empty result so callers fall back to today's warmth-hint + episodic behavior."""
-from __future__ import annotations
+"""Sync Amem read helper: the durable case summary, injected as the condensed
+"older context" for the orchestrator once a case runs past the episodic window.
 
-import asyncio
+Read-only and defensive — returns "" on disabled/empty/error so the caller
+simply omits the block. (The old semantic-read helpers retrieve_context /
+search_kp were removed: relevance-scoping now happens once at load time via
+load_active_kps, and kb_lookup is a pure RAM cache — see the memory design.)"""
+from __future__ import annotations
 
 from .config import AmemConfig
 from .scope import build_scope
 
-_LEVELS_CONTEXT = ["working", "conversation", "case"]
-_LEVELS_KP = ["working", "conversation"]
 
+def load_case_summary(amem, cfg: AmemConfig, *, case_id: str) -> str:
+    """Return the durable Amem case-summary content for this case, or "".
 
-async def retrieve_context(amem, cfg: AmemConfig, *, case_id: str, question: str) -> str:
+    Same source as build_session_brief (aupsert_case_memory stores it as
+    level='case', kind='case_summary'), but returns "" — not a welcome line —
+    when absent, so the caller can cleanly skip the summary block."""
     try:
-        results = await asyncio.wait_for(
-            amem.asearch_related(
-                question,
-                levels=_LEVELS_CONTEXT,
-                scope=build_scope(cfg, case_id),
-                search_mode="hybrid",
-                limit=cfg.retrieve_limit,
-                include_working=True,
-            ),
-            timeout=cfg.read_timeout_s,
+        records = amem.list_memories(
+            levels=["case"],
+            scope=build_scope(cfg, case_id),
+            kind="case_summary",
+            limit=1,
         )
     except Exception:
         return ""
-    if not results:
-        return ""
-    lines = []
-    for r in results:
-        rec = getattr(r, "record", None)
-        if rec is None:
-            continue
-        level = getattr(getattr(rec, "level", None), "value", "memory")
-        content = getattr(rec, "content", "") or ""
-        if content:
-            lines.append(f"  - [{level}] {content}")
-    if not lines:
-        return ""
-    return (
-        "[AMEM — relevant prior knowledge for this case (full claims, most "
-        "relevant first). Use to avoid redundant queries and to anchor "
-        "sub-questions:\n" + "\n".join(lines) + "\n]"
-    )
-
-
-async def search_kp(amem, cfg: AmemConfig, *, case_id: str, topic: str) -> str | None:
-    try:
-        results = await asyncio.wait_for(
-            amem.asearch_related(
-                topic,
-                levels=_LEVELS_KP,
-                scope=build_scope(cfg, case_id),
-                search_mode="hybrid",
-                limit=3,
-                include_working=True,
-            ),
-            timeout=cfg.read_timeout_s,
-        )
-    except Exception:
-        return None
-    for r in results:
-        rec = getattr(r, "record", None)
-        content = (getattr(rec, "content", "") or "") if rec else ""
+    for rec in records or []:
+        content = (getattr(rec, "content", "") or "").strip()
         if content:
             return content
-    return None
+    return ""
