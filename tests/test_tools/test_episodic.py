@@ -31,6 +31,26 @@ def test_parse_sub_answer_skips_non_json_and_failed():
     assert _parse_sub_answer(None) is None
 
 
+def test_parse_sub_answer_accepts_dict_payload():
+    # The LIVE format: payload is already a dict (SpecialistOutput), not a JSON
+    # string. This is what specialists actually store — the old str-only guard
+    # silently dropped every sub-answer, so specialists got no episodic.
+    assert _parse_sub_answer({"domain": "modeling", "findings": "TSR 39.6"}) == "TSR 39.6"
+    assert _parse_sub_answer({"answer": "elevated external delinquency"}) == \
+        "elevated external delinquency"
+    assert _parse_sub_answer({"domain": "x"}) is None            # neither field
+    assert _parse_sub_answer({}) is None
+
+
+def test_build_records_populates_sub_answers_from_dict_payloads():
+    qa = {"q": _entry(1, "Q", [_call("bureau", "sq", {"findings": "FICO 703 in Sep"})])}
+    recs = build_records(qa)
+    assert recs[0]["sub_answers"] == [
+        {"specialist": "bureau", "sub_question": "sq", "sub_answer": "FICO 703 in Sep"}]
+    assert select_specialist_episodic(recs, "bureau", k=3) == [
+        {"sub_question": "sq", "sub_answer": "FICO 703 in Sep"}]
+
+
 def test_parse_sub_answer_truncates(monkeypatch):
     import tools.episodic as ep
     monkeypatch.setattr(ep, "EPISODIC_SUBANSWER_CHARS", 5)

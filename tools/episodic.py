@@ -19,21 +19,25 @@ _SUBQ_PREFIX = "[Sub-question:"
 def _parse_sub_answer(payload) -> str | None:
     """Extract a concise sub-answer from a stored tool_call payload.
     SpecialistOutput → `findings`; report_agent ReportDraft → `answer`.
-    Returns None (skip) on non-JSON / [FAILED …] / neither field."""
-    if not isinstance(payload, str) or not payload:
-        return None
-    text = payload
-    if text.startswith(_SUBQ_PREFIX):            # strip "[Sub-question: ...]\n"
-        nl = text.find("\n")
-        if nl != -1:
-            text = text[nl + 1:]
-    text = text.strip()
-    if not text.startswith("{"):
-        return None
-    try:
-        obj = json.loads(text)
-    except (json.JSONDecodeError, ValueError):
-        return None
+
+    The live payload is usually a dict (the specialist output already parsed),
+    but may also be a JSON string, optionally prefixed with "[Sub-question:
+    ...]\n". Returns None (skip) on [FAILED …] / non-JSON / neither field."""
+    obj = None
+    if isinstance(payload, dict):
+        obj = payload
+    elif isinstance(payload, str) and payload:
+        text = payload
+        if text.startswith(_SUBQ_PREFIX):            # strip "[Sub-question: ...]\n"
+            nl = text.find("\n")
+            if nl != -1:
+                text = text[nl + 1:]
+        text = text.strip()
+        if text.startswith("{"):
+            try:
+                obj = json.loads(text)
+            except (json.JSONDecodeError, ValueError):
+                obj = None
     if not isinstance(obj, dict):
         return None
     val = obj.get("findings")
