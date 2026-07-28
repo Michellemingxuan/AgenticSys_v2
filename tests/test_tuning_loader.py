@@ -5,7 +5,8 @@ import pytest
 
 from config.tuning_loader import apply_tuning
 
-_KEYS = ["EPISODIC_TURNS", "AMEM_CONSOLIDATE_EVERY_N", "AMEM_ACTIVE_KP_THRESHOLD"]
+_KEYS = ["EPISODIC_TURNS", "AMEM_CONSOLIDATE_EVERY_N",
+         "AMEM_ACTIVE_KP_THRESHOLD", "AMEM_ACTIVE_KP_KEEP"]
 
 
 @pytest.fixture
@@ -23,11 +24,14 @@ def clean_env():
 
 def test_apply_tuning_sets_env_from_yaml(tmp_path, clean_env):
     y = tmp_path / "t.yaml"
-    y.write_text("memory:\n  episodic_turns: 4\n  active_kp_threshold: 7\n")
+    y.write_text("memory:\n  episodic_turns: 4\n  active_kp_threshold: 7\n"
+                 "  active_kp_keep: 3\n")
     applied = apply_tuning(str(y))
     assert os.environ["EPISODIC_TURNS"] == "4"
     assert os.environ["AMEM_ACTIVE_KP_THRESHOLD"] == "7"
-    assert applied == {"EPISODIC_TURNS": "4", "AMEM_ACTIVE_KP_THRESHOLD": "7"}
+    assert os.environ["AMEM_ACTIVE_KP_KEEP"] == "3"
+    assert applied == {"EPISODIC_TURNS": "4", "AMEM_ACTIVE_KP_THRESHOLD": "7",
+                       "AMEM_ACTIVE_KP_KEEP": "3"}
 
 
 def test_inline_env_wins_over_yaml(tmp_path, clean_env):

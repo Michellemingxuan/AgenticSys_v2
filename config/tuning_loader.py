@@ -24,6 +24,7 @@ _MAP = {
     "memory.episodic_turns": "EPISODIC_TURNS",
     "memory.consolidate_every_n_turns": "AMEM_CONSOLIDATE_EVERY_N",
     "memory.active_kp_threshold": "AMEM_ACTIVE_KP_THRESHOLD",
+    "memory.active_kp_keep": "AMEM_ACTIVE_KP_KEEP",
 }
 
 _DEFAULT_PATH = Path(__file__).resolve().parent / "tuning.yaml"

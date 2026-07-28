@@ -78,6 +78,33 @@ async def consolidate_case(amem, cfg: AmemConfig, *, case_id: str,
     await _guard(_do, cfg.write_timeout_s)
 
 
+async def consolidate_agent_case(amem, cfg: AmemConfig, *, case_id: str,
+                                 agent_id: str, session_id: str,
+                                 min_turns: int) -> None:
+    """Per-specialist case summary: a condensed overview of ONE agent's
+    accumulated findings across the case, stored as kind="agent_case_summary"
+    scoped to (case, agent) so it never collides with the whole-case summary.
+
+    Built only when the agent has run in more than `min_turns` turns (else its
+    own recent-turn episodic already covers everything it knows). The turn count
+    is the agent's durable conversation-record count (one per turn it ran) — a
+    cheap list_memories filter, no embedding. Best-effort; never raises."""
+    async def _do():
+        scope = build_scope(cfg, case_id, agent_id=agent_id)
+        try:
+            n_turns = len(amem.list_memories(scope=scope, levels=["conversation"]))
+        except Exception:
+            n_turns = 0
+        if n_turns <= min_turns:
+            return None
+        return await amem.aupsert_case_memory(
+            scope=scope,
+            kind="agent_case_summary",
+            metadata=base_metadata(session_id),
+        )
+    await _guard(_do, cfg.write_timeout_s)
+
+
 async def write_specialist_memory(amem, cfg: AmemConfig, *, case_id: str, turn_id: str,
                                   session_id: str, agent_id: str, sub_question: str,
                                   findings: str, kps: list | None,

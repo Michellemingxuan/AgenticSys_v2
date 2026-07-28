@@ -35,6 +35,7 @@ class FakeAmem:
         self.added: list[dict] = []
         self.conversations: list[dict] = []
         self.case_upserts: int = 0
+        self.case_upsert_calls: list[dict] = []
         self.deleted: list[str] = []
         self.search_results: list[FakeRecord] = []
         self.listed: list[FakeRecord] = []
@@ -55,6 +56,7 @@ class FakeAmem:
 
     async def aupsert_case_memory(self, **kwargs: Any):
         self.case_upserts += 1
+        self.case_upsert_calls.append(kwargs)
         return SimpleNamespace(id="case_1")
 
     async def asearch_related(self, query: str, **kwargs: Any):

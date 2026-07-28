@@ -11,17 +11,21 @@ from .config import AmemConfig
 from .scope import build_scope
 
 
-def load_case_summary(amem, cfg: AmemConfig, *, case_id: str) -> str:
+def load_case_summary(amem, cfg: AmemConfig, *, case_id: str,
+                      agent_id: str | None = None,
+                      kind: str = "case_summary") -> str:
     """Return the durable Amem case-summary content for this case, or "".
 
-    Same source as build_session_brief (aupsert_case_memory stores it as
-    level='case', kind='case_summary'), but returns "" — not a welcome line —
-    when absent, so the caller can cleanly skip the summary block."""
+    agent_id=None + kind="case_summary" → the whole-case summary (orchestrator).
+    agent_id=<name> + kind="agent_case_summary" → that specialist's per-agent
+    case summary. The distinct kind keeps the two from colliding under Amem's
+    None-as-wildcard scope matching. Returns "" — not a welcome line — when
+    absent, so the caller can cleanly skip the block."""
     try:
         records = amem.list_memories(
             levels=["case"],
-            scope=build_scope(cfg, case_id),
-            kind="case_summary",
+            scope=build_scope(cfg, case_id, agent_id=agent_id),
+            kind=kind,
             limit=1,
         )
     except Exception:

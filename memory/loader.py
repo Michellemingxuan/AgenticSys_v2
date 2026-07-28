@@ -15,15 +15,16 @@ import os
 from .config import AmemConfig
 from .scope import build_scope
 
-# One knob for the whole behavior: once a case's RAM specialist_kb would exceed
-# this many KPs, stop loading the WHOLE KB each turn and instead load the N most
-# relevant KPs for the current question (load_active_kps) — so it is BOTH the
-# switch point AND the subset size cap. Below it, the complete load is used.
-# Env-tunable (AMEM_ACTIVE_KP_THRESHOLD) — see config/tuning.yaml. Read at import,
-# so the tuning YAML must be applied before this module is imported (server.py
-# does this at startup).
-ACTIVE_KP_THRESHOLD = int(os.environ.get("AMEM_ACTIVE_KP_THRESHOLD", "100"))
-_ACTIVE_LOAD_TIMEOUT_S = 6.0    # generous: this is a batch load, only for large cases
+# Accumulate-then-compact working-set control. specialist_kb accumulates KPs in
+# RAM across turns; only when it crosses ACTIVE_KP_THRESHOLD (K1) do we pay one
+# hybrid search to compact it to the ACTIVE_KP_KEEP (K2 << K1) most-relevant KPs,
+# then it accumulates again. This hysteresis makes the expensive Amem search
+# fire ~every (K1-K2)/kps_per_turn turns instead of every turn.
+# Both env-tunable (see config/tuning.yaml), read at import — the tuning YAML
+# must be applied before this module is imported (server.py does this at startup).
+ACTIVE_KP_THRESHOLD = int(os.environ.get("AMEM_ACTIVE_KP_THRESHOLD", "100"))  # K1: compact trigger
+ACTIVE_KP_KEEP = int(os.environ.get("AMEM_ACTIVE_KP_KEEP", "20"))             # K2: compact target
+_ACTIVE_LOAD_TIMEOUT_S = 6.0    # generous: this batch search only fires at compaction
 
 
 def load_case_kps(amem, cfg: AmemConfig, *, case_id: str) -> dict:
@@ -62,7 +63,7 @@ def load_case_kps(amem, cfg: AmemConfig, *, case_id: str) -> dict:
 
 
 async def load_active_kps(amem, cfg: AmemConfig, *, case_id: str, question: str,
-                          limit: int = ACTIVE_KP_THRESHOLD) -> dict:
+                          limit: int = ACTIVE_KP_KEEP) -> dict:
     """Relevance-scoped subset of a case's KPs, for KBs too large to hold whole.
 
     Retrieves the most relevant conversation records for *question* via Amem

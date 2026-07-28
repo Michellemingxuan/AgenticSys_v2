@@ -15,13 +15,29 @@ _ELIDED_SPECIALIST_TOOL_OUTPUT = (
 )
 
 
+def _format_agent_case_summary_block(summary: str) -> str:
+    """Render a specialist's OWN case summary (its accumulated findings across
+    the case, condensed) as the 'older context' block — injected when it has
+    run in more than its episodic window. Empty -> "" (skipped)."""
+    summary = (summary or "").strip()
+    if not summary:
+        return ""
+    return ("[CASE SUMMARY — your own accumulated findings for this case so far "
+            "(condensed; covers turns older than the recent ones above). "
+            "Background only — re-query the data for exact current values:\n"
+            + summary + "\n]")
+
+
 def _compose_specialist_input(episodic_block: str, kb_digest: str,
-                              sub_question: str, directed_block: str = "") -> str:
-    """Prepend episodic slice, KB digest, and directed-variable block (each
-    non-empty, in that order) before the sub-question. Directed variables sit
-    last (nearest the question) as the most question-specific prefix.
-    Byte-identical to the prior behavior when directed_block is empty."""
-    prefixes = [p for p in (episodic_block, kb_digest, directed_block) if p]
+                              sub_question: str, directed_block: str = "",
+                              case_summary_block: str = "") -> str:
+    """Prepend the agent case summary (older accumulated findings), episodic
+    slice, KB digest, and directed-variable block (each non-empty, in that
+    order) before the sub-question. Directed variables sit last (nearest the
+    question) as the most question-specific prefix. Byte-identical to the prior
+    behavior when directed_block and case_summary_block are empty."""
+    prefixes = [p for p in (case_summary_block, episodic_block, kb_digest,
+                            directed_block) if p]
     if not prefixes:
         return sub_question
     return "\n\n".join(prefixes) + f"\n\n--- New question ---\n{sub_question}"
@@ -101,8 +117,29 @@ def assemble_specialist_input(app_ctx, name, redacted_in, concepts, catalog,
                 logger.log("directed_variables_assembly_failed",
                            {"specialist": name, "concepts": concepts,
                             "error": repr(_dv_exc)})
+    # Agent-specific case summary: this specialist's own condensed older
+    # findings (built durably every consolidate tick, once it has run in >
+    # EPISODIC_TURNS turns). Injected when present; report_agent has no KB/case
+    # memory of its own.
+    _agent_summary_block = ""
+    if name != "report_agent":
+        _amem = getattr(app_ctx, "_amem", None)
+        _cfg = getattr(app_ctx, "_amem_cfg", None)
+        _cid = getattr(app_ctx, "_case_id", None)
+        if _amem is not None and _cfg is not None and _cid:
+            try:
+                from memory import load_case_summary
+                _agent_summary_block = _format_agent_case_summary_block(
+                    load_case_summary(_amem, _cfg, case_id=_cid, agent_id=name,
+                                      kind="agent_case_summary"))
+            except Exception as _cs_exc:  # noqa: BLE001 — never break the call
+                _agent_summary_block = ""
+                if logger is not None:
+                    logger.log("agent_case_summary_load_failed",
+                               {"specialist": name, "error": repr(_cs_exc)})
     contextual_in = _compose_specialist_input(
-        _episodic_block, kb_digest, redacted_in, _directed_block)
+        _episodic_block, kb_digest, redacted_in, _directed_block,
+        case_summary_block=_agent_summary_block)
     return contextual_in, (len(_active_kps(kps_for_name)) if kb_digest else 0)
 
 

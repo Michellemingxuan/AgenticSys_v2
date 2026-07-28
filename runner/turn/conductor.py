@@ -34,7 +34,9 @@ from models.app_context import AppContext
 from llm.firewall_stack import redact_payload
 from logger.process_timer import ProcessTimer
 from memory import (
+    ACTIVE_KP_KEEP,
     ACTIVE_KP_THRESHOLD,
+    consolidate_agent_case,
     consolidate_case,
     kps_for_agent_turn,
     load_active_kps,
@@ -534,32 +536,32 @@ class TurnRunner:
         # from the earlier lazy `import server`; fixed here.)
         _amem = getattr(sess, "amem", None)
         _amem_cfg = getattr(sess, "amem_cfg", None)
-        # Load-once: reconstruct the RAM specialist_kb dict from Amem (the
-        # durable source of truth) at turn start. Only overwrite sess's dict
-        # when Amem actually returns something, so a NullAmemManager or an
-        # empty store never wipes a snapshot-restored dict.
+        # Accumulate-then-compact working set. specialist_kb persists across
+        # turns (restored from the node_trace snapshot on reopen) and grows as
+        # the distiller adds KPs. We touch Amem only to: (a) SEED an empty set
+        # once (cheap list, e.g. fresh case / cleared snapshot), or (b) COMPACT
+        # when it has grown past ACTIVE_KP_THRESHOLD (K1) — one hybrid search
+        # down to the ACTIVE_KP_KEEP (K2 << K1) most-relevant KPs. Between those
+        # there is NO per-turn Amem load — just in-RAM accumulation — so the
+        # ~3s search fires only ~every (K1-K2)/kps_per_turn turns.
         if _amem is not None and _amem_cfg is not None and sess.case_id:
             try:
-                loaded = load_case_kps(_amem, _amem_cfg, case_id=sess.case_id)
-                if loaded:
-                    # At scale, don't hold the whole KB in RAM/context: once a
-                    # case exceeds ACTIVE_KP_THRESHOLD KPs, swap to a
-                    # relevance-scoped subset (top-N KPs for THIS question) so
-                    # the orchestrator warmth + specialist digests stay bounded.
-                    # If the subset load returns nothing (timeout/miss), keep the
-                    # full load — only ever helps.
-                    n_full = sum(len(v) for v in loaded.values())
-                    if n_full > ACTIVE_KP_THRESHOLD:
-                        active = await load_active_kps(
-                            _amem, _amem_cfg, case_id=sess.case_id,
-                            question=self.verdict.redacted_question)
-                        if active:
-                            sess.logger.log("active_kp_subset_loaded", {
-                                "turn_id": self.turn_id, "n_full": n_full,
-                                "n_subset": sum(len(v) for v in active.values()),
-                                "threshold": ACTIVE_KP_THRESHOLD})
-                            loaded = active
-                    sess.specialist_kb = loaded
+                kb = sess.specialist_kb if isinstance(sess.specialist_kb, dict) else {}
+                if not kb:
+                    kb = load_case_kps(_amem, _amem_cfg, case_id=sess.case_id)
+                n = sum(len(v) for v in kb.values())
+                if n > ACTIVE_KP_THRESHOLD:
+                    compacted = await load_active_kps(
+                        _amem, _amem_cfg, case_id=sess.case_id,
+                        question=self.verdict.redacted_question,
+                        limit=ACTIVE_KP_KEEP)
+                    if compacted:      # empty (timeout/miss) → keep accumulating
+                        sess.logger.log("active_kp_compacted", {
+                            "turn_id": self.turn_id, "n_before": n,
+                            "n_after": sum(len(v) for v in compacted.values()),
+                            "k1": ACTIVE_KP_THRESHOLD, "k2": ACTIVE_KP_KEEP})
+                        kb = compacted
+                sess.specialist_kb = kb
             except Exception:
                 pass
         ctx = AppContext(
@@ -1278,6 +1280,14 @@ class TurnRunner:
         if seq and seq % _AMEM_CONSOLIDATE_EVERY_N == 0:
             await consolidate_case(amem, cfg, case_id=sess.case_id,
                                    session_id=sess.session_id)
+            # Per-specialist case summaries — each specialist that ran gets a
+            # condensed overview of its OWN accumulated findings, but only once
+            # it has run in > EPISODIC_TURNS turns (else its own episodic already
+            # covers everything). Same cadence as the whole-case summary.
+            for name in records:
+                await consolidate_agent_case(
+                    amem, cfg, case_id=sess.case_id, agent_id=name,
+                    session_id=sess.session_id, min_turns=EPISODIC_TURNS)
 
     async def _finalize(self) -> None:
         sess = self.sess
