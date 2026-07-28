@@ -546,14 +546,18 @@ class TurnRunner:
                     # case exceeds ACTIVE_KP_THRESHOLD KPs, swap to a
                     # relevance-scoped subset (top-N KPs for THIS question) so
                     # the orchestrator warmth + specialist digests stay bounded.
-                    # kb_lookup still reaches the full store via Amem semantic
-                    # fallback, so nothing is lost. If the subset load returns
-                    # nothing (timeout/miss), keep the full load — only ever helps.
-                    if sum(len(v) for v in loaded.values()) > ACTIVE_KP_THRESHOLD:
+                    # If the subset load returns nothing (timeout/miss), keep the
+                    # full load — only ever helps.
+                    n_full = sum(len(v) for v in loaded.values())
+                    if n_full > ACTIVE_KP_THRESHOLD:
                         active = await load_active_kps(
                             _amem, _amem_cfg, case_id=sess.case_id,
                             question=self.verdict.redacted_question)
                         if active:
+                            sess.logger.log("active_kp_subset_loaded", {
+                                "turn_id": self.turn_id, "n_full": n_full,
+                                "n_subset": sum(len(v) for v in active.values()),
+                                "threshold": ACTIVE_KP_THRESHOLD})
                             loaded = active
                     sess.specialist_kb = loaded
             except Exception:
@@ -594,6 +598,10 @@ class TurnRunner:
         if (_amem is not None and _amem_cfg is not None and sess.case_id
                 and getattr(sess, "_qa_turn_seq", 0) > EPISODIC_TURNS):
             case_summary = load_case_summary(_amem, _amem_cfg, case_id=sess.case_id)
+            if case_summary:
+                sess.logger.log("case_summary_injected", {
+                    "turn_id": self.turn_id, "chars": len(case_summary),
+                    "episodic_turns": EPISODIC_TURNS})
         framed_question = assemble_orchestrator_input(
             sess, self.verdict, ctx, case_summary=case_summary)
         self.framed_question = framed_question

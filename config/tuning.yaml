@@ -1,0 +1,30 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Memory / context tuning knobs.
+#
+# Edit a value and restart `python server.py` — that's it. These are read at
+# process start, so a restart is required for changes to take effect.
+#
+# Precedence: an inline env var or a .env entry STILL OVERRIDES the value here
+# (e.g. `EPISODIC_TURNS=2 python server.py` wins over episodic_turns below), so
+# you can do one-off tests without editing this file. This file is the
+# persistent default.
+# ─────────────────────────────────────────────────────────────────────────────
+
+memory:
+  # Recent turns shown to the orchestrator verbatim (episodic coreference).
+  # The durable Amem case summary is injected as condensed "older context" only
+  # once a case runs past this many turns.  [env: EPISODIC_TURNS]
+  episodic_turns: 2
+
+  # How often the Amem case summary is (re)built — every N turns, not every turn.
+  # The recent-episodic window covers the gap between refreshes.
+  # [env: AMEM_CONSOLIDATE_EVERY_N]
+  consolidate_every_n_turns: 2
+
+  # One knob: once a case's specialist_kb would exceed this many KPs, load the
+  # N most relevant KPs for the current question from Amem instead of the whole
+  # KB — so this is BOTH the switch point AND the subset size. e.g. 5 → once a
+  # case has >5 KPs, keep the 5 most relevant. Lower it to exercise the subset
+  # path in testing (you'll see n_subset < n_full in the log).
+  # [env: AMEM_ACTIVE_KP_THRESHOLD]
+  active_kp_threshold: 5

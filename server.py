@@ -46,6 +46,12 @@ try:
 except ImportError:
     pass
 
+# Apply the tuning YAML (config/tuning.yaml) into os.environ BEFORE any module
+# reads these knobs at import time (EPISODIC_TURNS, AMEM_CONSOLIDATE_EVERY_N,
+# AMEM_ACTIVE_KP_THRESHOLD). setdefault semantics: inline env / .env still win.
+from config.tuning_loader import apply_tuning as _apply_tuning
+_apply_tuning()
+
 from flask import Flask, Response, abort, jsonify, request, send_from_directory
 from flask_cors import CORS
 

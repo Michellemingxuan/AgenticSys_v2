@@ -10,16 +10,19 @@ reconstruction is identical regardless of how records are selected.
 from __future__ import annotations
 
 import asyncio
+import os
 
 from .config import AmemConfig
 from .scope import build_scope
 
-# When a case's RAM specialist_kb would exceed this many KPs, stop loading the
-# WHOLE KB each turn and switch to a relevance-scoped subset (load_active_kps),
-# so the orchestrator warmth digest + specialist digests stay bounded at scale.
-# Below the threshold the complete load (load_case_kps) is cheaper and complete.
-ACTIVE_KP_THRESHOLD = 100
-_ACTIVE_KP_LIMIT = 100          # max KPs kept in the relevance-scoped subset
+# One knob for the whole behavior: once a case's RAM specialist_kb would exceed
+# this many KPs, stop loading the WHOLE KB each turn and instead load the N most
+# relevant KPs for the current question (load_active_kps) — so it is BOTH the
+# switch point AND the subset size cap. Below it, the complete load is used.
+# Env-tunable (AMEM_ACTIVE_KP_THRESHOLD) — see config/tuning.yaml. Read at import,
+# so the tuning YAML must be applied before this module is imported (server.py
+# does this at startup).
+ACTIVE_KP_THRESHOLD = int(os.environ.get("AMEM_ACTIVE_KP_THRESHOLD", "100"))
 _ACTIVE_LOAD_TIMEOUT_S = 6.0    # generous: this is a batch load, only for large cases
 
 
@@ -59,7 +62,7 @@ def load_case_kps(amem, cfg: AmemConfig, *, case_id: str) -> dict:
 
 
 async def load_active_kps(amem, cfg: AmemConfig, *, case_id: str, question: str,
-                          limit: int = _ACTIVE_KP_LIMIT) -> dict:
+                          limit: int = ACTIVE_KP_THRESHOLD) -> dict:
     """Relevance-scoped subset of a case's KPs, for KBs too large to hold whole.
 
     Retrieves the most relevant conversation records for *question* via Amem
@@ -79,7 +82,10 @@ async def load_active_kps(amem, cfg: AmemConfig, *, case_id: str, question: str,
                 levels=["conversation"],
                 scope=build_scope(cfg, case_id),
                 search_mode="hybrid",
-                limit=limit,
+                # Fetch more RECORDS than the KP cap: each record carries several
+                # KPs and some (orchestrator) carry none, so a record-count == KP
+                # cap would under-fill the subset. KPs are still capped at `limit`.
+                limit=max(limit * 3, 20),
                 include_working=False,
             ),
             timeout=_ACTIVE_LOAD_TIMEOUT_S,
