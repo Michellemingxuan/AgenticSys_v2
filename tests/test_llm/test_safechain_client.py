@@ -660,3 +660,75 @@ async def test_stream_passes_through_a_long_but_healthy_stream(monkeypatch):
 
     chunks = await _drain(_SafeChainStream(agen=_slow_but_steady(), model="gpt-4.1"))
     assert "".join(c.choices[0].delta.content or "" for c in chunks) == "01234"
+
+
+# ── real token counts from usage_metadata ───────────────────────────────────
+
+class _AIMessageWithUsage(_AIMessage):
+    def __init__(self, usage_metadata=None, **kw):
+        super().__init__(**kw)
+        self.usage_metadata = usage_metadata
+
+
+def test_usage_metadata_becomes_completion_usage():
+    """The provider's own counts are exact; the tiktoken estimate could not see
+    the tool schemas / response_format that were actually billed."""
+    out = _completion_from_message(
+        _AIMessageWithUsage(
+            content="hi",
+            usage_metadata={"input_tokens": 1234, "output_tokens": 56,
+                            "total_tokens": 1290}),
+        "gpt-4.1")
+    assert out.usage.prompt_tokens == 1234
+    assert out.usage.completion_tokens == 56
+    assert out.usage.total_tokens == 1290
+
+
+def test_usage_total_is_derived_when_absent():
+    out = _completion_from_message(
+        _AIMessageWithUsage(content="hi",
+                            usage_metadata={"input_tokens": 10, "output_tokens": 4}),
+        "gpt-4.1")
+    assert out.usage.total_tokens == 14
+
+
+def test_usage_is_none_when_the_build_reports_nothing():
+    """Must stay None, not zero — the caller falls back to its estimate, and
+    zeros would silently under-report cost."""
+    assert _completion_from_message(_AIMessage(content="hi"), "gpt-4.1").usage is None
+    assert _completion_from_message(
+        _AIMessageWithUsage(content="hi", usage_metadata={}), "gpt-4.1").usage is None
+
+
+@pytest.mark.asyncio
+async def test_trace_prefers_real_counts_over_the_estimate(monkeypatch, tmp_path):
+    """End-to-end through create(): the node trace must record the provider's
+    numbers, including correcting the prompt estimate attached before the call."""
+    from pathlib import Path
+    from tools.node_trace import NodeTrace, NodeTraceStore
+    import sqlite3
+
+    store = NodeTraceStore(str(tmp_path / "t.db"))
+
+    async def _stub_invoke(self_, *, model, messages, tools, response_format,
+                           stream, **kw):
+        return _completion_from_message(
+            _AIMessageWithUsage(
+                content="hi",
+                usage_metadata={"input_tokens": 4321, "output_tokens": 77}),
+            model)
+
+    fw = FirewallStack(EventLogger(session_id="t", log_dir=str(tmp_path)))
+    client = SafeChainAsyncOpenAI(model_name="gpt-4o-mini", firewall=fw)
+    with patch("llm.safechain_client._SafeChainChatCompletions._invoke", _stub_invoke):
+        async with NodeTrace(store, chat_id="c", case_id="c", turn_id="t",
+                             node="specialist.modeling", depth=0):
+            await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": "short"}])
+
+    conn = sqlite3.connect(str(tmp_path / "t.db"))
+    row = conn.execute(
+        "SELECT prompt_tokens, completion_tokens FROM node_trace "
+        "WHERE node LIKE '%round_1'").fetchone()
+    assert row == (4321, 77)

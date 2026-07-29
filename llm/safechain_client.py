@@ -68,6 +68,7 @@ from openai.types.chat.chat_completion_message_tool_call import (
     ChatCompletionMessageToolCall,
     Function,
 )
+from openai.types.completion_usage import CompletionUsage
 
 from llm.firewall_stack import (
     FIREWALL_GUIDANCE,
@@ -305,9 +306,24 @@ class _SafeChainChatCompletions:
                                 completion_text = ""
                         except Exception:
                             completion_text = ""
-                        c_tok = _estimate_tokens(completion_text, model)
+                        # Prefer the provider's OWN counts when the model
+                        # reported them (`AIMessage.usage_metadata` ->
+                        # `resp.usage`). They're exact, and they account for the
+                        # tool schemas / response_format that were actually
+                        # billed — which an estimate over the rendered prompt
+                        # cannot see. Falls back to the tiktoken estimate when
+                        # the build doesn't supply usage, so telemetry never
+                        # silently drops to zero. `attach_usage` overwrites, so
+                        # the earlier estimated prompt_tokens is corrected here.
+                        _usage = getattr(resp, "usage", None)
+                        if _usage is not None:
+                            p_tok = _usage.prompt_tokens or p_tok
+                            c_tok = _usage.completion_tokens or 0
+                        else:
+                            c_tok = _estimate_tokens(completion_text, model)
                         attach_usage(
                             completion_excerpt=completion_text,
+                            prompt_tokens=p_tok,
                             completion_tokens=c_tok,
                             cost_usd=compute_cost(
                                 model=model,
@@ -602,6 +618,32 @@ def _sdk_tool_calls(message: Any) -> list[ChatCompletionMessageToolCall] | None:
     return calls or None
 
 
+def _usage_from_message(message: Any) -> CompletionUsage | None:
+    """LangChain `AIMessage.usage_metadata` -> OpenAI `usage`, when present.
+
+    The old text transport had no usage object at all, so token counts were
+    ESTIMATED with tiktoken. A real LangChain chat model reports the provider's
+    own counts, which are exact and — unlike an estimate over the rendered
+    prompt — correctly account for the tool schemas and response_format the
+    provider actually billed for. Returns None when the build doesn't supply it,
+    so the caller keeps its estimate rather than reporting zeros.
+    """
+    meta = getattr(message, "usage_metadata", None)
+    if not isinstance(meta, dict):
+        return None
+    prompt = meta.get("input_tokens")
+    completion = meta.get("output_tokens")
+    if prompt is None and completion is None:
+        return None
+    prompt = int(prompt or 0)
+    completion = int(completion or 0)
+    return CompletionUsage(
+        prompt_tokens=prompt,
+        completion_tokens=completion,
+        total_tokens=int(meta.get("total_tokens") or (prompt + completion)),
+    )
+
+
 def _completion_from_message(message: Any, model: str) -> ChatCompletion:
     """LangChain `AIMessage` -> OpenAI `ChatCompletion`.
 
@@ -633,6 +675,7 @@ def _completion_from_message(message: Any, model: str) -> ChatCompletion:
         created=int(time.time()),
         model=model,
         object="chat.completion",
+        usage=_usage_from_message(message),
     )
 
 
