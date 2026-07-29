@@ -732,3 +732,88 @@ async def test_trace_prefers_real_counts_over_the_estimate(monkeypatch, tmp_path
         "SELECT prompt_tokens, completion_tokens FROM node_trace "
         "WHERE node LIKE '%round_1'").fetchone()
     assert row == (4321, 77)
+
+
+# ── sampling / budget knobs reach the provider ──────────────────────────────
+#
+# Under the old TEXT transport `create()` did `del kw`, dropping every SDK
+# extra — nothing could be forwarded, since the request was a prompt string.
+# Native binding can honor them, and two are load-bearing: `max_tokens`
+# (specialists raise it to 3000 because a 500-cap truncated a batch call
+# mid-argument and the specialist fabricated numbers around the broken result)
+# and `parallel_tool_calls` (the orchestrator opts in explicitly).
+
+def test_bind_kwargs_forwards_the_allowlisted_knobs():
+    tools = [{"type": "function", "function": {"name": "f", "parameters": {}}}]
+    out = _bind_kwargs(tools, None, None,
+                       extra={"max_tokens": 3000, "parallel_tool_calls": True,
+                              "temperature": 0.2})
+    assert out["max_tokens"] == 3000
+    assert out["parallel_tool_calls"] is True
+    assert out["temperature"] == 0.2
+
+
+def test_bind_kwargs_drops_unset_knobs():
+    out = _bind_kwargs(None, None, None,
+                       extra={"max_tokens": None, "temperature": None})
+    assert out == {}
+
+
+def test_parallel_tool_calls_is_dropped_without_tools():
+    """A 400 otherwise — and the orchestrator sets it on the final synthesis
+    round too, where no tools remain."""
+    out = _bind_kwargs(None, None, None, extra={"parallel_tool_calls": True})
+    assert "parallel_tool_calls" not in out
+    # max_tokens has no such restriction and must survive.
+    assert _bind_kwargs(None, None, None,
+                        extra={"max_tokens": 2000})["max_tokens"] == 2000
+
+
+@pytest.mark.asyncio
+async def test_create_forwards_max_tokens_and_parallel_tool_calls(monkeypatch):
+    """End-to-end through create(): the knobs the agent factories set must
+    reach `.bind()`, not be swallowed by `del kw`."""
+    captured = {}
+
+    def _factory():
+        m = _FakeModel(lambda _in: _AIMessage(content="ok"))
+        captured["model"] = m
+        return m
+
+    _install_fake_safechain(monkeypatch, amodel_factory=_factory)
+    fw = FirewallStack(EventLogger(session_id="t"), max_retries=0, concurrency_cap=2)
+    client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
+
+    await client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": "u"}],
+        tools=[{"type": "function", "function": {"name": "f", "parameters": {}}}],
+        max_tokens=3000, parallel_tool_calls=True)
+
+    bound = captured["model"].bound_kwargs
+    assert bound["max_tokens"] == 3000
+    assert bound["parallel_tool_calls"] is True
+
+
+@pytest.mark.asyncio
+async def test_create_still_ignores_unknown_sdk_extras(monkeypatch):
+    """Allow-list, not passthrough — an unknown extra must not reach the
+    provider and risk a 400."""
+    captured = {}
+
+    def _factory():
+        m = _FakeModel(lambda _in: _AIMessage(content="ok"))
+        captured["model"] = m
+        return m
+
+    _install_fake_safechain(monkeypatch, amodel_factory=_factory)
+    fw = FirewallStack(EventLogger(session_id="t"), max_retries=0, concurrency_cap=2)
+    client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
+
+    await client.chat.completions.create(
+        model="gpt-4o", messages=[{"role": "user", "content": "u"}],
+        some_future_sdk_kwarg="boom", max_tokens=1234)
+
+    bound = captured["model"].bound_kwargs or {}
+    assert "some_future_sdk_kwarg" not in bound
+    assert bound["max_tokens"] == 1234

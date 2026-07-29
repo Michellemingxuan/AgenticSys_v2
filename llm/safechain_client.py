@@ -240,6 +240,22 @@ class _SafeChainChatCompletions:
         **kw: Any,
     ) -> Any:
         tool_choice = kw.pop("tool_choice", None)
+        # Sampling / budget knobs the agent factories set explicitly. Under the
+        # old TEXT transport these were dropped on the floor with the rest of
+        # `kw` — nothing could be forwarded, since the request was a prompt
+        # string. Native binding can honor them, and two matter:
+        #   • `max_tokens` — specialists raise it to 3000 because a 500-cap
+        #     truncated a batch call mid-argument and the specialist then
+        #     fabricated numbers around the broken tool result.
+        #   • `parallel_tool_calls` — the orchestrator opts in explicitly; we
+        #     should honor that rather than silently inherit the provider
+        #     default (which happens to match, so behavior is unchanged today —
+        #     but turning it OFF would have been a no-op, which is a trap).
+        # Kept to an ALLOW-LIST: forwarding arbitrary SDK extras risks a 400
+        # from a provider that doesn't know them.
+        passthrough = {k: kw.pop(k, None) for k in
+                       ("max_tokens", "parallel_tool_calls", "temperature",
+                        "top_p", "seed", "stop")}
         del kw  # absorbs remaining SDK extras we don't forward
         from tools.node_trace import (
             ACTIVE_NODE, NodeTrace, _hooks_own_rounds,
@@ -258,13 +274,13 @@ class _SafeChainChatCompletions:
                         return await self._invoke(
                             model=model, messages=messages, tools=tools,
                             response_format=response_format, stream=stream,
-                            tool_choice=tool_choice,
+                            tool_choice=tool_choice, passthrough=passthrough,
                         )
                     if _hooks_own_rounds(parent):
                         return await self._invoke(
                             model=model, messages=messages, tools=tools,
                             response_format=response_format, stream=stream,
-                            tool_choice=tool_choice,
+                            tool_choice=tool_choice, passthrough=passthrough,
                         )
                     round_idx = parent.next_round_index()
                     async with NodeTrace(
@@ -294,7 +310,7 @@ class _SafeChainChatCompletions:
                         resp = await self._invoke(
                             model=model, messages=messages, tools=tools,
                             response_format=response_format, stream=stream,
-                            tool_choice=tool_choice,
+                            tool_choice=tool_choice, passthrough=passthrough,
                         )
                         attach_latency(
                             llm_call_ms=int((time.perf_counter() - _llm_t0) * 1000),
@@ -364,6 +380,7 @@ class _SafeChainChatCompletions:
         response_format: Any,
         stream: bool = False,
         tool_choice: str | None = None,
+        passthrough: dict | None = None,
     ) -> Any:
         try:
             from safechain.prompts import ValidChatPromptTemplate  # type: ignore[import-not-found]
@@ -394,7 +411,8 @@ class _SafeChainChatCompletions:
         # redaction itself lives in the model — `InputRedactor` is in its MRO —
         # so that applies either way.) Verified: probe check R3.
         lc_messages = _to_lc_messages(messages)
-        bind_kwargs = _bind_kwargs(tools, tool_choice, response_format)
+        bind_kwargs = _bind_kwargs(tools, tool_choice, response_format,
+                                   extra=passthrough)
 
         def _chain(active_model: Any):
             bound = active_model.bind(**bind_kwargs) if bind_kwargs else active_model
@@ -573,8 +591,14 @@ def _bind_kwargs(tools: list[dict] | None, tool_choice: Any,
     if response_format is not None:
         kwargs["response_format"] = response_format
     for k, v in (extra or {}).items():
-        if v is not None:
-            kwargs[k] = v
+        if v is None:
+            continue
+        # `parallel_tool_calls` is only valid alongside tools — same 400 as a
+        # bare tool_choice. The orchestrator sets it on every round, including
+        # the final synthesis round that has no tools left to call.
+        if k == "parallel_tool_calls" and not tools:
+            continue
+        kwargs[k] = v
     return kwargs
 
 
