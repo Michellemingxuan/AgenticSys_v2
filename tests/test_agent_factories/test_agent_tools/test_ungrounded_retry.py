@@ -124,7 +124,7 @@ async def test_ungrounded_run_is_retried_with_a_directive():
     assert "GROUNDING CHECK" in directive
     assert "batch_summarize_trend failed (specs_unparseable)" in directive
     # The recovered answer is clean: no banner, and it is NOT quarantined.
-    assert "[DEGRADED" not in out
+    assert "DEGRADED" not in out
     assert ctx._degraded_specialists == {}
     assert "specialist_ungrounded_retry" in ctx.logger.kinds()
 
@@ -135,7 +135,7 @@ async def test_grounded_run_is_not_retried():
     out, calls = await _run(ctx, [_Result(_clean_transcript())])
 
     assert len(calls) == 1
-    assert "[DEGRADED" not in out
+    assert "DEGRADED" not in out
     assert ctx._degraded_specialists == {}
     assert "specialist_ungrounded_retry" not in ctx.logger.kinds()
 
@@ -161,10 +161,12 @@ async def test_still_degraded_run_is_banner_flagged_and_quarantined():
         _Result(_degraded_transcript()),
     ])
 
-    # The orchestrator still receives the answer, but explicitly marked.
-    assert out.startswith("[DEGRADED modeling")
-    assert "batch_summarize_trend (specs_unparseable)" in out
-    assert "UNSUPPORTED" in out
+    # The orchestrator still receives the answer, but explicitly marked — as a
+    # FIELD, so the payload keeps the dict shape every consumer reads.
+    assert out["DEGRADED"].startswith("modeling —")
+    assert "batch_summarize_trend (specs_unparseable)" in out["DEGRADED"]
+    assert "UNSUPPORTED" in out["DEGRADED"]
+    assert out["findings"], "the answer itself must still be there"
 
     # Registered for the conductor to project onto the qa_cache.
     assert list(ctx._degraded_specialists) == ["modeling"]
@@ -282,7 +284,7 @@ async def test_partial_batch_retries_but_does_not_quarantine():
     ], name="bureau")
 
     assert len(calls) == 2, "a partial failure is still worth one retry"
-    assert "[DEGRADED" not in out, "specs that SUCCEEDED must not be condemned"
+    assert "DEGRADED" not in out, "specs that SUCCEEDED must not be condemned"
     assert ctx._degraded_specialists == {}
 
 
@@ -310,7 +312,7 @@ async def test_a_wholly_failed_batch_still_quarantines():
     ctx = _ctx()
     out, _ = await _run(ctx, [_Result(transcript), _Result(transcript)],
                         name="bureau")
-    assert out.startswith("[DEGRADED bureau")
+    assert out["DEGRADED"].startswith("bureau —")
     assert list(ctx._degraded_specialists) == ["bureau"]
 
 

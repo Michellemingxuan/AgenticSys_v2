@@ -116,28 +116,40 @@ _DEGRADED_RECOVERY = {
 }
 
 
-def _banner_payload(payload, banner: str) -> str:
-    """Prefix `banner` onto a specialist payload, whatever shape it arrived in.
+def _annotate_payload(payload, *, degraded_notice: str | None = None,
+                      sub_question: str | None = None):
+    """Attach server-side annotations WITHOUT flattening the payload's shape.
 
-    Domain specialists run with `output_type=SpecialistOutput`, so
-    `redact_payload` hands back a PYDANTIC MODEL, not a string — a
-    str-only guard here would silently no-op on exactly the runs that need the
-    banner. The wrapper is annotated `-> str` and the SDK stringifies the return
-    anyway, so serializing here loses nothing.
+    Returns a DICT, never a string. Domain specialists run with
+    `output_type=SpecialistOutput`, so `redact_payload` hands back a pydantic
+    MODEL — and every downstream consumer keys off that structure:
+    `conductor._safe_dump` calls `model_dump()`, the reasoning-trace renderer
+    does `if not isinstance(payload, dict): payload = {}`, and
+    `episodic._parse_sub_answer` reads `findings`. Serializing to a prefixed
+    STRING satisfied none of them — the trace panel rendered an empty body
+    under the specialist header.
+
+    So annotations become FIELDS. `DEGRADED` is inserted first so it leads the
+    dict the orchestrator sees, keeping the "control text up front" property
+    the `[FAILED ...]` sentinel relies on.
     """
-    if isinstance(payload, str):
-        body = payload
-    elif hasattr(payload, "model_dump_json"):
+    if hasattr(payload, "model_dump"):
         try:
-            body = payload.model_dump_json()
+            base = payload.model_dump()
         except Exception:  # noqa: BLE001
-            body = str(payload)
+            base = {"answer": str(payload)}
+    elif isinstance(payload, dict):
+        base = dict(payload)
     else:
-        try:
-            body = json.dumps(payload, default=str)
-        except (TypeError, ValueError):
-            body = str(payload)
-    return f"{banner}\n{body}"
+        base = {"answer": payload if isinstance(payload, str) else str(payload)}
+
+    out: dict = {}
+    if degraded_notice:
+        out["DEGRADED"] = degraded_notice
+    if sub_question is not None:
+        out["sub_question"] = sub_question
+    out.update(base)
+    return out
 
 
 class _SkipPersistence(Exception):
@@ -644,38 +656,38 @@ def agent_tool(
                 f"output redaction failed: {exc}",
                 exc,
             )
-        # Inject the sub-question into the payload so the orchestrator
-        # (and general_specialist reading the outputs) knows what each
-        # specialist was answering — without the specialist wasting output
-        # tokens to echo it. Replaces the removed SpecialistOutput.question
-        # field with a zero-cost server-side injection.
+        # Server-side annotations, added as FIELDS on the payload dict:
         #
-        # Goes through `_banner_payload` for the same reason the DEGRADED
-        # banner does: domain specialists run with `output_type=SpecialistOutput`,
-        # so `redact_payload` returns a PYDANTIC MODEL and the old
-        # `isinstance(payload, str)` guard made this branch unreachable — the
-        # prefix never reached the orchestrator, and `episodic._parse_sub_answer`
-        # was stripping a prefix that never arrived.
-        if name != "report_agent":
-            payload = _banner_payload(payload, f"[Sub-question: {redacted_in}]")
-
-        # Degraded banner: the orchestrator must not synthesize these numbers
-        # into the FinalAnswer as though they were measured. Stated in the same
-        # `[...]` sentinel style as `[FAILED ...]` so the orchestrator prompt's
-        # existing "treat bracketed sentinels as control text" handling applies.
+        #   sub_question — so the orchestrator (and general_specialist reading
+        #     the outputs) knows what each specialist was answering, without the
+        #     specialist spending output tokens echoing it. Replaces the removed
+        #     SpecialistOutput.question field. report_agent is excluded: a
+        #     ReportDraft is a file lookup, not an answer to a sub-question.
+        #
+        #   DEGRADED — the orchestrator must not synthesize these numbers into
+        #     the FinalAnswer as though they were measured. Only the calls that
+        #     actually condemned the run are listed; a partial batch would
+        #     misattribute the cause.
+        #
+        # These used to be prefixed onto a STRINGIFIED payload, which broke
+        # every consumer that keys off the dict shape — see `_annotate_payload`.
+        degraded_notice = None
         if degraded:
-            # Only the calls that actually condemned the run — listing a
-            # partial batch here would misattribute the cause.
             failed = ", ".join(
                 f"{e['tool']} ({e['reason']})"
                 for e in tool_errors if not e.get("partial"))
-            payload = _banner_payload(payload, (
-                f"[DEGRADED {name} — this answer rests on tool calls that "
-                f"FAILED and did not recover after a retry: {failed}. "
-                f"Any numbers below are UNSUPPORTED — do not repeat them as "
-                f"measured values. Treat this domain as a data_gap and note it "
-                f"in your flags.]"
-            ))
+            degraded_notice = (
+                f"{name} — this answer rests on tool calls that FAILED and did "
+                f"not recover after a retry: {failed}. Any numbers below are "
+                f"UNSUPPORTED — do not repeat them as measured values. Treat "
+                f"this domain as a data_gap and note it in your flags."
+            )
+        if degraded_notice or name != "report_agent":
+            payload = _annotate_payload(
+                payload,
+                degraded_notice=degraded_notice,
+                sub_question=None if name == "report_agent" else redacted_in,
+            )
 
         timer.record(
             "specialist_output_redact",

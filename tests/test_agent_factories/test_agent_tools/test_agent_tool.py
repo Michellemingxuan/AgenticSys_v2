@@ -79,8 +79,10 @@ async def test_agent_tool_redacts_output():
             None, json.dumps({"sub_question": "anything"})
         )
 
-    assert "[CASE-ID]" in out
-    assert "99999" not in out
+    # The payload is a dict — annotations are FIELDS, not a string prefix — so
+    # assert over the serialized whole rather than the bare return.
+    assert "[CASE-ID]" in json.dumps(out)
+    assert "99999" not in json.dumps(out)
 
 
 @pytest.mark.asyncio
@@ -676,8 +678,11 @@ async def test_sub_question_is_injected_into_a_pydantic_payload():
             RunContextWrapper(ctx),
             json.dumps({"sub_question": "How did TSR move in 2024?"}))
 
-    assert out.startswith("[Sub-question: How did TSR move in 2024?]")
-    assert "39.6" in out, "the findings must survive the injection"
+    assert out["sub_question"] == "How did TSR move in 2024?"
+    # ...and the SpecialistOutput fields must survive alongside it, or every
+    # consumer that reads `findings` off the dict renders an empty panel.
+    assert out["findings"] == "TSR peaked at 39.6 in 2024-11."
+    assert out["domain"] == "modeling"
 
 
 @pytest.mark.asyncio
@@ -713,4 +718,37 @@ async def test_report_agent_payload_is_left_alone():
         out = await wrapped.on_invoke_tool(
             RunContextWrapper(ctx), json.dumps({"sub_question": "anything"}))
 
-    assert "[Sub-question:" not in out
+    assert not isinstance(out, dict) or "sub_question" not in out
+
+
+@pytest.mark.asyncio
+async def test_payload_keeps_the_dict_shape_consumers_render_from():
+    """Regression: annotations were prefixed onto a STRINGIFIED payload, so
+    every consumer that keys off the dict shape got nothing — the reasoning
+    trace showed a specialist header with an empty body. Pin the contract:
+
+      conductor._safe_dump    -> passes a dict straight through
+      run_question_suite      -> `if not isinstance(payload, dict): payload={}`
+      episodic._parse_sub_answer -> reads `findings`
+    """
+    from agents import RunContextWrapper
+    from runner.turn.conductor import TurnRunner
+    from tools.episodic import _parse_sub_answer
+
+    ctx = _make_failure_ctx()
+    with patch("agent_factories.agent_tools.agent_tool.Runner.run",
+               new=AsyncMock(return_value=_specialist_result())):
+        wrapped = agent_tool(Agent(name="inner", instructions="x", tools=[]),
+                             name="crossbu", description="d")
+        out = await wrapped.on_invoke_tool(
+            RunContextWrapper(ctx), json.dumps({"sub_question": "why?"}))
+
+    assert isinstance(out, dict), "a string payload renders as an empty panel"
+
+    # `_safe_dump` recurses through `self`, so it needs a real instance —
+    # bypass __init__, we only exercise the pure dump.
+    dumped = TurnRunner.__new__(TurnRunner)._safe_dump(out)
+    assert isinstance(dumped, dict)
+    assert dumped["findings"] == "TSR peaked at 39.6 in 2024-11."
+    assert dumped["sub_question"] == "why?"
+    assert _parse_sub_answer(dumped) == "TSR peaked at 39.6 in 2024-11."
