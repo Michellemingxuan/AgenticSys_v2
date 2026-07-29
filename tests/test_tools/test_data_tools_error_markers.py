@@ -34,6 +34,20 @@ _IMPL_TO_TOOL = {
     "_summarize_by_group_impl": "summarize_by_group",
 }
 
+# Shared error helpers that are NOT `_*_impl` functions but DO own marker
+# literals. `_unparseable_specs_directive` (data_tools.py:2820) is the ONLY
+# home of the "did NOT run" literal, and it is called by the three batch impls
+# rather than inlined into them — so a walk that only descends into `_*_impl`
+# functions misses `specs_unparseable` entirely. That is the marker for the
+# truncated-specs_json → fabricated-peaks bug this whole feature exists to
+# catch, so it must be covered. It takes `tool` as a parameter, so its literals
+# are checked against every tool it serves.
+_SHARED_HELPERS = {
+    "_unparseable_specs_directive": [
+        "batch_query_table", "batch_aggregate", "batch_summarize_trend",
+    ],
+}
+
 
 def _render(node) -> str | None:
     """Reconstruct a str/f-string literal, substituting 'X' for interpolations.
@@ -79,13 +93,16 @@ def _collect():
     for fn in ast.walk(tree):
         if not isinstance(fn, ast.FunctionDef):
             continue
-        tool = _IMPL_TO_TOOL.get(fn.name)
-        if tool is None:
-            continue
+        tools = _SHARED_HELPERS.get(fn.name)
+        if tools is None:
+            tool = _IMPL_TO_TOOL.get(fn.name)
+            if tool is None:
+                continue
+            tools = [tool]
         for node in _iter_nodes_no_joinedstr_descent(fn):
             text = _render(node)
             if text and any(m in text for m in _ERROR_MARKERS):
-                found.append((tool, text))
+                found.extend((t, text) for t in tools)
     return found
 
 
@@ -123,3 +140,15 @@ def test_every_error_literal_is_classified(tool, literal):
             f"classify_tool_output does not recognize it — a marker in "
             f"grounding.py has drifted from the source string"
         )
+
+
+def test_specs_unparseable_marker_is_covered():
+    """The `did NOT run` literal lives ONLY in the shared
+    `_unparseable_specs_directive` helper, not inline in any `_*_impl`. It is
+    the marker for the truncated-specs_json → fabricated-peaks failure that
+    motivated this feature, so a walk that silently stops covering it would
+    leave the most important marker unguarded while still reporting green."""
+    covered = {tool for tool, lit in _CASES if "did NOT run" in lit}
+    assert covered == {
+        "batch_query_table", "batch_aggregate", "batch_summarize_trend",
+    }, f"specs_unparseable marker not collected for the batch tools: {covered}"
