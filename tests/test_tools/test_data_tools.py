@@ -624,8 +624,8 @@ def test_summarize_trend_first_last_peak_trough():
     s = json.loads(raw)["summary"]
     assert s["first"]["period"] == "2024-11"
     assert s["last"]["period"] == "2025-03"
-    assert s["peak"]["period"] == "2025-03"     # 1100 is the max
-    assert s["trough"]["period"] == "2024-12"   # 250 is the min
+    assert s["peak_all_time"]["period"] == "2025-03"     # 1100 is the max
+    assert s["trough_all_time"]["period"] == "2024-12"   # 250 is the min
 
 
 def test_summarize_trend_detects_missing_month():
@@ -1332,7 +1332,7 @@ def test_summarize_trend_with_partial_values_still_trends():
 # ── threshold crossings in summarize_trend ──────────────────────────────────
 #
 # "Did TSR spike recently / cross the threshold?" was unanswerable from the
-# summary: `peak` is the GLOBAL peak (2024-09 on the real case), `slope` reads
+# summary: `peak_all_time` is global (2024-09 on the real case), `slope` reads
 # as declining, and the catalog's risk_threshold never appeared in the output.
 # The 2025 breach (Apr 27.4, May 20.2 vs a threshold of 20) was visible only to
 # whoever eyeballed 18 raw points AND already knew the threshold.
@@ -1358,13 +1358,13 @@ def test_trend_reports_threshold_crossings():
 
 
 def test_latest_breach_is_the_recent_one_not_the_global_peak():
-    """The whole point — `peak` points at 2024; a 'recent' question needs the
+    """The whole point — `peak_all_time` points at 2024; a 'recent' question needs the
     most recent CROSSING."""
     rows = [{"trans_month": f"{y}-{m:02d}-01", "tot_struct_risk_score": v}
             for y, m, v in [(2024, 9, 39.6), (2024, 10, 34.8), (2025, 1, 7.4),
                             (2025, 4, 27.4), (2025, 5, 20.2), (2025, 6, 7.7)]]
     s = _trend_summary(rows)
-    assert s["peak"]["period"] == "2024-09"          # unchanged
+    assert s["peak_all_time"]["period"] == "2024-09"          # unchanged
     assert s["threshold"]["latest_breach"]["period"] == "2025-05"
 
 
@@ -1449,3 +1449,76 @@ def test_sample_advice_matches_the_sampling_actually_used():
         assert "FIRST rows in TABLE ORDER" not in advice
     else:
         assert "FIRST rows in TABLE ORDER" in advice
+
+
+# ── join / transaction_detail shape defects ─────────────────────────────────
+
+def _two_table_gw(left, right):
+    gw = LocalDataGateway(case_data={"C": {"spends": left, "model_scores_transaction": right}})
+    gw.set_case("C")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    return gw
+
+
+def test_join_flags_fan_out_when_the_right_key_repeats():
+    """9,021 joined rows from 8,888 spends on the real case, because 64
+    timestamps repeat in the transaction table. Unflagged, `matched_rows` reads
+    as a transaction count and every downstream total is inflated."""
+    left = [{"Timestamp": "2025-01-01 10:00:00", "Amount": "100"}]
+    right = [{"txn_date_time": "2025-01-01 10:00:00", "tot_struct_risk_score": "21"},
+             {"txn_date_time": "2025-01-01 10:00:00", "tot_struct_risk_score": "22"}]
+    _two_table_gw(left, right)
+    j = json.loads(data_tools._join_table_impl(
+        left_table="spends", right_table="model_scores_transaction",
+        left_on="Timestamp", right_on="txn_date_time"))
+    assert j["matched_rows"] == 2 and j["left_rows_after_filter"] == 1
+    assert j["fan_out"]["detected"] is True
+    assert "do NOT count them" in j["fan_out"]["note"]
+
+
+def test_join_without_fan_out_has_no_flag():
+    left = [{"Timestamp": "2025-01-01 10:00:00", "Amount": "100"}]
+    right = [{"txn_date_time": "2025-01-01 10:00:00", "tot_struct_risk_score": "21"}]
+    _two_table_gw(left, right)
+    j = json.loads(data_tools._join_table_impl(
+        left_table="spends", right_table="model_scores_transaction",
+        left_on="Timestamp", right_on="txn_date_time"))
+    assert "fan_out" not in j
+
+
+def test_transaction_detail_states_the_denominator_of_its_join_counts():
+    """`limit=3` reported with_model_scores=3 beside transactions_selected=8888,
+    which reads as "only 3 of 8,888 are model-scored"."""
+    left = [{"Timestamp": f"2025-01-01 10:00:0{i}", "Amount": "100"} for i in range(5)]
+    right = [{"txn_date_time": f"2025-01-01 10:00:0{i}",
+              "tot_struct_risk_score": "21"} for i in range(5)]
+    _two_table_gw(left, right)
+    d = json.loads(data_tools._transaction_detail_impl(limit=2))
+    assert d["transactions_selected"] == 5
+    assert d["transactions_examined"] == 2
+    assert "NOT the 5 selected" in d["joined_match_counts_note"]
+
+    full = json.loads(data_tools._transaction_detail_impl())
+    assert full["transactions_examined"] == 5
+    assert "NOT the" not in full["joined_match_counts_note"]
+
+
+def test_driver_values_survive_rows_missing_the_joined_columns():
+    """Regression: the resolver cached a column name from a row that HAD it and
+    then indexed a row that didn't — `transaction_detail` is a LEFT join, so
+    key sets differ. Raised KeyError on the first unmatched row."""
+    left = [{"Timestamp": "2025-01-01 10:00:00", "Amount": "100"},
+            {"Timestamp": "2025-01-02 10:00:00", "Amount": "200"}]
+    right = [{"txn_date_time": "2025-01-01 10:00:00", "cbr_score": "700"}]
+    gw = LocalDataGateway(case_data={"C": {
+        "spends": left, "model_scores_transaction": right,
+        "score_drivers_transaction": [
+            {"txn_date_time": "2025-01-01 10:00:00", "top_cdss1": "cbr_score"},
+            {"txn_date_time": "2025-01-02 10:00:00", "top_cdss1": "cbr_score"},
+        ]}})
+    gw.set_case("C")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    d = json.loads(data_tools._transaction_detail_impl())   # must not raise
+    assert d["rows_returned"] == 2
+    with_vals = [r for r in d["rows"] if "driver_values" in r]
+    assert len(with_vals) == 1, "only the joined row can carry a driver value"

@@ -1941,11 +1941,34 @@ def _join_table_impl(
         "truncated": bool(truncation_notes),
         "rows": merged,
     }
+    # FAN-OUT. When the right key is not unique, one left row matches several
+    # right rows and `matched_rows` exceeds the left side — 9,021 joined rows
+    # from 8,888 spends, because 64 timestamps repeat in the transaction table
+    # (worst case 5 rows on one instant). Unflagged, `matched_rows` reads as a
+    # transaction count and every downstream total is inflated. This is the
+    # same failure family as the top-N share error: a number that looks like
+    # an answer but is measured over the wrong set.
+    if matched_n > left_n:
+        response["fan_out"] = {
+            "detected": True,
+            "note": (
+                f"{matched_n:,} joined rows from {left_n:,} left rows — the "
+                f"right key `{r_on}` is NOT unique, so one left row matched "
+                f"several right rows. Joined rows are NOT distinct "
+                f"{lt} records: do NOT count them as such, and do not SUM a "
+                f"left-side column over them (it double-counts). Aggregate on "
+                f"the left table directly, or de-duplicate on `{l_on}` first."
+            ),
+        }
     if truncation_notes:
         response["truncation_note"] = ", ".join(truncation_notes)
         response["count_advice"] = (
-            "matched_rows is the true join count; the rows array is a display "
-            "sample and may be truncated."
+            "matched_rows is the true JOINED-ROW count (see fan_out if present, "
+            "it may exceed the number of distinct left records); the rows array "
+            "is a display sample and may be truncated — do NOT count its "
+            "entries, and do not characterize the full set from it. Use "
+            "`summarize_by_group` or `aggregate_column` on the source table for "
+            "distributions and totals."
         )
     out = json.dumps(response, indent=2, default=str)
     _log_result("join_table", result=out,
@@ -2046,13 +2069,19 @@ _DRIVER_VALUE_SUFFIXES = ("_max", "_min", "_mean")
 
 def _resolve_driver_feature(row: dict, feature: str, table: str,
                             cache: dict) -> str | None:
-    """Real column in `row` holding `feature`'s value, or None if absent.
+    """Real column in `row` holding `feature`'s value, or None if absent here.
 
-    Cached per feature: the key set is identical across rows of one table, so
-    the (potentially ~250-column) resolution runs once per distinct driver.
+    The cache saves re-running a (potentially ~250-column) resolution per
+    distinct driver, but it stores only the resolved NAME — membership is
+    re-checked against the row every time. Rows do NOT share a key set:
+    `transaction_detail` merges a LEFT join, so a transaction with no
+    `model_scores_transaction` match simply lacks those columns. Trusting the
+    cached name blind raised `KeyError: 'cust_intr_extnl_unscr_tt_debt_srvc_rt1'`
+    on the first such row.
     """
     if feature in cache:
-        return cache[feature]
+        real = cache[feature]
+        return real if (real is not None and real in row) else None
     real = _resolve_real_column([row], feature, table)
     if real not in row:
         real = next((c for s in _DRIVER_VALUE_SUFFIXES
@@ -2079,8 +2108,11 @@ def _attach_driver_values(merged: dict, driver_names: list[str],
     values: dict = {}
     for feature in driver_names:
         real = _resolve_driver_feature(merged, feature, score_table, resolve_cache)
-        if real is not None and merged[real] not in ("", None):
-            values[feature] = merged[real]
+        if real is None:
+            continue
+        val = merged.get(real)      # .get, not [] — see the resolver's note
+        if val not in ("", None):
+            values[feature] = val
     return values
 
 
@@ -2256,10 +2288,23 @@ def _transaction_detail_impl(
     response: dict[str, Any] = {
         "base_table": base_t,
         "transactions_selected": n_txn,
+        # The join counts are measured over the rows this call actually
+        # MERGED, which `limit` truncates — they are NOT out of
+        # `transactions_selected`. Stating the denominator explicitly matters:
+        # `limit=3` reported `with_model_scores: 3` beside
+        # `transactions_selected: 8888`, which reads as "only 3 of 8,888
+        # transactions are model-scored" when the true figure is 8,866.
+        "transactions_examined": matched_n,
         "with_model_scores": with_scores,
         "joined_match_counts": {t: match_counts[t] for t in join_tables},
+        "joined_match_counts_note": (
+            f"counts are out of transactions_examined ({matched_n:,})"
+            + (f", NOT the {n_txn:,} selected — `limit` truncated the merge, so "
+               f"these coverage figures describe the examined subset only"
+               if matched_n < n_txn else "")
+        ),
         "merchant_amount_coverage": (
-            f"{n_with_merchant} of {matched_n} selected transactions have a "
+            f"{n_with_merchant} of {matched_n} examined transactions have a "
             f"settled spend (so carry Merchant Name + Amount); the other "
             f"{matched_n - n_with_merchant} are model-scored auths/declines that "
             f"never settled — merchant/amount are legitimately absent for those, "
@@ -3159,8 +3204,12 @@ def _summarize_trend_impl(
         "n_records": sum(s["n_records"] for s in series),
         "first": {"period": first["period"], "value": first["value"]},
         "last":  {"period": last["period"],  "value": last["value"]},
-        "peak":  {"period": peak["period"],  "value": peak["value"]},
-        "trough":{"period": trough["period"],"value": trough["value"]},
+        # Named `*_all_time` because these are the GLOBAL extremes over the
+        # whole series. Called `peak`, it read as "the peak" and got quoted for
+        # "recent spike" questions, pointing a year off — see `threshold` below,
+        # which is what a recency question actually needs.
+        "peak_all_time":   {"period": peak["period"],   "value": peak["value"]},
+        "trough_all_time": {"period": trough["period"], "value": trough["value"]},
         "total":  _format_aggregate(total, value_column, "sum"),
         "mean_per_bucket": _format_aggregate(mean_v, value_column, "mean"),
         "slope_per_bucket": (
