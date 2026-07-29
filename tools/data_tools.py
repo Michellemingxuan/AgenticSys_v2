@@ -1180,6 +1180,37 @@ def format_tail_group(n: int) -> str:
     return f"({n} others)"
 
 
+# How many breaching periods to list. The count and the LATEST one carry the
+# answer; a full list on a long series would crowd out the trend itself.
+_MAX_BREACH_PERIODS = 12
+
+
+def _column_threshold(real_table: str, real_col: str) -> dict | None:
+    """`{"value", "direction"}` for a column's catalog risk threshold, or None.
+
+    Catalog thresholds are keyed by CANONICAL column name while the trend
+    payload reports the REAL one (`tot_struct_risk_score` vs
+    `tot_struct_risk_score_max` in the real monthly export), so match through
+    aliases and normalization the same way `_resolve_real_column` does —
+    otherwise every real-data column silently has no threshold.
+    """
+    if _catalog is None or not real_col:
+        return None
+    target = _normalize(real_col)
+    for ct in _resolve_canonical_tables(real_table):
+        thresholds = _catalog.get_thresholds(ct)
+        if not thresholds:
+            continue
+        cols = (_catalog._profiles.get(ct, {}).get("columns", {}) or {})
+        for canonical, spec in thresholds.items():
+            if canonical == real_col or _normalize(canonical) == target:
+                return spec
+            aliases = (cols.get(canonical) or {}).get("aliases") or []
+            if real_col in aliases or any(_normalize(a) == target for a in aliases):
+                return spec
+    return None
+
+
 def _search_tokens(text: str) -> list[str]:
     """Lowercase alphanumeric tokens, function words removed."""
     return [t for t in re.findall(r"[a-z0-9]+", (text or "").lower())
@@ -3139,6 +3170,33 @@ def _summarize_trend_impl(
         ),
         "missing_periods": missing,  # empty for day/week or when fully covered
     }
+
+    # Threshold crossings. Without this, "did TSR spike recently / cross the
+    # threshold?" is unanswerable from the summary: `peak` is the GLOBAL peak
+    # (2024-09 on the case that surfaced this), `slope` reads as declining, and
+    # the catalog's `risk_threshold` never appeared in the output at all — so a
+    # genuine 2025 breach (Apr 27.4, May 20.2 against a threshold of 20) was
+    # visible only to whoever eyeballed 18 raw series points AND already knew
+    # the threshold. `latest_breach` is the one a "recent" question needs.
+    thresh = _column_threshold(real_table, value_column)
+    if thresh is not None:
+        limit = thresh["value"]
+        above = (thresh.get("direction") or "above") == "above"
+        breached = [
+            s for s in series
+            if ((s["raw_value"] > limit) if above else (s["raw_value"] < limit))
+        ]
+        summary["threshold"] = {
+            "value": limit,
+            "risky_when": f"{'>' if above else '<'} {limit}",
+            "n_breaching_periods": len(breached),
+            # Most recent first — a "recent spike" question cares about the tail.
+            "breaching_periods": [s["period"] for s in breached][-_MAX_BREACH_PERIODS:],
+            "latest_breach": (
+                {"period": breached[-1]["period"], "value": breached[-1]["value"]}
+                if breached else None
+            ),
+        }
 
     payload = {
         "table": real_table,

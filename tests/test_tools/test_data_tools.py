@@ -1327,3 +1327,92 @@ def test_summarize_trend_with_partial_values_still_trends():
         table_name="t", value_column="score", time_column="month", op="max")
     assert "DATA GAP" not in out
     assert "series" in out
+
+
+# ── threshold crossings in summarize_trend ──────────────────────────────────
+#
+# "Did TSR spike recently / cross the threshold?" was unanswerable from the
+# summary: `peak` is the GLOBAL peak (2024-09 on the real case), `slope` reads
+# as declining, and the catalog's risk_threshold never appeared in the output.
+# The 2025 breach (Apr 27.4, May 20.2 vs a threshold of 20) was visible only to
+# whoever eyeballed 18 raw points AND already knew the threshold.
+
+def _trend_summary(rows, value_column="tot_struct_risk_score",
+                   table="model_scores", case="CASE-T"):
+    gw = LocalDataGateway(case_data={case: {"model_scores": rows}})
+    gw.set_case(case)
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    out = data_tools._summarize_trend_impl(
+        table_name=table, value_column=value_column,
+        time_column="trans_month", op="max")
+    return json.loads(out)["summary"]
+
+
+def test_trend_reports_threshold_crossings():
+    rows = [{"trans_month": f"2025-{m:02d}-01", "tot_struct_risk_score": v}
+            for m, v in [(1, 7.4), (2, 12.8), (3, 10.4), (4, 27.4), (5, 20.2)]]
+    t = _trend_summary(rows)["threshold"]
+    assert t["value"] == 20
+    assert t["risky_when"] == "> 20"
+    assert t["breaching_periods"] == ["2025-04", "2025-05"]
+
+
+def test_latest_breach_is_the_recent_one_not_the_global_peak():
+    """The whole point — `peak` points at 2024; a 'recent' question needs the
+    most recent CROSSING."""
+    rows = [{"trans_month": f"{y}-{m:02d}-01", "tot_struct_risk_score": v}
+            for y, m, v in [(2024, 9, 39.6), (2024, 10, 34.8), (2025, 1, 7.4),
+                            (2025, 4, 27.4), (2025, 5, 20.2), (2025, 6, 7.7)]]
+    s = _trend_summary(rows)
+    assert s["peak"]["period"] == "2024-09"          # unchanged
+    assert s["threshold"]["latest_breach"]["period"] == "2025-05"
+
+
+def test_threshold_resolves_through_the_real_data_alias():
+    """The monthly export ships `tot_struct_risk_score_max`; catalog thresholds
+    are keyed by the canonical name. Without alias matching every real-data
+    column silently has no threshold."""
+    rows = [{"trans_month": "2025-04-01", "tot_struct_risk_score_max": 27.4}]
+    t = _trend_summary(rows, value_column="tot_struct_risk_score")["threshold"]
+    assert t["value"] == 20 and t["n_breaching_periods"] == 1
+
+
+def test_below_direction_breaches_when_under_the_limit():
+    """`last_cycle_cut_revolve_rate` is risky BELOW 0.46 — an above-only rule
+    would report zero breaches on exactly the risky months."""
+    rows = [{"trans_month": "2025-01-01", "last_cycle_cut_revolve_rate": 0.80},
+            {"trans_month": "2025-02-01", "last_cycle_cut_revolve_rate": 0.31}]
+    t = _trend_summary(rows, value_column="last_cycle_cut_revolve_rate")["threshold"]
+    assert t["risky_when"].startswith("<")
+    assert t["breaching_periods"] == ["2025-02"]
+
+
+def test_no_breaches_reports_none_not_a_missing_block():
+    rows = [{"trans_month": "2025-01-01", "tot_struct_risk_score": 5.0},
+            {"trans_month": "2025-02-01", "tot_struct_risk_score": 6.0}]
+    t = _trend_summary(rows)["threshold"]
+    assert t["n_breaching_periods"] == 0
+    assert t["latest_breach"] is None
+
+
+def test_column_without_a_catalog_threshold_gets_no_block():
+    rows = [{"trans_month": "2025-01-01", "amt": 5.0},
+            {"trans_month": "2025-02-01", "amt": 6.0}]
+    gw = LocalDataGateway(case_data={"C": {"t": rows}})
+    gw.set_case("C")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    s = json.loads(data_tools._summarize_trend_impl(
+        table_name="t", value_column="amt", time_column="trans_month",
+        op="max"))["summary"]
+    assert "threshold" not in s
+
+
+def test_breaching_period_list_is_bounded_but_the_count_is_not():
+    rows = [{"trans_month": f"2024-{m:02d}-01", "tot_struct_risk_score": 25.0}
+            for m in range(1, 13)]
+    rows += [{"trans_month": f"2025-{m:02d}-01", "tot_struct_risk_score": 25.0}
+             for m in range(1, 5)]
+    t = _trend_summary(rows)["threshold"]
+    assert t["n_breaching_periods"] == 16
+    assert len(t["breaching_periods"]) == data_tools._MAX_BREACH_PERIODS
+    assert t["breaching_periods"][-1] == "2025-04", "keep the most RECENT"
