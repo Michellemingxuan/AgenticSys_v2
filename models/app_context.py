@@ -92,3 +92,11 @@ class AppContext:
     # Keyed by specialist name; each value: {"sub_question", "findings",
     # "tool_calls"}. report_agent is excluded (not a data specialist).
     _specialist_turn_records: dict = field(default_factory=dict)
+    # Specialists whose run STILL rested on a failed tool call after the
+    # grounding retry (see agent_factories/agent_tools/grounding.py). Their
+    # answer is returned to the orchestrator with a degraded banner, but is
+    # kept OUT of every cross-turn channel — distiller/KB, Amem, the qa_cache
+    # tool_calls that feed episodic, and the intra-turn dedup cache — so a
+    # wrong answer this turn cannot ground the next one.
+    # Keyed by specialist name; each value: list of the grounding error dicts.
+    _degraded_specialists: dict = field(default_factory=dict)

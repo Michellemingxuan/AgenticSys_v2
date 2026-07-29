@@ -113,3 +113,42 @@ def test_render_blocks_empty_and_nonempty():
     assert "EPISODIC" in b and "CDSS" in b and "2024-11" in b
     s = render_specialist_block([{"sub_question": "x", "sub_answer": "CDSS spiked 2024-11"}])
     assert "EPISODIC" in s and "2024-11" in s
+
+
+# ── degraded sub-answers must not become next-turn context ──────────────────
+#
+# agent_tool quarantines a specialist whose answer rested on a FAILED tool call;
+# conductor projects that onto the cached tool_call as `degraded: True`. If these
+# still reached episodic, one broken tool call would ground every later turn —
+# the exact propagation this whole path exists to stop.
+
+def _degraded_call(tool, subq, payload):
+    return {**_call(tool, subq, payload), "degraded": True}
+
+
+def test_build_records_drops_degraded_sub_answers():
+    recs = build_records({"k": _entry(1, "Q", [
+        _degraded_call("modeling", "trend?", {"findings": "TSR fell to 12.0"}),
+        _call("bureau", "fico?", {"findings": "FICO 712"}),
+    ])})
+    subs = recs[0]["sub_answers"]
+    assert [s["specialist"] for s in subs] == ["bureau"]
+    assert "12.0" not in str(subs)
+
+
+def test_build_records_keeps_explicitly_ungraded_sub_answers():
+    """`degraded: False` and a missing key both mean 'grounded' — entries cached
+    before this field existed must not be dropped wholesale."""
+    recs = build_records({"k": _entry(1, "Q", [
+        {**_call("modeling", "trend?", {"findings": "TSR 39.6"}), "degraded": False},
+        _call("bureau", "fico?", {"findings": "FICO 712"}),
+    ])})
+    assert [s["specialist"] for s in recs[0]["sub_answers"]] == ["modeling", "bureau"]
+
+
+def test_degraded_specialist_is_invisible_to_its_own_episodic():
+    """The specialist itself must not read back its own ungrounded answer."""
+    recs = build_records({"k": _entry(1, "Q", [
+        _degraded_call("modeling", "trend?", {"findings": "TSR fell to 12.0"}),
+    ])})
+    assert select_specialist_episodic(recs, "modeling", k=5) == []

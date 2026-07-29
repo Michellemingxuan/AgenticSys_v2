@@ -15,6 +15,7 @@ from tools.node_trace import _open_node, attach_extra, attach_tag
 from agent_factories.agent_tools.series_extract import _extract_data_tool_outputs
 from agent_factories.agent_tools.distiller_pass import _distill_and_persist
 from agent_factories.agent_tools.auto_chart import _auto_chart_from_tool_outputs
+from agent_factories.agent_tools.grounding import scan_tool_errors
 from agent_factories.agent_tools.specialist_input_tool import (
     _SPECIALIST_HISTORY_KEEP_RECENT_USER_MESSAGES,
     _ELIDED_SPECIALIST_TOOL_OUTPUT,
@@ -83,6 +84,117 @@ def _record_failure(app_ctx, name: str, sub_question: str,
         f"If retry is appropriate, narrow the sub-question (e.g., limit to "
         f"a single metric or period)."
     )
+
+
+# Per-reason recovery guidance handed back to a specialist whose run rested on
+# a failed tool call. Keep each line ACTIONABLE — the model gets one retry, so
+# "your call failed" is not enough; it needs the specific next move. Keys must
+# stay in sync with `grounding.classify_tool_output`'s return values (the
+# drift-guard test in tests/test_tools/test_data_tools_error_markers.py pins the
+# marker strings; `test_ungrounded_retry.py` pins this mapping's coverage).
+_DEGRADED_RECOVERY = {
+    "specs_unparseable":
+        "the specs_json argument was malformed so the tool NEVER RAN — re-send "
+        "it as a valid JSON array of objects, or fall back to the single-spec "
+        "tool (query_table / aggregate_column / summarize_trend) one call at a time",
+    "no_buckets":
+        "the date column produced no parseable periods — call get_table_schema "
+        "on that table, read the date column's actual format, and re-issue with "
+        "the correct date_column (or a different one)",
+    "no_groups":
+        "the group column produced no parseable values — call get_table_schema "
+        "and re-issue with a column that actually holds values for this case",
+    "table_not_found":
+        "that table does not exist for this case — call list_available_tables "
+        "and pick one that does",
+    "data_layer_uninitialized":
+        "the data layer returned nothing — do NOT report numbers; say the data "
+        "is unavailable for this sub-question",
+    "spec_rejected":
+        "the tool rejected your arguments — re-read its schema and re-issue "
+        "with corrected column names / filter values",
+}
+
+
+def _banner_payload(payload, banner: str) -> str:
+    """Prefix `banner` onto a specialist payload, whatever shape it arrived in.
+
+    Domain specialists run with `output_type=SpecialistOutput`, so
+    `redact_payload` hands back a PYDANTIC MODEL, not a string — a
+    str-only guard here would silently no-op on exactly the runs that need the
+    banner. The wrapper is annotated `-> str` and the SDK stringifies the return
+    anyway, so serializing here loses nothing.
+    """
+    if isinstance(payload, str):
+        body = payload
+    elif hasattr(payload, "model_dump_json"):
+        try:
+            body = payload.model_dump_json()
+        except Exception:  # noqa: BLE001
+            body = str(payload)
+    else:
+        try:
+            body = json.dumps(payload, default=str)
+        except (TypeError, ValueError):
+            body = str(payload)
+    return f"{banner}\n{body}"
+
+
+class _SkipPersistence(Exception):
+    """Internal signal: this run must not reach the KB / Amem / chart channels.
+
+    Raised (and caught silently) inside the persistence block rather than
+    wrapping that block in an `if` so the degraded path shares the existing
+    belt-and-suspenders fence and the block keeps its indentation — the guard
+    is one line at the top instead of a re-indent of forty.
+    """
+
+
+def _degraded_directive(errors: list[dict]) -> str:
+    """The retry instruction for a run that rested on failed tool calls.
+
+    Names each broken tool, why it broke, and what to do instead — then makes
+    the no-data outcome explicitly acceptable, so the retry's escape hatch is
+    "report the gap" rather than "invent a number", which is the failure mode
+    this whole path exists to stop.
+    """
+    lines = []
+    for err in errors:
+        tool = err.get("tool", "?")
+        reason = err.get("reason", "")
+        fix = _DEGRADED_RECOVERY.get(reason, "re-issue the call with corrected arguments")
+        lines.append(f"  • {tool} failed ({reason}): {fix}.")
+    return (
+        "[GROUNDING CHECK — your answer above rests on tool calls that FAILED. "
+        "The numbers in it are therefore not supported by data.\n"
+        + "\n".join(lines)
+        + "\nRe-do the analysis: fix and re-issue the failed call(s) FIRST, then "
+        "answer from what actually came back. If the data genuinely is not "
+        "available for this case, say so plainly in `findings` and leave the "
+        "numbers out — an honest data gap is a CORRECT answer here, an "
+        "unsupported number is not.]"
+    )
+
+
+def _retry_input(result, errors: list[dict], fallback):
+    """Build the retry run-input: this run's own transcript + the directive.
+
+    Continuing from the transcript (rather than restarting from the bare
+    sub-question) is what makes the retry cheap and targeted — the specialist
+    can see the exact failed call and its error text, so it fixes THAT call
+    instead of re-exploring from scratch. Falls back to the original input when
+    the transcript can't be read.
+    """
+    directive = _degraded_directive(errors)
+    try:
+        prior = result.to_input_list()
+    except (AttributeError, TypeError):
+        prior = None
+    if not isinstance(prior, list) or not prior:
+        base = fallback if isinstance(fallback, list) else [
+            {"role": "user", "content": str(fallback)}]
+        return base + [{"role": "user", "content": directive}]
+    return prior + [{"role": "user", "content": directive}]
 
 
 def _normalize_subq(text: str) -> str:
@@ -288,9 +400,20 @@ def agent_tool(
         # truncate long JSON outputs, causing parse failures on the first
         # attempt. A retry often succeeds because the model produces a
         # shorter response. Max 2 attempts (1 initial + 1 retry).
+        #
+        # The SAME budget also covers the grounding retry: a run that completes
+        # cleanly but rested on a FAILED tool call is retried once with a
+        # directive naming the broken calls (see `_degraded_directive`). Both
+        # retry triggers share the 2-attempt cap so a specialist can never cost
+        # more than 2 inner runs, whichever way it went wrong.
         _MAX_SPECIALIST_ATTEMPTS = 2
         result = None
         last_exc = None
+        tool_errors: list[dict] = []
+        # Which trigger caused the pending retry — tagged inside the retry's own
+        # NodeTrace block so a trace reader can tell an ungrounded retry (built
+        # on a failed tool call) from a ModelBehaviorError retry.
+        retry_kind = "retry"
         node_store = getattr(app_ctx, "_node_trace_store", None)
         node_label = name if name == "report_agent" else f"specialist.{name}"
 
@@ -308,7 +431,7 @@ def agent_tool(
                             if prior:
                                 attach_tag("warm_specialist")
                         else:
-                            attach_tag("retry")
+                            attach_tag(retry_kind)
                         result = await asyncio.wait_for(
                             Runner.run(
                                 inner, run_input, context=app_ctx,
@@ -316,6 +439,17 @@ def agent_tool(
                             ),
                             timeout=timeout_s,
                         )
+                        # Grounding check, INSIDE the node so the tags land on
+                        # this specialist's own trace block: the run did not
+                        # raise, but it may have built its answer on a tool
+                        # call that failed and was never re-issued.
+                        tool_errors = scan_tool_errors(result)
+                        if tool_errors:
+                            attach_tag("ungrounded")
+                            attach_extra(
+                                n_failed_tools=len(tool_errors),
+                                failed_tools=[e["tool"] for e in tool_errors],
+                            )
                 finally:
                     LLM_CALL_KIND.reset(kind_token)
                 timer.record(
@@ -324,7 +458,18 @@ def agent_tool(
                     max_turns=max_turns,
                     attempt=_attempt,
                 )
-                break  # success
+                if tool_errors and _attempt + 1 < _MAX_SPECIALIST_ATTEMPTS:
+                    if logger is not None:
+                        logger.log("specialist_ungrounded_retry", {
+                            "specialist": name,
+                            "attempt": _attempt,
+                            "errors": tool_errors,
+                        })
+                    retry_kind = "ungrounded_retry"
+                    run_input = _retry_input(result, tool_errors, run_input)
+                    result = None
+                    continue
+                break  # success (grounded, or out of retry budget)
             except MaxTurnsExceeded as exc:
                 timer.summary(
                     outcome="failed",
@@ -434,6 +579,23 @@ def agent_tool(
                 last_exc,
             )
 
+        # QUARANTINE: the retry above was already spent and the run STILL rests
+        # on a failed tool call. The answer is returned (the orchestrator may
+        # still need the qualitative part, and dropping it entirely would look
+        # like a silent failure), but it is fenced off from every channel that
+        # would carry it into a LATER turn — see `_degraded_specialists`.
+        degraded = bool(tool_errors)
+        if degraded:
+            if logger is not None:
+                logger.log("specialist_ungrounded", {
+                    "specialist": name,
+                    "sub_question": redacted_in[:500],
+                    "errors": tool_errors,
+                })
+            registry = getattr(app_ctx, "_degraded_specialists", None)
+            if isinstance(registry, dict):
+                registry[name] = tool_errors
+
         t0 = time.perf_counter()
         try:
             payload = redact_payload(result.final_output)
@@ -459,6 +621,21 @@ def agent_tool(
         if isinstance(payload, str) and name != "report_agent":
             payload = f"[Sub-question: {redacted_in}]\n{payload}"
 
+        # Degraded banner: the orchestrator must not synthesize these numbers
+        # into the FinalAnswer as though they were measured. Stated in the same
+        # `[...]` sentinel style as `[FAILED ...]` so the orchestrator prompt's
+        # existing "treat bracketed sentinels as control text" handling applies.
+        if degraded:
+            failed = ", ".join(
+                f"{e['tool']} ({e['reason']})" for e in tool_errors)
+            payload = _banner_payload(payload, (
+                f"[DEGRADED {name} — this answer rests on tool calls that "
+                f"FAILED and did not recover after a retry: {failed}. "
+                f"Any numbers below are UNSUPPORTED — do not repeat them as "
+                f"measured values. Treat this domain as a data_gap and note it "
+                f"in your flags.]"
+            ))
+
         timer.record(
             "specialist_output_redact",
             int((time.perf_counter() - t0) * 1000),
@@ -471,9 +648,20 @@ def agent_tool(
         # the critical path). Server.py awaits all pending distillers at
         # end-of-turn so the KB is fully populated before the next turn's
         # warmth digest is built.
+        #
+        # A DEGRADED run skips this whole block. The distiller would mint
+        # KnowledgePoints from unsupported numbers straight into specialist_kb
+        # (→ next turn's warmth digest), and the turn record would be written
+        # durably to Amem (→ every later session for this case). Auto-chart is
+        # skipped for the same reason — a chart is a claim, and this run has no
+        # data behind it. The dedup cache is skipped further down so a repeat of
+        # the same sub-question this turn gets a real re-run, not a cached
+        # degraded answer.
         pending = getattr(app_ctx, "_pending_distillers", None)
         t0 = time.perf_counter()
         try:
+            if degraded:
+                raise _SkipPersistence
             tool_outputs = _extract_data_tool_outputs(result)
             if logger is not None and name != "report_agent":
                 logger.log("distiller_tool_outputs_extracted", {
@@ -517,6 +705,8 @@ def agent_tool(
                 )
                 if isinstance(pending, list):
                     pending.append(chart_task)
+        except _SkipPersistence:
+            pass  # degraded run — intentionally persists nothing
         except Exception as exc:  # noqa: BLE001 - belt-and-suspenders
             if logger is not None:
                 logger.log("distiller_outer_failure", {
@@ -530,10 +720,13 @@ def agent_tool(
             pending_distillers=len(pending) if isinstance(pending, list) else None,
         )
 
-        if isinstance(seen, dict):
+        # Degraded answers are NOT cached: a re-ask within this turn should get
+        # a genuine re-run (the tool may work the second time), not a replay of
+        # the ungrounded answer.
+        if isinstance(seen, dict) and not degraded:
             seen[cache_key] = payload
         timer.summary(
-            outcome="ok",
+            outcome="degraded" if degraded else "ok",
             total_ms=int((time.perf_counter() - runner_started) * 1000),
             sub_question_chars=len(redacted_in),
         )

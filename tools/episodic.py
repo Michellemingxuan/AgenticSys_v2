@@ -59,6 +59,14 @@ def build_records(qa_cache: dict, window: int = EPISODIC_WINDOW) -> list[dict]:
     for e in entries:
         sub_answers = []
         for tc in e.get("tool_calls") or []:
+            # A degraded specialist answered from tool calls that FAILED (see
+            # agent_factories/agent_tools/grounding.py). Its numbers are
+            # unsupported, so it must not become context that the next turn
+            # reasons from — that is exactly how one wrong answer propagates
+            # forward. Dropped here rather than at write time so the cached
+            # payload stays intact for UI replay.
+            if tc.get("degraded"):
+                continue
             sa = _parse_sub_answer(tc.get("payload"))
             if sa is None:
                 continue

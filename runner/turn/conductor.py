@@ -129,6 +129,33 @@ _NO_REPORTS_NOTE = (
 )
 
 
+def _cacheable_tool_calls(tool_calls: list, degraded_names) -> list[dict]:
+    """The qa_cache projection of this turn's specialist calls.
+
+    Keeps the fields a cache-hit replay needs to repopulate the
+    orchestrator-flow / specialists panel, and stamps `degraded` for any
+    specialist whose answer rested on a tool call that FAILED and never
+    recovered (`agent_tool` registers those on `ctx._degraded_specialists`).
+
+    The payload of a degraded call is still cached — a replay must look
+    identical to the original turn — but `episodic.build_records` drops the
+    flagged entries, which is what stops one turn's ungrounded answer from
+    becoming the next turn's context.
+    """
+    names = set(degraded_names or ())
+    return [
+        {
+            "call_id": tc.get("call_id"),
+            "tool": tc.get("tool"),
+            "sub_question": tc.get("sub_question"),
+            "payload": tc.get("payload"),
+            "duration_ms": tc.get("duration_ms"),
+            "degraded": tc.get("tool") in names,
+        }
+        for tc in tool_calls
+    ]
+
+
 def _case_has_reports(case_id: str) -> bool:
     """True iff the case has at least one curated report (.md) to look up.
 
@@ -1480,6 +1507,8 @@ class TurnRunner:
         # "(no answer produced)" sentinel.
         if final_answer is not None and cache_key:
             timer_t0 = time.perf_counter()
+            _degraded_names = set(
+                getattr(self.ctx, "_degraded_specialists", None) or {})
             evicted_cache_entries = _store_cached_qa(sess, cache_key, {
                 "answer": answer_text,
                 "flags": list(flags or []),
@@ -1498,16 +1527,7 @@ class TurnRunner:
                 # orchestrator-flow / specialists panel. Without these, the
                 # cached-answer replay arrives with an empty reasoning trace
                 # and looks like a silent failure to the reviewer.
-                "tool_calls": [
-                    {
-                        "call_id": tc.get("call_id"),
-                        "tool": tc.get("tool"),
-                        "sub_question": tc.get("sub_question"),
-                        "payload": tc.get("payload"),
-                        "duration_ms": tc.get("duration_ms"),
-                    }
-                    for tc in tool_calls
-                ],
+                "tool_calls": _cacheable_tool_calls(tool_calls, _degraded_names),
             })
             sess.logger.log("qa_cache_store",
                             {"turn_id": turn_id, "norm_q": cache_key,
