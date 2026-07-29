@@ -1233,3 +1233,49 @@ def test_date_key_day_mmm_2digit_year():
 def test_date_key_tz_aware_datetime_already_covered():
     assert _date_key("2024-01-01 15:25:20.602+00:00") == (2024, 1, 1)
     assert _date_key("2024-01-01T15:25:20Z") == (2024, 1, 1)
+
+
+# ── summarize_by_group tail aggregate ───────────────────────────────────────
+def _group_gateway(rows):
+    gw = LocalDataGateway(case_data={"CASE-GRP": {"txns": rows}})
+    gw.set_case("CASE-GRP")
+    return gw
+
+
+def test_summarize_by_group_appends_a_tail_aggregate():
+    """A share/pie chart built from the top-N must still sum to the whole."""
+    rows = [{"merchant": f"M{i}", "amt": float(100 - i)} for i in range(40)]
+    data_tools.init_tools(_group_gateway(rows),
+                          DataCatalog(profile_dir="config/data_profiles"))
+
+    payload = json.loads(data_tools._summarize_by_group_impl(
+        table_name="txns", value_column="amt", group_column="merchant",
+        op="sum", top_n=5))
+
+    groups = payload["groups"]
+    assert groups[-1]["group"] == "(35 others)"
+    total = sum(g["raw_value"] for g in groups)
+    assert total == pytest.approx(sum(r["amt"] for r in rows))
+
+
+def test_summarize_by_group_no_tail_when_all_groups_fit():
+    rows = [{"merchant": f"M{i}", "amt": 10.0} for i in range(3)]
+    data_tools.init_tools(_group_gateway(rows),
+                          DataCatalog(profile_dir="config/data_profiles"))
+
+    payload = json.loads(data_tools._summarize_by_group_impl(
+        table_name="txns", value_column="amt", group_column="merchant",
+        op="sum", top_n=10))
+    assert not any("others" in g["group"] for g in payload["groups"])
+
+
+def test_summarize_by_group_no_tail_for_non_additive_ops():
+    """Summing per-group means is meaningless, so no tail row."""
+    rows = [{"merchant": f"M{i}", "amt": float(i)} for i in range(40)]
+    data_tools.init_tools(_group_gateway(rows),
+                          DataCatalog(profile_dir="config/data_profiles"))
+
+    payload = json.loads(data_tools._summarize_by_group_impl(
+        table_name="txns", value_column="amt", group_column="merchant",
+        op="mean", top_n=5))
+    assert not any("others" in g["group"] for g in payload["groups"])

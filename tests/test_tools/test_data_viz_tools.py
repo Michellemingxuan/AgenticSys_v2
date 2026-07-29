@@ -638,3 +638,65 @@ async def test_make_chart_table_kind_accepts_empty_y_fields(tmp_path):
     kp = ctx._specialist_kb["modeling"][0]
     assert kp["viz"]["kind"] == "table"
     assert kp["numbers"]
+
+
+@pytest.mark.asyncio
+async def test_make_chart_extends_retyped_points_from_the_registry(
+        tmp_path, monkeypatch):
+    """End-to-end: the model retypes 12 of 60 points; the chart renders 60."""
+    from tools import data_tools
+
+    full = [{"period": f"P{i:03d}", "raw_value": float(i)} for i in range(60)]
+    monkeypatch.setattr(data_tools, "_current_turn_id", lambda: "t")
+    monkeypatch.setattr(data_tools, "_series_registry_turn", "t")
+    monkeypatch.setattr(data_tools, "_series_registry", {"trend-1": full})
+
+    tool = build_make_chart_tool("modeling")
+    ctx = _make_ctx(tmp_path)
+    out = await tool.on_invoke_tool(
+        RunContextWrapper(ctx),
+        json.dumps({
+            "topic": "metric_trend",
+            "kind": "trend",
+            "claim": "Metric rises steadily across the window.",
+            "points": [{"period": f"P{i:03d}", "metric": float(i)}
+                       for i in range(0, 60, 5)],
+            "x_field": "period",
+            "y_fields": ["metric"],
+            "source_call": "summarize_trend('t','metric','trans_dt')",
+        }),
+    )
+
+    assert "[chart created]" in out
+    assert "60 rendered from the source series" in out
+    assert len(ctx._specialist_kb["modeling"][0]["numbers"]) == 60
+
+
+@pytest.mark.asyncio
+async def test_make_chart_leaves_points_alone_when_the_registry_is_empty(
+        tmp_path, monkeypatch):
+    """No registered series -> the model's points are used verbatim, exactly as
+    before this feature existed."""
+    from tools import data_tools
+
+    monkeypatch.setattr(data_tools, "_current_turn_id", lambda: "t")
+    monkeypatch.setattr(data_tools, "_series_registry_turn", "t")
+    monkeypatch.setattr(data_tools, "_series_registry", {})
+
+    tool = build_make_chart_tool("spend_payments")
+    ctx = _make_ctx(tmp_path)
+    out = await tool.on_invoke_tool(
+        RunContextWrapper(ctx),
+        json.dumps({
+            "topic": "monthly_spend_trend",
+            "kind": "trend",
+            "claim": "Spend rose 2.7x from Nov-2024 to Jan-2025.",
+            "points": _good_points(),
+            "x_field": "period",
+            "y_fields": ["value"],
+            "source_call": "summarize_trend('spends','Amount','Date')",
+        }),
+    )
+
+    assert "[chart created]" in out
+    assert ctx._specialist_kb["spend_payments"][0]["numbers"] == _good_points()
