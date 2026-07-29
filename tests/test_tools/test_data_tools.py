@@ -1416,3 +1416,36 @@ def test_breaching_period_list_is_bounded_but_the_count_is_not():
     assert t["n_breaching_periods"] == 16
     assert len(t["breaching_periods"]) == data_tools._MAX_BREACH_PERIODS
     assert t["breaching_periods"][-1] == "2025-04", "keep the most RECENT"
+
+
+def test_group_total_is_available_as_a_raw_number():
+    """`total_across_groups` is a FORMATTED string ("$3,927,582.20"). Anything
+    doing share arithmetic needs a number — re-parsing the formatted form is
+    exactly the transcription step that goes wrong."""
+    rows = [{"m": f"M{i}", "amt": 10.0} for i in range(3)]
+    gw = LocalDataGateway(case_data={"C": {"t": rows}})
+    gw.set_case("C")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    c = json.loads(data_tools._summarize_by_group_impl(
+        table_name="t", value_column="amt", group_column="m",
+        op="sum", top_n=10))["concentration"]
+    assert c["total_across_groups_raw"] == 30.0
+    assert isinstance(c["total_across_groups"], str)
+
+
+def test_sample_advice_matches_the_sampling_actually_used():
+    """The advice used to say "FIRST rows in TABLE ORDER" unconditionally,
+    contradicting truncation_note in the SAME payload once even-sampling
+    landed — two stories about the same rows."""
+    rows = [{"m": f"M{i}", "amt": float(i), "pad": "x" * 400} for i in range(200)]
+    gw = LocalDataGateway(case_data={"C": {"t": rows}})
+    gw.set_case("C")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    q = json.loads(data_tools._query_table_impl(table_name="t"))
+    assert q["truncated"]
+    note, advice = q["truncation_note"], q["count_advice"]
+    if "EVENLY-SPACED" in note:
+        assert "spread evenly" in advice
+        assert "FIRST rows in TABLE ORDER" not in advice
+    else:
+        assert "FIRST rows in TABLE ORDER" in advice

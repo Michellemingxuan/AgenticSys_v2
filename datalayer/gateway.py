@@ -15,6 +15,28 @@ from pathlib import Path
 from typing import Any
 
 
+
+def _strip_row(row: dict) -> dict:
+    """Trim padding from CSV cell values at the LOAD boundary.
+
+    The real exports pad string columns to fixed width — 8,587 of 8,888
+    `Merchant Name` cells on case 366132845011 carry trailing spaces. Filters
+    already tolerated it (`_apply_filter` compares stripped), but the padding
+    survived into OUTPUT: group labels, chart axes, quoted merchant names in
+    findings, and KB claims all rendered ragged, and two spellings of the same
+    merchant could not be compared as strings.
+
+    Fixed here rather than in each tool: one boundary, and every consumer —
+    filters, grouping, joins, labels — sees the same clean value. Keys are
+    trimmed too, since a padded HEADER would break column resolution outright.
+    """
+    out = {}
+    for k, v in row.items():
+        key = k.strip() if isinstance(k, str) else k
+        out[key] = v.strip() if isinstance(v, str) else v
+    return out
+
+
 class DataGateway(ABC):
     """Abstract data gateway. All queries are scoped to a case_id."""
 
@@ -171,7 +193,9 @@ class LocalDataGateway(DataGateway):
                 # column header (e.g. "﻿customer_name").
                 with open(csv_file, encoding="utf-8-sig") as f:
                     reader = csv.DictReader(f)
-                    case_data[case_id][table_name] = list(reader)
+                    case_data[case_id][table_name] = [
+                        _strip_row(row) for row in reader
+                    ]
 
             cls._rbind_payments(case_data[case_id])
 

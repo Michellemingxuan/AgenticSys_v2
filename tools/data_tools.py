@@ -1666,12 +1666,17 @@ def _query_table_impl(
             "match set from it."
         )
         if not sort_descriptor and limit_applied is None:
+            # Describe the sampling ACTUALLY used. This used to say "the FIRST
+            # rows in TABLE ORDER" unconditionally, contradicting the
+            # truncation_note in the same payload once even-sampling landed —
+            # the model was handed two different stories about the same rows.
+            how = ("spread evenly across the whole match set" if _even
+                   else "the FIRST rows in TABLE ORDER")
             advice += (
-                " These sample rows are the FIRST rows in TABLE ORDER (arbitrary "
-                "— they can ALL share one date/value and are NOT representative "
-                "of the matches). To characterize the matches, use "
-                "`summarize_by_group` for the distribution, or `sort_by`+`limit` "
-                "for the true top-N — never report this raw sample as the answer."
+                f" These sample rows are {how}, and are NOT a summary of the "
+                f"matches. To characterize them, use `summarize_by_group` for "
+                f"the distribution, or `sort_by`+`limit` for the true top-N — "
+                f"never report this raw sample as the answer."
             )
         response["count_advice"] = advice
 
@@ -3644,6 +3649,12 @@ def _summarize_by_group_impl(
         concentration = {
             "total_across_groups": _format_aggregate(total_value, value_column,
                                                      "sum" if op == "sum" else "count"),
+            # Raw companion to the formatted string above. Renderers and any
+            # share arithmetic need a NUMBER — parsing "$3,927,582.20" back out
+            # is exactly the kind of transcription step that goes wrong.
+            "total_across_groups_raw": (round(total_value, 4)
+                                        if isinstance(total_value, float)
+                                        else total_value),
             "top1_share": f"{top1_share * 100:.1f}%",
             "top3_share": f"{top3_share * 100:.1f}%",
             "top5_share": f"{top5_share * 100:.1f}%",

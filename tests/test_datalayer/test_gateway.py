@@ -164,3 +164,47 @@ def test_gateway_error_uses_neutral_path_token():
 
     assert gw._display_path("payments") == "<case>/payments.csv"
     assert "77165907010" not in gw._display_path("payments")
+
+
+# ── CSV padding is trimmed at the load boundary ─────────────────────────────
+#
+# Real exports pad string columns to fixed width — 8,587 of 8,888 `Merchant
+# Name` cells on case 366132845011. Filters already compared stripped, but the
+# padding reached OUTPUT: ragged chart labels, padded merchant names quoted in
+# findings and KB claims, and two spellings of one merchant that don't compare
+# equal as strings.
+
+def test_from_case_folders_trims_padded_cells(tmp_path):
+    case = tmp_path / "CASE-1"
+    case.mkdir()
+    (case / "spends.csv").write_text(
+        "Merchant Name ,Amount\n"
+        "S BERTRAM     ,100\n"
+        "  FRAYLICH,200\n"
+    )
+    gw = LocalDataGateway.from_case_folders(str(tmp_path))
+    gw.set_case("CASE-1")
+    rows = gw.query("spends")
+    assert [r["Merchant Name"] for r in rows] == ["S BERTRAM", "FRAYLICH"]
+    # Padded HEADERS are trimmed too — otherwise column resolution misses.
+    assert "Merchant Name" in rows[0]
+
+
+def test_trimming_makes_one_merchant_compare_equal(tmp_path):
+    case = tmp_path / "CASE-2"
+    case.mkdir()
+    (case / "spends.csv").write_text(
+        "Merchant Name,Amount\nACME  ,100\nACME,200\n")
+    gw = LocalDataGateway.from_case_folders(str(tmp_path))
+    gw.set_case("CASE-2")
+    assert len({r["Merchant Name"] for r in gw.query("spends")}) == 1
+
+
+def test_non_string_and_empty_cells_survive_trimming(tmp_path):
+    case = tmp_path / "CASE-3"
+    case.mkdir()
+    (case / "t.csv").write_text("a,b\n , 5 \n")
+    gw = LocalDataGateway.from_case_folders(str(tmp_path))
+    gw.set_case("CASE-3")
+    row = gw.query("t")[0]
+    assert row["a"] == "" and row["b"] == "5"
