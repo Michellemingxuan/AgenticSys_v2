@@ -316,6 +316,72 @@ def _sort_points(
     return sorted(points, key=lambda p: str(p.get(x_field, "")))
 
 
+def _draw_tail_note(fig, note: str | None) -> None:
+    """Footnote under the axes naming what the tail row left out.
+
+    Figure-level text rather than an axis label so it sits below everything and
+    reads as provenance, not as data. `bbox_inches="tight"` at save time grows
+    the canvas to include it, so it can't be clipped.
+    """
+    if not note:
+        return
+    fig.text(0.5, -0.01, note, ha="center", va="top",
+             fontsize=8, style="italic", color="#666666")
+
+
+def _split_tail_row(
+    numbers: list[dict], x_field: str, y_fields: list[str],
+) -> tuple[list[dict], str | None]:
+    """Pull the `(N others)` remainder row out of the plotted points.
+
+    Returns ``(points_without_tail, footnote_or_None)``. The footnote states
+    what was left out and what share of the whole it represents — the reader
+    still learns the top-N isn't everything, which is the point of the tail
+    row, without the bar chart being dominated by it.
+
+    No-ops when there is no tail row, so trend/multi-series charts are
+    unaffected. Only the FIRST y_field is consulted for the value: the tail is
+    produced solely by `summarize_by_group`, which is single-series.
+    """
+    if not numbers or not y_fields:
+        return numbers, None
+    from tools.data_tools import TAIL_GROUP_RE   # local: avoid import weight
+
+    yf = y_fields[0]
+    kept: list[dict] = []
+    tail_value: float | None = None
+    tail_n = 0
+    for p in numbers:
+        m = TAIL_GROUP_RE.match(str(p.get(x_field, "")))
+        if m is None:
+            kept.append(p)
+            continue
+        try:
+            tail_value = float(p.get(yf))
+        except (TypeError, ValueError):
+            kept.append(p)          # unreadable value — leave it visible
+            continue
+        tail_n = int(m.group(1))
+
+    if tail_value is None or not kept:
+        # Nothing to split, or the tail was the ONLY row — better a correct
+        # single-bar chart than an empty one.
+        return numbers, None
+
+    shown = 0.0
+    for p in kept:
+        try:
+            shown += float(p.get(yf))
+        except (TypeError, ValueError):
+            pass
+    total = shown + tail_value
+    pct = f" ({tail_value / total * 100:.0f}% of total)" if total else ""
+    return kept, (
+        f"Top {len(kept)} of {len(kept) + tail_n} shown; "
+        f"{tail_n} others total {tail_value:,.0f}{pct}"
+    )
+
+
 def _resolve_axes(kp_viz: dict, numbers: list[dict]) -> tuple[str, list[str]] | None:
     """Resolve x_field + a LIST of y_fields. Multi-series charts (e.g.
     spend vs payment over time) plot one line per y_field on the same axes.
@@ -656,6 +722,13 @@ def render_chart(
                                      "multi-series.")})
             return None
 
+    # Split off the `(N others)` remainder row before plotting. It exists so
+    # anything SUMMING the series gets the true total (see
+    # data_tools.summarize_by_group), but drawing it swamps a ranking chart —
+    # sorted by value it becomes the longest bar and squashes the real groups.
+    # So: excluded from the bars, reported as a footnote instead.
+    numbers, tail_note = _split_tail_row(numbers, x_field, y_fields)
+
     # One (xs, ys) pair per y_field — supports multi-series trend/bar.
     extracted = []
     for yf in y_fields:
@@ -770,6 +843,7 @@ def render_chart(
                              color="#3c4043", y=1.02)
 
             # Keep panels visually distinct but tight.
+            _draw_tail_note(fig, tail_note)
             fig.tight_layout(h_pad=0.6)
             fig.savefig(out_path, format="png", bbox_inches="tight",
                         facecolor=fig.get_facecolor())
@@ -1075,6 +1149,7 @@ def render_chart(
                     ax.set_ylabel("")
 
             _apply_style(ax, fig)
+            _draw_tail_note(fig, tail_note)
             fig.tight_layout()
             fig.savefig(out_path, format="png", bbox_inches="tight",
                         facecolor=fig.get_facecolor())

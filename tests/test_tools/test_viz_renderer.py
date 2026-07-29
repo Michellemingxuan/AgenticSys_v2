@@ -832,3 +832,95 @@ def test_kp_to_vega_spec_skips_table_kind():
         "numbers": [{"month": "2025-05", "spend": 404152}],
     }
     assert kp_to_vega_spec(kp) is None
+
+
+# ── `(N others)` tail row ───────────────────────────────────────────────────
+#
+# summarize_by_group appends a remainder row so anything SUMMING the series
+# gets the true total. Plotting it would swamp the ranking bars (sorted by
+# value it lands first), so the renderer drops it from the bars and reports it
+# as a footnote instead.
+
+from tools.viz_renderer import _split_tail_row
+
+
+def _pts(pairs):
+    return [{"merchant": k, "value": v} for k, v in pairs]
+
+
+def test_tail_row_is_excluded_from_the_bars():
+    kept, note = _split_tail_row(
+        _pts([("M0", 100), ("M1", 99), ("(35 others)", 2730)]),
+        "merchant", ["value"])
+    assert [p["merchant"] for p in kept] == ["M0", "M1"]
+    assert note is not None
+
+
+def test_tail_footnote_states_coverage_and_share():
+    _, note = _split_tail_row(
+        _pts([("M0", 100), ("M1", 99), ("(35 others)", 2730)]),
+        "merchant", ["value"])
+    # Share is of the WHOLE (100 + 99 + 2730 = 2929), not of the shown bars.
+    assert note == "Top 2 of 37 shown; 35 others total 2,730 (93% of total)"
+
+
+def test_no_tail_row_is_a_no_op():
+    """Trend and untruncated breakdowns must be completely unaffected."""
+    pts = _pts([("M0", 100), ("M1", 99)])
+    kept, note = _split_tail_row(pts, "merchant", ["value"])
+    assert kept == pts and note is None
+
+
+def test_tail_only_series_is_left_alone():
+    """Better a correct single-bar chart than an empty one."""
+    pts = _pts([("(40 others)", 3220)])
+    kept, note = _split_tail_row(pts, "merchant", ["value"])
+    assert kept == pts and note is None
+
+
+def test_unreadable_tail_value_stays_visible():
+    pts = _pts([("M0", 100), ("(35 others)", None)])
+    kept, note = _split_tail_row(pts, "merchant", ["value"])
+    assert len(kept) == 2 and note is None
+
+
+def test_renderer_matches_the_label_data_tools_actually_writes():
+    """Drift guard binding the WRITER to the READER. data_tools produces the
+    label; viz_renderer matches it with TAIL_GROUP_RE. If the format changes on
+    one side, the tail silently becomes a normal bar again."""
+    from tools.data_tools import TAIL_GROUP_RE, format_tail_group
+
+    m = TAIL_GROUP_RE.match(format_tail_group(35))
+    assert m is not None and m.group(1) == "35"
+
+
+def test_tail_row_is_hidden_end_to_end(tmp_path):
+    """Through the real summarize_by_group payload, not a hand-built fixture."""
+    import json
+    from datalayer.catalog import DataCatalog
+    from datalayer.gateway import LocalDataGateway
+    from tools import data_tools
+    from tools.viz_renderer import render_chart
+
+    rows = [{"merchant": f"M{i}", "amt": float(100 - i)} for i in range(40)]
+    gw = LocalDataGateway(case_data={"C": {"txns": rows}})
+    gw.set_case("C")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    groups = json.loads(data_tools._summarize_by_group_impl(
+        table_name="txns", value_column="amt", group_column="merchant",
+        op="sum", top_n=5))["groups"]
+    pts = [{"merchant": g["group"], "value": g["raw_value"]} for g in groups]
+
+    kept, note = _split_tail_row(pts, "merchant", ["value"])
+    assert len(kept) == 5, "the tail row must not be plotted"
+    assert "35 others" in note and "85% of total" in note
+
+    kp = {"topic": "t", "claim": "c", "numbers": pts,
+          "viz": {"kind": "share", "x_field": "merchant",
+                  "y_fields": ["value"]},
+          "source_call": "summarize_by_group('txns','merchant','amt', op='sum')"}
+    out = render_chart(kp, tmp_path, turn_id="t1")
+    assert out and Path(out).exists()
+    # The KP itself is untouched — the tail still counts toward any total
+    # computed downstream (that is why it exists).
+    assert kp["numbers"][-1]["merchant"] == "(35 others)"

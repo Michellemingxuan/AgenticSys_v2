@@ -1167,6 +1167,19 @@ _SEARCH_STOPWORDS = frozenset({
 # whole tokens, which is how they actually appear in these names.
 _SEARCH_MIN_SUBSTRING_TERM = 4
 
+# The `(N others)` remainder row `summarize_by_group` appends when it truncates
+# to top_n. Defined HERE, next to the code that writes it, and read by
+# `viz_renderer` — which hides the row from ranking bars but still counts it in
+# the total. One definition rather than a regex copied across the boundary;
+# `test_data_viz_tools` pins that the writer and the reader agree.
+TAIL_GROUP_RE = re.compile(r"^\((\d+) others\)$")
+
+
+def format_tail_group(n: int) -> str:
+    """Label for the remainder row covering `n` groups outside the top-N."""
+    return f"({n} others)"
+
+
 def _search_tokens(text: str) -> list[str]:
     """Lowercase alphanumeric tokens, function words removed."""
     return [t for t in re.findall(r"[a-z0-9]+", (text or "").lower())
@@ -3593,7 +3606,7 @@ def _summarize_by_group_impl(
         rest = raw_per_group[top_n_int:]
         tail_value = sum(v for _, v, _ in rest)
         series.append({
-            "group": f"({len(rest)} others)",
+            "group": format_tail_group(len(rest)),
             "value": _format_aggregate(tail_value, value_column, op),
             "raw_value": round(tail_value, 4) if isinstance(tail_value, float)
                          else tail_value,
