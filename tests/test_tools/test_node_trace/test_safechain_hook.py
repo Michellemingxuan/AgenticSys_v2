@@ -19,8 +19,16 @@ async def test_safechain_create_records_round_with_tiktoken(tmp_path: Path):
 
     # Stub _invoke to bypass real safechain.
     async def _stub_invoke(self_, *, model, messages, tools, response_format, stream, **kw):
-        from llm.safechain_client import _synthesize_chat_completion
-        return _synthesize_chat_completion(text='{"output":"hi"}', model=model)
+        from llm.safechain_client import _completion_from_message
+
+        # Stands in for the LangChain AIMessage the real transport returns.
+        class _Msg:
+            content = '{"output":"hi"}'
+            tool_calls: list = []
+            response_metadata: dict = {}
+            id = None
+
+        return _completion_from_message(_Msg(), model)
 
     with patch.object(_SafeChainChatCompletions, "_invoke", _stub_invoke):
         async with NodeTrace(
