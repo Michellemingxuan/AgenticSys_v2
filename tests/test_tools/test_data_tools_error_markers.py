@@ -1,0 +1,125 @@
+"""Drift guard: every error string data_tools.py actually emits must still be
+classified by grounding.classify_tool_output.
+
+This parses the literals out of the SOURCE rather than hard-coding copies — a
+hard-coded copy would keep passing after someone reworded the real message,
+which is precisely the drift this guards against.
+"""
+import ast
+import pathlib
+
+import pytest
+
+from agent_factories.agent_tools.grounding import classify_tool_output
+
+_SRC = pathlib.Path(__file__).resolve().parents[2] / "tools" / "data_tools.py"
+
+# Marker substrings that identify a string literal as an error message.
+_ERROR_MARKERS = ("Data unavailable", "no parseable", "did NOT run")
+
+# Map the private impl function that owns a literal to the public tool name the
+# specialist sees. classify_tool_output keys the get_table_schema carve-out on
+# the tool name, so this mapping is load-bearing.
+_IMPL_TO_TOOL = {
+    "_list_available_tables_impl": "list_available_tables",
+    "_get_table_schema_impl": "get_table_schema",
+    "_query_table_impl": "query_table",
+    "_batch_query_table_impl": "batch_query_table",
+    "_join_table_impl": "join_table",
+    "_transaction_detail_impl": "transaction_detail",
+    "_aggregate_column_impl": "aggregate_column",
+    "_batch_aggregate_impl": "batch_aggregate",
+    "_summarize_trend_impl": "summarize_trend",
+    "_batch_summarize_trend_impl": "batch_summarize_trend",
+    "_summarize_by_group_impl": "summarize_by_group",
+}
+
+
+def _render(node) -> str | None:
+    """Reconstruct a str/f-string literal, substituting 'X' for interpolations.
+
+    f"table '{name}' not found" -> "table 'X' not found", which is exactly the
+    shape classify_tool_output must match.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.JoinedStr):
+        parts = []
+        for v in node.values:
+            if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                parts.append(v.value)
+            else:
+                parts.append("X")
+        return "".join(parts)
+    return None
+
+
+def _iter_nodes_no_joinedstr_descent(node):
+    """Like ast.walk, but does not descend into a JoinedStr's own children.
+
+    `ast.walk` visits a JoinedStr node AND, separately, each Constant piece
+    inside it (the text either side of an f-string interpolation). _render
+    already reconstructs the JoinedStr's full text in one pass, so descending
+    further would also yield those Constant pieces on their own — fragments
+    like "Data unavailable: table '" with no closing quote or suffix, which
+    data_tools.py never emits as a standalone string. Treating JoinedStr as a
+    leaf for this walk avoids collecting those fragments as fake literals.
+    """
+    yield node
+    if isinstance(node, ast.JoinedStr):
+        return
+    for child in ast.iter_child_nodes(node):
+        yield from _iter_nodes_no_joinedstr_descent(child)
+
+
+def _collect():
+    """[(tool_name, literal), ...] for every error literal in data_tools.py."""
+    tree = ast.parse(_SRC.read_text(encoding="utf-8"))
+    found = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef):
+            continue
+        tool = _IMPL_TO_TOOL.get(fn.name)
+        if tool is None:
+            continue
+        for node in _iter_nodes_no_joinedstr_descent(fn):
+            text = _render(node)
+            if text and any(m in text for m in _ERROR_MARKERS):
+                found.append((tool, text))
+    return found
+
+
+_CASES = _collect()
+
+
+def test_collection_found_the_expected_literals():
+    """Guards the guard: if the AST walk silently stops finding literals (file
+    moved, functions renamed), every parametrized case below would vacuously
+    pass. data_tools.py had 16 'Data unavailable' sites plus 3 others when this
+    was written; require a healthy floor."""
+    assert len(_CASES) >= 15, (
+        f"only found {len(_CASES)} error literals in {_SRC} — the AST walk or "
+        f"_IMPL_TO_TOOL is probably stale"
+    )
+
+
+@pytest.mark.parametrize("tool,literal", _CASES,
+                         ids=[f"{t}:{lit[:40]}" for t, lit in _CASES])
+def test_every_error_literal_is_classified(tool, literal):
+    """Except the ONE deliberate carve-out: get_table_schema reporting a table
+    absent from this case is benign exploration, not a failure."""
+    reason = classify_tool_output(tool, literal)
+    is_carve_out = (
+        tool == "get_table_schema"
+        and "not found for current case" in literal
+    )
+    if is_carve_out:
+        assert reason is None, (
+            f"the get_table_schema carve-out should suppress {literal!r}"
+        )
+    else:
+        assert reason is not None, (
+            f"data_tools.py emits {literal!r} from {tool}, but "
+            f"classify_tool_output does not recognize it — a marker in "
+            f"grounding.py has drifted from the source string"
+        )
