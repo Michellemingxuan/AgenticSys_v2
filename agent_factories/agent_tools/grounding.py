@@ -110,30 +110,27 @@ def _iter_call_outcomes(result):
 def scan_tool_errors(result) -> list[dict]:
     """Errors that were NOT superseded by a later clean call to the same tool.
 
-    Returns `[{"tool", "call_id", "reason", "excerpt"}, ...]` in transcript
-    order. Empty list means every tool call this run either succeeded or was
-    successfully re-issued.
+    Returns at most one entry per tool, carrying that tool's latest unrecovered
+    failure. Supersession is order-sensitive: a clean call clears only failures
+    that came BEFORE it. A tool whose final call returned an error (even if an
+    earlier call succeeded) is reported, because the run's current state is that
+    the tool is broken.
+
+    `[{"tool", "call_id", "reason", "excerpt"}, ...]` in transcript order.
     """
-    errors: list[dict] = []
-    recovered_tools: set[str] = set()
-    tools_with_errors: set[str] = set()
+    errors_by_tool: dict[str, dict] = {}
 
     for tool, call_id, output in _iter_call_outcomes(result):
         reason = classify_tool_output(tool, output)
         if reason is None:
-            # A clean call retroactively clears earlier failures of the SAME
-            # tool — the specialist fixed its call and re-issued it.
-            recovered_tools.add(tool)
+            # A clean call clears only what came BEFORE it.
+            errors_by_tool.pop(tool, None)
         else:
-            # Only record the first error for each tool; retries that also fail
-            # don't add additional errors.
-            if tool not in tools_with_errors:
-                errors.append({
-                    "tool": tool,
-                    "call_id": call_id,
-                    "reason": reason,
-                    "excerpt": output[:_EXCERPT_CHARS],
-                })
-                tools_with_errors.add(tool)
+            errors_by_tool[tool] = {
+                "tool": tool,
+                "call_id": call_id,
+                "reason": reason,
+                "excerpt": output[:_EXCERPT_CHARS],
+            }
 
-    return [e for e in errors if e["tool"] not in recovered_tools]
+    return list(errors_by_tool.values())

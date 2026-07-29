@@ -180,3 +180,41 @@ def test_scan_excerpt_is_bounded():
         _output("c1", "no parseable trans_month values " + "x" * 5000),
     ])
     assert len(scan_tool_errors(r)[0]["excerpt"]) <= 300
+
+
+def test_scan_reports_the_final_failure_after_an_intervening_success():
+    """Supersession is ORDER-SENSITIVE. A clean call clears only the failures
+    BEFORE it — a run whose final call returned nothing is not exonerated by an
+    earlier success, which is the whole fabrication path this module catches."""
+    err = "trend(...) = (no parseable trans_month values; 18 total)"
+    ok = '{"table": "m", "series": [{"period": "2025-01", "raw_value": 3}]}'
+    r = _Result([
+        _call("c1", "summarize_trend"), _output("c1", err),
+        _call("c2", "summarize_trend"), _output("c2", ok),
+        _call("c3", "summarize_trend"), _output("c3", err),
+    ])
+    found = scan_tool_errors(r)
+    assert [f["call_id"] for f in found] == ["c3"]
+
+
+def test_scan_reports_the_latest_reason_when_a_tool_fails_twice():
+    """The reported reason must describe the run's CURRENT state — the retry
+    directive and the payload banner quote it back to the reader."""
+    r = _Result([
+        _call("a1", "batch_summarize_trend"),
+        _output("a1", "batch_summarize_trend did NOT run — you have NO data from it."),
+        _call("a2", "batch_summarize_trend"),
+        _output("a2", "(no parseable trans_month values; 3 total)"),
+    ])
+    found = scan_tool_errors(r)
+    assert [(f["call_id"], f["reason"]) for f in found] == [("a2", "no_buckets")]
+
+
+def test_scan_reports_at_most_one_entry_per_tool():
+    err = "trend(...) = (no parseable trans_month values; 18 total)"
+    r = _Result([
+        _call("c1", "summarize_trend"), _output("c1", err),
+        _call("c2", "summarize_trend"), _output("c2", err),
+        _call("c3", "summarize_trend"), _output("c3", err),
+    ])
+    assert len(scan_tool_errors(r)) == 1
