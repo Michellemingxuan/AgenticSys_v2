@@ -1279,3 +1279,51 @@ def test_summarize_by_group_no_tail_for_non_additive_ops():
         table_name="txns", value_column="amt", group_column="merchant",
         op="mean", top_n=5))
     assert not any("others" in g["group"] for g in payload["groups"])
+
+
+# ── empty value column is a DATA GAP, not a date-format problem ─────────────
+
+def test_summarize_trend_names_an_empty_value_column_as_a_data_gap():
+    """The old message blamed the TIME column whatever the cause, so a
+    specialist trending an all-blank column kept 'fixing' a date column that was
+    never wrong (observed: bureau_data.'SBFE Score', blank in all 26 rows)."""
+    rows = [{"month": "2024-01-01", "score": ""},
+            {"month": "2024-02-01", "score": ""}]
+    gw = LocalDataGateway(case_data={"CASE-E": {"t": rows}})
+    gw.set_case("CASE-E")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+
+    out = data_tools._summarize_trend_impl(
+        table_name="t", value_column="score", time_column="month", op="max")
+    assert "DATA GAP" in out
+    assert "'score' is EMPTY" in out
+    assert "do NOT retry" in out
+    # It must NOT blame the time column — the dates were fine.
+    assert "no parseable month" not in out
+
+
+def test_summarize_trend_still_blames_the_time_column_when_dates_are_bad():
+    rows = [{"month": "not-a-date", "score": "5"},
+            {"month": "also-bad", "score": "6"}]
+    gw = LocalDataGateway(case_data={"CASE-D": {"t": rows}})
+    gw.set_case("CASE-D")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+
+    out = data_tools._summarize_trend_impl(
+        table_name="t", value_column="score", time_column="month", op="max")
+    assert "no parseable month values" in out
+    assert "DATA GAP" not in out
+
+
+def test_summarize_trend_with_partial_values_still_trends():
+    """Only an EMPTY column is a gap — some blanks is just sparse data."""
+    rows = [{"month": "2024-01-01", "score": "5"},
+            {"month": "2024-02-01", "score": ""}]
+    gw = LocalDataGateway(case_data={"CASE-P": {"t": rows}})
+    gw.set_case("CASE-P")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+
+    out = data_tools._summarize_trend_impl(
+        table_name="t", value_column="score", time_column="month", op="max")
+    assert "DATA GAP" not in out
+    assert "series" in out

@@ -35,6 +35,12 @@ _SCHEMA_PROBE_TOOLS = frozenset({"get_table_schema"})
 # transaction_detail variant "base table 'x' not found for current case".
 _TABLE_NOT_FOUND = re.compile(r"table '[^']*' not found for current case")
 
+# Emitted by `data_tools` when a column exists but is EMPTY for this case. The
+# tool succeeded and reported an absence, so this is not a failed call — it is
+# the answer. Bound to the emitter by the drift guard in
+# `tests/test_tools/test_data_tools_error_markers.py`.
+_DATA_GAP_MARKER = "DATA GAP:"
+
 
 def classify_tool_output(tool: str, output: str) -> str | None:
     """Reason string when `output` signals a failed tool call, else None.
@@ -119,6 +125,14 @@ def _classify_scalar(tool: str, output: str) -> str | None:
     if not isinstance(output, str) or not output:
         return None
     text = output.strip()
+
+    # BENIGN NEGATIVE, checked first. "This case has no data for that column" is
+    # the tool WORKING — same category as `get_table_schema` reporting a table
+    # is absent. Flagging it made a specialist that honestly reported the gap
+    # indistinguishable from one that fabricated numbers, and quarantined the
+    # honest one (see `_DATA_GAP_MARKER`'s emitter in data_tools).
+    if _DATA_GAP_MARKER in text:
+        return None
 
     # Order matters: the specs_unparseable payload also carries an "error" key,
     # so it must be classified before the generic batch-element check.

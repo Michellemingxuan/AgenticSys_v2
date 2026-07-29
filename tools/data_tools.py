@@ -3011,6 +3011,30 @@ def _summarize_trend_impl(
         buckets.setdefault(bk, []).append(v)
 
     if not buckets:
+        # Two very different causes, and conflating them sent specialists in
+        # circles: the DATES didn't parse, vs the dates were fine and the VALUE
+        # column is empty for this case. The old message blamed the time column
+        # either way, so a specialist trending an all-blank column (real case:
+        # `bureau_data.SBFE Score`, 26 rows all blank) kept "fixing" a date
+        # column that was never wrong. An empty column is a DATA GAP — the tool
+        # worked, this case simply has no such data — so say that, and say it
+        # is not worth retrying.
+        if n_in_range and n_value_skipped >= n_in_range:
+            out = (
+                f"trend({op}({value_column}) by {period} on {time_column})"
+                f"{filter_descr} = (DATA GAP: column '{value_column}' is EMPTY "
+                f"for this case — {n_in_range:,} row(s) in range, every one "
+                f"blank or non-numeric; the {time_column} values parsed fine. "
+                f"The tool worked; this case has no {value_column} data. Record "
+                f"it in `data_gaps` and do NOT retry this column.)"
+            )
+            _log_result("summarize_trend", result=out,
+                        extra={"reason": "empty_value_column",
+                               "value_column": value_column,
+                               "n_in_range": n_in_range,
+                               "n_value_skipped": n_value_skipped})
+            return out
+
         # Surface the actual unrecognized values to the LLM (truncated) so a
         # specialist can decide whether to (a) fall back to a different time
         # column, (b) report a data_gap, or (c) point the reviewer at an

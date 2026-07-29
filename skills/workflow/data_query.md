@@ -37,6 +37,12 @@ Every claim in `findings` / `evidence` / `raw_data` must trace to a tool result 
   recall peaks/trends/values as if it succeeded. Re-issue the call correctly
   (fix the JSON), or emit a `data_gap`. Fabricating numbers around a failed tool
   is the worst failure mode: it also poisons the KB for later turns.
+- **`DATA GAP:` in a tool result is an ANSWER, not an error — record it, don't retry.**
+  It means the column exists but is empty for THIS case (cases carry different
+  data). The tool worked. Add a `data_gaps` entry naming the column, say plainly
+  in `findings` that the case has no such data, and move on — re-issuing the
+  same column, or "fixing" a date column that was never wrong, just burns a
+  round. In a batch, the OTHER specs still returned real data: keep them.
 
 ## Output formatting
 

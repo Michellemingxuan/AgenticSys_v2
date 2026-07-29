@@ -152,3 +152,38 @@ def test_specs_unparseable_marker_is_covered():
     assert covered == {
         "batch_query_table", "batch_aggregate", "batch_summarize_trend",
     }, f"specs_unparseable marker not collected for the batch tools: {covered}"
+
+
+# ── DATA GAP is a benign negative, not an error ─────────────────────────────
+#
+# "the column is empty for THIS case" is the tool WORKING and reporting an
+# absence — same category as get_table_schema saying a table isn't present.
+# Flagging it made a specialist that honestly reported the gap indistinguishable
+# from one that fabricated numbers, and quarantined the honest one (observed on
+# case 366132845011: bureau_data.'SBFE Score' is blank in all 26 rows).
+
+def test_data_gap_marker_is_still_emitted_by_data_tools():
+    """Binds READER to WRITER. If the message is reworded without updating
+    grounding, the gap silently becomes a 'failed tool call' again."""
+    from agent_factories.agent_tools.grounding import _DATA_GAP_MARKER
+
+    src = _SRC.read_text()
+    assert _DATA_GAP_MARKER in src, (
+        f"grounding treats {_DATA_GAP_MARKER!r} as benign, but data_tools no "
+        f"longer emits it — one side was reworded without the other")
+
+
+def test_data_gap_output_is_not_classified_as_a_failure():
+    out = ("trend(max(SBFE Score) by month on month) = (DATA GAP: column "
+           "'SBFE Score' is EMPTY for this case — 26 row(s) in range, every one "
+           "blank or non-numeric; the month values parsed fine. The tool "
+           "worked; this case has no SBFE Score data. Record it in `data_gaps` "
+           "and do NOT retry this column.)")
+    assert classify_tool_output("summarize_trend", out) is None
+
+
+def test_an_unparseable_DATE_column_is_still_a_failure():
+    """The carve-out must not swallow the real thing it was carved out of."""
+    out = ("trend(max(FICO Score) by month on FICO Score) = (no parseable "
+           "FICO Score values; 26 total in bureau_data)")
+    assert classify_tool_output("summarize_trend", out) == "no_buckets"
