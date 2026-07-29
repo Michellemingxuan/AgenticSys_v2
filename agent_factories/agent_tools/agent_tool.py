@@ -291,9 +291,27 @@ def agent_tool(
         # single-turn path.
         app_ctx = ctx.context if ctx else None
         logger = getattr(app_ctx, "logger", None)
+        def _publish_run_ms(summary: dict) -> None:
+            """Record this run's measured wall-clock for the SSE layer.
+
+            The UI cannot derive it from stream events: the SDK gathers PARALLEL
+            tool calls and queues their output items only after the SLOWEST
+            finishes, so every sibling gets the same start and end stamp and
+            reports the batch duration. Observed: crossbu and spend_payments
+            both shown as 8.42s while node_trace had them differing.
+
+            Keyed by specialist, FIFO — repeats of the same specialist in a turn
+            are sequential (dedup cache intra-turn, review re-dispatch after),
+            and different specialists can never mix because the key is the name.
+            """
+            runs = getattr(app_ctx, "_specialist_run_ms", None)
+            if isinstance(runs, dict):
+                runs.setdefault(name, []).append(int(summary.get("total_ms") or 0))
+
         timer = ProcessTimer(
             logger,
             "specialist_call",
+            on_summary=_publish_run_ms,
             turn_id=getattr(app_ctx, "_turn_id", None),
             specialist=name,
         )

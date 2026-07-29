@@ -22,6 +22,7 @@ def map_run_item(
     first_tool_call_logged: bool,
     safe_dump: Callable,
     drain_specialist_errors: Callable[[], None],
+    run_ms_by_tool: dict | None = None,
 ) -> tuple[bool, bool, float | None]:
     """Translate one streamed ``RunItem`` into typed SSE events (``team_plan``
     / ``agent_started`` / ``agent_completed``).
@@ -102,6 +103,15 @@ def map_run_item(
         payload = safe_dump(item.output)
         started_ts = started_at_by_call.get(call_id, int(time.time() * 1000))
         duration_ms = int(time.time() * 1000) - started_ts
+        # Prefer the specialist's OWN measured wall-clock when agent_tool
+        # published one. Stream timing cannot separate parallel siblings: the
+        # SDK gathers parallel tool calls and queues every output item only
+        # after the slowest returns, so all of them report the batch duration
+        # (observed: two specialists both shown as 8.42s, disagreeing with
+        # node_trace). FIFO per tool name — see AppContext._specialist_run_ms.
+        _measured = (run_ms_by_tool or {}).get(tool)
+        if _measured:
+            duration_ms = _measured.pop(0)
         # Stash the payload back onto `tool_calls` so a late-stage
         # orchestrator failure (ModelBehaviorError on FinalAnswer
         # parsing, etc.) can still synthesize a partial fallback

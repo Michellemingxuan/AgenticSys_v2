@@ -100,3 +100,9 @@ class AppContext:
     # wrong answer this turn cannot ground the next one.
     # Keyed by specialist name; each value: list of the grounding error dicts.
     _degraded_specialists: dict = field(default_factory=dict)
+    # Measured wall-clock per specialist run, `{name: [ms, ...]}` in completion
+    # order, published by agent_tool. The SSE layer prefers these over
+    # stream-event timing: the SDK gathers PARALLEL tool calls and only queues
+    # their output items after the slowest finishes, so stream-derived durations
+    # are identical for every sibling and report the batch, not the specialist.
+    _specialist_run_ms: dict = field(default_factory=dict)

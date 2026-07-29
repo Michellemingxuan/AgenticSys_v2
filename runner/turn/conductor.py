@@ -800,6 +800,8 @@ class TurnRunner:
                             first_tool_call_logged=self.first_tool_call_logged,
                             safe_dump=self._safe_dump,
                             drain_specialist_errors=self._drain_specialist_errors,
+                            run_ms_by_tool=getattr(
+                                self.ctx, "_specialist_run_ms", None),
                         )
                         if _last_agent_completed_at is not None:
                             last_agent_completed_at = _last_agent_completed_at
@@ -1141,6 +1143,12 @@ class TurnRunner:
                         pl = self._safe_dump(it.output)
                         sts = self.started_at_by_call.get(cid, int(time.time() * 1000))
                         dms = int(time.time() * 1000) - sts
+                        # Same correction as the main stream path in sse.py:
+                        # parallel siblings share stream timestamps, so prefer
+                        # the specialist's own measured wall-clock.
+                        _m = (getattr(self.ctx, "_specialist_run_ms", None) or {}).get(tl)
+                        if _m:
+                            dms = _m.pop(0)
                         if cid in self.call_index_by_id:
                             self.tool_calls[self.call_index_by_id[cid]]["payload"] = pl
                             self.tool_calls[self.call_index_by_id[cid]]["duration_ms"] = dms

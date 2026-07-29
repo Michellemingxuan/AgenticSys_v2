@@ -15,12 +15,17 @@ class ProcessTimer:
     of the process.
     """
 
-    def __init__(self, logger: Any, process: str, **base_payload: Any) -> None:
+    def __init__(self, logger: Any, process: str, *,
+                 on_summary: Any = None, **base_payload: Any) -> None:
         self.logger = logger
         self.process = process
         self.base_payload = dict(base_payload)
         self.started_at = perf_counter()
         self.phases: list[dict[str, Any]] = []
+        # Optional sink called with the summary dict. Lets a caller capture the
+        # measured `total_ms` without threading a return value through every
+        # exit path — `summary()` is already called on all of them.
+        self.on_summary = on_summary
 
     @contextmanager
     def phase(self, name: str, **payload: Any) -> Iterator[None]:
@@ -54,6 +59,12 @@ class ProcessTimer:
             **payload,
         }
         self._log("process_timing_summary", out)
+        if self.on_summary is not None:
+            # Never let a telemetry sink break the thing it is measuring.
+            try:
+                self.on_summary(out)
+            except Exception:  # noqa: BLE001
+                pass
         return out
 
     def _log(self, event_type: str, payload: dict[str, Any]) -> None:
