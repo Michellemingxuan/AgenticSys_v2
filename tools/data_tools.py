@@ -3577,6 +3577,30 @@ def _summarize_by_group_impl(
                 sub["min"] = _format_aggregate(min(values), value_column, "min")
         series.append(sub)
 
+    n_groups_returned = len(series)
+
+    # Tail aggregate. Downstream consumers treat `groups` as THE series: the
+    # auto-charter sums it for its "N% of total" claim and plots it as a share
+    # bar. With a truncated top-N that denominator is the top-N sum, not the
+    # whole — measured at top_n=5 of 40 groups, the claim read "20% of total"
+    # where the true share was 3.1%. So when groups were dropped, say so IN the
+    # series rather than only in `concentration`, whose total is a formatted
+    # string a renderer can't do arithmetic with.
+    #
+    # Additive ops only: summing per-group means/maxes is meaningless, so a
+    # tail there would invent a number rather than restore one.
+    if additive and n_groups_total > n_groups_returned:
+        rest = raw_per_group[top_n_int:]
+        tail_value = sum(v for _, v, _ in rest)
+        series.append({
+            "group": f"({len(rest)} others)",
+            "value": _format_aggregate(tail_value, value_column, op),
+            "raw_value": round(tail_value, 4) if isinstance(tail_value, float)
+                         else tail_value,
+            "n_records": sum(len(vals) for _, _, vals in rest),
+            "is_tail": True,
+        })
+
     payload = {
         "table": real_table,
         "group_column": real_group,
@@ -3590,7 +3614,9 @@ def _summarize_by_group_impl(
         "rows_value_skipped": n_value_skipped,
         "rows_group_null": n_group_null,
         "n_groups_total": n_groups_total,
-        "n_groups_returned": len(series),
+        # Counts the REAL groups, excluding any tail row appended above — the
+        # tail is a remainder, not a group.
+        "n_groups_returned": n_groups_returned,
         "concentration": concentration,
         "groups": series,
     }
