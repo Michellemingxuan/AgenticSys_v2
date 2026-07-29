@@ -163,16 +163,23 @@ def _degraded_directive(errors: list[dict]) -> str:
         tool = err.get("tool", "?")
         reason = err.get("reason", "")
         fix = _DEGRADED_RECOVERY.get(reason, "re-issue the call with corrected arguments")
-        lines.append(f"  • {tool} failed ({reason}): {fix}.")
+        if err.get("partial"):
+            # Name the scope, or the specialist re-issues the whole batch and
+            # throws away the specs that worked.
+            scope = (f" — {err.get('n_failed')} of {err.get('n_total')} specs, "
+                     f"the rest returned data and can be KEPT")
+        else:
+            scope = ""
+        lines.append(f"  • {tool} failed ({reason}){scope}: {fix}.")
     return (
         "[GROUNDING CHECK — your answer above rests on tool calls that FAILED. "
-        "The numbers in it are therefore not supported by data.\n"
+        "Numbers taken from them are not supported by data.\n"
         + "\n".join(lines)
         + "\nRe-do the analysis: fix and re-issue the failed call(s) FIRST, then "
-        "answer from what actually came back. If the data genuinely is not "
-        "available for this case, say so plainly in `findings` and leave the "
-        "numbers out — an honest data gap is a CORRECT answer here, an "
-        "unsupported number is not.]"
+        "answer from what actually came back. If a column is simply empty for "
+        "this case, that is a DATA GAP, not something to re-try forever — say "
+        "so plainly in `findings` and leave the numbers out. An honest data gap "
+        "is a CORRECT answer here; an unsupported number is not.]"
     )
 
 
@@ -584,7 +591,13 @@ def agent_tool(
         # still need the qualitative part, and dropping it entirely would look
         # like a silent failure), but it is fenced off from every channel that
         # would carry it into a LATER turn — see `_degraded_specialists`.
-        degraded = bool(tool_errors)
+        # PARTIAL batch failures don't quarantine. One bad spec among several
+        # still leaves the run grounded in the specs that succeeded — condemning
+        # it would suppress good findings (observed in prod: an all-blank
+        # bureau column failed one trend and flagged FICO + delinquencies with
+        # it). Those are still worth the retry above; they are not worth
+        # discarding an answer over.
+        degraded = any(not e.get("partial") for e in tool_errors)
         if degraded:
             if logger is not None:
                 logger.log("specialist_ungrounded", {
@@ -633,8 +646,11 @@ def agent_tool(
         # `[...]` sentinel style as `[FAILED ...]` so the orchestrator prompt's
         # existing "treat bracketed sentinels as control text" handling applies.
         if degraded:
+            # Only the calls that actually condemned the run — listing a
+            # partial batch here would misattribute the cause.
             failed = ", ".join(
-                f"{e['tool']} ({e['reason']})" for e in tool_errors)
+                f"{e['tool']} ({e['reason']})"
+                for e in tool_errors if not e.get("partial"))
             payload = _banner_payload(payload, (
                 f"[DEGRADED {name} — this answer rests on tool calls that "
                 f"FAILED and did not recover after a retry: {failed}. "

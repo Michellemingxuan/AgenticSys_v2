@@ -218,7 +218,10 @@ def test_directive_covers_every_reason_grounding_can_return():
 
     from agent_factories.agent_tools import grounding
 
-    src = inspect.getsource(grounding.classify_tool_output)
+    # `_classify_scalar` is where the reason literals live; classify_tool_output
+    # is a thin wrapper over the detailed form. The `assert reasons` below is
+    # what stops this guard passing vacuously if they move again.
+    src = inspect.getsource(grounding._classify_scalar)
     reasons = {
         literal
         for literal in ("specs_unparseable", "no_groups", "no_buckets",
@@ -247,3 +250,74 @@ def test_broken_marker_still_classifies():
     """Cheap canary: if data_tools stops emitting this text, the fixtures above
     are testing nothing. The full drift guard lives in test_data_tools_error_markers."""
     assert classify_tool_output("batch_summarize_trend", _BROKEN) == "specs_unparseable"
+
+
+# ── partial batch: retry, but never quarantine ──────────────────────────────
+#
+# The prod false positive this guards: bureau batched a trend over FICO,
+# delinquencies AND an all-blank column. The blank one reported "no parseable
+# values" (correct — a data gap), and the whole run was quarantined, so
+# general_specialist told the reviewer bureau's FICO and delinquency numbers
+# "may be unreliable". They were fine.
+
+_OK_TREND = '{"table": "bureau_data", "series": [{"period": "2023-07", "value": 654}]}'
+_BLANK_COL = ('trend(max(SBFE Score) by month on month) = '
+              '(no parseable SBFE Score values; 26 total)')
+
+
+def _partial_batch_transcript():
+    body = json.dumps({"results": [
+        {"index": 0, "value_column": "FICO Score", "result": _OK_TREND},
+        {"index": 1, "value_column": "SBFE Score", "result": _BLANK_COL},
+    ]})
+    return [_call("b1", "batch_summarize_trend"), _out("b1", body)]
+
+
+@pytest.mark.asyncio
+async def test_partial_batch_retries_but_does_not_quarantine():
+    ctx = _ctx()
+    out, calls = await _run(ctx, [
+        _Result(_partial_batch_transcript()),
+        _Result(_partial_batch_transcript()),   # still partial after the retry
+    ], name="bureau")
+
+    assert len(calls) == 2, "a partial failure is still worth one retry"
+    assert "[DEGRADED" not in out, "specs that SUCCEEDED must not be condemned"
+    assert ctx._degraded_specialists == {}
+
+
+@pytest.mark.asyncio
+async def test_partial_batch_still_reaches_the_cross_turn_channels():
+    """The whole point: good findings must not be suppressed."""
+    ctx = _ctx()
+    await _run(ctx, [_Result(_partial_batch_transcript()),
+                     _Result(_partial_batch_transcript())], name="bureau")
+
+    assert list(ctx._specialist_turn_records) == ["bureau"]
+    assert ctx._pending_distillers
+    for t in ctx._pending_distillers:
+        t.cancel()
+
+
+@pytest.mark.asyncio
+async def test_a_wholly_failed_batch_still_quarantines():
+    """The softening must not swallow a batch where NOTHING came back."""
+    body = json.dumps({"results": [
+        {"index": 0, "value_column": "a", "result": _BLANK_COL},
+        {"index": 1, "value_column": "b", "result": _BLANK_COL},
+    ]})
+    transcript = [_call("b1", "batch_summarize_trend"), _out("b1", body)]
+    ctx = _ctx()
+    out, _ = await _run(ctx, [_Result(transcript), _Result(transcript)],
+                        name="bureau")
+    assert out.startswith("[DEGRADED bureau")
+    assert list(ctx._degraded_specialists) == ["bureau"]
+
+
+def test_partial_directive_tells_the_model_to_keep_the_good_specs():
+    text = _degraded_directive([{
+        "tool": "batch_summarize_trend", "reason": "no_buckets",
+        "partial": True, "n_failed": 1, "n_total": 3}])
+    assert "1 of 3 specs" in text
+    assert "KEPT" in text, "or the model re-issues the whole batch"
+    assert "DATA GAP" in text, "an empty column is not a retry-forever loop"

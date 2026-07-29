@@ -20,6 +20,7 @@ literals out of `data_tools.py` and asserts this module still classifies them.
 """
 from __future__ import annotations
 
+import json
 import re
 
 _EXCERPT_CHARS = 300
@@ -36,7 +37,81 @@ _TABLE_NOT_FOUND = re.compile(r"table '[^']*' not found for current case")
 
 
 def classify_tool_output(tool: str, output: str) -> str | None:
-    """Return a reason string when `output` signals a failed tool call, else None.
+    """Reason string when `output` signals a failed tool call, else None.
+
+    Thin wrapper over :func:`classify_tool_output_detailed` for callers that
+    only need the reason (the drift guard in
+    `tests/test_tools/test_data_tools_error_markers.py`, mostly).
+    """
+    detail = classify_tool_output_detailed(tool, output)
+    return detail["reason"] if detail else None
+
+
+def classify_tool_output_detailed(tool: str, output: str) -> dict | None:
+    """`{"reason", "partial", "n_failed", "n_total"}` when `output` signals a
+    failed tool call, else None.
+
+    `partial` is the load-bearing field. A BATCH tool returns one result per
+    spec, and a single bad spec among several used to condemn the whole call —
+    which quarantined answers built on the specs that DID succeed. Observed in
+    prod: `bureau_data` carries all-blank columns (SBFE Score and friends) for
+    some cases, so a trend over one legitimately reports "no parseable values"
+    — an honest DATA GAP, not a broken tool — and that one element flagged
+    bureau's perfectly good FICO and delinquency numbers as unsupported.
+
+    So: a partial batch failure is still worth a retry (the specialist can fix
+    the bad spec, and in the observed run it did), but it must NOT quarantine
+    the run. Only a call that failed OUTRIGHT does that.
+    """
+    batch = _classify_batch(tool, output)
+    if batch is not None:
+        return batch
+    reason = _classify_scalar(tool, output)
+    if reason is None:
+        return None
+    return {"reason": reason, "partial": False, "n_failed": 1, "n_total": 1}
+
+
+def _classify_batch(tool: str, output: str) -> dict | None:
+    """Per-element classification for batch tools, or None if not a batch.
+
+    Batch payloads are `{"results": [{"index", "result", ...}, ...]}`. A batch
+    that never RAN (malformed specs_json) is emitted as a bare string instead,
+    so it doesn't parse here and falls through to the scalar path as a total
+    failure — which is correct: nothing ran.
+    """
+    if not isinstance(output, str) or "results" not in output:
+        return None
+    try:
+        parsed = json.loads(output)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    results = parsed.get("results")
+    if not isinstance(results, list) or not results:
+        return None
+
+    reasons: list[str | None] = []
+    for element in results:
+        inner = element.get("result") if isinstance(element, dict) else element
+        if not isinstance(inner, str):
+            inner = "" if inner is None else json.dumps(inner, default=str)
+        reasons.append(_classify_scalar(tool, inner))
+
+    failed = [r for r in reasons if r is not None]
+    if not failed:
+        return None
+    return {
+        "reason": failed[0],
+        "partial": len(failed) < len(reasons),
+        "n_failed": len(failed),
+        "n_total": len(reasons),
+    }
+
+
+def _classify_scalar(tool: str, output: str) -> str | None:
+    """Reason for a SINGLE tool output.
 
     `tool` participates in the decision — "table not found" is benign from
     `get_table_schema` and a real gap from every data-retrieving tool.
@@ -121,15 +196,21 @@ def scan_tool_errors(result) -> list[dict]:
     errors_by_tool: dict[str, dict] = {}
 
     for tool, call_id, output in _iter_call_outcomes(result):
-        reason = classify_tool_output(tool, output)
-        if reason is None:
+        detail = classify_tool_output_detailed(tool, output)
+        if detail is None:
             # A clean call clears only what came BEFORE it.
             errors_by_tool.pop(tool, None)
         else:
             errors_by_tool[tool] = {
                 "tool": tool,
                 "call_id": call_id,
-                "reason": reason,
+                "reason": detail["reason"],
+                # `partial` — some specs in a batch succeeded. Callers should
+                # retry on these but NOT quarantine the run; see
+                # classify_tool_output_detailed.
+                "partial": detail["partial"],
+                "n_failed": detail["n_failed"],
+                "n_total": detail["n_total"],
                 "excerpt": output[:_EXCERPT_CHARS],
             }
 

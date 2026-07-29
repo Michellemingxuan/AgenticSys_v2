@@ -2,8 +2,11 @@
 runs that rested on a tool call which failed and was never re-issued."""
 import pytest
 
+import json
+
 from agent_factories.agent_tools.grounding import (
     classify_tool_output,
+    classify_tool_output_detailed,
     scan_tool_errors,
 )
 
@@ -218,3 +221,67 @@ def test_scan_reports_at_most_one_entry_per_tool():
         _call("c3", "summarize_trend"), _output("c3", err),
     ])
     assert len(scan_tool_errors(r)) == 1
+
+
+# ── partial batch failures ──────────────────────────────────────────────────
+#
+# Regression: a batch tool returns one result per spec, and a single bad spec
+# used to condemn the whole call. Seen in prod on case 366132845011 —
+# `bureau_data` carries all-blank columns (SBFE Score and friends), so a trend
+# over one legitimately reports "no parseable values" (a DATA GAP, the tool
+# worked), and that one element quarantined bureau's perfectly good FICO and
+# delinquency numbers. general_specialist then relayed "bureau's FICO scores
+# and delinquency counts may be unreliable" to the reviewer.
+
+_OK_TREND = '{"table": "bureau_data", "series": [{"period": "2023-07", "value": 654}]}'
+_BAD_TREND = ('trend(max(SBFE Score) by month on month) = '
+              '(no parseable SBFE Score values; 26 total)')
+
+
+def _batch(*inners):
+    return json.dumps({"results": [
+        {"index": i, "value_column": f"c{i}", "result": inner}
+        for i, inner in enumerate(inners)
+    ]}, indent=2)
+
+
+def test_partial_batch_is_flagged_but_marked_partial():
+    d = classify_tool_output_detailed(
+        "batch_summarize_trend", _batch(_OK_TREND, _OK_TREND, _BAD_TREND))
+    assert d["reason"] == "no_buckets"
+    assert d["partial"] is True
+    assert (d["n_failed"], d["n_total"]) == (1, 3)
+
+
+def test_batch_where_every_spec_failed_is_NOT_partial():
+    d = classify_tool_output_detailed(
+        "batch_summarize_trend", _batch(_BAD_TREND, _BAD_TREND))
+    assert d["partial"] is False
+    assert (d["n_failed"], d["n_total"]) == (2, 2)
+
+
+def test_fully_successful_batch_is_clean():
+    assert classify_tool_output_detailed(
+        "batch_summarize_trend", _batch(_OK_TREND, _OK_TREND)) is None
+
+
+def test_batch_that_never_ran_is_a_total_failure():
+    """A malformed specs_json is emitted as a bare string, not a results list —
+    nothing ran, so it must not be softened into a partial."""
+    out = ("batch_summarize_trend received a specs_json that was malformed: "
+           "'['. batch_summarize_trend did NOT run — you have NO data from it.")
+    d = classify_tool_output_detailed("batch_summarize_trend", out)
+    assert d["reason"] == "specs_unparseable" and d["partial"] is False
+
+
+def test_scalar_outputs_are_never_partial():
+    d = classify_tool_output_detailed("summarize_trend", _BAD_TREND)
+    assert d["partial"] is False and (d["n_failed"], d["n_total"]) == (1, 1)
+
+
+def test_scan_carries_partial_through_to_the_caller():
+    r = _Result([_call("c1", "batch_summarize_trend"),
+                 _output("c1", _batch(_OK_TREND, _BAD_TREND))])
+    err = scan_tool_errors(r)[0]
+    assert err["partial"] is True
+    assert (err["n_failed"], err["n_total"]) == (1, 2)
