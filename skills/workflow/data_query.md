@@ -5,7 +5,7 @@ type: workflow
 owner: [base_specialist]
 mode: inline
 replaces: [BASE_INSTRUCTIONS]
-tools: [list_available_tables, get_table_schema, query_table, batch_query_table, join_table, transaction_detail, aggregate_column, batch_aggregate, summarize_trend, batch_summarize_trend, summarize_by_group, make_chart, get_chart_guidance]
+tools: [list_available_tables, get_table_schema, search_columns, query_table, batch_query_table, join_table, transaction_detail, score_driver_values, aggregate_column, batch_aggregate, summarize_trend, batch_summarize_trend, summarize_by_group, make_chart, get_chart_guidance]
 ---
 
 Specialist analyst. Three parallel concerns per call:
@@ -231,6 +231,7 @@ Charts render automatically from tool outputs — no `make_chart` call needed.
 ## Data handling rules
 
 - **Schema is ground truth.** Probe `get_table_schema` before filtering on unseen columns. If a filter returns 0, suspect vocab mismatch.
+- **Don't answer only from the variables named below.** This skill lists *starting points*, not the full column set — `model_scores` alone carries ~250 columns. When the question names a metric you can't map to a column you already know, call **`search_columns("<the user's own words>")`** BEFORE concluding the data is unavailable. It searches every column in this case by name, alias, catalog concept and description. e.g. "internal paydown rate" → `last_cycle_cut_revolve_rate` (concept `capacity_paydown`), which no skill enumerates. Then confirm with `get_table_schema` and query it. Saying "not available" for a column that exists is a reviewer-visible error.
 - **Counts → `rows_matching_filter`** (never count `rows[]`; it's truncated). Sums → `aggregate_column`. Format with thousand separators.
 - **Dates → match the column's own format.** Check via `get_table_schema`. Quote verbatim from results. Never echo filter bounds (dates ending `-01`/`-31` are red flags).
 - **Unwindowed questions → no date filter.** Windowed → anchor to `cut_off_date`, not today. Derived windows ("ramp-up") → ONE `summarize_trend` on `credit_loss_prob`/`tot_struct_risk_score` to find the inflection.
@@ -254,6 +255,24 @@ transaction table (one row per transaction). Choose by question type:
   specific transactions. For spend/payment there is no monthly table —
   `spends` and `payments` are transaction-level, so bucket them by month
   with `summarize_trend` for trend framing.
+
+### Score drivers — always quote the VALUE, not just the name
+
+`score_drivers` / `score_drivers_transaction` store a driver as a **feature
+name** (`top_cdss1 = "last_cycle_cut_revolve_rate"`). The name alone tells a
+reviewer nothing about how far out of line the customer was — the value lives in
+the modeling table and must come with it.
+
+- **Monthly** ("what drove CDSS in June?", "why did the score move?") →
+  `score_driver_values(period="June'2025", score="cdss")`. It joins
+  `score_drivers` → `model_scores` on `trans_month` and returns each driver with
+  its value for that month.
+- **Per transaction** → `transaction_detail` already returns a `driver_values`
+  map alongside the driver columns; read the value from there.
+- Report as `last_cycle_cut_revolve_rate = 0.44` (and against its risk threshold
+  from `get_table_schema` when there is one), never as a bare feature name.
+- A driver with no value means that feature isn't a column of this case's
+  modeling export (`unresolved_driver_values` counts them) — say so; don't guess.
 
 ### Per-transaction records — `transaction_detail` (preferred)
 

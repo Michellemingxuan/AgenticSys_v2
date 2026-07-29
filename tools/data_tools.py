@@ -47,6 +47,13 @@ try:
 except NameError:
     _schema_cache: dict[tuple[str | None, str], str] = {}
 
+# Per-case column index backing ``search_columns`` — same lifecycle and same
+# reset points as ``_schema_cache`` above. See ``_build_search_index``.
+try:
+    _search_index_cache  # type: ignore[used-before-def]  # noqa: F821
+except NameError:
+    _search_index_cache: dict[str | None, list[dict]] = {}
+
 _MAX_CHARS = 3000
 # A trend `series` is load-bearing — auto_chart parses it to render the plotted
 # chart — so it gets a larger budget than generic row dumps, and when it is
@@ -870,6 +877,7 @@ def init_tools(gateway: DataGateway, catalog: DataCatalog, logger: Any = None) -
     _catalog = catalog
     _logger = logger
     _schema_cache.clear()
+    _search_index_cache.clear()
 
 
 def clear_schema_cache() -> None:
@@ -879,6 +887,7 @@ def clear_schema_cache() -> None:
     columns / aliases). Idempotent.
     """
     _schema_cache.clear()
+    _search_index_cache.clear()
 
 
 def set_logger(logger: Any) -> None:
@@ -1126,6 +1135,232 @@ def _find_column_spec(canonical_cols: dict, real_col: str) -> dict | None:
             if _normalize(alias) == real_norm:
                 return spec
     return None
+
+
+# ── search_columns ──────────────────────────────────────────────────────────
+#
+# Why this exists: a specialist proposes variables from its SKILL, then calls
+# get_table_schema to confirm them. Both sides are biased toward what the skill
+# already names — so a column the skill never mentions is invisible, even when
+# it is the one the user asked for. `model_scores` alone ships ~250 real columns
+# against ~56 named in the profile; "how is the internal paydown rate" is
+# answered by `last_cycle_cut_revolve_rate` (concept: capacity_paydown), which
+# no skill enumerates. This tool searches the case's ACTUAL columns by name,
+# alias, concept and description so the specialist can find that column from the
+# user's wording instead of from its own vocabulary.
+
+# Pure function words. Deliberately SHORT — domain words that look generic
+# ("rate", "score", "customer", "internal") are exactly the discriminating terms
+# in this catalog, so stripping them would defeat the search.
+_SEARCH_STOPWORDS = frozenset({
+    "a", "an", "and", "any", "are", "as", "at", "be", "by", "did", "do", "does",
+    "for", "from", "has", "have", "how", "i", "in", "is", "it", "its", "me",
+    "no", "not", "of", "on", "or", "s", "show", "that", "the", "their",
+    "there", "this", "to", "was", "were", "what", "when", "which", "with",
+})
+
+# Minimum term length for SUBSTRING matching inside a column name. Below this,
+# a term must match a whole name token instead: "no" is a substring of
+# `ttl_nonp_inq_ons_grms` and dozens more, so short-term substring matching
+# turns any query into a scan of the whole catalog. Abbreviations that matter
+# ("rvlv", "dpd") still land — 4-char ones as substrings, shorter ones as
+# whole tokens, which is how they actually appear in these names.
+_SEARCH_MIN_SUBSTRING_TERM = 4
+
+def _search_tokens(text: str) -> list[str]:
+    """Lowercase alphanumeric tokens, function words removed."""
+    return [t for t in re.findall(r"[a-z0-9]+", (text or "").lower())
+            if t not in _SEARCH_STOPWORDS]
+
+
+def _build_search_index(case_id) -> list[dict]:
+    """One entry per column physically present in this case's tables.
+
+    Mirrors `_get_table_schema_impl`'s resolution (real table → canonical
+    profile(s) → per-column spec) so a name found here is a name the other data
+    tools accept verbatim. Columns absent from the catalog are still indexed —
+    they exist in the data, and their name alone is often the match.
+    """
+    if case_id in _search_index_cache:
+        return _search_index_cache[case_id]
+
+    entries: list[dict] = []
+    if _gateway is not None and _catalog is not None:
+        for table in _gateway.list_tables():
+            rows = _gateway.query(table) or []
+            if not rows:
+                continue
+            merged_cols: dict[str, dict] = {}
+            for ct in _resolve_canonical_tables(table):
+                for col, spec in (
+                    _catalog._profiles.get(ct, {}).get("columns", {}) or {}
+                ).items():
+                    merged_cols.setdefault(col, spec)
+            for real_col in rows[0].keys():
+                spec = _find_column_spec(merged_cols, real_col) or {}
+                concepts = sorted(DataCatalog._concept_set(spec))
+                threshold = ""
+                if "risk_threshold" in spec:
+                    sym = ">" if spec.get("risk_direction", "above") == "above" else "<"
+                    threshold = f"risky {sym} {spec['risk_threshold']}"
+                entries.append({
+                    "table": table,
+                    "column": real_col,
+                    "dtype": spec.get("dtype", "unknown"),
+                    "description": (spec.get("description") or "").strip(),
+                    "concepts": concepts,
+                    "aliases": list(spec.get("aliases") or []),
+                    "threshold": threshold,
+                    "in_catalog": bool(spec),
+                })
+
+    _search_index_cache[case_id] = entries
+    return entries
+
+
+def _score_entry(entry: dict, terms: list[str], query_norm: str) -> int:
+    """Relevance of one column to the query terms; 0 means "don't show it".
+
+    Weights encode where a match is most trustworthy: the column NAME and its
+    curated `concept` are AUTHORED signals, the free-text description is weaker,
+    and matching every term at once is what separates a real hit from incidental
+    overlap on a common word.
+
+    The floor matters as much as the ranking. Descriptions are long enough that
+    almost any query brushes against a few of them, and a specialist handed 25
+    weak matches is no better off than one handed none. So a hit must either
+    touch an authored identifier, or account for EVERY term in the query.
+    """
+    name = entry["column"].lower()
+    name_tokens = set(re.findall(r"[a-z0-9]+", name))
+    concept_text = " ".join(entry["concepts"]).lower()
+    alias_text = " ".join(entry["aliases"]).lower()
+    desc = entry["description"].lower()
+
+    if _normalize(entry["column"]) == query_norm:
+        return 1000                                  # the user named the column
+    if query_norm and query_norm in {_normalize(a) for a in entry["aliases"]}:
+        return 900
+
+    score = 0
+    matched = 0          # terms matched anywhere
+    identifier_hits = 0  # terms matched in name / concept / alias
+    for term in terms:
+        hit = ident = False
+        if term in name_tokens:
+            score += 6                               # whole word in the name
+            hit = ident = True
+        elif len(term) >= _SEARCH_MIN_SUBSTRING_TERM and term in name:
+            score += 4                               # substring, e.g. "rvlv"
+            hit = ident = True
+        if term in concept_text:
+            score += 5
+            hit = ident = True
+        if term in alias_text:
+            score += 2
+            hit = ident = True
+        if term in desc:
+            score += 2
+            hit = True
+        matched += hit
+        identifier_hits += ident
+
+    all_terms = matched == len(terms)
+    if not identifier_hits and not all_terms:
+        return 0                                     # description noise only
+    if all_terms:
+        score += 8
+    return score
+
+
+def _search_columns_impl(query: str, table_name: str = "", limit: int = 25) -> str:
+    """Find columns by meaning across the case's tables. See the block comment
+    above for why this exists alongside `get_table_schema`."""
+    _log_call("search_columns", {"query": query, "table_name": table_name,
+                                 "limit": limit})
+    if _catalog is None or _gateway is None or _gateway.get_case_id() is None:
+        out = "Data unavailable: data layer is not initialized for this session."
+        _log_result("search_columns", result=out)
+        return out
+
+    terms = _search_tokens(query)
+    if not terms:
+        out = (f"search_columns('{query}') — the query has no searchable terms. "
+               f"Pass a concept or metric name, e.g. 'paydown rate'.")
+        _log_result("search_columns", result=out, extra={"n_terms": 0})
+        return out
+
+    entries = _build_search_index(_gateway.get_case_id())
+    if table_name:
+        wanted = _resolve_real_table(table_name)
+        entries = [e for e in entries if e["table"] in (wanted, table_name)]
+
+    query_norm = _normalize(query)
+    scored = [(s, e) for e in entries
+              if (s := _score_entry(e, terms, query_norm)) > 0]
+    # Highest score first; ties broken so catalog-documented columns lead, then
+    # alphabetically for a stable, reproducible ordering.
+    scored.sort(key=lambda se: (-se[0], not se[1]["in_catalog"],
+                                se[1]["table"], se[1]["column"]))
+    hits = scored[:limit]
+
+    if not hits:
+        # A benign negative, NOT a tool failure: the specialist should widen the
+        # query or fall back to get_table_schema. Deliberately phrased to avoid
+        # the failure markers that grounding.classify_tool_output looks for.
+        out = (f"search_columns('{query}') — no columns matched. Try a broader "
+               f"term, or call list_available_tables / get_table_schema to browse.")
+        _log_result("search_columns", result=out, extra={"n_hits": 0})
+        return out
+
+    by_table: dict[str, list] = {}
+    for score, e in hits:
+        by_table.setdefault(e["table"], []).append((score, e))
+
+    lines = [
+        f"search_columns('{query}') — {len(hits)} match"
+        f"{'' if len(hits) == 1 else 'es'} across {len(by_table)} table"
+        f"{'' if len(by_table) == 1 else 's'}, best first. "
+        f"Column names are as they appear in THIS case's data — pass them verbatim."
+    ]
+    for table, rows in by_table.items():
+        lines.append(f"\n{table}:")
+        for _score, e in rows:
+            bits = [f"  - {e['column']} ({e['dtype']})"]
+            if e["concepts"]:
+                bits.append(f"[concept: {', '.join(e['concepts'])}]")
+            lines.append(" ".join(bits))
+            detail = e["description"] or ("(not in catalog — name only)"
+                                          if not e["in_catalog"] else "")
+            if e["threshold"]:
+                detail = f"{detail} ({e['threshold']})".strip()
+            if detail:
+                lines.append(f"      {detail}")
+    out = "\n".join(lines)
+    _log_result("search_columns", result=out,
+                extra={"n_hits": len(hits), "n_terms": len(terms),
+                       "top": [e["column"] for _s, e in hits[:5]]})
+    return out
+
+
+@function_tool
+def search_columns(query: str, table_name: str = "", limit: int = 25) -> str:
+    """Find data columns by MEANING when you don't know the exact column name.
+
+    Searches every column present in this case — by name, alias, catalog
+    concept, and description — and returns the best matches with their table.
+    Use this BEFORE assuming a metric is unavailable: the column that answers a
+    question is often one your skill never names (e.g. "internal paydown rate"
+    → `last_cycle_cut_revolve_rate`). Then confirm with `get_table_schema` and
+    query it.
+
+    Args:
+        query: The metric or concept in the user's words, e.g. "paydown rate",
+            "revolve utilization", "days past due".
+        table_name: Optional — restrict the search to one table.
+        limit: Max matches to return (default 25).
+    """
+    return _search_columns_impl(query, table_name, limit)
 
 
 def _query_table_impl(
@@ -1745,6 +1980,61 @@ _TXN_DETAIL_CFG = {
 }
 
 
+# A driver column holds the NAME of a feature, not a value: `top_cdss1` =
+# "last_cycle_cut_revolve_rate". Matches top_/bottom_ + family + rank.
+_DRIVER_COL_RE = re.compile(r"^(top|bottom)_[a-z]+\d+$", re.IGNORECASE)
+
+
+# The real monthly modeling export ships per-month AGGREGATES of each model
+# feature, suffixed by the aggregation: `cbr_score` → `cbr_score_max`. The
+# driver tables reference the UNSUFFIXED feature name, and only some columns
+# declare the suffixed form as a catalog alias (31 `_max` / 9 `_min` / 1 `_mean`
+# in the shipped real case, most undeclared). So after the normal alias +
+# normalization resolution fails, try the suffixes — otherwise the majority of
+# drivers come back name-only, which is the state this feature exists to fix.
+_DRIVER_VALUE_SUFFIXES = ("_max", "_min", "_mean")
+
+
+def _resolve_driver_feature(row: dict, feature: str, table: str,
+                            cache: dict) -> str | None:
+    """Real column in `row` holding `feature`'s value, or None if absent.
+
+    Cached per feature: the key set is identical across rows of one table, so
+    the (potentially ~250-column) resolution runs once per distinct driver.
+    """
+    if feature in cache:
+        return cache[feature]
+    real = _resolve_real_column([row], feature, table)
+    if real not in row:
+        real = next((c for s in _DRIVER_VALUE_SUFFIXES
+                     if (c := f"{feature}{s}") in row), None)
+    cache[feature] = real if (real and real in row) else None
+    return cache[feature]
+
+
+def _attach_driver_values(merged: dict, driver_names: list[str],
+                          score_table: str, resolve_cache: dict) -> dict:
+    """Map each driver FEATURE NAME in this row to its value on the same row.
+
+    A bare driver name tells a case reviewer which feature moved the score but
+    not by how much — and the value is already sitting in the joined
+    `model_scores_transaction` row, so answering "how bad is it" should not cost
+    another query. Real-data profiles suffix these features (`_min` / `_max`),
+    so names resolve through the catalog's aliases rather than by exact key.
+
+    Returned as ONE deduplicated `{feature: value}` map per row instead of a
+    sibling key per driver column: CDSS and TSR routinely cite the same feature,
+    and `transaction_detail` truncates on total characters, so the dedup buys
+    back rows.
+    """
+    values: dict = {}
+    for feature in driver_names:
+        real = _resolve_driver_feature(merged, feature, score_table, resolve_cache)
+        if real is not None and merged[real] not in ("", None):
+            values[feature] = merged[real]
+    return values
+
+
 # Timestamp join column per transaction table (all three share the same
 # instant at different precision — matched via `_join_key` at second grain).
 _TXN_TABLE_KEYS = {
@@ -1858,6 +2148,8 @@ def _transaction_detail_impl(
         want = [base_key_name] + want
 
     # ── merge one record per transaction (LEFT join from the base table) ──
+    driver_cols_wanted = [c for c in want if _DRIVER_COL_RE.match(c)]
+    resolve_cache: dict = {}
     out_rows: list[dict] = []
     match_counts = {t: 0 for t in join_tables}
     for br in brows:
@@ -1868,7 +2160,19 @@ def _transaction_detail_impl(
             if m:
                 merged.update(m)
                 match_counts[t] += 1
-        out_rows.append({name: merged[name] for name in want if name in merged})
+        row = {name: merged[name] for name in want if name in merged}
+        # Attach the VALUE behind each driver name. Driver columns keep their
+        # bare feature name (callers match on it); the values ride alongside.
+        if driver_cols_wanted:
+            names = list(dict.fromkeys(
+                v for c in driver_cols_wanted
+                if isinstance(v := merged.get(c), str) and v.strip()))
+            if names:
+                dv = _attach_driver_values(
+                    merged, names, cfg["score_table"], resolve_cache)
+                if dv:
+                    row["driver_values"] = dv
+        out_rows.append(row)
 
     matched_n = len(out_rows)
     # Coverage of the merchant/amount side across the FULL selected set (before
@@ -1918,6 +2222,10 @@ def _transaction_detail_impl(
             "tot_struct_risk_score, CDSS = credit_loss_prob, the customer score) + "
             "score drivers — `top_*` raise the score, `bottom_*` lower it; CDSS "
             "and TSR have DIFFERENT drivers (top_/bottom_cdss* vs top_/bottom_tsr*). "
+            "`driver_values` gives the VALUE of each driver feature on that same "
+            "transaction (from the modeling table) — quote the driver WITH its "
+            "value, e.g. 'last_cycle_cut_revolve_rate = 0.31'; a driver name "
+            "alone does not tell the reviewer how far out of line it is. "
             "A transaction in the base table but "
             "absent from a joined table (e.g. a model-scored auth with no settled "
             "spend) keeps the columns it HAS — the missing side is simply absent, "
@@ -1979,6 +2287,159 @@ def transaction_detail(
         sort_by=sort_by, sort_desc=sort_desc, limit=limit, columns=columns,
         base_table=base_table,
     )
+
+
+# ── score_driver_values ────────────────────────────────────────────────────
+#
+# The MONTHLY counterpart to transaction_detail's `driver_values`. Real cases
+# ship `score_drivers` (which features moved CDSS / TSR each month) and
+# `model_scores` (what those features were worth), joined on `trans_month` —
+# but the driver table stores a feature NAME as its cell value, so no generic
+# join expresses "use this cell's contents as a column name in that table".
+# Without this, a reviewer reads "top CDSS driver: last_cycle_cut_revolve_rate"
+# and still has to go ask what it was, which is the whole question.
+
+_DRIVER_FAMILY_RE = re.compile(r"^(top|bottom)_([a-z]+?)(\d+)$", re.IGNORECASE)
+
+
+def _driver_columns(row_keys) -> list[tuple[str, str, str, int]]:
+    """(column, direction, family, rank) for each driver column, rank-ordered."""
+    found = []
+    for key in row_keys:
+        m = _DRIVER_FAMILY_RE.match(str(key))
+        if m:
+            found.append((key, m.group(1).lower(), m.group(2).lower(),
+                          int(m.group(3))))
+    found.sort(key=lambda t: (t[2], t[1], t[3]))
+    return found
+
+
+def _score_driver_values_impl(period: str = "", score: str = "",
+                              limit: int = 0) -> str:
+    """Monthly score drivers WITH the value of each driver feature."""
+    _log_call("score_driver_values",
+              {"period": period, "score": score, "limit": limit})
+    if _gateway is None or _catalog is None:
+        out = ("Data unavailable: data layer is not initialized for this session "
+               "(no gateway bound). Infrastructure error, not a finding.")
+        _log_result("score_driver_values", result=out)
+        return out
+
+    drv_t = _resolve_real_table("score_drivers")
+    mdl_t = _resolve_real_table("model_scores")
+    drows = _gateway.query(drv_t, filters=None)
+    if not drows:
+        out = (f"Data unavailable: table '{drv_t}' not found for current case.")
+        _log_result("score_driver_values", result=out, extra={"found": False})
+        return out
+    mrows = _gateway.query(mdl_t, filters=None) or []
+
+    drv_key = _resolve_real_column(drows, "trans_month", drv_t)
+    mdl_key = _resolve_real_column(mrows, "trans_month", mdl_t) if mrows else ""
+    # Index the modeling table by month. `_date_key` normalizes the format gap
+    # (the real export writes `July'2023`), so the two tables join even when
+    # their date spellings differ — see the date-format notes in CLAUDE.md.
+    by_month: dict = {}
+    for mr in mrows:
+        k = _date_key(mr.get(mdl_key))
+        if k is not None:
+            by_month.setdefault(k, mr)
+
+    want_family = (score or "").strip().lower().replace("_", "") or ""
+    period_key = _date_key(period) if period else None
+    if period and period_key is None:
+        out = (f"score_driver_values: could not parse period '{period}'. Pass a "
+               f"month as it appears in the data (check get_table_schema), "
+               f"e.g. \"July'2023\" or 2023-07.")
+        _log_result("score_driver_values", result=out, extra={"bad_period": period})
+        return out
+
+    driver_cols = _driver_columns(drows[0].keys())
+    resolve_cache: dict = {}
+    months: list[dict] = []
+    n_missing = 0
+    for dr in drows:
+        mkey = _date_key(dr.get(drv_key))
+        if period_key is not None and mkey != period_key:
+            continue
+        mrow = by_month.get(mkey) if mkey is not None else None
+        entry: dict = {"trans_month": dr.get(drv_key), "drivers": {}}
+        for col, direction, family, rank in driver_cols:
+            if want_family and family != want_family:
+                continue
+            feature = dr.get(col)
+            if not isinstance(feature, str) or not feature.strip():
+                continue
+            feature = feature.strip()
+            item: dict = {"rank": rank, "feature": feature}
+            if mrow is not None:
+                real = _resolve_driver_feature(mrow, feature, mdl_t, resolve_cache)
+                if real is not None and mrow[real] not in ("", None):
+                    item["value"] = mrow[real]
+                    if real != feature:
+                        # Surface the aggregation so the reviewer knows the value
+                        # is that month's max/min, not a point-in-time reading.
+                        item["value_column"] = real
+                else:
+                    n_missing += 1
+            entry["drivers"].setdefault(f"{direction}_{family}", []).append(item)
+        if entry["drivers"]:
+            months.append(entry)
+
+    if not months:
+        out = (f"score_driver_values: no driver rows"
+               f"{f' for period {period}' if period else ''}"
+               f"{f' and score {score}' if score else ''}. "
+               f"Call get_table_schema('{drv_t}') to see the months available.")
+        _log_result("score_driver_values", result=out, extra={"n_months": 0})
+        return out
+
+    if limit and limit > 0:
+        months = months[-limit:]        # most recent months
+
+    response = {
+        "driver_table": drv_t,
+        "value_table": mdl_t,
+        "months_returned": len(months),
+        "unresolved_driver_values": n_missing,
+        "schema_note": (
+            "Per month, the features that moved each score, WITH their value "
+            "that month. `top_*` push the score UP, `bottom_*` push it DOWN; "
+            "CDSS and TSR have different drivers. `rank` 1 = strongest. Quote a "
+            "driver WITH its value — the name alone does not tell the reviewer "
+            "how far out of line it was. A missing `value` means the feature is "
+            f"not a column of '{mdl_t}' for this case (counted in "
+            "unresolved_driver_values), NOT a failed lookup."),
+        "months": months,
+    }
+    out = json.dumps(response, indent=2, default=str)
+    if len(out) > _MAX_CHARS * 2:
+        months = months[-max(1, len(months) // 2):]
+        response["months"] = months
+        response["months_returned"] = len(months)
+        response["truncated"] = True
+        out = json.dumps(response, indent=2, default=str)
+    _log_result("score_driver_values", result=out,
+                extra={"n_months": len(months), "unresolved": n_missing})
+    return out
+
+
+@function_tool
+def score_driver_values(period: str = "", score: str = "", limit: int = 0) -> str:
+    """Monthly score drivers WITH the value of each driver feature attached.
+
+    `score_drivers` names the features that moved CDSS / TSR each month, but
+    stores only the NAME; the value lives in the modeling table. This joins the
+    two so you can say "last_cycle_cut_revolve_rate = 0.31" instead of just
+    naming it. Use for "why did the score move" / "what drove the decline".
+
+    Args:
+        period: Optional month filter, e.g. "July'2023" or "2023-07". Any format
+            the data uses is accepted.
+        score: Optional score family — "cdss" or "tsr". Omit for both.
+        limit: Optional — keep only the N most recent months.
+    """
+    return _score_driver_values_impl(period, score, limit)
 
 
 # ── aggregate_column ──────────────────────────────────────────────────────
