@@ -637,3 +637,80 @@ async def test_distiller_failure_does_not_break_specialist_response():
     assert ctx._specialist_kb == {}
     # Failure was logged.
     assert any(e[0] == "distiller_failed" for e in ctx.logger.events)
+
+
+# ── sub-question injection ──────────────────────────────────────────────────
+#
+# The orchestrator needs to know WHICH sub-question produced each specialist's
+# findings, without the specialist spending output tokens echoing it. This was
+# dead code until 2026-07-29: it was guarded on `isinstance(payload, str)`, but
+# domain specialists run with `output_type=SpecialistOutput`, so
+# `redact_payload` hands back a pydantic MODEL and the branch never ran. These
+# tests use the real model for exactly that reason — a str-shaped fixture would
+# let the bug pass.
+
+
+def _specialist_result(findings="TSR peaked at 39.6 in 2024-11."):
+    from models.types import SpecialistOutput
+
+    class _R:
+        final_output = SpecialistOutput(
+            domain="modeling", mode="chat", findings=findings)
+
+        def to_input_list(self):
+            return []
+
+    return _R()
+
+
+@pytest.mark.asyncio
+async def test_sub_question_is_injected_into_a_pydantic_payload():
+    from agents import RunContextWrapper
+
+    ctx = _make_failure_ctx()
+    with patch("agent_factories.agent_tools.agent_tool.Runner.run",
+               new=AsyncMock(return_value=_specialist_result())):
+        wrapped = agent_tool(Agent(name="inner", instructions="x", tools=[]),
+                             name="modeling", description="d")
+        out = await wrapped.on_invoke_tool(
+            RunContextWrapper(ctx),
+            json.dumps({"sub_question": "How did TSR move in 2024?"}))
+
+    assert out.startswith("[Sub-question: How did TSR move in 2024?]")
+    assert "39.6" in out, "the findings must survive the injection"
+
+
+@pytest.mark.asyncio
+async def test_injected_payload_still_parses_back_to_the_sub_answer():
+    """episodic._parse_sub_answer strips this exact prefix — it was written for
+    a payload shape that never actually arrived. Pin the round-trip."""
+    from agents import RunContextWrapper
+    from tools.episodic import _parse_sub_answer
+
+    ctx = _make_failure_ctx()
+    with patch("agent_factories.agent_tools.agent_tool.Runner.run",
+               new=AsyncMock(return_value=_specialist_result())):
+        wrapped = agent_tool(Agent(name="inner", instructions="x", tools=[]),
+                             name="modeling", description="d")
+        out = await wrapped.on_invoke_tool(
+            RunContextWrapper(ctx), json.dumps({"sub_question": "TSR?"}))
+
+    assert _parse_sub_answer(out) == "TSR peaked at 39.6 in 2024-11."
+
+
+@pytest.mark.asyncio
+async def test_report_agent_payload_is_left_alone():
+    """report_agent returns a ReportDraft, not an answer to a sub-question."""
+    from agents import RunContextWrapper
+
+    ctx = _make_failure_ctx()
+    fake = type("R", (), {"final_output": "report body",
+                          "to_input_list": lambda self: []})()
+    with patch("agent_factories.agent_tools.agent_tool.Runner.run",
+               new=AsyncMock(return_value=fake)):
+        wrapped = agent_tool(Agent(name="inner", instructions="x", tools=[]),
+                             name="report_agent", description="d")
+        out = await wrapped.on_invoke_tool(
+            RunContextWrapper(ctx), json.dumps({"sub_question": "anything"}))
+
+    assert "[Sub-question:" not in out

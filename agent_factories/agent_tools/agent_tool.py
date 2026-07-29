@@ -618,8 +618,15 @@ def agent_tool(
         # specialist was answering — without the specialist wasting output
         # tokens to echo it. Replaces the removed SpecialistOutput.question
         # field with a zero-cost server-side injection.
-        if isinstance(payload, str) and name != "report_agent":
-            payload = f"[Sub-question: {redacted_in}]\n{payload}"
+        #
+        # Goes through `_banner_payload` for the same reason the DEGRADED
+        # banner does: domain specialists run with `output_type=SpecialistOutput`,
+        # so `redact_payload` returns a PYDANTIC MODEL and the old
+        # `isinstance(payload, str)` guard made this branch unreachable — the
+        # prefix never reached the orchestrator, and `episodic._parse_sub_answer`
+        # was stripping a prefix that never arrived.
+        if name != "report_agent":
+            payload = _banner_payload(payload, f"[Sub-question: {redacted_in}]")
 
         # Degraded banner: the orchestrator must not synthesize these numbers
         # into the FinalAnswer as though they were measured. Stated in the same
