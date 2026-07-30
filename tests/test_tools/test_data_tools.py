@@ -1812,3 +1812,100 @@ def test_query_table_still_samples_evenly_when_it_can():
     got = [r["m"] for r in q["rows"]]
     assert len(got) > 1
     assert got[0] == "M000" and got[-1] == "M399", "must span the match set"
+
+
+# ── derived ops: share-of-total and ratio ───────────────────────────────────
+#
+# So a specialist never divides in its head. Mental math is not usually WRONG,
+# but it is untraceable — the reviewer can't tell a measured number from an
+# estimated one, and the operand can come from the wrong place even when the
+# arithmetic is trivial. Both ops report numerator AND denominator.
+
+def _spend_gw():
+    rows = ([{"m": "A", "amt": "100", "risk": "10"}] * 2
+            + [{"m": "B", "amt": "300", "risk": "10"}])
+    gw = LocalDataGateway(case_data={"C": {"spends": rows}})
+    gw.set_case("C")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+
+
+def test_share_is_the_subset_over_the_WHOLE_table():
+    _spend_gw()
+    out = data_tools._aggregate_column_impl(
+        table_name="spends", column="amt", op="share",
+        filter_column="m", filter_value="A")
+    assert "40.0%" in out                      # 200 of 500
+    # Numerator AND denominator must be visible, or the number isn't checkable.
+    assert "200" in out and "500" in out
+    assert "2 of 3 rows" in out
+
+
+def test_share_denominator_ignores_the_filter():
+    """The whole point — a subset share must not be measured against itself."""
+    _spend_gw()
+    out = data_tools._aggregate_column_impl(
+        table_name="spends", column="amt", op="share",
+        filter_column="m", filter_value="B")
+    assert "60.0%" in out                      # 300 of 500, not 300 of 300
+
+
+def test_share_without_a_filter_is_refused_not_reported_as_100pct():
+    _spend_gw()
+    out = data_tools._aggregate_column_impl(
+        table_name="spends", column="amt", op="share")
+    assert "needs a filter" in out
+    assert "100%" in out            # explains WHY, rather than returning it
+
+
+def test_ratio_is_sum_over_sum():
+    _spend_gw()
+    out = data_tools._aggregate_column_impl(
+        table_name="spends", column="amt", op="ratio",
+        denominator_column="risk")
+    assert "16.67" in out           # 500 / 30
+    assert "sum-over-sum" in out, "must say which statistic it is"
+
+
+def test_ratio_respects_the_row_filter():
+    _spend_gw()
+    out = data_tools._aggregate_column_impl(
+        table_name="spends", column="amt", op="ratio",
+        denominator_column="risk", filter_column="m", filter_value="B")
+    assert "30" in out              # 300 / 10
+
+
+def test_ratio_without_a_denominator_column_is_refused():
+    _spend_gw()
+    out = data_tools._aggregate_column_impl(
+        table_name="spends", column="amt", op="ratio")
+    assert "needs `denominator_column`" in out
+
+
+def test_zero_denominator_is_reported_not_a_crash():
+    rows = [{"m": "A", "amt": "100", "risk": "0"}]
+    gw = LocalDataGateway(case_data={"C": {"spends": rows}})
+    gw.set_case("C")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    out = data_tools._aggregate_column_impl(
+        table_name="spends", column="amt", op="ratio", denominator_column="risk")
+    assert "undefined" in out and "sums to 0" in out
+
+
+def test_derived_ops_report_an_unknown_column_as_NOT_FOUND():
+    _spend_gw()
+    for kwargs in ({"column": "nope", "op": "share", "filter_column": "m",
+                    "filter_value": "A"},
+                   {"column": "amt", "op": "ratio", "denominator_column": "nope"}):
+        out = data_tools._aggregate_column_impl(table_name="spends", **kwargs)
+        assert "COLUMN NOT FOUND" in out and "search_columns" in out
+
+
+def test_existing_ops_are_unchanged():
+    """The new branch must not disturb sum/mean/count."""
+    _spend_gw()
+    assert "500" in data_tools._aggregate_column_impl(
+        table_name="spends", column="amt", op="sum")
+    assert "166" in data_tools._aggregate_column_impl(
+        table_name="spends", column="amt", op="mean")
+    assert "3" in data_tools._aggregate_column_impl(
+        table_name="spends", column="amt", op="count")

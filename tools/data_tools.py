@@ -2650,6 +2650,20 @@ def _format_aggregate(value, column: str, op: str) -> str:
     return f"${formatted}" if is_money else formatted
 
 
+def _numeric_column_values(rows: list[dict], real_col: str) -> list[float]:
+    """Coercible numeric cells of `real_col`. Blanks and non-numerics skipped."""
+    out: list[float] = []
+    for r in rows:
+        v = r.get(real_col)
+        if v is None or v == "":
+            continue
+        try:
+            out.append(float(v))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def _aggregate_column_impl(
     table_name: str,
     column: str,
@@ -2657,6 +2671,7 @@ def _aggregate_column_impl(
     filter_column: str = "",
     filter_value: str = "",
     filter_op: str = "eq",
+    denominator_column: str = "",
 ) -> str:
     """Compute an aggregate over a column, returning a formatted string."""
     op = (op or "sum").lower()
@@ -2664,6 +2679,7 @@ def _aggregate_column_impl(
         "table_name": table_name, "column": column, "op": op,
         "filter_column": filter_column, "filter_value": filter_value,
         "filter_op": filter_op if (filter_column and filter_value) else None,
+        "denominator_column": denominator_column or None,
     })
 
     if _gateway is None:
@@ -2684,6 +2700,7 @@ def _aggregate_column_impl(
         return out
 
     total_rows = len(rows)
+    all_rows = rows          # pre-filter; `share`'s denominator is the WHOLE table
     filter_descr = ""
     if filter_column and filter_value:
         resolved = _resolve_real_column(rows, filter_column, real_table)
@@ -2706,6 +2723,87 @@ def _aggregate_column_impl(
         )
         _log_result("aggregate_column", result=out,
                     extra={"op": op, "n_matching": n_matching, "total": total_rows})
+        return out
+
+    # ── derived ops ─────────────────────────────────────────────────────
+    #
+    # These exist so a specialist never has to do the arithmetic in its head.
+    # Mental math is not usually WRONG, but it is untraceable — a reviewer
+    # cannot tell a measured number from an estimated one, and the operand can
+    # come from the wrong place even when the sum is trivial. Both ops report
+    # NUMERATOR and DENOMINATOR explicitly so the result stays checkable.
+    if op in ("share", "ratio"):
+        real_col = _resolve_real_column(all_rows, column, real_table)
+        if all_rows and real_col not in all_rows[0]:
+            out = (f"COLUMN NOT FOUND: '{column}' is not a column of "
+                   f"'{real_table}' for this case. Call "
+                   f"search_columns('{column}') or get_table_schema.")
+            _log_result("aggregate_column", result=out,
+                        extra={"reason": "column_not_found", "op": op})
+            return out
+
+        if op == "share":
+            if not filter_descr:
+                out = (f"share({column}) needs a filter — without one the share "
+                       f"is 100% by definition. Pass filter_column / "
+                       f"filter_value to define the subset, or use "
+                       f"summarize_by_group for a full breakdown.")
+                _log_result("aggregate_column", result=out,
+                            extra={"reason": "share_without_filter"})
+                return out
+            num = sum(_numeric_column_values(rows, real_col))
+            den = sum(_numeric_column_values(all_rows, real_col))
+            if den == 0:
+                out = (f"share({real_col}){filter_descr} = (undefined: the "
+                       f"whole-table total is 0; {total_rows:,} rows)")
+                _log_result("aggregate_column", result=out,
+                            extra={"reason": "zero_denominator", "op": op})
+                return out
+            out = (
+                f"share({real_col}){filter_descr} = {num / den * 100:.1f}% "
+                f"({_format_aggregate(num, real_col, 'sum')} of "
+                f"{_format_aggregate(den, real_col, 'sum')}; "
+                f"{n_matching:,} of {total_rows:,} rows in {real_table})"
+            )
+            _log_result("aggregate_column", result=out,
+                        extra={"op": op, "numerator": num, "denominator": den,
+                               "n_matching": n_matching, "total": total_rows})
+            return out
+
+        # ratio: sum(column) / sum(denominator_column) over the SAME rows.
+        if not denominator_column:
+            out = ("ratio needs `denominator_column` — e.g. "
+                   "aggregate_column(table, column='A', op='ratio', "
+                   "denominator_column='B') for sum(A)/sum(B).")
+            _log_result("aggregate_column", result=out,
+                        extra={"reason": "ratio_without_denominator"})
+            return out
+        real_den = _resolve_real_column(all_rows, denominator_column, real_table)
+        if all_rows and real_den not in all_rows[0]:
+            out = (f"COLUMN NOT FOUND: denominator '{denominator_column}' is "
+                   f"not a column of '{real_table}' for this case. Call "
+                   f"search_columns('{denominator_column}').")
+            _log_result("aggregate_column", result=out,
+                        extra={"reason": "column_not_found", "op": op})
+            return out
+        num = sum(_numeric_column_values(rows, real_col))
+        den = sum(_numeric_column_values(rows, real_den))
+        if den == 0:
+            out = (f"ratio({real_col} / {real_den}){filter_descr} = (undefined: "
+                   f"denominator sums to 0 over {n_matching:,} row(s))")
+            _log_result("aggregate_column", result=out,
+                        extra={"reason": "zero_denominator", "op": op})
+            return out
+        # Sum-over-sum, NOT the mean of per-row ratios — a different statistic.
+        out = (
+            f"ratio({real_col} / {real_den}){filter_descr} = {num / den:.4g} "
+            f"({_format_aggregate(num, real_col, 'sum')} / "
+            f"{_format_aggregate(den, real_den, 'sum')}, summed over "
+            f"{n_matching:,} row(s); sum-over-sum, not the mean of per-row ratios)"
+        )
+        _log_result("aggregate_column", result=out,
+                    extra={"op": op, "numerator": num, "denominator": den,
+                           "n_matching": n_matching})
         return out
 
     if not rows:
@@ -2818,8 +2916,9 @@ def aggregate_column(
     filter_column: str = "",
     filter_value: str = "",
     filter_op: str = "eq",
+    denominator_column: str = "",
 ) -> str:
-    """Compute an aggregate (sum / mean / max / min / count) over a column.
+    """Compute an aggregate (sum / mean / max / min / count / share / ratio).
 
     Use this for ANY question asking for a total, average, maximum, minimum,
     or count. The result is formatted with thousand separators (e.g.
@@ -2835,10 +2934,30 @@ def aggregate_column(
         table_name: the table to aggregate over (canonical or real name).
         column: the column to aggregate. Must be numeric for sum/mean/max/min.
             Ignored for op='count'.
-        op: one of 'sum', 'mean', 'max', 'min', 'count'. Default 'sum'.
+        op: one of 'sum', 'mean', 'max', 'min', 'count', 'share', 'ratio'.
+            Default 'sum'.
         filter_column / filter_value / filter_op: optional row filter, same
             semantics as query_table. When omitted, aggregates over ALL
             rows of the table for the active case.
+        denominator_column: REQUIRED for op='ratio' — the ratio is
+            sum(column) / sum(denominator_column) over the same rows.
+
+    DERIVED OPS — use these instead of computing the number yourself. A value
+    you divide in your head is untraceable: the reviewer cannot tell it from a
+    measured one, and the operand can come from the wrong place even when the
+    arithmetic is trivial. Both report numerator AND denominator.
+
+        op='share'  — this subset as a share of the WHOLE table. Needs a
+            filter (that is what defines the subset)::
+                share(Amount) filtered by Merchant Name contains 'S BERTRAM'
+                = 10.0% ($392,454.63 of $3,927,582.20; 15 of 8,888 rows)
+
+        op='ratio'  — sum(column) / sum(denominator_column), NOT the mean of
+            per-row ratios::
+                aggregate_column('spends', column='Amount', op='ratio',
+                                 denominator_column='Merchant Risk Score')
+
+    For a per-row average use op='mean' — do NOT divide a sum by a count.
     """
     return _aggregate_column_impl(
         table_name=table_name,
@@ -2847,6 +2966,7 @@ def aggregate_column(
         filter_column=filter_column,
         filter_value=filter_value,
         filter_op=filter_op,
+        denominator_column=denominator_column,
     )
 
 

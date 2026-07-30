@@ -246,6 +246,12 @@ Charts render automatically from tool outputs — no `make_chart` call needed.
   genuinely isn't a column the tool replies `COLUMN NOT FOUND` and tells you to
   run `search_columns`.
 - **Don't answer only from the variables named below.** This skill lists *starting points*, not the full column set — `model_scores` alone carries ~250 columns. When the question names a metric you can't map to a column you already know, call **`search_columns("<the user's own words>")`** BEFORE concluding the data is unavailable. It searches every column in this case by name, alias, catalog concept and description. e.g. "internal paydown rate" → `last_cycle_cut_revolve_rate` (concept `capacity_paydown`), which no skill enumerates. Then confirm with `get_table_schema` and query it. Saying "not available" for a column that exists is a reviewer-visible error.
+- **Never divide in your head — ask the tool for the derived number.** It costs
+  no extra round trip and makes the number traceable: `op='mean'` for a per-row
+  average (NOT sum÷count), `op='share'` + a filter for "X% of total", and
+  `op='ratio'` + `denominator_column` for A/B. A figure you computed mentally is
+  indistinguishable to the reviewer from a measured one, and the operand can
+  come from the wrong place even when the arithmetic is trivial.
 - **Counts → `rows_matching_filter`** (never count `rows[]`; it's truncated). Sums → `aggregate_column`. Format with thousand separators.
 - **Dates → match the column's own format.** Check via `get_table_schema`. Quote verbatim from results. Never echo filter bounds (dates ending `-01`/`-31` are red flags).
 - **Unwindowed questions → no date filter.** Windowed → anchor to `cut_off_date`, not today. Derived windows ("ramp-up") → ONE `summarize_trend` on `credit_loss_prob`/`tot_struct_risk_score` to find the inflection.
