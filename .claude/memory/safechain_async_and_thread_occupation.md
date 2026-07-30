@@ -11,7 +11,7 @@
 The prod model factory is **`amodel` (ASYNC), imported `from safechain.core.model import amodel`**. It must be **awaited** — it performs token acquisition. `_invoke`:
 
 1. **Build once via `await amodel(model_id)`**, cache on `self._llm`, **rebuild on 401** (`_aensure_llm` / `_arefresh_llm`, both async).
-2. Build the chain `ValidChatPromptTemplate.from_messages([("human","{__input__}")]) | model | StrOutputParser()` and run **`await chain.ainvoke(...)`**, bounded by `asyncio.wait_for(timeout=_SAFECHAIN_CALL_TIMEOUT_S)` (180s, env). Because `ainvoke` is native async here, `wait_for` / task cancellation ABORT the in-flight request and free the semaphore + turn lock promptly — **no lingering worker thread**.
+2. Build the chain and run **`await chain.ainvoke(...)`**, bounded by `asyncio.wait_for(timeout=_SAFECHAIN_CALL_TIMEOUT_S)` (180s, env). (Chain shape as of the 2026-07-29 rewrite: `ValidChatPromptTemplate.from_messages([MessagesPlaceholder("messages")]) | model.bind(**openai_kwargs)` — see [[safechain_dual_environment]]. The async/cancellation behavior below is unaffected by that change; streaming uses `astream` and bounds the GAP BETWEEN chunks.) Because `ainvoke` is native async here, `wait_for` / task cancellation ABORT the in-flight request and free the semaphore + turn lock promptly — **no lingering worker thread**.
 
 **Reference shape (from the private env), not invented:**
 ```python
