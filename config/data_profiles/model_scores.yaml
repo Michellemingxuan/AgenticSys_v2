@@ -734,6 +734,7 @@ columns:
     concept: exposure_leverage
     aliases:
     - overall_exposure
+    - business_exposure
   business_revenue:
     dtype: float
     distribution: normal
