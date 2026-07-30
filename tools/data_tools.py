@@ -2672,6 +2672,9 @@ def _aggregate_column_impl(
     filter_value: str = "",
     filter_op: str = "eq",
     denominator_column: str = "",
+    base_filter_column: str = "",
+    base_filter_value: str = "",
+    base_filter_op: str = "eq",
 ) -> str:
     """Compute an aggregate over a column, returning a formatted string."""
     op = (op or "sum").lower()
@@ -2751,11 +2754,31 @@ def _aggregate_column_impl(
                 _log_result("aggregate_column", result=out,
                             extra={"reason": "share_without_filter"})
                 return out
+
+            # "Share of WHAT" is a parameter, not a constant. The whole table is
+            # only the default: "declines as a share of MAY's transactions"
+            # needs May as the base, not the year. `base_filter_*` sets it.
+            base_rows = all_rows
+            base_descr = f"all {total_rows:,} rows in {real_table}"
+            if base_filter_column and base_filter_value:
+                base_col = _resolve_real_column(
+                    all_rows, base_filter_column, real_table)
+                base_rows = _apply_filter(all_rows, base_col,
+                                          str(base_filter_value), base_filter_op)
+                base_descr = (f"{len(base_rows):,} rows where {base_col} "
+                              f"{base_filter_op} {base_filter_value!r}")
+                if not base_rows:
+                    out = (f"share({real_col}){filter_descr} = (undefined: the "
+                           f"base filter matched no rows — {base_descr})")
+                    _log_result("aggregate_column", result=out,
+                                extra={"reason": "empty_base", "op": op})
+                    return out
+
             num = sum(_numeric_column_values(rows, real_col))
-            den = sum(_numeric_column_values(all_rows, real_col))
+            den = sum(_numeric_column_values(base_rows, real_col))
             if den == 0:
-                out = (f"share({real_col}){filter_descr} = (undefined: the "
-                       f"whole-table total is 0; {total_rows:,} rows)")
+                out = (f"share({real_col}){filter_descr} = (undefined: the base "
+                       f"total is 0 over {base_descr})")
                 _log_result("aggregate_column", result=out,
                             extra={"reason": "zero_denominator", "op": op})
                 return out
@@ -2763,11 +2786,12 @@ def _aggregate_column_impl(
                 f"share({real_col}){filter_descr} = {num / den * 100:.1f}% "
                 f"({_format_aggregate(num, real_col, 'sum')} of "
                 f"{_format_aggregate(den, real_col, 'sum')}; "
-                f"{n_matching:,} of {total_rows:,} rows in {real_table})"
+                f"{n_matching:,} matching rows, base = {base_descr})"
             )
             _log_result("aggregate_column", result=out,
                         extra={"op": op, "numerator": num, "denominator": den,
-                               "n_matching": n_matching, "total": total_rows})
+                               "n_matching": n_matching, "base_rows": len(base_rows),
+                               "base_filtered": bool(base_filter_column)})
             return out
 
         # ratio: sum(column) / sum(denominator_column) over the SAME rows.
@@ -2917,6 +2941,9 @@ def aggregate_column(
     filter_value: str = "",
     filter_op: str = "eq",
     denominator_column: str = "",
+    base_filter_column: str = "",
+    base_filter_value: str = "",
+    base_filter_op: str = "eq",
 ) -> str:
     """Compute an aggregate (sum / mean / max / min / count / share / ratio).
 
@@ -2947,8 +2974,11 @@ def aggregate_column(
     measured one, and the operand can come from the wrong place even when the
     arithmetic is trivial. Both report numerator AND denominator.
 
-        op='share'  — this subset as a share of the WHOLE table. Needs a
-            filter (that is what defines the subset)::
+        op='share'  — this subset as a share of a BASE set. The base defaults
+            to the whole table, but "share of what" is a parameter: pass
+            base_filter_column / base_filter_value to make it a subset (e.g.
+            declines as a share of MAY's transactions, not the year's). Needs a
+            filter — that is what defines the numerator::
                 share(Amount) filtered by Merchant Name contains 'S BERTRAM'
                 = 10.0% ($392,454.63 of $3,927,582.20; 15 of 8,888 rows)
 
@@ -2967,6 +2997,9 @@ def aggregate_column(
         filter_value=filter_value,
         filter_op=filter_op,
         denominator_column=denominator_column,
+        base_filter_column=base_filter_column,
+        base_filter_value=base_filter_value,
+        base_filter_op=base_filter_op,
     )
 
 
@@ -3966,6 +3999,12 @@ def _summarize_by_group_impl(
         concentration = None
 
     # Per-group payload.
+    #
+    # BOTH denominators, because "share of what" is genuinely ambiguous and the
+    # specialist should never have to divide to find out. "The top merchant is
+    # 10% of spend" and "the top merchant is 28.5% of the top 5" are both valid
+    # answers to different questions; only the first was derivable before.
+    shown_total = sum(v for _, v, _ in top) if additive else None
     series: list[dict] = []
     for g, bv, values in top:
         n = len(values)
@@ -3975,6 +4014,12 @@ def _summarize_by_group_impl(
             "raw_value": round(bv, 4) if isinstance(bv, float) else bv,
             "n_records": n,
         }
+        if additive and total_value:
+            sub["share_of_total"] = f"{bv / total_value * 100:.1f}%"
+        if additive and shown_total and len(top) < n_groups_total:
+            # Only when the list IS a subset — otherwise it equals
+            # share_of_total and is just noise.
+            sub["share_of_shown"] = f"{bv / shown_total * 100:.1f}%"
         # When the op already covers it, don't duplicate. Otherwise add a
         # mini-stats block so the LLM can see shape per group in one shot.
         if op in ("sum", "count"):

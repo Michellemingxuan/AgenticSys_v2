@@ -1837,7 +1837,7 @@ def test_share_is_the_subset_over_the_WHOLE_table():
     assert "40.0%" in out                      # 200 of 500
     # Numerator AND denominator must be visible, or the number isn't checkable.
     assert "200" in out and "500" in out
-    assert "2 of 3 rows" in out
+    assert "2 matching rows" in out and "base = all 3 rows" in out
 
 
 def test_share_denominator_ignores_the_filter():
@@ -1909,3 +1909,79 @@ def test_existing_ops_are_unchanged():
         table_name="spends", column="amt", op="mean")
     assert "3" in data_tools._aggregate_column_impl(
         table_name="spends", column="amt", op="count")
+
+
+# ── "share of WHAT" is a parameter, not a constant ──────────────────────────
+
+def test_share_base_defaults_to_the_whole_table():
+    _spend_gw()
+    out = data_tools._aggregate_column_impl(
+        table_name="spends", column="amt", op="share",
+        filter_column="m", filter_value="A")
+    assert "40.0%" in out and "base = all 3 rows" in out
+
+
+def test_share_base_can_be_a_subset():
+    """"X as a share of MAY" needs May as the base, not the whole year."""
+    rows = [{"m": "A", "amt": "100", "mon": "May"},
+            {"m": "B", "amt": "100", "mon": "May"},
+            {"m": "A", "amt": "800", "mon": "Jun"}]
+    gw = LocalDataGateway(case_data={"C": {"spends": rows}})
+    gw.set_case("C")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    out = data_tools._aggregate_column_impl(
+        table_name="spends", column="amt", op="share",
+        filter_column="m", filter_value="A",
+        base_filter_column="mon", base_filter_value="May")
+    # A-in-May is 100 of May's 200 — NOT 900/1000 against the whole table.
+    assert "50.0%" in out
+    assert "mon eq 'May'" in out, "the base must be stated, not implied"
+
+
+def test_share_with_an_empty_base_is_undefined_not_a_number():
+    _spend_gw()
+    out = data_tools._aggregate_column_impl(
+        table_name="spends", column="amt", op="share",
+        filter_column="m", filter_value="A",
+        base_filter_column="m", base_filter_value="ZZZ")
+    assert "undefined" in out and "matched no rows" in out
+
+
+def test_group_rows_carry_both_share_denominators():
+    """"top 1 of spend" and "top 1 among the top 5" are different answers to
+    different questions; both must be readable without dividing."""
+    rows = [{"m": "A", "amt": 50.0}, {"m": "B", "amt": 30.0},
+            {"m": "C", "amt": 20.0}, {"m": "D", "amt": 100.0}]
+    gw = LocalDataGateway(case_data={"C": {"t": rows}})
+    gw.set_case("C")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    g = json.loads(data_tools._summarize_by_group_impl(
+        table_name="t", value_column="amt", group_column="m",
+        op="sum", top_n=2))
+    top = g["groups"][0]
+    assert top["share_of_total"] == "50.0%"     # 100 of 200
+    assert top["share_of_shown"] == "66.7%"     # 100 of the shown 150
+
+
+def test_share_of_shown_is_omitted_when_nothing_was_truncated():
+    """Otherwise it just repeats share_of_total and adds noise."""
+    rows = [{"m": "A", "amt": 50.0}, {"m": "B", "amt": 50.0}]
+    gw = LocalDataGateway(case_data={"C": {"t": rows}})
+    gw.set_case("C")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    g = json.loads(data_tools._summarize_by_group_impl(
+        table_name="t", value_column="amt", group_column="m",
+        op="sum", top_n=10))
+    assert "share_of_shown" not in g["groups"][0]
+    assert g["groups"][0]["share_of_total"] == "50.0%"
+
+
+def test_group_shares_are_omitted_for_non_additive_ops():
+    rows = [{"m": "A", "amt": 50.0}, {"m": "B", "amt": 30.0}]
+    gw = LocalDataGateway(case_data={"C": {"t": rows}})
+    gw.set_case("C")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    g = json.loads(data_tools._summarize_by_group_impl(
+        table_name="t", value_column="amt", group_column="m",
+        op="mean", top_n=10))
+    assert "share_of_total" not in g["groups"][0]
