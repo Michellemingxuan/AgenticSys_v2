@@ -346,10 +346,11 @@ recurring / recent pattern):
 A zero-record result is **more often a filter mismatch than a true absence**.
 Before concluding "no data":
 
-- **Check the column's actual format first** via `get_table_schema` — never
-  assume a date format or a value spelling. Match the column's own format
-  (e.g. `txn_date_time` is `YYYY-MM-DD HH:MM:SS.fff`; `appr_deny_cd` is the
-  integer `0`/`1`, not the words "approved"/"declined").
+- **On 0 matches, READ `zero_match_diagnostic`** — `query_table` reports it for
+  you: whether the column exists, and the values actually present. Re-issue with
+  one of those. Don't conclude "no data" and don't guess a spelling; the answer
+  is in the response. (`get_table_schema` also lists `declared_values` where the
+  catalog has them.)
 - For **free-text entity columns** (merchant name, reason codes), prefer the **`contains`** operator (case-insensitive substring) over exact `eq`. `eq`/`ne` are now case- and whitespace-insensitive for text, so case alone won't cause a miss — but `contains` is the right tool when the stored value has extra tokens (e.g. "STARBUCKS #4412 SEATTLE WA").
 - On **high-volume transaction tables**, always bound the time range and add
   the most specific entity filter you have. **Filter the day-grain `trans_dt`

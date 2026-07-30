@@ -20,7 +20,7 @@ description: 'Transaction-level model scoring features — ONE ROW PER TRANSACTI
   questions.
 
 
-  Authorization columns: `appr_deny_cd` (0 = approved, 1 = declined) and
+  Authorization columns: `appr_deny_cd` (0 = approved, 2 = DECLINED — not 1) and
 
   `auto_decline_pos_deny_cd_s1` (decline-reason code, populated only on declines).
 
@@ -59,11 +59,13 @@ columns:
       filter this column by that spend's Timestamp.
   appr_deny_cd:
     dtype: int
-    description: 'Authorization decision: 0 = approved, 1 = declined. Filter with
-      eq and value 0 or 1.'
+    description: 'Authorization decision. OBSERVED CODING in the real export: 0 = approved, 2 = DECLINED (verified on case 366132845011 — all 755 rows with 2 carry a decline reason, all 8,866 with 0 carry none; blank on 18 rows). The value 1 does NOT appear: filtering eq 1 returns zero rows and reads as "no declines". Filter declines with eq 2.'
+    categories:
+      '0': approved
+      '2': declined
   auto_decline_pos_deny_cd_s1:
     dtype: int
-    description: Decline-reason code, populated only when appr_deny_cd = 1 (blank
+    description: Decline-reason code, populated only when appr_deny_cd = 2 (blank
       on approvals). Quote the raw code; do not invent a human label.
     dtype_pending_review: true
   cust_lexis_nexis_tot_tax_assess_val_am:

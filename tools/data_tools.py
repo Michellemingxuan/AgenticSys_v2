@@ -773,6 +773,61 @@ def _resolve_real_column(
     return requested
 
 
+_ZERO_MATCH_SAMPLE_VALUES = 8
+
+
+def _zero_match_diagnostic(
+    unfiltered: list[dict], conditions: list[tuple[str, str, str]],
+) -> dict | None:
+    """Why a filter matched nothing: does the column exist, and what IS in it.
+
+    A bare `rows_matching_filter: 0` is indistinguishable between "wrong column
+    name", "wrong value vocabulary" and "genuinely no such rows" — so the skill
+    had to carry rules like "check the column's format FIRST" and "appr_deny_cd
+    is 0/1, not the words approved/declined". Those are a memory burden standing
+    in for feedback the tool can simply give: report the column's actual values
+    and the model self-corrects on the next call.
+
+    Values only, bounded and truncated — this is a vocabulary hint, not a data
+    dump, and it goes through the same redaction as any other tool output.
+    """
+    if not unfiltered or not conditions:
+        return None
+    real_keys = set(unfiltered[0].keys())
+    out: dict = {}
+    for col, value, op in conditions:
+        if col not in real_keys:
+            out[col] = {
+                "column_exists": False,
+                "hint": (f"'{col}' is not a column of this table — call "
+                         f"get_table_schema, or search_columns to find it."),
+            }
+            continue
+        seen: list[str] = []
+        for r in unfiltered:
+            v = r.get(col)
+            if v in (None, ""):
+                continue
+            s = str(v)[:40]
+            if s not in seen:
+                seen.append(s)
+            if len(seen) > _ZERO_MATCH_SAMPLE_VALUES:
+                break
+        entry: dict = {
+            "column_exists": True,
+            "filter_tried": f"{op} {value!r}",
+            "values_present": seen[:_ZERO_MATCH_SAMPLE_VALUES],
+        }
+        if len(seen) > _ZERO_MATCH_SAMPLE_VALUES:
+            entry["values_present_note"] = "first few distinct values only"
+        if not seen:
+            entry["column_is_empty"] = True
+            entry["hint"] = (f"'{col}' is present but EMPTY for this case — a "
+                             f"DATA GAP, not a filter mistake.")
+        out[col] = entry
+    return out or None
+
+
 def _apply_filter(
     rows: list[dict],
     column: str,
@@ -1551,8 +1606,13 @@ def _query_table_impl(
     # real CSV headers before filtering. Without this, a specialist following
     # the skill's snake_case names silently gets 0 rows.
     filter_parts: list[str] = []
+    # Keep the pre-filter rows so a zero-match result can say WHY (see
+    # `_zero_match_diagnostic`). Cheap: the gateway already returned this list.
+    unfiltered_rows = rows
+    resolved_conditions: list[tuple[str, str, str]] = []
     for fc, fv, fo in conditions:
         rc = _resolve_real_column(rows, fc, table_name)
+        resolved_conditions.append((rc, str(fv), str(fo)))
         rows = _apply_filter(rows, rc, fv, fo)
         filter_parts.append(
             f"{rc} {fo} {fv!r} (resolved from '{fc}')" if rc != fc
@@ -1646,6 +1706,11 @@ def _query_table_impl(
     rows_returned = len(rows)
     truncated = bool(truncation_notes)
 
+    # Zero matches: say WHY rather than leaving the specialist to guess between
+    # a wrong column, a wrong value vocabulary, and an honest absence.
+    zero_diag = (_zero_match_diagnostic(unfiltered_rows, resolved_conditions)
+                 if rows_matching_filter == 0 and resolved_conditions else None)
+
     response: dict[str, Any] = {
         "table": table_name,
         "filter": filter_descriptor,
@@ -1654,6 +1719,7 @@ def _query_table_impl(
         "columns_requested": requested_cols,
         "total_rows_in_table": total_rows_in_table,
         "rows_matching_filter": rows_matching_filter,
+        **({"zero_match_diagnostic": zero_diag} if zero_diag else {}),
         "rows_returned": rows_returned,
         "truncated": truncated,
         "rows": rows,

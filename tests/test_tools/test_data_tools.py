@@ -1522,3 +1522,69 @@ def test_driver_values_survive_rows_missing_the_joined_columns():
     assert d["rows_returned"] == 2
     with_vals = [r for r in d["rows"] if "driver_values" in r]
     assert len(with_vals) == 1, "only the joined row can carry a driver value"
+
+
+# ── zero-match diagnostic ───────────────────────────────────────────────────
+#
+# A bare `rows_matching_filter: 0` can't be told apart from a wrong column, a
+# wrong value vocabulary, or an honest absence — so the skill carried rules like
+# "check the column's format FIRST" and "appr_deny_cd is 0/1". The second was
+# WRONG on real data (declines are coded 2), which is the case for giving
+# feedback instead of instructions: no prompt discipline survives a false fact.
+
+def _decision_gw():
+    rows = [{"appr_deny_cd": "0", "amt": "10"}] * 3 + [{"appr_deny_cd": "2", "amt": "20"}]
+    gw = LocalDataGateway(case_data={"C": {"model_scores_transaction": rows}})
+    gw.set_case("C")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+
+
+def test_zero_match_reports_the_values_actually_present():
+    _decision_gw()
+    q = json.loads(data_tools._query_table_impl(
+        table_name="model_scores_transaction",
+        filter_column="appr_deny_cd", filter_value="declined", filter_op="eq"))
+    d = q["zero_match_diagnostic"]["appr_deny_cd"]
+    assert d["column_exists"] is True
+    assert set(d["values_present"]) == {"0", "2"}
+    assert d["filter_tried"] == "eq 'declined'"
+
+
+def test_zero_match_says_when_the_column_does_not_exist():
+    _decision_gw()
+    q = json.loads(data_tools._query_table_impl(
+        table_name="model_scores_transaction",
+        filter_column="approval_status", filter_value="1", filter_op="eq"))
+    d = q["zero_match_diagnostic"]["approval_status"]
+    assert d["column_exists"] is False
+    assert "search_columns" in d["hint"]
+
+
+def test_zero_match_distinguishes_an_empty_column_from_a_bad_filter():
+    rows = [{"appr_deny_cd": "", "amt": "10"}]
+    gw = LocalDataGateway(case_data={"C": {"model_scores_transaction": rows}})
+    gw.set_case("C")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    q = json.loads(data_tools._query_table_impl(
+        table_name="model_scores_transaction",
+        filter_column="appr_deny_cd", filter_value="2", filter_op="eq"))
+    d = q["zero_match_diagnostic"]["appr_deny_cd"]
+    assert d["column_is_empty"] is True and "DATA GAP" in d["hint"]
+
+
+def test_no_diagnostic_when_the_filter_actually_matched():
+    _decision_gw()
+    q = json.loads(data_tools._query_table_impl(
+        table_name="model_scores_transaction",
+        filter_column="appr_deny_cd", filter_value="2", filter_op="eq"))
+    assert q["rows_matching_filter"] == 1
+    assert "zero_match_diagnostic" not in q
+
+
+def test_schema_declares_the_decline_code_vocabulary():
+    """The catalog said 0/1; the real export uses 0/2. Now declared, so
+    get_table_schema hands the specialist the real vocabulary up front."""
+    _decision_gw()
+    sc = json.loads(data_tools._get_table_schema_impl("model_scores_transaction"))
+    assert set(sc["appr_deny_cd"]["declared_values"]) == {"0", "2"}
+    assert "2 = DECLINED" in sc["appr_deny_cd"]["description"]
