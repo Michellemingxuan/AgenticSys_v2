@@ -1766,3 +1766,49 @@ def test_no_breach_has_no_episode():
     rows = [{"trans_month": "2025-01-01", "tot_struct_risk_score": 5.0}]
     t = _trend_summary(rows)["threshold"]
     assert t["n_episodes"] == 0 and t["latest_episode"] is None
+
+
+def test_query_table_terminates_on_a_wide_table(monkeypatch):
+    """Regression: an UNBOUNDED loop, not a slow one.
+
+    The size-truncation loop halved the row count, and `_even_sample` returns
+    its input UNCHANGED when max_items < 2 — so once halving reached target=1 it
+    handed back every row, re-measured the full size, and spun forever. Fired on
+    any table wide enough that 2 rows exceed the char budget with no
+    sort_by/limit: `query_table("model_scores")` (44 columns) hung until the
+    240s specialist timeout.
+    """
+    import threading
+
+    # 44 columns of padded values: 2 rows must exceed _MAX_CHARS.
+    rows = [{f"c{i}": f"value_{i}_" + "x" * 30 for i in range(44)}
+            for _ in range(18)]
+    gw = LocalDataGateway(case_data={"C": {"t": rows}})
+    gw.set_case("C")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+
+    box: dict = {}
+
+    def _run():
+        box["out"] = data_tools._query_table_impl(table_name="t")
+
+    th = threading.Thread(target=_run, daemon=True)
+    th.start()
+    th.join(timeout=15)
+    assert not th.is_alive(), "query_table did not terminate — unbounded loop"
+
+    q = json.loads(box["out"])
+    assert q["total_rows_in_table"] == 18
+    assert 1 <= q["rows_returned"] < 18 and q["truncated"] is True
+
+
+def test_query_table_still_samples_evenly_when_it_can():
+    """The progress guard must not disable even-sampling on the normal path."""
+    rows = [{"m": f"M{i:03d}", "amt": float(i)} for i in range(400)]
+    gw = LocalDataGateway(case_data={"C": {"t": rows}})
+    gw.set_case("C")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    q = json.loads(data_tools._query_table_impl(table_name="t"))
+    got = [r["m"] for r in q["rows"]]
+    assert len(got) > 1
+    assert got[0] == "M000" and got[-1] == "M399", "must span the match set"

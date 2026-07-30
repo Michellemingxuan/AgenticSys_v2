@@ -1687,7 +1687,16 @@ def _query_table_impl(
         text = json.dumps(rows, indent=2, default=str)
         while len(text) > _MAX_CHARS - 500 and len(rows) > 1:
             target = max(1, len(rows) // 2)
-            rows = _even_sample(_full_rows, target) if _even else rows[:target]
+            sampled = _even_sample(_full_rows, target) if _even else rows[:target]
+            # GUARANTEE PROGRESS. `_even_sample` returns its input UNCHANGED
+            # when max_items < 2, so once halving reached target=1 this loop
+            # got all rows back, re-measured the full size, and spun forever —
+            # an unbounded hang on any table wide enough that 2 rows exceed the
+            # budget with no sort_by/limit (e.g. query_table("model_scores"),
+            # 44 columns). A plain head-slice always shrinks.
+            if len(sampled) >= len(rows):
+                sampled = rows[:target]
+            rows = sampled
             text = json.dumps(rows, indent=2, default=str)
         if limit_applied is not None:
             note = (f"top {min(limit_applied, rows_matching_filter)} of "
