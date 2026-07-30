@@ -728,8 +728,10 @@ def agent_tool(
                 # the one check that also brings domain knowledge.
                 measured_over=(None if name == "report_agent"
                                else measured_over(result) or None),
-                # One-line collapse of the same thing, for the reviewer-facing
-                # answer footnote (the per-call detail stays in the trace).
+                # One-line collapse of the same thing (`table: window` pairs),
+                # so the trace leads with the scope before the per-call detail —
+                # and so an UNFILTERED table is stated as "all dates" rather
+                # than showing up as an absent clause nobody notices.
                 scope=(None if name == "report_agent"
                        else scope_line(result) or None),
             )

@@ -212,6 +212,14 @@ def _render_specialist_output(payload):
     # derived server-side. This is what lets a REVIEWER catch a correct number
     # measured over the wrong set (a share with no time filter answering a
     # "in 2025" question), so it has to be visible, not just logged.
+    #
+    # `scope` first: one line of `table: window` pairs, and the only place that
+    # names an ABSENT filter ("all dates"). In `measured_over` an unconstrained
+    # call just lacks a `where` clause, and missing text is far harder to notice
+    # than the words "all dates" next to a question about 2025.
+    scope = payload.get("scope") or ""
+    if scope:
+        lines.append(f"  - **Scope:** {_excerpt(scope, 300)}")
     measured = payload.get("measured_over") or []
     if measured:
         lines.append("  - **Measured over:**")

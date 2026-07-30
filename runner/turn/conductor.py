@@ -130,36 +130,12 @@ _NO_REPORTS_NOTE = (
 
 
 
-# Reviewer-facing scope footnote. ONE line, appended to the final answer.
+# Scope provenance lives in the REASONING TRACE, not the final answer.
 #
-# The reviewer's own check is the strongest one available — they know the domain
-# and no automated check does. But they can only catch "right number, wrong
-# set" if the set is stated, and the trace panel is a click away. So the answer
-# itself carries `table: window` pairs, derived from the arguments the
-# specialists actually passed (agent_tool attaches them per specialist).
-#
-# Terse on purpose: a footnote nobody reads catches nothing.
-_SCOPE_FOOTNOTE_MAX = 240
-
-
-def _scope_footnote(tool_calls: list) -> str:
-    """`_Scope: spends: all dates; model_scores: 2025-04..2025-05_`, or ""."""
-    parts: list[str] = []
-    for tc in tool_calls or []:
-        payload = tc.get("payload")
-        scope = payload.get("scope") if isinstance(payload, dict) else None
-        if not isinstance(scope, str) or not scope:
-            continue
-        for entry in scope.split("; "):
-            entry = entry.strip()
-            if entry and entry not in parts:
-                parts.append(entry)
-    if not parts:
-        return ""
-    body = "; ".join(parts)
-    if len(body) > _SCOPE_FOOTNOTE_MAX:
-        body = body[:_SCOPE_FOOTNOTE_MAX].rstrip(" ;") + " …"
-    return f"\n\n_Scope: {body}_"
+# `agent_tool` attaches a one-line `scope` (`table: window` pairs) and per-call
+# `measured_over` lines to each specialist's payload, so both already travel to
+# every trace surface. The answer text stays clean: scope is provenance a
+# reviewer opens the trace for, not part of the finding being reported.
 
 
 def _cacheable_tool_calls(tool_calls: list, degraded_names) -> list[dict]:
@@ -1416,14 +1392,6 @@ class TurnRunner:
             flags = getattr(final_answer, "flags", [])
             timeline = getattr(final_answer, "timeline", [])
             data_pull = getattr(final_answer, "data_pull_request", None)
-
-        # Scope footnote — what the numbers were measured over. Appended here
-        # so it reaches the SSE `final`, the chat message, and the qa_cache
-        # entry identically (see the SSE-invariant note in the module
-        # docstring); a footnote only on one path would be worse than none.
-        _footnote = _scope_footnote(tool_calls)
-        if _footnote and answer_text and "_Scope:" not in answer_text:
-            answer_text = answer_text + _footnote
 
         # Fold in any flags produced by the server-enforced coherence review
         # (re-dispatch note / capped-with-residual) so they land in the audit

@@ -152,33 +152,56 @@ def test_one_specialists_timings_never_leak_to_another():
     assert runs["crossbu"] == [3120], "must not be consumed by another tool"
 
 
-# ── scope footnote on the final answer ──────────────────────────────────────
-
-def test_scope_footnote_is_one_terse_line_and_deduplicates():
-    from runner.turn.conductor import _scope_footnote
-
-    tc = [
-        {"tool": "spend_payments", "payload": {"scope": "spends: all dates"}},
-        {"tool": "modeling", "payload": {
-            "scope": "model_scores: all dates; "
-                     "model_scores_transaction: 2025-05-01..2025-05-31"}},
-        {"tool": "spend_payments", "payload": {"scope": "spends: all dates"}},
-    ]
-    out = _scope_footnote(tc)
-    assert out.startswith("\n\n_Scope: ") and out.endswith("_")
-    assert out.count("spends: all dates") == 1, "must dedupe across specialists"
-    assert out.count("\n\n") == 1, "one line, not a block"
+# ── scope provenance belongs in the trace, NOT in the answer ────────────────
 
 
-def test_scope_footnote_absent_when_no_specialist_reported_scope():
-    from runner.turn.conductor import _scope_footnote
-    assert _scope_footnote([{"tool": "report_agent", "payload": {"answer": "x"}}]) == ""
-    assert _scope_footnote([]) == ""
+def _render(payload: dict) -> str:
+    """The suite's specialist-payload → markdown renderer, loaded by path."""
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "notebooks" / "run_question_suite.py"
+    spec = importlib.util.spec_from_file_location("_rqs_for_test", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module._render_specialist_output(payload)
 
 
-def test_scope_footnote_is_length_capped():
-    from runner.turn.conductor import _scope_footnote
-    tc = [{"tool": f"s{i}", "payload": {"scope": f"table_with_a_long_name_{i}: all dates"}}
-          for i in range(40)]
-    out = _scope_footnote(tc)
-    assert len(out) < 300 and out.endswith("…_")
+def test_trace_shows_scope_before_the_per_call_detail():
+    out = _render({
+        "findings": "Top merchant is 10.0% of spend.",
+        "scope": "spends: all dates; model_scores_transaction: 2025-05-01..2025-05-31",
+        "measured_over": ["aggregate_column(spends.amount, op=share)"],
+    })
+    assert "**Scope:** spends: all dates" in out
+    assert out.index("**Scope:**") < out.index("**Measured over:**"), \
+        "the one-line scope leads; per-call detail follows"
+
+
+def test_trace_states_an_absent_filter_as_all_dates():
+    """The load-bearing half: an unconstrained table must be NAMED, not omitted.
+
+    In `measured_over` an unfiltered call merely lacks a `where` clause, and
+    missing text is what a reviewer skims past.
+    """
+    assert "all dates" in _render({"findings": "f", "scope": "spends: all dates"})
+
+
+def test_trace_omits_scope_when_no_data_calls_were_made():
+    out = _render({"findings": "from the curated report"})
+    assert "**Scope:**" not in out
+
+
+def test_final_answer_never_carries_a_scope_footnote():
+    """Drift guard: scope is trace-only.
+
+    It previously appended `_Scope: …` to `answer_text`, which also pushed it
+    into the chat message, the qa_cache entry and the Amem write. Bind that
+    removal so it cannot creep back via any of those paths.
+    """
+    import inspect
+
+    from runner.turn import conductor
+
+    assert not hasattr(conductor, "_scope_footnote")
+    assert "_Scope:" not in inspect.getsource(conductor)
