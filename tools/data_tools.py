@@ -1237,7 +1237,9 @@ def format_tail_group(n: int) -> str:
 
 # How many breaching periods to list. The count and the LATEST one carry the
 # answer; a full list on a long series would crowd out the trend itself.
-_MAX_BREACH_PERIODS = 12
+# How many breach EPISODES to list. The count and the latest one carry the
+# answer; older episodes are context.
+_MAX_BREACH_EPISODES = 6
 
 
 def _column_threshold(real_table: str, real_col: str) -> dict | None:
@@ -3327,12 +3329,47 @@ def _summarize_trend_impl(
             s for s in series
             if ((s["raw_value"] > limit) if above else (s["raw_value"] < limit))
         ]
+        # EPISODES, not a flat period list. A flat list reads as a range, and on
+        # a series that breaches, recovers, then breaches again it spans the
+        # whole history: "2024-03 to 2025-05" was reported as the window for
+        # "when TSR was reacting RECENTLY" when the recent reaction is
+        # 2025-04..2025-05 and 2025-01..03 sat below the line. Its endpoints
+        # were artifacts too — the first one moved with list truncation.
+        #
+        # Contiguity is adjacency within `series` (every present bucket, in
+        # order), so a bucket that is present-but-not-breaching splits an
+        # episode. A period MISSING from the data does not split it — see
+        # `missing_periods`.
+        idx_by_period = {s["period"]: i for i, s in enumerate(series)}
+        episodes: list[dict] = []
+        for s in breached:
+            i = idx_by_period[s["period"]]
+            if episodes and i == episodes[-1]["_last_idx"] + 1:
+                ep = episodes[-1]
+                ep["end"], ep["_last_idx"] = s["period"], i
+                ep["n_periods"] += 1
+                if s["raw_value"] > ep["_peak_raw"] if above else s["raw_value"] < ep["_peak_raw"]:
+                    ep["_peak_raw"], ep["peak"] = s["raw_value"], {
+                        "period": s["period"], "value": s["value"]}
+            else:
+                episodes.append({
+                    "start": s["period"], "end": s["period"], "n_periods": 1,
+                    "peak": {"period": s["period"], "value": s["value"]},
+                    "_last_idx": i, "_peak_raw": s["raw_value"],
+                })
+        for ep in episodes:
+            ep.pop("_last_idx", None)
+            ep.pop("_peak_raw", None)
+
         summary["threshold"] = {
             "value": limit,
             "risky_when": f"{'>' if above else '<'} {limit}",
             "n_breaching_periods": len(breached),
-            # Most recent first — a "recent spike" question cares about the tail.
-            "breaching_periods": [s["period"] for s in breached][-_MAX_BREACH_PERIODS:],
+            "n_episodes": len(episodes),
+            # THE field for "recently": a start..end window, directly usable as
+            # a date filter for pulling that period's transactions.
+            "latest_episode": episodes[-1] if episodes else None,
+            "episodes": episodes[-_MAX_BREACH_EPISODES:],
             "latest_breach": (
                 {"period": breached[-1]["period"], "value": breached[-1]["value"]}
                 if breached else None

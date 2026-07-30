@@ -1354,7 +1354,8 @@ def test_trend_reports_threshold_crossings():
     t = _trend_summary(rows)["threshold"]
     assert t["value"] == 20
     assert t["risky_when"] == "> 20"
-    assert t["breaching_periods"] == ["2025-04", "2025-05"]
+    assert t["latest_episode"]["start"] == "2025-04"
+    assert t["latest_episode"]["end"] == "2025-05"
 
 
 def test_latest_breach_is_the_recent_one_not_the_global_peak():
@@ -1384,7 +1385,7 @@ def test_below_direction_breaches_when_under_the_limit():
             {"trans_month": "2025-02-01", "last_cycle_cut_revolve_rate": 0.31}]
     t = _trend_summary(rows, value_column="last_cycle_cut_revolve_rate")["threshold"]
     assert t["risky_when"].startswith("<")
-    assert t["breaching_periods"] == ["2025-02"]
+    assert t["latest_episode"]["start"] == "2025-02"
 
 
 def test_no_breaches_reports_none_not_a_missing_block():
@@ -1414,8 +1415,10 @@ def test_breaching_period_list_is_bounded_but_the_count_is_not():
              for m in range(1, 5)]
     t = _trend_summary(rows)["threshold"]
     assert t["n_breaching_periods"] == 16
-    assert len(t["breaching_periods"]) == data_tools._MAX_BREACH_PERIODS
-    assert t["breaching_periods"][-1] == "2025-04", "keep the most RECENT"
+    # One unbroken run -> ONE episode spanning it, not 16 loose periods.
+    assert t["n_episodes"] == 1
+    assert (t["latest_episode"]["start"], t["latest_episode"]["end"]) == \
+        ("2024-01", "2025-04")
 
 
 def test_group_total_is_available_as_a_raw_number():
@@ -1707,3 +1710,59 @@ def test_an_absent_column_is_reported_even_for_a_valid_alias():
         table_name="model_scores", value_column="CUMNTHS2",
         time_column="trans_month", op="max")
     assert "COLUMN NOT FOUND" in out and "DATA GAP" not in out
+
+
+# ── breach EPISODES, not a flat period list ─────────────────────────────────
+#
+# Reported: "extract the abnormal transactions when TSR was reacting recently"
+# answered with 2024-03..2025-05. That IS the span of the flat breach list on a
+# series that breached in 2024, recovered for three months, then breached again
+# in 2025-04. "Recently" is the LAST run, and a window is what you filter
+# transactions by — a single period or a flat list can't express it.
+
+def test_gapped_breaches_split_into_episodes():
+    vals = [(2024, 2, 21.3), (2024, 3, 21.5), (2024, 12, 30.6),
+            (2025, 1, 7.4), (2025, 2, 12.8), (2025, 3, 10.4),
+            (2025, 4, 27.4), (2025, 5, 20.2), (2025, 6, 7.7)]
+    rows = [{"trans_month": f"{y}-{m:02d}-01", "tot_struct_risk_score": v}
+            for y, m, v in vals]
+    t = _trend_summary(rows)["threshold"]
+    assert t["n_episodes"] == 2
+    assert (t["episodes"][0]["start"], t["episodes"][0]["end"]) == ("2024-02", "2024-12")
+    assert (t["latest_episode"]["start"], t["latest_episode"]["end"]) == ("2025-04", "2025-05")
+
+
+def test_latest_episode_is_a_window_not_the_whole_breach_span():
+    """The exact regression: the answer must not span 2024 → 2025."""
+    vals = [(2024, 3, 21.5), (2025, 1, 7.4), (2025, 4, 27.4), (2025, 5, 20.2)]
+    rows = [{"trans_month": f"{y}-{m:02d}-01", "tot_struct_risk_score": v}
+            for y, m, v in vals]
+    t = _trend_summary(rows)["threshold"]
+    assert t["latest_episode"]["start"] == "2025-04"      # NOT "2024-03"
+    assert t["latest_episode"]["n_periods"] == 2
+
+
+def test_episode_peak_is_the_peak_within_that_episode():
+    """So a recent-episode answer quotes 27.4, not the all-time 39.6."""
+    vals = [(2024, 9, 39.6), (2025, 1, 7.4), (2025, 4, 27.4), (2025, 5, 20.2)]
+    rows = [{"trans_month": f"{y}-{m:02d}-01", "tot_struct_risk_score": v}
+            for y, m, v in vals]
+    s = _trend_summary(rows)
+    assert s["peak_all_time"]["period"] == "2024-09"
+    assert s["threshold"]["latest_episode"]["peak"]["period"] == "2025-04"
+
+
+def test_below_direction_episodes_track_the_low_side():
+    vals = [(2025, 1, 0.80), (2025, 2, 0.31), (2025, 3, 0.90), (2025, 4, 0.20)]
+    rows = [{"trans_month": f"{y}-{m:02d}-01", "last_cycle_cut_revolve_rate": v}
+            for y, m, v in vals]
+    t = _trend_summary(rows, value_column="last_cycle_cut_revolve_rate")["threshold"]
+    assert t["n_episodes"] == 2
+    assert t["latest_episode"]["start"] == "2025-04"
+    assert t["latest_episode"]["peak"]["period"] == "2025-04"   # most extreme LOW
+
+
+def test_no_breach_has_no_episode():
+    rows = [{"trans_month": "2025-01-01", "tot_struct_risk_score": 5.0}]
+    t = _trend_summary(rows)["threshold"]
+    assert t["n_episodes"] == 0 and t["latest_episode"] is None
