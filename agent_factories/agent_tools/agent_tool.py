@@ -15,6 +15,7 @@ from tools.node_trace import _open_node, attach_extra, attach_tag
 from agent_factories.agent_tools.series_extract import _extract_data_tool_outputs
 from agent_factories.agent_tools.distiller_pass import _distill_and_persist
 from agent_factories.agent_tools.auto_chart import _auto_chart_from_tool_outputs
+from agent_factories.agent_tools.claim_audit import audit_claims
 from agent_factories.agent_tools.grounding import scan_tool_errors
 from agent_factories.agent_tools.specialist_input_tool import (
     _SPECIALIST_HISTORY_KEEP_RECENT_USER_MESSAGES,
@@ -632,6 +633,25 @@ def agent_tool(
         # bureau column failed one trend and flagged FICO + delinquencies with
         # it). Those are still worth the retry above; they are not worth
         # discarding an answer over.
+        # SHADOW-MODE claim audit. Logs only — deliberately gates nothing. It
+        # asks "do the answer's numbers trace to the tool outputs?", which has
+        # more room to false-positive than the grounding check (a legitimately
+        # DERIVED ratio won't appear verbatim). Measure the rate on a known-good
+        # question suite before letting any of it drive a retry, and never wire
+        # an auditor straight to the quarantine — this system has already
+        # over-flagged twice.
+        if logger is not None and name != "report_agent":
+            _audit = audit_claims(result, getattr(result, "final_output", None))
+            if _audit["unsupported_numbers"] or _audit["sample_size_as_count"]:
+                logger.log("specialist_claim_audit", {
+                    "specialist": name,
+                    "sub_question": redacted_in[:300],
+                    **_audit,
+                    # So analysis can separate audit noise from answers that
+                    # were already known-bad for a different reason.
+                    "already_flagged_ungrounded": bool(tool_errors),
+                })
+
         degraded = any(not e.get("partial") for e in tool_errors)
         if degraded:
             if logger is not None:
