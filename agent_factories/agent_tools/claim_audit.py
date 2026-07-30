@@ -270,3 +270,56 @@ def measured_over(result) -> list[str]:
     except Exception:  # noqa: BLE001 - provenance must never break the turn
         return out
     return out
+
+
+# ── the one-line version, for the reviewer-facing answer ────────────────────
+#
+# `measured_over` is per-call and belongs in the trace. The FINAL ANSWER needs
+# something a reviewer reads in passing, so this collapses a whole run to
+# `table: window` pairs — the two things a wrong-scope answer gets wrong. Kept
+# deliberately terse: a footnote nobody reads catches nothing.
+
+# Any date-ish literal in a filter value, so a window can be spotted without
+# knowing which column happens to be the date one in each table.
+_WINDOW = re.compile(r"\d{4}-\d{2}(?:-\d{2})?(?:\s*(?:\.\.|,|to)\s*\d{4}-\d{2}(?:-\d{2})?)?")
+
+
+def _window_of(params: dict) -> str:
+    """The date window a call constrained to, or "" when unconstrained."""
+    blob = " ".join(
+        str(params.get(k) or "")
+        for k in ("filter_value", "filters", "timestamps",
+                  "base_filter_value", "start_date", "end_date")
+    )
+    found = [f.replace(",", "..").replace(" to ", "..") for f in _WINDOW.findall(blob)]
+    if not found:
+        return ""
+    lo, hi = min(found), max(found)
+    return lo if lo == hi else f"{lo}..{hi}"
+
+
+def scope_line(result) -> str:
+    """`spends: all dates; model_scores_transaction: 2025-05-01..2025-05-31`.
+
+    "all dates" is the load-bearing half — an unconstrained table answering a
+    windowed question is the error this exists to expose, and silence would
+    read as fine.
+    """
+    windows: dict[str, set] = {}
+    try:
+        for tool, params in _iter_calls(result):
+            if tool not in _SCOPE_TOOLS:
+                continue
+            table = (params.get("table_name") or params.get("left_table")
+                     or params.get("base_table") or "")
+            if not table:
+                continue
+            windows.setdefault(table, set()).add(_window_of(params))
+    except Exception:  # noqa: BLE001
+        return ""
+
+    parts: list[str] = []
+    for table, seen in windows.items():
+        real = sorted(w for w in seen if w)
+        parts.append(f"{table}: {', '.join(real) if real else 'all dates'}")
+    return "; ".join(parts)

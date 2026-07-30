@@ -150,3 +150,35 @@ def test_one_specialists_timings_never_leak_to_another():
     other = _emit_output("c9", "spend_payments", run_ms_by_tool=runs)
     assert other["duration_ms"] != 3120
     assert runs["crossbu"] == [3120], "must not be consumed by another tool"
+
+
+# ── scope footnote on the final answer ──────────────────────────────────────
+
+def test_scope_footnote_is_one_terse_line_and_deduplicates():
+    from runner.turn.conductor import _scope_footnote
+
+    tc = [
+        {"tool": "spend_payments", "payload": {"scope": "spends: all dates"}},
+        {"tool": "modeling", "payload": {
+            "scope": "model_scores: all dates; "
+                     "model_scores_transaction: 2025-05-01..2025-05-31"}},
+        {"tool": "spend_payments", "payload": {"scope": "spends: all dates"}},
+    ]
+    out = _scope_footnote(tc)
+    assert out.startswith("\n\n_Scope: ") and out.endswith("_")
+    assert out.count("spends: all dates") == 1, "must dedupe across specialists"
+    assert out.count("\n\n") == 1, "one line, not a block"
+
+
+def test_scope_footnote_absent_when_no_specialist_reported_scope():
+    from runner.turn.conductor import _scope_footnote
+    assert _scope_footnote([{"tool": "report_agent", "payload": {"answer": "x"}}]) == ""
+    assert _scope_footnote([]) == ""
+
+
+def test_scope_footnote_is_length_capped():
+    from runner.turn.conductor import _scope_footnote
+    tc = [{"tool": f"s{i}", "payload": {"scope": f"table_with_a_long_name_{i}: all dates"}}
+          for i in range(40)]
+    out = _scope_footnote(tc)
+    assert len(out) < 300 and out.endswith("…_")

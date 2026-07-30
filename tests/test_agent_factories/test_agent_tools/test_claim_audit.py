@@ -226,3 +226,37 @@ def test_provenance_never_raises_on_a_broken_transcript():
         def to_input_list(self):
             raise RuntimeError("boom")
     assert measured_over(_Broken()) == []
+
+
+# ── one-line scope, for the answer footnote ─────────────────────────────────
+
+from agent_factories.agent_tools.claim_audit import scope_line
+
+
+def test_scope_line_says_all_dates_when_unconstrained():
+    """The load-bearing half: an unconstrained table answering a windowed
+    question is the error this exposes, and silence would read as fine."""
+    r = _Calls([("summarize_trend", {"table_name": "model_scores",
+                                     "value_column": "x",
+                                     "time_column": "trans_month"})])
+    assert scope_line(r) == "model_scores: all dates"
+
+
+def test_scope_line_reports_a_window_from_a_filters_list():
+    r = _Calls([("query_table", {
+        "table_name": "model_scores_transaction",
+        "filters": '[{"column":"trans_dt","op":"between",'
+                   '"value":"2025-05-01,2025-05-31"}]'})])
+    assert scope_line(r) == "model_scores_transaction: 2025-05-01..2025-05-31"
+
+
+def test_scope_line_covers_every_table_touched():
+    r = _Calls([("aggregate_column", {"table_name": "spends", "column": "Amount"}),
+                ("summarize_trend", {"table_name": "model_scores",
+                                     "value_column": "x"})])
+    out = scope_line(r)
+    assert "spends: all dates" in out and "model_scores: all dates" in out
+
+
+def test_scope_line_is_empty_without_data_calls():
+    assert scope_line(_Calls([("kb_lookup", {"topic": "t"})])) == ""

@@ -15,7 +15,9 @@ from tools.node_trace import _open_node, attach_extra, attach_tag
 from agent_factories.agent_tools.series_extract import _extract_data_tool_outputs
 from agent_factories.agent_tools.distiller_pass import _distill_and_persist
 from agent_factories.agent_tools.auto_chart import _auto_chart_from_tool_outputs
-from agent_factories.agent_tools.claim_audit import audit_claims, measured_over
+from agent_factories.agent_tools.claim_audit import (
+    audit_claims, measured_over, scope_line,
+)
 from agent_factories.agent_tools.grounding import scan_tool_errors
 from agent_factories.agent_tools.specialist_input_tool import (
     _SPECIALIST_HISTORY_KEEP_RECENT_USER_MESSAGES,
@@ -124,7 +126,8 @@ _DEGRADED_RECOVERY = {
 
 def _annotate_payload(payload, *, degraded_notice: str | None = None,
                       sub_question: str | None = None,
-                      measured_over: list[str] | None = None):
+                      measured_over: list[str] | None = None,
+                      scope: str | None = None):
     """Attach server-side annotations WITHOUT flattening the payload's shape.
 
     Returns a DICT, never a string. Domain specialists run with
@@ -157,6 +160,8 @@ def _annotate_payload(payload, *, degraded_notice: str | None = None,
         out["sub_question"] = sub_question
     if measured_over:
         out["measured_over"] = measured_over
+    if scope:
+        out["scope"] = scope
     out.update(base)
     return out
 
@@ -723,6 +728,10 @@ def agent_tool(
                 # the one check that also brings domain knowledge.
                 measured_over=(None if name == "report_agent"
                                else measured_over(result) or None),
+                # One-line collapse of the same thing, for the reviewer-facing
+                # answer footnote (the per-call detail stays in the trace).
+                scope=(None if name == "report_agent"
+                       else scope_line(result) or None),
             )
 
         timer.record(
