@@ -74,6 +74,8 @@ columns:
       LexisNexis. Stored as string with "millions" suffix (e.g. "3.6 millions" → 3600000.0).
     dtype_pending_review: true
     concept: bureau_derived
+    aliases:
+    - CULNBLND
   cust_cash_tot_liab_yr1_rt:
     dtype: float
     description: ratio of cash to total liability corresponding to latest full year
@@ -83,6 +85,8 @@ columns:
     dtype: int
     description: customer credit bureau score (raw per-transaction value)
     concept: bureau_derived
+    aliases:
+    - cbsfico
   cust_eff_se_cdss_5_180_day_score:
     dtype: float
     description: MERCHANT CDSS — NOT the customer's CDSS (that is
@@ -92,6 +96,8 @@ columns:
     risk_threshold: 2
     risk_direction: above
     concept: spend_pattern
+    aliases:
+    - CLAVHRSK
   cust_expsr_avg_rem_12m_ratio:
     dtype: float
     description: Customer Exposure / (Average Remit In 2-12 Months). Values above
@@ -114,6 +120,8 @@ columns:
     risk_threshold: 5.8
     risk_direction: above
     concept: internal_delinquency
+    aliases:
+    - CUIDINDX
   oop_interaction:
     dtype: float
     description: Out of Pattern Spend index wrt to Exposure. Values above 28 are risky.
@@ -122,6 +130,8 @@ columns:
     concept:
     - oop
     - spend_pattern
+    aliases:
+    - INTOOP
   sum_tot_rsky_evnt:
     dtype: int
     description: total risky events
@@ -132,6 +142,8 @@ columns:
     risk_threshold: 0.028
     risk_direction: above
     concept: spend_pattern
+    aliases:
+    - NNR1USCR
   cust_experian_trans_union_inq_idx:
     dtype: float
     description: risk based index of inquiries from credit bureau. Values above 4.65
@@ -139,6 +151,8 @@ columns:
     risk_threshold: 4.65
     risk_direction: above
     concept: bureau_derived
+    aliases:
+    - HCUIQITU
   hcam_bal_trnd_indx:
     dtype: float
     description: hcam balance trend index. Values above 2.65 are risky.
@@ -165,6 +179,8 @@ columns:
     concept:
     - capacity_paydown
     - exposure_leverage
+    aliases:
+    - EXPTINC
   lvrg_debt_remit:
     dtype: float
     description: leverage commercial debt
@@ -277,6 +293,8 @@ columns:
     risk_threshold: 0.46
     risk_direction: below
     concept: capacity_paydown
+    aliases:
+    - curttd01
   hcam_src_trnd_indx:
     dtype: float
     description: FICO Trend Index. Values below -19 are risky.
@@ -304,6 +322,8 @@ columns:
     risk_threshold: 0.3
     risk_direction: below
     concept: capacity_paydown
+    aliases:
+    - OPENPYDN
   gam_clr_erly_risk_score:
     dtype: string
     description: Clear early risk score. Values below 785 are risky. Stored in CSV

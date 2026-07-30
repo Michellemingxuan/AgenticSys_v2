@@ -110,6 +110,11 @@ _DEGRADED_RECOVERY = {
     "data_layer_uninitialized":
         "the data layer returned nothing — do NOT report numbers; say the data "
         "is unavailable for this sub-question",
+    "column_not_found":
+        "the column you named is not in that table — call search_columns with "
+        "the term from the question (ADL/CAS aliases resolve, any case) or "
+        "get_table_schema to list what IS there, then re-issue with a real "
+        "column name; do NOT report it as a data gap",
     "spec_rejected":
         "the tool rejected your arguments — re-read its schema and re-issue "
         "with corrected column names / filter values",

@@ -27,6 +27,7 @@ columns:
     concept: bureau_derived
     aliases:
     - cbr_score_max
+    - cbsfico
   exp_pif_max:
     dtype: float
     description: Pay-In-Full exposure (max over scoring window). Stored as string
@@ -62,6 +63,7 @@ columns:
     concept: capacity_paydown
     aliases:
     - last_cycle_cut_revolve_rate_min
+    - curttd01
     risk_threshold: 0.46
     risk_direction: below
   times_30_dpd:
@@ -136,6 +138,7 @@ columns:
     concept: internal_delinquency
     aliases:
     - tpf_internal_delinq_idx_max
+    - CUIDINDX
     risk_threshold: 5.8
     risk_direction: above
   tpf_cust_mod_tenure:
@@ -149,6 +152,7 @@ columns:
     concept: trends_tenure
     aliases:
     - tpf_cust_mod_tenure_max
+    - CUMNTHS2
   ratio_30_90dys_trig_amt:
     dtype: float
     distribution: normal
@@ -330,6 +334,7 @@ columns:
     - spend_pattern
     aliases:
     - oop_interaction_max
+    - INTOOP
     risk_threshold: 28
     risk_direction: above
   sum_o30dn_o60dn_o90dn:
@@ -395,6 +400,7 @@ columns:
     concept: trends_tenure
     aliases:
     - tm_wt_q_score_max
+    - TWDSCRUN
   cust_eff_se_cdss_5_180_day_score:
     dtype: float
     distribution: normal
@@ -409,6 +415,7 @@ columns:
     concept: spend_pattern
     aliases:
     - cust_eff_se_cdss_5_180_day_score_max
+    - CLAVHRSK
     risk_threshold: 2
     risk_direction: above
   cust_expr_to_arb_inc_ratio:
@@ -425,6 +432,7 @@ columns:
     - exposure_leverage
     aliases:
     - cust_expr_to_arb_inc_ratio_max
+    - EXPTINC
     risk_threshold: 0.08
     risk_direction: above
   cust_lend_acct_paydown:
@@ -452,6 +460,7 @@ columns:
     concept: bureau_derived
     aliases:
     - cust_experian_trans_union_inq_idx_max
+    - HCUIQITU
     risk_threshold: 4.65
     risk_direction: above
   cust_intr_extnl_unscr_tt_debt_srvc_rt1:
@@ -479,6 +488,7 @@ columns:
     concept: capacity_paydown
     aliases:
     - cust_open_acct_paydown_min
+    - OPENPYDN
     risk_threshold: 0.3
     risk_direction: below
   cust_old_rec_age:
@@ -542,6 +552,7 @@ columns:
     concept: bureau_derived
     aliases:
     - cust_lexis_nexis_tot_tax_assess_val_am_max
+    - CULNBLND
     dtype_pending_review: true
   cust_enhnc_one_way_spend_concentration_30day_rt1:
     dtype: float
@@ -581,6 +592,7 @@ columns:
     concept: spend_pattern
     aliases:
     - cust_rnn_score_max
+    - NNR1USCR
     risk_threshold: 0.028
     risk_direction: above
   cust_min_due_12mo_avg:

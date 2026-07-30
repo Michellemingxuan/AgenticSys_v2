@@ -7,6 +7,8 @@ The Text-to-SQL skill (future) reads it to resolve semantic queries.
 
 from __future__ import annotations
 
+import re
+
 from pathlib import Path
 
 import yaml
@@ -25,6 +27,14 @@ CONCEPT_GLOSS: dict[str, str] = {
     "output_score": "internal ML output scores (CDSS, TSR)",
     "third_party_score": "embedded third-party scores (Paydex, SBFE, LN, Clarity)",
 }
+
+
+
+# Case/punctuation-insensitive column key. ADL alias codes are declared with
+# inconsistent case (`INTOOP` vs `cbsfico`), so any lookup that compares them
+# literally will miss whichever spelling the caller happened to use.
+def _norm_col(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (name or "").lower())
 
 
 class DataCatalog:
@@ -167,6 +177,23 @@ class DataCatalog:
                 for alias in spec.get("aliases") or []:
                     if alias in real_keys:
                         return alias
+
+        # Case/punctuation-insensitive pass over canonicals AND aliases. ADL
+        # codes are declared with inconsistent case (`INTOOP`, `CUIDINDX` but
+        # `cbsfico`, `curttd01`), and a user or model asking "how is intoop"
+        # will not match the declared spelling. Without this, an EXISTING
+        # variable resolves to nothing.
+        target = _norm_col(requested)
+        if target:
+            for canonical, spec in columns.items():
+                candidates = [canonical, *(spec.get("aliases") or [])]
+                if any(_norm_col(c) == target for c in candidates):
+                    for c in candidates:
+                        if c in real_keys:
+                            return c
+                    for key in real_keys:          # normalized header match
+                        if _norm_col(key) in {_norm_col(c) for c in candidates}:
+                            return key
 
         return requested
 

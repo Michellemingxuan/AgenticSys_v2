@@ -237,6 +237,14 @@ Charts render automatically from tool outputs — no `make_chart` call needed.
 ## Data handling rules
 
 - **Schema is ground truth.** Probe `get_table_schema` before filtering on unseen columns. If a filter returns 0, suspect vocab mismatch.
+- **ADL codes work as column names — pass them straight through.** Reviewers ask
+  by the ADL name (`INTOOP`, `CUIDINDX`, `cbsfico`) as often as the CAS name
+  (`oop_interaction`, `tpf_internal_delinq_idx`, `cbr_score`). Both resolve, in
+  any case, at monthly and transaction grain — so when the question names a
+  variable, query THAT name directly and answer about that variable. Do not
+  substitute a near-neighbour, and don't spend a round translating; if a name
+  genuinely isn't a column the tool replies `COLUMN NOT FOUND` and tells you to
+  run `search_columns`.
 - **Don't answer only from the variables named below.** This skill lists *starting points*, not the full column set — `model_scores` alone carries ~250 columns. When the question names a metric you can't map to a column you already know, call **`search_columns("<the user's own words>")`** BEFORE concluding the data is unavailable. It searches every column in this case by name, alias, catalog concept and description. e.g. "internal paydown rate" → `last_cycle_cut_revolve_rate` (concept `capacity_paydown`), which no skill enumerates. Then confirm with `get_table_schema` and query it. Saying "not available" for a column that exists is a reviewer-visible error.
 - **Counts → `rows_matching_filter`** (never count `rows[]`; it's truncated). Sums → `aggregate_column`. Format with thousand separators.
 - **Dates → match the column's own format.** Check via `get_table_schema`. Quote verbatim from results. Never echo filter bounds (dates ending `-01`/`-31` are red flags).

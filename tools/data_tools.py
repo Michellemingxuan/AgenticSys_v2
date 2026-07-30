@@ -3166,6 +3166,27 @@ def _summarize_trend_impl(
         # column that was never wrong. An empty column is a DATA GAP — the tool
         # worked, this case simply has no such data — so say that, and say it
         # is not worth retrying.
+        # A column that is not PRESENT is a different failure from one that is
+        # present but empty, and conflating them is actively harmful: the DATA
+        # GAP branch below tells the specialist "do NOT retry this column", so a
+        # simple name miss (`intoop` for `INTOOP`) would make it abandon a
+        # variable that exists. This is a mistake to correct, not a gap to report.
+        if rows and real_value not in rows[0]:
+            out = (
+                f"trend({op}({value_column}) by {period} on {time_column})"
+                f"{filter_descr} = (COLUMN NOT FOUND: '{value_column}' is not a "
+                f"column of '{real_table}' for this case — nothing was measured. "
+                f"Call search_columns('{value_column}') to find the right name "
+                f"(ADL/CAS aliases resolve), or get_table_schema('{real_table}') "
+                f"to list what IS here, then re-issue. Do NOT report this as a "
+                f"data gap.)"
+            )
+            _log_result("summarize_trend", result=out,
+                        extra={"reason": "column_not_found",
+                               "value_column": value_column,
+                               "resolved_to": real_value})
+            return out
+
         if n_in_range and n_value_skipped >= n_in_range:
             out = (
                 f"trend({op}({value_column}) by {period} on {time_column})"

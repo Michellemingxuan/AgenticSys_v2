@@ -139,6 +139,11 @@ def _classify_scalar(tool: str, output: str) -> str | None:
     if "did NOT run" in text:
         return "specs_unparseable"
 
+    # A column the caller named that isn't there — a correctable mistake, so
+    # it must be FLAGGED (retryable), unlike the benign DATA GAP above.
+    if "COLUMN NOT FOUND" in text:
+        return "column_not_found"
+
     if "no parseable" in text:
         return "no_groups" if "group" in tool else "no_buckets"
 

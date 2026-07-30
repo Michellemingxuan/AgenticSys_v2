@@ -1588,3 +1588,122 @@ def test_schema_declares_the_decline_code_vocabulary():
     sc = json.loads(data_tools._get_table_schema_impl("model_scores_transaction"))
     assert set(sc["appr_deny_cd"]["declared_values"]) == {"0", "2"}
     assert "2 = DECLINED" in sc["appr_deny_cd"]["description"]
+
+
+# ── ADL alias names resolve to the CAS column ───────────────────────────────
+#
+# Reviewers ask by the ADL code (`INTOOP`) as often as the CAS name
+# (`oop_interaction`). The catalog declares them with inconsistent case
+# (`INTOOP`, `CUIDINDX` but `cbsfico`, `curttd01`), so a literal comparison
+# missed whichever spelling the caller used — and the miss landed in the DATA
+# GAP branch, which tells the specialist "do NOT retry this column" for a
+# variable that exists.
+
+_REAL_CASE = "366132845011"
+
+
+def _real_case_tools():
+    gw = LocalDataGateway.from_case_folders("data_tables/real")
+    gw.set_case(_REAL_CASE)
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+
+
+@pytest.mark.parametrize("adl,expected", [
+    ("INTOOP", "oop_interaction_max"),
+    ("intoop", "oop_interaction_max"),          # case must not matter
+    ("IntOop", "oop_interaction_max"),
+    ("CUIDINDX", "tpf_internal_delinq_idx_max"),
+    ("cbsfico", "cbr_score_max"),
+    ("CBSFICO", "cbr_score_max"),
+    ("NNR1USCR", "cust_rnn_score_max"),
+    ("OPENPYDN", "cust_open_acct_paydown_min"),
+    ("oop_interaction", "oop_interaction_max"),  # CAS name still works
+])
+def test_adl_name_trends_the_right_monthly_column(adl, expected):
+    _real_case_tools()
+    out = data_tools._summarize_trend_impl(
+        table_name="model_scores", value_column=adl,
+        time_column="trans_month", op="max")
+    assert json.loads(out)["value_column"] == expected
+
+
+@pytest.mark.parametrize("adl,expected", [
+    ("INTOOP", "oop_interaction"),
+    ("intoop", "oop_interaction"),
+    ("CULNBLND", "cust_lexis_nexis_tot_tax_assess_val_am"),
+])
+def test_adl_name_works_at_transaction_grain(adl, expected):
+    """Mirrored into model_scores_transaction.yaml — the same question at
+    per-transaction grain must resolve identically."""
+    _real_case_tools()
+    out = data_tools._summarize_trend_impl(
+        table_name="model_scores_transaction", value_column=adl,
+        time_column="trans_dt", op="max")
+    assert json.loads(out)["value_column"] == expected
+
+
+def test_adl_name_gives_a_single_value_too():
+    _real_case_tools()
+    out = data_tools._aggregate_column_impl(
+        table_name="model_scores", column="INTOOP", op="max")
+    assert "oop_interaction_max" in out and "24.46" in out
+
+
+def test_search_columns_finds_a_variable_by_its_adl_code():
+    _real_case_tools()
+    out = data_tools._search_columns_impl("INTOOP")
+    assert "oop_interaction" in out
+
+
+def test_a_name_that_is_not_a_column_says_NOT_FOUND_not_data_gap():
+    """The dangerous confusion: an unresolved name used to fall into the DATA
+    GAP branch, which says "do NOT retry" — abandoning a real variable over a
+    spelling miss. A missing column is a correctable mistake."""
+    from agent_factories.agent_tools.grounding import classify_tool_output
+
+    _real_case_tools()
+    out = data_tools._summarize_trend_impl(
+        table_name="model_scores", value_column="NOSUCHVAR",
+        time_column="trans_month", op="max")
+    assert "COLUMN NOT FOUND" in out
+    assert "DATA GAP" not in out
+    assert "search_columns" in out
+    # And it must be FLAGGED for retry, unlike a genuine data gap.
+    assert classify_tool_output("summarize_trend", out) == "column_not_found"
+
+
+def test_every_declared_adl_alias_resolves_to_its_canonical():
+    """Drift guard for newly added ADL aliases.
+
+    Asserts RESOLUTION, not presence: a real export carries only a subset of
+    the catalog (44 of ~250 columns here), so `CUMNTHS2` correctly reports
+    COLUMN NOT FOUND on a case whose export lacks `tpf_cust_mod_tenure_max`.
+    What must hold is that the catalog can map every declared alias back to its
+    canonical — a typo'd alias would resolve to nothing anywhere.
+    """
+    import yaml
+    from datalayer.catalog import DataCatalog as _DC
+
+    prof = yaml.safe_load(open("config/data_profiles/model_scores.yaml"))
+    cat = _DC(profile_dir="config/data_profiles")
+    suffixes = ("_max", "_min", "_mean")
+    checked = 0
+    for canon, spec in (prof.get("columns") or {}).items():
+        for alias in spec.get("aliases") or []:
+            if alias.endswith(suffixes) or alias == canon:
+                continue                      # aggregation alias / self-alias
+            for spelling in (alias, alias.lower(), alias.upper()):
+                got = cat.resolve_real_column("model_scores", spelling, [canon])
+                assert got == canon, f"{spelling!r} resolved to {got!r}, want {canon!r}"
+            checked += 1
+    assert checked >= 10, f"expected the ADL aliases to be checked, saw {checked}"
+
+
+def test_an_absent_column_is_reported_even_for_a_valid_alias():
+    """`CUMNTHS2` is a real alias whose column is not in this case's export —
+    that must read as COLUMN NOT FOUND (correctable), never as a data gap."""
+    _real_case_tools()
+    out = data_tools._summarize_trend_impl(
+        table_name="model_scores", value_column="CUMNTHS2",
+        time_column="trans_month", op="max")
+    assert "COLUMN NOT FOUND" in out and "DATA GAP" not in out
