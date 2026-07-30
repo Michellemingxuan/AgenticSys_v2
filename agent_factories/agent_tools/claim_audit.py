@@ -90,14 +90,24 @@ def _numbers_in(text: str) -> list[tuple[str, list[float]]]:
 
 
 def _claim_text(final_output) -> str:
-    """`findings` + `evidence` — what the specialist actually asserts."""
+    """`findings` + `evidence` — what the specialist actually asserts.
+
+    Evidence items are structured (claim / value / scope). Only `claim` and
+    `value` are audited: `scope` is where the DENOMINATOR lives, and auditing it
+    would flag every share's base total as an "unsupported" number when it is
+    exactly the provenance we asked for.
+    """
     parts: list[str] = []
     findings = getattr(final_output, "findings", None)
     if isinstance(findings, str):
         parts.append(findings)
-    evidence = getattr(final_output, "evidence", None)
-    if isinstance(evidence, list):
-        parts.extend(str(e) for e in evidence)
+    for e in getattr(final_output, "evidence", None) or []:
+        if isinstance(e, str):
+            parts.append(e)
+        elif isinstance(e, dict):
+            parts.extend(str(e.get(f) or "") for f in ("claim", "value"))
+        else:
+            parts.extend(str(getattr(e, f, "") or "") for f in ("claim", "value"))
     return "\n".join(parts)
 
 

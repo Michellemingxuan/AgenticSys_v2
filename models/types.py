@@ -44,6 +44,40 @@ class AnswerResult(BaseModel):
     evidence: list[str] = Field(default_factory=list)
 
 
+class Evidence(BaseModel):
+    """One backing data point, WITH the scope it was measured over.
+
+    Structured rather than a free string because scope is what makes a number
+    checkable, and prose loses it. A reviewer reading "top merchant: 10.0%"
+    cannot tell whether the denominator was the whole history or one month —
+    and the tools now report that scope, so the only place it was being dropped
+    was here. Giving `scope` its own required slot means the model cannot state
+    a number without saying what it is a number OF; a directive asking for the
+    same thing is forgettable, a schema field is not.
+    """
+
+    claim: str = Field(
+        description="What this shows, ≤12 words. No preamble, no 'I found'.",
+    )
+    value: str = Field(
+        description=(
+            "The number / date / count itself, VERBATIM from the tool result "
+            "(e.g. '$392,454.63', '27.4', '755 rows'). Never re-typed from "
+            "memory or recomputed."
+        ),
+    )
+    scope: str = Field(
+        description=(
+            "What the value is measured OVER — the part a reviewer needs to "
+            "catch a wrong question. Name the table, any filter, the time "
+            "window, and for a share or ratio the DENOMINATOR. Copy it from "
+            "the tool result, which states it (e.g. 'spends_data, Merchant "
+            "Name contains S BERTRAM, base = all 8,888 rows' or "
+            "'modelling_data, trans_month 2025-04..2025-05')."
+        ),
+    )
+
+
 class SpecialistOutput(BaseModel):
     """Specialist's structured answer. Field descriptions are reflected
     into the OpenAI structured-output schema, so they directly shape how
@@ -59,12 +93,12 @@ class SpecialistOutput(BaseModel):
             "'I observed', NO methodology preamble. Numbers > prose."
         ),
     )
-    evidence: list[str] = Field(
+    evidence: list[Evidence] = Field(
         default_factory=list,
         description=(
-            "≤3 bullets, ≤15 words each. Specific numbers / dates / "
-            "row counts that back the finding. Skip the list entirely if "
-            "findings already contains the key data points."
+            "≤3 items backing the finding. Each carries the number AND what it "
+            "was measured over. Skip entirely if findings already states the "
+            "key data points with their scope."
         ),
     )
     data_gaps: list[str] = Field(

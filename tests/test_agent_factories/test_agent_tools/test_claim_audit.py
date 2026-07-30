@@ -14,7 +14,7 @@ from agent_factories.agent_tools.claim_audit import (
     _numbers_in,
     audit_claims,
 )
-from models.types import SpecialistOutput
+from models.types import Evidence, SpecialistOutput
 
 
 class _Result:
@@ -29,6 +29,10 @@ class _Result:
 
     def to_input_list(self):
         return list(self._items)
+
+
+def _ev(claim="c", value="", scope="t"):
+    return Evidence(claim=claim, value=value, scope=scope)
 
 
 def _out(findings, evidence=None):
@@ -102,7 +106,8 @@ def test_no_numbers_in_the_claim_is_silent():
 
 def test_evidence_bullets_are_audited_too():
     r = _Result(['{"total": 100}'])
-    rep = audit_claims(r, _out("Total was 100.", evidence=["and 555 elsewhere"]))
+    rep = audit_claims(r, _out("Total was 100.",
+                           evidence=[_ev("elsewhere", "555")]))
     assert any("555" in n for n in rep["unsupported_numbers"])
 
 

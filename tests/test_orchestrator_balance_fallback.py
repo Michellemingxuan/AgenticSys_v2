@@ -10,7 +10,7 @@ from agents.items import ToolCallOutputItem
 from llm.factory import build_session_clients
 from llm.firewall_stack import FirewallStack
 from logger.event_logger import EventLogger
-from models.types import FinalAnswer, ReportDraft, SpecialistOutput
+from models.types import Evidence, FinalAnswer, ReportDraft, SpecialistOutput
 from runner.orchestrator import Orchestrator
 
 
@@ -35,7 +35,9 @@ async def test_balance_fallback_recovers_partial_drafts(tmp_path):
     )
     specialist_output = SpecialistOutput(
         domain="credit", mode="chat",
-        findings="Risk score is elevated", evidence=["FICO 540"],
+        findings="Risk score is elevated",
+        evidence=[Evidence(claim="FICO", value="540",
+                           scope="bureau_full, latest row")],
         data_gaps=[],
     )
 

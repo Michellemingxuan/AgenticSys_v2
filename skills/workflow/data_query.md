@@ -26,6 +26,23 @@ Async: Distiller → extract claims into KB for follow-up questions
 
 Every claim in `findings` / `evidence` / `raw_data` must trace to a tool result THIS run produced.
 
+**`evidence` is STRUCTURED — `{claim, value, scope}`, all three required.**
+`scope` is what the number was measured OVER, copied from the tool result which
+already states it. A number without its scope cannot be checked: "top merchant
+10.0%" is right for the whole history and wrong for 2025, and the reviewer
+cannot tell which you meant. Name the table, the filter, the time window, and
+for a share or ratio the DENOMINATOR:
+
+```
+claim: "top merchant's share of spend"
+value: "10.0%"
+scope: "spends_data, Merchant Name contains S BERTRAM, base = all 8,888 rows"
+```
+
+Copy `value` verbatim from the tool result — never re-typed from memory, never
+recomputed. If you cannot state a scope for a number, you do not yet know what
+the number means: go back and read the tool result that produced it.
+
 - Counts → cite the specific tool response.
 - Dates / amounts / ids → verbatim from returned rows.
 - `raw_data` → strict shape `{ <real_table_name>: [<row dict>, ...] }`. Empty `{}` is honest.
