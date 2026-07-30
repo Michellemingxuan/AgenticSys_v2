@@ -15,7 +15,7 @@ from tools.node_trace import _open_node, attach_extra, attach_tag
 from agent_factories.agent_tools.series_extract import _extract_data_tool_outputs
 from agent_factories.agent_tools.distiller_pass import _distill_and_persist
 from agent_factories.agent_tools.auto_chart import _auto_chart_from_tool_outputs
-from agent_factories.agent_tools.claim_audit import audit_claims
+from agent_factories.agent_tools.claim_audit import audit_claims, measured_over
 from agent_factories.agent_tools.grounding import scan_tool_errors
 from agent_factories.agent_tools.specialist_input_tool import (
     _SPECIALIST_HISTORY_KEEP_RECENT_USER_MESSAGES,
@@ -123,7 +123,8 @@ _DEGRADED_RECOVERY = {
 
 
 def _annotate_payload(payload, *, degraded_notice: str | None = None,
-                      sub_question: str | None = None):
+                      sub_question: str | None = None,
+                      measured_over: list[str] | None = None):
     """Attach server-side annotations WITHOUT flattening the payload's shape.
 
     Returns a DICT, never a string. Domain specialists run with
@@ -154,6 +155,8 @@ def _annotate_payload(payload, *, degraded_notice: str | None = None,
         out["DEGRADED"] = degraded_notice
     if sub_question is not None:
         out["sub_question"] = sub_question
+    if measured_over:
+        out["measured_over"] = measured_over
     out.update(base)
     return out
 
@@ -712,6 +715,14 @@ def agent_tool(
                 payload,
                 degraded_notice=degraded_notice,
                 sub_question=None if name == "report_agent" else redacted_in,
+                # Deterministic provenance: the table, column, op and filters
+                # behind the numbers. Free (derived from the arguments the
+                # specialist already passed) and un-forgettable, unlike a
+                # directive asking it to restate its own scope. Lets the
+                # REVIEWER catch a right number measured over the wrong set —
+                # the one check that also brings domain knowledge.
+                measured_over=(None if name == "report_agent"
+                               else measured_over(result) or None),
             )
 
         timer.record(

@@ -85,17 +85,9 @@ def _is_narrow_output(specialist_output, sub_question: str = "") -> bool:
     findings = getattr(specialist_output, "findings", "") or ""
     evidence = getattr(specialist_output, "evidence", None) or []
 
-    # Evidence items are structured (claim / value / scope) — a bare
-    # `isinstance(e, str)` filter would silently drop every one of them and
-    # leave the series-keyword gate reading `findings` alone.
-    parts: list[str] = [findings]
-    for e in evidence:
-        if isinstance(e, str):
-            parts.append(e)
-            continue
-        parts.extend(str(getattr(e, f, "") or "")
-                     for f in ("claim", "value", "scope"))
-    all_text = " ".join(parts).lower()
+    all_text = (findings + " " + " ".join(
+        e for e in evidence if isinstance(e, str)
+    )).lower()
 
     if any(kw in all_text for kw in _SERIES_KEYWORDS):
         return False

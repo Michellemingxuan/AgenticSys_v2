@@ -14,7 +14,7 @@ from agent_factories.agent_tools.claim_audit import (
     _numbers_in,
     audit_claims,
 )
-from models.types import Evidence, SpecialistOutput
+from models.types import SpecialistOutput
 
 
 class _Result:
@@ -29,10 +29,6 @@ class _Result:
 
     def to_input_list(self):
         return list(self._items)
-
-
-def _ev(claim="c", value="", scope="t"):
-    return Evidence(claim=claim, value=value, scope=scope)
 
 
 def _out(findings, evidence=None):
@@ -106,8 +102,7 @@ def test_no_numbers_in_the_claim_is_silent():
 
 def test_evidence_bullets_are_audited_too():
     r = _Result(['{"total": 100}'])
-    rep = audit_claims(r, _out("Total was 100.",
-                           evidence=[_ev("elsewhere", "555")]))
+    rep = audit_claims(r, _out("Total was 100.", evidence=["and 555 elsewhere"]))
     assert any("555" in n for n in rep["unsupported_numbers"])
 
 
@@ -149,3 +144,85 @@ def test_unreadable_transcript_returns_an_empty_report():
 def test_missing_final_output_returns_an_empty_report():
     r = _Result(['{"total": 1}'])
     assert audit_claims(r, None)["unsupported_numbers"] == []
+
+
+# ── provenance: what the answer was measured over ───────────────────────────
+#
+# The reviewer's own check is the strongest available — they know the domain.
+# Forcing scope into the OUTPUT SCHEMA worked but cost tokens per bullet, so
+# this derives it from the arguments the specialist already passed: free, and
+# un-forgettable unlike a directive.
+
+from agent_factories.agent_tools.claim_audit import measured_over
+
+
+class _Calls:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def to_input_list(self):
+        return [{"type": "function_call", "call_id": f"c{i}", "name": n,
+                 "arguments": json.dumps(a)}
+                for i, (n, a) in enumerate(self.calls)]
+
+
+def test_provenance_names_table_column_op_and_filter():
+    r = _Calls([("aggregate_column", {
+        "table_name": "spends", "column": "Amount", "op": "share",
+        "filter_column": "Merchant Name", "filter_op": "contains",
+        "filter_value": "S BERTRAM"})])
+    line = measured_over(r)[0]
+    assert "spends.Amount" in line and "op=share" in line
+    assert "Merchant Name contains 'S BERTRAM'" in line
+
+
+def test_provenance_exposes_a_MISSING_time_filter():
+    """The whole point: a share with no window, answering an "in 2025"
+    question, must be visibly unscoped."""
+    r = _Calls([("aggregate_column", {"table_name": "spends", "column": "Amount",
+                                      "op": "share", "filter_column": "m",
+                                      "filter_value": "A"})])
+    line = measured_over(r)[0]
+    assert "2025" not in line and "base=" not in line
+
+
+def test_provenance_reports_an_explicit_base():
+    r = _Calls([("aggregate_column", {
+        "table_name": "spends", "column": "Amount", "op": "share",
+        "filter_column": "m", "filter_value": "A",
+        "base_filter_column": "Date", "base_filter_op": "contains",
+        "base_filter_value": "2025"})])
+    assert "base=Date contains '2025'" in measured_over(r)[0]
+
+
+def test_provenance_skips_non_data_tools():
+    r = _Calls([("kb_lookup", {"topic": "t"}),
+                ("make_chart", {"topic": "t"}),
+                ("get_chart_guidance", {})])
+    assert measured_over(r) == []
+
+
+def test_provenance_deduplicates_repeated_calls():
+    call = ("summarize_trend", {"table_name": "model_scores",
+                                "value_column": "x", "time_column": "trans_month"})
+    assert len(measured_over(_Calls([call, call, call]))) == 1
+
+
+def test_provenance_is_bounded():
+    calls = [("query_table", {"table_name": f"t{i}", "column": "c"})
+             for i in range(30)]
+    assert len(measured_over(_Calls(calls))) <= 8
+
+
+def test_provenance_survives_unparseable_arguments():
+    r = _Calls([])
+    r.to_input_list = lambda: [{"type": "function_call", "call_id": "c",
+                                "name": "query_table", "arguments": "{oops"}]
+    assert measured_over(r) == ["query_table(?)"]
+
+
+def test_provenance_never_raises_on_a_broken_transcript():
+    class _Broken:
+        def to_input_list(self):
+            raise RuntimeError("boom")
+    assert measured_over(_Broken()) == []

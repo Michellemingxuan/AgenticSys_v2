@@ -1985,35 +1985,3 @@ def test_group_shares_are_omitted_for_non_additive_ops():
         table_name="t", value_column="amt", group_column="m",
         op="mean", top_n=10))
     assert "share_of_total" not in g["groups"][0]
-
-
-def test_renderer_shows_the_scope_line():
-    """Scope must reach the reviewer's page, not just the schema — otherwise the
-    structure buys nothing."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "rqs", "notebooks/run_question_suite.py")
-    rqs = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(rqs)
-
-    md = rqs._render_specialist_output({
-        "findings": "Top merchant is 10.0% of spend.",
-        "evidence": [{"claim": "top merchant's share", "value": "10.0%",
-                      "scope": "spends_data, base = all 8,888 rows"}],
-    })
-    assert "10.0%" in md
-    assert "over: spends_data, base = all 8,888 rows" in md
-
-
-def test_renderer_still_handles_legacy_string_evidence():
-    """Cached turns and Amem records written before the schema change hold plain
-    strings; they must render rather than crash."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "rqs", "notebooks/run_question_suite.py")
-    rqs = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(rqs)
-
-    md = rqs._render_specialist_output(
-        {"findings": "f", "evidence": ["FICO 540"]})
-    assert "FICO 540" in md

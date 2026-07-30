@@ -90,24 +90,14 @@ def _numbers_in(text: str) -> list[tuple[str, list[float]]]:
 
 
 def _claim_text(final_output) -> str:
-    """`findings` + `evidence` — what the specialist actually asserts.
-
-    Evidence items are structured (claim / value / scope). Only `claim` and
-    `value` are audited: `scope` is where the DENOMINATOR lives, and auditing it
-    would flag every share's base total as an "unsupported" number when it is
-    exactly the provenance we asked for.
-    """
+    """`findings` + `evidence` — what the specialist actually asserts."""
     parts: list[str] = []
     findings = getattr(final_output, "findings", None)
     if isinstance(findings, str):
         parts.append(findings)
-    for e in getattr(final_output, "evidence", None) or []:
-        if isinstance(e, str):
-            parts.append(e)
-        elif isinstance(e, dict):
-            parts.extend(str(e.get(f) or "") for f in ("claim", "value"))
-        else:
-            parts.extend(str(getattr(e, f, "") or "") for f in ("claim", "value"))
+    evidence = getattr(final_output, "evidence", None)
+    if isinstance(evidence, list):
+        parts.extend(str(e) for e in evidence)
     return "\n".join(parts)
 
 
@@ -177,3 +167,106 @@ def audit_claims(result, final_output) -> dict:
     except Exception:  # noqa: BLE001 - an auditor must never break the turn
         return report
     return report
+
+
+# ── provenance: what the answer was measured over ───────────────────────────
+#
+# The reviewer's own check is the strongest one available: shown "top merchant
+# = 10.0%", they cannot tell whether the base was the whole history or one
+# month, but shown "base = all 8,888 rows" they can — and they know the domain,
+# which no automated check does.
+#
+# Forcing that into the OUTPUT SCHEMA (a required `scope` per evidence bullet)
+# worked but cost tokens on every bullet, against the per-specialist latency
+# budget. This gets the same information for FREE: the scope is already in the
+# arguments the specialist passed, so derive it deterministically instead of
+# asking the model to restate what it just typed.
+
+_SCOPE_TOOLS = frozenset({
+    "query_table", "batch_query_table", "aggregate_column", "batch_aggregate",
+    "summarize_trend", "batch_summarize_trend", "summarize_by_group",
+    "join_table", "transaction_detail", "score_driver_values",
+})
+
+_MAX_SCOPE_LINES = 8
+
+
+def _iter_calls(result):
+    """Yield `(tool_name, params)` for each function_call in the transcript."""
+    try:
+        items = result.to_input_list()
+    except (AttributeError, TypeError):
+        return
+    for item in items:
+        if not isinstance(item, dict) or item.get("type") != "function_call":
+            continue
+        name = item.get("name")
+        if not name:
+            continue
+        args = item.get("arguments")
+        if isinstance(args, str):
+            try:
+                params = json.loads(args)
+            except (json.JSONDecodeError, ValueError):
+                params = {}
+        else:
+            params = args or {}
+        yield name, (params if isinstance(params, dict) else {})
+
+
+def _one_scope(tool: str, p: dict) -> str:
+    """One compact line naming the table, column, op and every filter."""
+    table = p.get("table_name") or p.get("left_table") or p.get("base_table") or ""
+    col = (p.get("column") or p.get("value_column") or "")
+    head = f"{table}.{col}" if table and col else (table or col or "?")
+
+    bits: list[str] = []
+    if p.get("op"):
+        bits.append(f"op={p['op']}")
+    if p.get("group_column"):
+        bits.append(f"by {p['group_column']}")
+    if p.get("time_column"):
+        bits.append(f"on {p['time_column']}")
+    if p.get("period"):
+        bits.append(f"per {p['period']}")
+    if p.get("denominator_column"):
+        bits.append(f"/ {p['denominator_column']}")
+    if p.get("filter_column") and p.get("filter_value") is not None:
+        bits.append(f"where {p['filter_column']} "
+                    f"{p.get('filter_op', 'eq')} {p['filter_value']!r}")
+    if p.get("filters"):
+        bits.append(f"filters={str(p['filters'])[:120]}")
+    if p.get("base_filter_column"):
+        bits.append(f"base={p['base_filter_column']} "
+                    f"{p.get('base_filter_op', 'eq')} {p.get('base_filter_value')!r}")
+    if p.get("timestamps"):
+        bits.append(f"timestamps={str(p['timestamps'])[:60]}")
+    for k in ("top_n", "limit"):
+        if p.get(k):
+            bits.append(f"{k}={p[k]}")
+    if p.get("specs_json"):
+        bits.append(f"specs={str(p['specs_json'])[:140]}")
+
+    return f"{tool}({head}" + (f", {', '.join(bits)}" if bits else "") + ")"
+
+
+def measured_over(result) -> list[str]:
+    """Compact provenance lines for the data calls behind this answer.
+
+    Deterministic, zero LLM cost, and un-forgettable — unlike a directive asking
+    the specialist to state its scope. Duplicates collapse so a repeated call
+    doesn't pad the list.
+    """
+    out: list[str] = []
+    try:
+        for tool, params in _iter_calls(result):
+            if tool not in _SCOPE_TOOLS:
+                continue
+            line = _one_scope(tool, params)
+            if line not in out:
+                out.append(line)
+            if len(out) >= _MAX_SCOPE_LINES:
+                break
+    except Exception:  # noqa: BLE001 - provenance must never break the turn
+        return out
+    return out

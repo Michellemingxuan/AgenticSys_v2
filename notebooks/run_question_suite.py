@@ -197,19 +197,7 @@ def _render_specialist_output(payload):
     if evidence:
         lines.append("  - **Evidence:**")
         for e in evidence[:5]:
-            if isinstance(e, dict):
-                # Structured: claim / value / scope. Rendering the scope is the
-                # whole point — it is what lets a reviewer notice the number
-                # answers a different question than the one they asked.
-                claim = _excerpt(str(e.get("claim") or ""), 160)
-                value = _excerpt(str(e.get("value") or ""), 80)
-                scope = _excerpt(str(e.get("scope") or ""), 200)
-                head = f"{claim} — **{value}**" if value else claim
-                lines.append(f"      - {head}")
-                if scope:
-                    lines.append(f"        _over: {scope}_")
-            else:
-                lines.append(f"      - {_excerpt(str(e), 300)}")
+            lines.append(f"      - {_excerpt(e, 300)}")
         if len(evidence) > 5:
             lines.append(f"      - … and {len(evidence) - 5} more")
     if implications:
@@ -220,6 +208,15 @@ def _render_specialist_output(payload):
         lines.append("  - **Data gaps:**")
         for g in data_gaps[:3]:
             lines.append(f"      - {_excerpt(g, 300)}")
+    # Provenance — the table / column / op / filters behind the numbers,
+    # derived server-side. This is what lets a REVIEWER catch a correct number
+    # measured over the wrong set (a share with no time filter answering a
+    # "in 2025" question), so it has to be visible, not just logged.
+    measured = payload.get("measured_over") or []
+    if measured:
+        lines.append("  - **Measured over:**")
+        for m in measured[:8]:
+            lines.append(f"      - `{_excerpt(m, 220)}`")
     if raw_data:
         # Just hint that raw data was attached, don't dump it.
         keys = list(raw_data.keys())[:4]

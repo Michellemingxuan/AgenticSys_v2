@@ -1,6 +1,5 @@
 import pytest
 from models.types import (
-    Evidence,
     DomainSkill, SpecialistOutput, SynthesisResult, ReportSection,
     AnswerResult, DataRequestResult, ReviewReport, Resolution,
     Conflict, FinalOutput, DataGap, BlockedStep, LLMResult, StepRecord,
@@ -24,19 +23,12 @@ def test_specialist_output_creation():
         domain="bureau",
         mode="chat",
         findings="3 derog marks in last 12 months, score declining.",
-        evidence=[
-            Evidence(claim="derogatory marks on file", value="3",
-                     scope="bureau_full, all rows for the case"),
-            Evidence(claim="FICO fell", value="680 → 620",
-                     scope="bureau_full, 2024-01..2024-06"),
-        ],
+        evidence=["3 derogatory marks on file", "FICO fell 680 → 620"],
         data_gaps=[],
         raw_data={"bureau_full": [{"score": 620, "derog_count": 3}]},
     )
     assert output.domain == "bureau"
     assert len(output.evidence) == 2
-    # Scope is the point of the structure — it must survive validation.
-    assert output.evidence[0].scope.startswith("bureau_full")
 
 
 def test_review_report_with_resolution():
@@ -141,44 +133,3 @@ def test_llm_result_blocked():
     result = LLMResult(status="blocked", data=None, error="Firewall rejection 403")
     assert result.status == "blocked"
     assert result.error is not None
-
-
-# ── Evidence carries scope all the way to the reviewer ──────────────────────
-#
-# The point of structuring `evidence`: the tools now report what they measured
-# over, and that scope was being dropped at the first LLM boundary. A reviewer
-# reading "top merchant 10.0%" cannot tell whether the denominator was the whole
-# history or one month. A required field cannot be forgotten; a directive can.
-
-def test_scope_is_required_not_optional():
-    """If scope were optional the model would omit it under token pressure,
-    which is exactly the failure this schema change exists to prevent."""
-    with pytest.raises(Exception):
-        Evidence(claim="top merchant share", value="10.0%")
-
-
-def test_evidence_survives_a_model_dump_round_trip():
-    from models.types import SpecialistOutput as SO
-
-    out = SO(domain="spend_payments", mode="chat",
-             findings="Top merchant is 10.0% of spend.",
-             evidence=[Evidence(
-                 claim="top merchant's share of spend", value="10.0%",
-                 scope="spends_data, Merchant Name contains S BERTRAM, "
-                       "base = all 8,888 rows")])
-    dumped = out.model_dump()
-    ev = dumped["evidence"][0]
-    assert ev["value"] == "10.0%"
-    assert "base = all 8,888 rows" in ev["scope"], \
-        "the denominator must reach whatever renders the answer"
-
-
-def test_two_shares_of_the_same_number_are_distinguishable():
-    """The case that motivated this: same numerator, different base, both
-    'correct'. Structured scope is what makes them tellable apart."""
-    whole = Evidence(claim="share of all spend", value="10.0%",
-                     scope="spends_data, base = all 8,888 rows")
-    y2025 = Evidence(claim="share of 2025 spend", value="30.6%",
-                     scope="spends_data, base = 2,787 rows where Date contains 2025")
-    assert whole.value != y2025.value
-    assert "all 8,888" in whole.scope and "2,787" in y2025.scope
