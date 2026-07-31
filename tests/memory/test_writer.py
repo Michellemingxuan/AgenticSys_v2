@@ -8,23 +8,6 @@ CFG = AmemConfig(enabled=True, store_url="x", collection_name="c", vector_size=3
                  org_id="amx", user_id="amx_reviewer")
 
 
-def test_mirror_kp_working_writes_working_level():
-    fake = FakeAmem()
-    kp = {"topic": "tsr_trend", "claim": "TSR rose", "numbers": [{"x": 1}],
-          "confidence": "high", "captured_at_turn": "t1"}
-    asyncio.run(writer.mirror_kp_working(fake, CFG, kp, case_id="c1",
-                                         turn_id="t1", agent_id="risk", session_id="s1"))
-    assert len(fake.added) == 1
-    call = fake.added[0]
-    assert call["level"] == "working"
-    assert call["content"] == "TSR rose"
-    assert call["kind"] == "knowledge_point"
-    assert call["metadata"]["topic"] == "tsr_trend"
-    assert call["metadata"]["session_id"] == "s1"
-    assert call["scope"].case_id == "c1" and call["scope"].turn_id == "t1"
-    assert call["scope"].agent_id == "risk"
-
-
 def test_write_conversation_passes_atomic_facts():
     fake = FakeAmem()
     asyncio.run(writer.write_conversation(
@@ -83,15 +66,4 @@ def test_writer_swallows_errors():
         async def aadd_memory(self, **k):
             raise RuntimeError("qdrant down")
     fake = Boom()
-    # must NOT raise
-    asyncio.run(writer.mirror_kp_working(fake, CFG, {"claim": "x"}, case_id="c1",
-                                         turn_id="t1", agent_id="risk", session_id="s1"))
 
-
-def test_mirror_kp_working_swallows_malformed_kp():
-    fake = FakeAmem()
-    # A None (or non-dict) kp_dict must NOT raise — the guard catches the
-    # construction-time AttributeError and the write is silently skipped.
-    asyncio.run(writer.mirror_kp_working(fake, CFG, None, case_id="c1",
-                                         turn_id="t1", agent_id="risk", session_id="s1"))
-    assert fake.added == []

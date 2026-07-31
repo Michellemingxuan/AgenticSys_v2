@@ -19,7 +19,8 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from flask import Flask, abort, redirect, render_template_string, request, url_for
+from flask import (Flask, Response, abort, redirect, render_template_string,
+                   request, url_for)
 
 from tools.node_trace._io import open_db
 
@@ -144,6 +145,18 @@ def _server_run_for_turn(conn, chat_id: str, turn_id: str) -> str:
 _REFRESH_META = (
     '{% if refresh_secs %}<meta http-equiv="refresh" content="{{ refresh_secs }}">{% endif %}'
 )
+_FAVICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Same Blue Box family as the chat app, deeper navy so the two are
+       distinguishable in adjacent tabs. Monitoring reads as a live trace: a
+       pulse across the box, with a sparkle tying it to AgenticSys. -->
+  <rect width="32" height="32" rx="7.5" fill="#00175A"/>
+  <path d="M5.5 19.5h4.2l2.6-7.4 3.4 12 2.7-8.3 1.8 3.7h6.3" fill="none"
+        stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round"
+        stroke-linejoin="round"/>
+  <path d="M24.4 5.2c.35 2.4 1.95 4 4.35 4.35-2.4.35-4 1.95-4.35 4.35-.35-2.4-1.95-4-4.35-4.35 2.4-.35 4-1.95 4.35-4.35z"
+        fill="#7FC4FF"/>
+</svg>"""
+_FAVICON = '<link rel="icon" type="image/svg+xml" href="/favicon.svg">'
 _REFRESH_BADGE = """
 {% if refresh_secs %}
 <div style="position:fixed; top:8px; right:8px; background:#fef3c7; color:#92400e;
@@ -280,9 +293,9 @@ nav a { margin-right: 12px; }
 
 _INDEX = """
 <!doctype html>
-<html><head><meta charset="utf-8">""" + _REFRESH_META + """<title>node_trace</title>""" + _STYLE + """</head>
+<html><head><meta charset="utf-8">""" + _REFRESH_META + """<title>AgenticSys Monitor</title>""" + _FAVICON + _STYLE + """</head>
 <body>""" + _REFRESH_BADGE + """
-  <h1>Trace viewer · {{ db }}</h1>
+  <h1>AgenticSys Monitor <span class="muted">· agent run traces · {{ db }}</span></h1>
   <nav><a href="/">conversations</a></nav>
   <h2>Conversations ({{ chats|length }})</h2>
   <table>
@@ -320,7 +333,7 @@ _INDEX = """
 
 _CHAT = """
 <!doctype html>
-<html><head><meta charset="utf-8">""" + _REFRESH_META + """<title>{{ chat_id }} · node_trace</title>""" + _STYLE + """</head>
+<html><head><meta charset="utf-8">""" + _REFRESH_META + """<title>{{ chat_id }} · AgenticSys Monitor</title>""" + _FAVICON + _STYLE + """</head>
 <body>""" + _REFRESH_BADGE + """
   <h1>Conversation: {{ chat_id }}</h1>
   <nav>
@@ -416,7 +429,7 @@ _NODE_DETAIL_MACRO = """
 
 _STATE = """
 <!doctype html>
-<html><head><meta charset="utf-8">""" + _REFRESH_META + """<title>{{ chat_id }} state · node_trace</title>""" + _STYLE + """</head>
+<html><head><meta charset="utf-8">""" + _REFRESH_META + """<title>{{ chat_id }} state · AgenticSys Monitor</title>""" + _FAVICON + _STYLE + """</head>
 <body>""" + _REFRESH_BADGE + """
   <h1>Cross-turn state: {{ chat_id }}</h1>
   <nav>
@@ -469,7 +482,7 @@ _STATE = """
 
 _TURN = _NODE_DETAIL_MACRO + """
 <!doctype html>
-<html><head><meta charset="utf-8">""" + _REFRESH_META + """<title>{% if question %}{{ question[:60] }} · {% endif %}{{ turn_id }} · node_trace</title>""" + _STYLE + """</head>
+<html><head><meta charset="utf-8">""" + _REFRESH_META + """<title>{% if question %}{{ question[:60] }} · {% endif %}{{ turn_id }} · AgenticSys Monitor</title>""" + _FAVICON + _STYLE + """</head>
 <body>""" + _REFRESH_BADGE + """
   <h1>
     {% if question %}
@@ -743,6 +756,12 @@ _TURN = _NODE_DETAIL_MACRO + """
 
 
 # ── Routes ──────────────────────────────────────────────────────────────────
+
+
+@app.get("/favicon.svg")
+def favicon():
+    return Response(_FAVICON_SVG, mimetype="image/svg+xml",
+                    headers={"Cache-Control": "max-age=86400"})
 
 
 @app.get("/")

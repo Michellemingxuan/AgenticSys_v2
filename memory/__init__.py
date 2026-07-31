@@ -10,7 +10,6 @@ from .scope import base_metadata, build_scope, kps_for_agent_turn, kps_for_turn
 from .writer import (
     consolidate_agent_case,
     consolidate_case,
-    mirror_kp_working,
     write_conversation,
     write_specialist_memory,
 )
@@ -18,7 +17,7 @@ from .writer import (
 __all__ = [
     "AmemConfig", "build_amem_manager", "NullAmemManager",
     "build_scope", "base_metadata", "kps_for_turn", "kps_for_agent_turn",
-    "mirror_kp_working", "write_conversation", "consolidate_case", "consolidate_agent_case",
+    "write_conversation", "consolidate_case", "consolidate_agent_case",
     "write_specialist_memory", "load_case_kps", "load_active_kps",
     "ACTIVE_KP_THRESHOLD", "ACTIVE_KP_KEEP",
     "load_case_summary", "delete_turns", "delete_case_memory", "build_session_brief",

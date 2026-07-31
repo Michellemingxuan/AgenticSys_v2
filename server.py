@@ -293,6 +293,11 @@ _AMEM = build_amem_manager(
     _AMEM_CFG,
     backend=(getattr(_CLIENTS, "backend", None) or os.environ.get("LLM_BACKEND", "openai")),
     logger=_BOOT_LOGGER,
+    # Amem synthesizes case summaries with its OWN LLM call (we never pass
+    # `content`), over this case's questions and answers. Hand it the
+    # firewalled client so those calls are redacted and gated like every other
+    # model call here, instead of going out through a plain AsyncOpenAI.
+    client=getattr(_CLIENTS, "firewalled_client", None),
 )
 atexit.register(lambda: _AMEM.close())
 

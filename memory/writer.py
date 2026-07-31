@@ -20,27 +20,6 @@ async def _guard(make_awaitable: Callable[[], Awaitable[Any]], timeout: float) -
         return None
 
 
-async def mirror_kp_working(amem, cfg: AmemConfig, kp_dict: dict, *,
-                            case_id: str, turn_id: str, agent_id: str,
-                            session_id: str) -> None:
-    async def _do():
-        metadata = base_metadata(session_id)
-        metadata.update({
-            "topic": kp_dict.get("topic"),
-            "numbers": kp_dict.get("numbers"),
-            "confidence": kp_dict.get("confidence"),
-            "captured_at_turn": kp_dict.get("captured_at_turn"),
-        })
-        return await amem.aadd_memory(
-            level="working",
-            content=(kp_dict.get("claim") or ""),
-            scope=build_scope(cfg, case_id, turn_id=turn_id, agent_id=agent_id),
-            kind="knowledge_point",
-            metadata=metadata,
-        )
-    await _guard(_do, cfg.write_timeout_s)
-
-
 async def write_conversation(amem, cfg: AmemConfig, *, question: str, answer: str,
                              case_id: str, turn_id: str, session_id: str,
                              atomic_facts: list[str] | None = None,

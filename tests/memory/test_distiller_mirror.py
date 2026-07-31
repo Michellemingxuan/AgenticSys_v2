@@ -16,3 +16,16 @@ def test_distiller_pass_does_not_import_mirror_kp_working():
     src = inspect.getsource(dp)
     assert "mirror_kp_working" not in src
     assert "_mirror_kp(" not in src
+
+
+def test_the_working_level_mirror_no_longer_exists_at_all():
+    """It outlived its removal from the distiller seam: still defined and
+    exported from `memory`, never called, so the store held zero
+    `knowledge_point` records while the function implied otherwise. Deleted —
+    bind that so it cannot drift back as a second, unused storage path."""
+    import memory
+    import memory.writer as writer
+
+    assert not hasattr(writer, "mirror_kp_working")
+    assert not hasattr(memory, "mirror_kp_working")
+    assert "mirror_kp_working" not in getattr(memory, "__all__", ())
