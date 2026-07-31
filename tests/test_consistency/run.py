@@ -139,7 +139,6 @@ class _HarnessSession:
         self.chat_agent = chat_agent
         self.logger = logger
         # Per-turn state — fresh so each response is independent.
-        self.input_history: list = []
         self.qa_cache: dict = {}
         self.specialist_kb: dict = {}
         self._qa_turn_seq = 0

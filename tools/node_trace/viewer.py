@@ -426,7 +426,7 @@ _STATE = """
 
   <p class="muted">
     Snapshots are taken at end-of-turn after distillers drain, after
-    qa_cache + specialist_kb + input_history are updated. Rewind drops
+    qa_cache + specialist_kb are updated. Rewind drops
     all snapshots for this chat (same lifetime as the trace rows).
   </p>
 
@@ -437,8 +437,6 @@ _STATE = """
       <th class="right">qa_cache</th>
       <th class="right">KB specialists</th>
       <th class="right">KB KPs</th>
-      <th class="right">input_history items</th>
-      <th class="right">input_history chars</th>
     </tr></thead>
     <tbody>
     {% for s in snapshots %}
@@ -448,8 +446,6 @@ _STATE = """
         <td class="right">{{ s.qa_cache_n }}</td>
         <td class="right">{{ s.kb_specialists_n }}</td>
         <td class="right">{{ s.kb_kps_n }}</td>
-        <td class="right">{{ s.input_history_items }}</td>
-        <td class="right">{{ "{:,}".format(s.input_history_chars or 0) }}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -464,10 +460,6 @@ _STATE = """
     <details>
       <summary><strong>specialist_kb</strong> · {{ latest.kb_specialists_n }} specialists, {{ latest.kb_kps_n }} knowledge points</summary>
       <pre>{{ latest.kb_pretty }}</pre>
-    </details>
-    <details>
-      <summary><strong>input_history</strong> · {{ latest.input_history_items }} items, {{ "{:,}".format(latest.input_history_chars or 0) }} chars</summary>
-      <pre>{{ latest.ih_pretty }}</pre>
     </details>
   {% else %}
     <p class="muted">No snapshots yet. Restart the server and run a turn to populate.</p>
@@ -605,11 +597,6 @@ _TURN = _NODE_DETAIL_MACRO + """
           <td class="right">{{ snapshot.kb_kps_n }} KPs / {{ snapshot.kb_specialists_n }} specialists</td>
           <td class="muted">distilled knowledge points; preface each specialist's next prompt</td>
         </tr>
-        <tr class="clickable" data-node-id="xt-ih">
-          <td><strong>input_history</strong></td>
-          <td class="right">{{ snapshot.input_history_items }} items / {{ "{:,}".format(snapshot.input_history_chars or 0) }} chars</td>
-          <td class="muted">raw chat history threaded into the next orchestrator call</td>
-        </tr>
       </tbody>
     </table>
   {% else %}
@@ -638,11 +625,6 @@ _TURN = _NODE_DETAIL_MACRO + """
         <h3 style="margin:0 0 6px;">specialist_kb</h3>
         <p class="muted" style="margin:0 0 12px;">{{ snapshot.kb_specialists_n }} specialists · {{ snapshot.kb_kps_n }} knowledge points</p>
         <pre>{{ snapshot.kb_pretty }}</pre>
-      </div>
-      <div class="node-detail" id="node-detail-xt-ih">
-        <h3 style="margin:0 0 6px;">input_history</h3>
-        <p class="muted" style="margin:0 0 12px;">{{ snapshot.input_history_items }} items · {{ "{:,}".format(snapshot.input_history_chars or 0) }} chars</p>
-        <pre>{{ snapshot.ih_pretty }}</pre>
       </div>
     {% endif %}
   </div>
@@ -1043,8 +1025,7 @@ def turn(chat_id: str, turn_id: str):
         snapshot = dict(snap_row)
         snapshot["taken_at_sg"] = _iso_to_sgt(snapshot.get("taken_at"))
         for src, dst in (("qa_cache_json", "qa_cache_pretty"),
-                         ("specialist_kb_json", "kb_pretty"),
-                         ("input_history_json", "ih_pretty")):
+                         ("specialist_kb_json", "kb_pretty")):
             raw = snapshot.get(src)
             if raw:
                 try:
@@ -1122,8 +1103,7 @@ def state(chat_id: str):
     if snaps:
         latest = dict(snaps[0])
         for src_key, dst_key in (("qa_cache_json", "qa_cache_pretty"),
-                                 ("specialist_kb_json", "kb_pretty"),
-                                 ("input_history_json", "ih_pretty")):
+                                 ("specialist_kb_json", "kb_pretty")):
             raw = latest.get(src_key)
             if raw:
                 try:

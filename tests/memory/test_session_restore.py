@@ -11,21 +11,19 @@ class _FakeStore:
 
 def _sess():
     return types.SimpleNamespace(qa_cache={}, specialist_kb={},
-                                 input_history=[], _qa_turn_seq=0,
+                                 _qa_turn_seq=0,
                                  logger=types.SimpleNamespace(log=lambda *a, **k: None))
 
 
 def test_restore_populates_ram_from_snapshot(monkeypatch):
     snap = {"chat_id": "c-1",
             "qa_cache": {"q1": {"turn_seq": 1}, "q2": {"turn_seq": 2}},
-            "specialist_kb": {"risk": [{"topic": "fico"}]},
-            "input_history": [{"role": "user", "content": "hi"}]}
+            "specialist_kb": {"risk": [{"topic": "fico"}]}}
     monkeypatch.setattr(server, "_NODE_TRACE_STORE", _FakeStore(snap))
     sess = _sess()
     server._restore_session_state(sess, "CASE")
     assert set(sess.qa_cache) == {"q1", "q2"}
     assert sess.specialist_kb == {"risk": [{"topic": "fico"}]}
-    assert sess.input_history == [{"role": "user", "content": "hi"}]
     assert sess._qa_turn_seq == 2          # continues from max turn_seq
 
 

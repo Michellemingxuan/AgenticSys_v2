@@ -169,9 +169,6 @@ class CaseSession:
     pillar_yaml: dict
     chat_agent: ChatAgent
     logger: EventLogger
-    # Conversation memory across turns: each turn appends to this list, the next
-    # `Runner.run_streamed` is invoked with the full list as input.
-    input_history: list = field(default_factory=list)
     # Current turn lock — serialize turns per case. The frontend disables the
     # composer while a turn is in flight.
     turn_lock: threading.Lock = field(default_factory=threading.Lock)
@@ -214,7 +211,7 @@ class CaseSession:
     # specialist run. Older entries are RETAINED for audit when a newer KP
     # supersedes them; the active set is "latest per topic" (filter happens in
     # agent_tool._format_kb_digest). Cleared by /rewind alongside
-    # input_history and qa_cache so a session reset wipes everything.
+    # qa_cache so a session reset wipes everything.
     specialist_kb: dict = field(default_factory=dict)
     # Amem session identity (metadata only; reads stay case-scoped/cross-session).
     # Rotated on full rewind / clear-history so prior sessions become immutable.
@@ -377,7 +374,7 @@ ALL_CASES = _GATEWAY.list_case_ids()
 print(f"[server] {len(ALL_CASES)} cases available: {ALL_CASES[:5]}{'...' if len(ALL_CASES) > 5 else ''}")
 
 
-    # (input_history pruning removed — each turn now starts fresh.
+    # (Each turn starts fresh — no accumulated conversation history.
     #  Follow-up context lives in specialist_kb + KB warmth hint.)
 
 
@@ -538,7 +535,7 @@ def _sync_case_catalog(case_id: str, gateway, catalog, logger) -> None:
 
 
 def _restore_session_state(sess, case_id: str) -> None:
-    """Restore a case's cross-turn RAM (qa_cache, specialist_kb, input_history)
+    """Restore a case's cross-turn RAM (qa_cache, specialist_kb)
     from the latest durable snapshot, so a server restart is invisible.
     Best-effort; never raises."""
     if _NODE_TRACE_STORE is None:
@@ -552,7 +549,6 @@ def _restore_session_state(sess, case_id: str) -> None:
     try:
         sess.qa_cache = snap.get("qa_cache") or {}
         sess.specialist_kb = snap.get("specialist_kb") or {}
-        sess.input_history = snap.get("input_history") or []
         sess._qa_turn_seq = max(
             (e.get("turn_seq", 0) for e in sess.qa_cache.values()
              if isinstance(e, dict)), default=0)
@@ -1003,8 +999,8 @@ def post_cancel_turn(case_id: str):
     """Interrupt the in-flight turn AND fully rewind — as if the
     stopped question was never asked.
 
-    Clears: specialist_kb (current turn's KPs), qa_cache (so re-asking
-    doesn't replay), input_history. Cancels the running task via
+    Clears: specialist_kb (current turn's KPs) and qa_cache (so re-asking
+    doesn't replay). Cancels the running task via
     aggressive task.cancel() + cooperative signal.
     """
     try:
@@ -1037,7 +1033,6 @@ def post_cancel_turn(case_id: str):
     sess._qa_turn_seq = 0   # episodic ordering counter rewinds with qa_cache (spec §4)
     n_kb_total = sum(len(v) for v in sess.specialist_kb.values())
     sess.specialist_kb.clear()
-    sess.input_history = []
     with sess.subscribers_lock:
         sess.event_buffer.clear()  # don't replay events from the wiped turn(s)
 
@@ -1124,7 +1119,6 @@ def post_rewind(case_id: str):
                     chat_id=sess.conversation_id, case_id=case_id,
                     turn_id=f"rewind-{_max_seq}",
                     qa_cache=sess.qa_cache, specialist_kb=sess.specialist_kb,
-                    input_history=sess.input_history,
                     conversation_id=sess.conversation_id,
                     server_run_id=SERVER_RUN_ID, user_id=sess.user_id,
                     pillar_id=sess.pillar_id)
@@ -1132,7 +1126,6 @@ def post_rewind(case_id: str):
                 pass
     else:
         # Full rewind: clear everything.
-        sess.input_history = []
         n_cached = len(sess.qa_cache)
         sess.qa_cache.clear()
         sess._qa_turn_seq = 0   # episodic ordering counter rewinds with qa_cache (spec §4)

@@ -174,27 +174,22 @@ def test_snapshot_session_persists_and_counts(tmp_path):
     store = NodeTraceStore(str(tmp_path / "traces.db"))
     qa = OrderedDict([("q1", {"answer": "a1"}), ("q2", {"answer": "a2"})])
     kb = {"spend_payments": [{"topic": "t", "claim": "c"}], "modeling": []}
-    ih = [{"role": "user", "content": "what's the case status"},
-          {"role": "assistant", "content": "ok"}]
     row_id = store.snapshot_session(
         chat_id="C", case_id="X", turn_id="T",
-        qa_cache=qa, specialist_kb=kb, input_history=ih,
+        qa_cache=qa, specialist_kb=kb,
     )
     assert row_id > 0
     conn = sqlite3.connect(str(tmp_path / "traces.db"))
     row = conn.execute(
-        "SELECT qa_cache_n, kb_specialists_n, kb_kps_n, "
-        "       input_history_items, input_history_chars "
+        "SELECT qa_cache_n, kb_specialists_n, kb_kps_n "
         "FROM session_snapshot WHERE id = ?",
         (row_id,),
     ).fetchone()
-    # 2 cache entries, 1 specialist with KPs (modeling is empty so not counted),
-    # 1 KP total, 2 history items.
+    # 2 cache entries, 1 specialist with KPs (modeling is empty so not
+    # counted), 1 KP total.
     assert row[0] == 2
     assert row[1] == 1
     assert row[2] == 1
-    assert row[3] == 2
-    assert row[4] > 0
 
 
 def test_snapshot_stores_clean_episodic_projection_not_raw_qa_cache(tmp_path):
@@ -219,7 +214,7 @@ def test_snapshot_stores_clean_episodic_projection_not_raw_qa_cache(tmp_path):
     }
     row_id = store.snapshot_session(
         chat_id="C", case_id="X", turn_id="T",
-        qa_cache=qa, specialist_kb={}, input_history=[],
+        qa_cache=qa, specialist_kb={},
     )
     conn = sqlite3.connect(str(tmp_path / "traces.db"))
     (qa_n, qa_json) = conn.execute(
@@ -243,11 +238,11 @@ def test_delete_chat_drops_snapshots_too(tmp_path):
     store = NodeTraceStore(str(tmp_path / "traces.db"))
     store.snapshot_session(
         chat_id="A", case_id="x", turn_id="t",
-        qa_cache={}, specialist_kb={}, input_history=[],
+        qa_cache={}, specialist_kb={},
     )
     store.snapshot_session(
         chat_id="B", case_id="x", turn_id="t",
-        qa_cache={}, specialist_kb={}, input_history=[],
+        qa_cache={}, specialist_kb={},
     )
     store.delete_chat("A")
     conn = sqlite3.connect(str(tmp_path / "traces.db"))

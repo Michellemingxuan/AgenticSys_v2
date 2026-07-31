@@ -62,7 +62,7 @@ CREATE INDEX IF NOT EXISTS idx_node      ON node_trace(node);
 CREATE INDEX IF NOT EXISTS idx_started   ON node_trace(started_at);
 
 -- End-of-turn snapshot of CaseSession's cross-turn state: qa_cache,
--- specialist_kb, input_history. Lets the viewer show what the
+-- specialist_kb. Lets the viewer show what the
 -- conversation "remembers" at each point. Cleared by delete_chat (rewind).
 CREATE TABLE IF NOT EXISTS session_snapshot (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -73,6 +73,10 @@ CREATE TABLE IF NOT EXISTS session_snapshot (
   qa_cache_n          INTEGER,
   kb_specialists_n    INTEGER,
   kb_kps_n            INTEGER,
+  -- RETIRED, always 0 / NULL. Raw chat history was once threaded into each
+  -- orchestrator call; that was removed (every turn now starts fresh, and
+  -- cross-turn context arrives via case summary + episodic block + KB warmth
+  -- hint). The columns are kept so existing trace DBs need no migration.
   input_history_items INTEGER,
   input_history_chars INTEGER,
   qa_cache_json       TEXT,
@@ -244,7 +248,6 @@ class NodeTraceStore:
         turn_id: str,
         qa_cache: Any,
         specialist_kb: Any,
-        input_history: Any,
         conversation_id: str | None = None,
         server_run_id: str | None = None,
         user_id: str | None = None,
@@ -266,11 +269,6 @@ class NodeTraceStore:
                 sum(len(v or []) for v in specialist_kb.values())
                 if isinstance(specialist_kb, dict) else 0
             )
-            ih_items = len(input_history) if isinstance(input_history, list) else 0
-            ih_chars = (
-                sum(len(json.dumps(it, default=str)) for it in input_history)
-                if isinstance(input_history, list) else 0
-            )
             # Store the clean episodic projection the next turn actually
             # injects (question → sub-answers → final answer), NOT the raw
             # qa_cache entry. The raw entry also carries per-tool-call
@@ -282,7 +280,6 @@ class NodeTraceStore:
                 default=str,
             ) if qa_cache else None
             kb_json = json.dumps(specialist_kb, default=str) if specialist_kb else None
-            ih_json = json.dumps(input_history, default=str) if input_history else None
             qa_raw_json = json.dumps(qa_cache, default=str) if qa_cache else None
             with self._lock:
                 cur = self._conn.execute(
@@ -296,8 +293,8 @@ class NodeTraceStore:
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (chat_id, case_id, turn_id, _now_iso(),
                      qa_n, kb_specialists_n, kb_kps_n,
-                     ih_items, ih_chars,
-                     qa_json, kb_json, ih_json,
+                     0, 0,
+                     qa_json, kb_json, None,
                      qa_raw_json,
                      conversation_id, server_run_id, user_id, pillar_id),
                 )
@@ -311,14 +308,14 @@ class NodeTraceStore:
         None. Read-only (no lock). Decodes each JSON column defensively."""
         try:
             row = self._conn.execute(
-                "SELECT chat_id, qa_cache_raw_json, specialist_kb_json, "
-                "input_history_json FROM session_snapshot "
+                "SELECT chat_id, qa_cache_raw_json, specialist_kb_json "
+                "FROM session_snapshot "
                 "WHERE case_id = ? ORDER BY taken_at DESC LIMIT 1",
                 (case_id,),
             ).fetchone()
             if row is None:
                 return None
-            chat_id, qa_raw, kb_json, ih_json = row
+            chat_id, qa_raw, kb_json = row
 
             def _load(blob, default):
                 if not blob:
@@ -332,7 +329,6 @@ class NodeTraceStore:
                 "chat_id": chat_id,
                 "qa_cache": _load(qa_raw, {}),
                 "specialist_kb": _load(kb_json, {}),
-                "input_history": _load(ih_json, []),
             }
         except Exception as exc:  # noqa: BLE001
             self._log_failure("load_latest_snapshot", exc)

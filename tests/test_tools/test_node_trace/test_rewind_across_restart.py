@@ -24,7 +24,7 @@ def test_rewind_pre_restart_turn_survives_restart(tmp_path):
     store_a.snapshot_session(
         chat_id=conv, case_id="366", turn_id="T2",
         qa_cache={"q": {"turn_id_origin": "T2", "turn_seq": 2}},
-        specialist_kb={}, input_history=[],
+        specialist_kb={},
         conversation_id=conv, server_run_id="run-A",
         user_id="u", pillar_id="credit_risk")
     assert _ids(store_a, conv) == ["T1", "T2"]

@@ -662,7 +662,6 @@ class TurnRunner:
         self.turn_timer.record(
             "memory_framing",
             int((time.perf_counter() - timer_t0) * 1000),
-            input_history_len=0,
             warmth_hint_present=bool(sess.specialist_kb and any(sess.specialist_kb.values())),
         )
 
@@ -692,10 +691,6 @@ class TurnRunner:
         orch_perf_t0 = time.perf_counter()
         sess.logger.log("turn_phase_orchestrator_starting", {
             "turn_id": turn_id,
-            "input_history_len": len(sess.input_history),
-            "input_history_chars": sum(
-                len(json.dumps(item, default=str)) for item in sess.input_history
-            ) if sess.input_history else 0,
             "warmth_hint_present": bool(sess.specialist_kb and any(sess.specialist_kb.values())),
             "n_specialists_warm": sum(1 for kps in sess.specialist_kb.values() if kps),
         })
@@ -1553,7 +1548,7 @@ class TurnRunner:
                              "entries_evicted": evicted_cache_entries})
             # Snapshot CaseSession's cross-turn state to the trace DB so the
             # viewer can show what the conversation "remembers" at end of turn:
-            # qa_cache, specialist_kb (with all KnowledgePoints), input_history.
+            # qa_cache, specialist_kb (with all KnowledgePoints).
             # Failures are swallowed by the store; never breaks the turn.
             if _NODE_TRACE_STORE is not None:
                 _conv = getattr(sess, "conversation_id", "") or sess.logger.session_id
@@ -1563,7 +1558,6 @@ class TurnRunner:
                     turn_id=turn_id,
                     qa_cache=sess.qa_cache,
                     specialist_kb=sess.specialist_kb,
-                    input_history=sess.input_history,
                     conversation_id=_conv,
                     server_run_id=SERVER_RUN_ID,
                     user_id=getattr(sess, "user_id", ""),
