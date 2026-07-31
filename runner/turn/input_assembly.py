@@ -84,6 +84,31 @@ def _compose_framed_question(*parts: str) -> str:
     return "\n\n".join(p for p in parts if p)
 
 
+def _table_owners() -> dict[str, str]:
+    """`{real table name: specialist that owns it}`, from the skills' own
+    `data_hints`. Derived rather than declared twice, so adding a table to a
+    skill is enough — there is no second list to keep in step."""
+    owners: dict[str, str] = {}
+    try:
+        from skills.domain.loader import list_domain_skills, load_domain_skill
+        from tools.data_tools import _resolve_real_table
+    except Exception:  # noqa: BLE001
+        return owners
+    for name in list_domain_skills():
+        skill = load_domain_skill(name)
+        if not skill:
+            continue
+        for table in skill.data_hints or []:
+            # Canonical AND real spelling — the hint carries whichever name the
+            # column index reports.
+            owners.setdefault(table, skill.name)
+            try:
+                owners.setdefault(_resolve_real_table(table), skill.name)
+            except Exception:  # noqa: BLE001
+                pass
+    return owners
+
+
 def assemble_orchestrator_input(sess, verdict, ctx, case_summary: str = "") -> str:
     """Build the orchestrator's framed user message and stash episodic records on ctx.
 
@@ -112,6 +137,25 @@ def assemble_orchestrator_input(sess, verdict, ctx, case_summary: str = "") -> s
                         {"turn_id": getattr(ctx, "_turn_id", None),
                          "error": repr(_epi_exc)})
     ctx._episodic_records = episodic_window
+    # LAST, after the question: a bare variable name reads as a proper noun.
+    # "how is intoop" was answered as though INTOOP were the customer ("Intoop
+    # is a high-utilization commercial customer with 3 cards…") and dispatched
+    # as a generic case overview, never touching `oop_interaction_max`. The
+    # screen already resolved the name against this case's data, so this hands
+    # over what is known rather than asking the orchestrator to guess again.
+    variable_hint = ""
+    if getattr(verdict, "named_variables", None):
+        try:
+            from tools.data_tools import variable_routing_hint
+            variable_hint = variable_routing_hint(
+                verdict.redacted_question, owners=_table_owners())
+        except Exception:  # noqa: BLE001 — never break a turn over a hint
+            variable_hint = ""
+        if variable_hint:
+            sess.logger.log("variable_routing_hint_emitted", {
+                "turn_id": getattr(ctx, "_turn_id", None),
+                "named_variables": list(verdict.named_variables)[:8],
+            })
     return _compose_framed_question(
         _format_case_summary_block(case_summary),
-        episodic_block, warmth_hint, verdict.redacted_question)
+        episodic_block, warmth_hint, verdict.redacted_question, variable_hint)

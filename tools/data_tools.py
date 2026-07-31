@@ -54,6 +54,14 @@ try:
 except NameError:
     _search_index_cache: dict[str | None, list[dict]] = {}
 
+# Rendered column inventories, keyed by (case_id, table scope). Built from
+# ``_search_index_cache`` and reset at the same points — a stale inventory would
+# describe the PREVIOUS case's data, the one error this must never make.
+try:
+    _inventory_cache  # type: ignore[used-before-def]  # noqa: F821
+except NameError:
+    _inventory_cache: dict[tuple, str] = {}
+
 _MAX_CHARS = 3000
 # A trend `series` is load-bearing — auto_chart parses it to render the plotted
 # chart — so it gets a larger budget than generic row dumps, and when it is
@@ -933,6 +941,7 @@ def init_tools(gateway: DataGateway, catalog: DataCatalog, logger: Any = None) -
     _logger = logger
     _schema_cache.clear()
     _search_index_cache.clear()
+    _inventory_cache.clear()
 
 
 def clear_schema_cache() -> None:
@@ -943,6 +952,7 @@ def clear_schema_cache() -> None:
     """
     _schema_cache.clear()
     _search_index_cache.clear()
+    _inventory_cache.clear()
 
 
 def set_logger(logger: Any) -> None:
@@ -1222,6 +1232,36 @@ _SEARCH_STOPWORDS = frozenset({
 # whole tokens, which is how they actually appear in these names.
 _SEARCH_MIN_SUBSTRING_TERM = 4
 
+# Minimum length of a STEM. Column names are written in one grammatical form
+# ("spend", "payment", "score") and questions arrive in another ("spending",
+# "payments", "scores"), so an exact-token search silently misses the column it
+# was built to find: observed `search_columns('spending', 'model_scores')`
+# returning nothing while `'spend'` returned four columns, costing a turn.
+_SEARCH_MIN_STEM = 4
+
+
+def _stem(term: str) -> str:
+    """Crude English suffix stripping — enough to bridge question↔column form.
+
+    Deliberately NOT a real stemmer. Only the endings that actually differ
+    between how a reviewer asks and how these columns are named, and only when
+    what remains is still long enough to be a meaningful substring; over-eager
+    stemming would reintroduce the noise `_SEARCH_MIN_SUBSTRING_TERM` exists to
+    prevent. Returns "" when there is nothing useful to strip.
+    """
+    for suffix, keep in (("ing", 3), ("ed", 2), ("es", 2), ("s", 1)):
+        if term.endswith(suffix) and not term.endswith("ss"):
+            stem = term[: -keep]
+            if len(stem) >= _SEARCH_MIN_STEM and stem != term:
+                return stem
+    return ""
+
+
+def _term_variants(term: str) -> list[str]:
+    """The term plus its stem, if stemming yields anything."""
+    stem = _stem(term)
+    return [term, stem] if stem else [term]
+
 # The `(N others)` remainder row `summarize_by_group` appends when it truncates
 # to top_n. Defined HERE, next to the code that writes it, and read by
 # `viz_renderer` — which hides the row from ranking bars but still counts it in
@@ -1274,6 +1314,11 @@ def _search_tokens(text: str) -> list[str]:
             if t not in _SEARCH_STOPWORDS]
 
 
+def _is_blank(value) -> bool:
+    """A cell carrying no data. Whitespace counts — the real export pads."""
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
 def _build_search_index(case_id) -> list[dict]:
     """One entry per column physically present in this case's tables.
 
@@ -1297,6 +1342,15 @@ def _build_search_index(case_id) -> list[dict]:
                     _catalog._profiles.get(ct, {}).get("columns", {}) or {}
                 ).items():
                     merged_cols.setdefault(col, spec)
+            # Which columns are present-but-blank for THIS case. Listing an
+            # empty column in the inventory as if it were usable sends a
+            # specialist at a guaranteed DATA GAP — the bureau table alone
+            # carries 7 all-blank columns. Computed once per table here rather
+            # than per column so it stays one pass over the rows.
+            empty_cols = {
+                col for col in rows[0].keys()
+                if all(_is_blank(r.get(col)) for r in rows)
+            }
             for real_col in rows[0].keys():
                 spec = _find_column_spec(merged_cols, real_col) or {}
                 concepts = sorted(DataCatalog._concept_set(spec))
@@ -1307,6 +1361,8 @@ def _build_search_index(case_id) -> list[dict]:
                 entries.append({
                     "table": table,
                     "column": real_col,
+                    "short": (spec.get("short_description") or "").strip(),
+                    "empty": real_col in empty_cols,
                     "dtype": spec.get("dtype", "unknown"),
                     "description": (spec.get("description") or "").strip(),
                     "concepts": concepts,
@@ -1317,6 +1373,217 @@ def _build_search_index(case_id) -> list[dict]:
 
     _search_index_cache[case_id] = entries
     return entries
+
+
+# ── the case's column inventory, for the specialist's opening prompt ─────────
+#
+# A specialist is constructed with tool_choice="required", so its FIRST move is
+# always a tool call — and with nothing in its prompt describing what this case
+# holds, that first move is a blind probe. Observed cost: `modeling` spent four
+# of six turns on list/search/schema round-trips and ran out of budget before
+# answering, surfacing as "No model-based feature analysis is available due to a
+# data retrieval issue."
+#
+# The inventory is deterministic, fixed per case, and small: the whole 218-column
+# case renders in ~1.2k tokens with names alone, against ~3k for ONE
+# `get_table_schema` dump. Handing it over up front removes the round-trips
+# rather than making them cheaper.
+#
+# It answers "which column do I want?" only. "How do I read it?" — wire format,
+# row grain, full prose — stays in `get_table_schema`, now a targeted lookup.
+
+_INVENTORY_MAX_SHORT = 90        # a long "short" description is a bug, not detail
+
+
+def _is_derivable_alias(alias: str, column: str) -> bool:
+    """True when the alias adds nothing a reader couldn't infer.
+
+    Self-aliases and the `_max`/`_min`/`_mean` aggregation forms of a name
+    already on the line — 148 of the 194 declared aliases in this catalog. They
+    would triple the alias budget while telling a specialist nothing it does not
+    already see.
+    """
+    a, c = alias.lower(), column.lower()
+    if a == c:
+        return True
+    strip = lambda s: re.sub(r"_(max|min|mean)$", "", s)  # noqa: E731
+    return strip(a) == strip(c)
+
+
+def _genuine_aliases(entry: dict) -> list[str]:
+    """The alias spellings a reviewer might actually type: ADL codes, CAS and
+    business names. These are what make "how is INTOOP" resolvable — not for
+    tool-calling (the catalog already resolves them) but for RECOGNITION. An
+    inventory listing only `oop_interaction_max` invites the specialist to
+    conclude INTOOP does not exist and report a data gap for a live column."""
+    return [a for a in entry["aliases"]
+            if not _is_derivable_alias(a, entry["column"])]
+
+
+def build_column_inventory(tables: list[str] | None = None) -> str:
+    """The columns this case actually holds, one terse line each.
+
+    `tables` accepts canonical or real names (a specialist passes its skill's
+    `data_hints`); None renders every table. Returns "" when the data layer is
+    not wired, so a caller can append it unconditionally.
+    """
+    if _gateway is None or _catalog is None:
+        return ""
+    case_id = _gateway.get_case_id()
+    if case_id is None:
+        return ""
+
+    wanted: set[str] | None = None
+    if tables:
+        wanted = set()
+        for t in tables:
+            wanted.add(t)
+            wanted.add(_resolve_real_table(t))
+
+    key = (case_id, tuple(sorted(wanted)) if wanted else None)
+    if key in _inventory_cache:
+        return _inventory_cache[key]
+
+    by_table: dict[str, list[dict]] = {}
+    for e in _build_search_index(case_id):
+        if wanted is not None and e["table"] not in wanted:
+            continue
+        by_table.setdefault(e["table"], []).append(e)
+
+    if not by_table:
+        _inventory_cache[key] = ""
+        return ""
+
+    lines = [
+        "§ COLUMNS IN THIS CASE",
+        "",
+        "Every column below is PRESENT in this case's data. Names are verbatim "
+        "— pass them exactly as written. `=NAME` lists other spellings that "
+        "also resolve (ADL / business names), so a question naming one of those "
+        "is answerable without searching. `(EMPTY)` means the column exists but "
+        "holds no values for this case — do not build an analysis on it.",
+        "",
+        "This is the full inventory: if a column is not listed, this case does "
+        "not have it. Use `get_table_schema` for a column's full definition "
+        "(units, wire format, row grain), and `search_columns` only when you "
+        "need to find a column by meaning rather than by name.",
+    ]
+    for table in sorted(by_table):
+        cols = sorted(by_table[table], key=lambda e: e["column"])
+        lines.append("")
+        lines.append(f"{table} ({len(cols)} columns)")
+        for e in cols:
+            bits = [e["column"]]
+            if e["concepts"]:
+                bits.append(f"[{'/'.join(e['concepts'])}]")
+            for a in _genuine_aliases(e):
+                bits.append(f"={a}")
+            if e["threshold"]:
+                bits.append(f"({e['threshold']})")
+            if e["empty"]:
+                bits.append("(EMPTY)")
+            head = " ".join(bits)
+            short = e["short"][:_INVENTORY_MAX_SHORT]
+            lines.append(f"  {head} — {short}" if short else f"  {head}")
+
+    out = "\n".join(lines)
+    _inventory_cache[key] = out
+    return out
+
+
+# Column names that are also ordinary English words. Matching these would let
+# "what is the date today" or "how much does it amount to" read as a question
+# about this case's data, which is exactly the false positive that would make
+# the in-scope check below untrustworthy.
+_GENERIC_COLUMN_WORDS = frozenset({
+    "date", "month", "year", "time", "amount", "timestamp", "index", "name",
+    "type", "value", "score", "limit", "status", "count", "total", "rate",
+    "balance", "strategy", "action", "product", "customer", "merchant",
+})
+
+
+def _variable_key(name: str) -> str:
+    """Comparison key for a variable name, ignoring case, punctuation and the
+    `_max`/`_min`/`_mean` aggregation suffix — so `oop_interaction` (the CAS
+    name a reviewer types) matches the stored `oop_interaction_max`."""
+    return _normalize(re.sub(r"_(max|min|mean)$", "", (name or "").strip().lower()))
+
+
+def known_variable_matches(text: str) -> list[dict]:
+    """`[{typed, column, table}, ...]` for variables this text NAMES.
+
+    Ground truth, not judgment: if a reviewer types a variable this case
+    actually holds, a question about it is in scope by construction. That is
+    what the LLM screen cannot know — "how is intoop" was rejected as
+    off-topic while `INTOOP` (`oop_interaction_max`) sat in the data.
+
+    Deliberately conservative. Only whole tokens of 4+ characters that are not
+    ordinary English words, so this can be trusted to OVERRIDE a rejection.
+    """
+    if _gateway is None or _catalog is None or not text:
+        return []
+    case_id = _gateway.get_case_id()
+    if case_id is None:
+        return []
+
+    lookup: dict[str, dict] = {}
+    for e in _build_search_index(case_id):
+        for spelling in [e["column"], *e["aliases"]]:
+            key = _variable_key(spelling)
+            if len(key) >= 4:
+                lookup.setdefault(key, e)
+
+    out: list[dict] = []
+    seen: set[str] = set()
+    for token in re.findall(r"[A-Za-z][A-Za-z0-9_]{3,}", text):
+        if token.lower() in _GENERIC_COLUMN_WORDS:
+            continue
+        e = lookup.get(_variable_key(token))
+        if e and e["column"] not in seen:
+            seen.add(e["column"])
+            out.append({"typed": token, "column": e["column"],
+                        "table": e["table"]})
+    return out
+
+
+def known_variables_in(text: str) -> list[str]:
+    """Just the real column names — see `known_variable_matches`."""
+    return [m["column"] for m in known_variable_matches(text)]
+
+
+def variable_routing_hint(text: str, owners: dict[str, str] | None = None) -> str:
+    """Tell the orchestrator that a bare token IS a data column.
+
+    Without this, "how is intoop" reads as a proper noun: the orchestrator
+    answered it as though INTOOP were the CUSTOMER ("Intoop is a
+    high-utilization commercial customer with 3 cards…") and dispatched a
+    generic case overview — never once looking at `oop_interaction_max`.
+
+    The screen already resolved the name against the case's own data, so this
+    is a free hand-off of something already known, not a second guess.
+
+    `owners` maps a table to the specialist that owns it. Naming the specialist
+    is what actually answers the orchestrator's question — it routes, so
+    "table `modelling_data`" still leaves it a step to infer.
+    """
+    matches = known_variable_matches(text)
+    if not matches:
+        return ""
+    lines = []
+    for m in matches[:6]:
+        owner = (owners or {}).get(m["table"])
+        lines.append(
+            f"  - \"{m['typed']}\" is the column `{m['column']}` in table "
+            f"`{m['table']}`" + (f" — ask `{owner}`" if owner else "")
+        )
+    return (
+        "RESOLVED VARIABLE NAMES — the reviewer's question names DATA COLUMNS "
+        "that exist in this case, NOT a person, company or customer:\n"
+        + "\n".join(lines)
+        + "\nAnswer about THOSE variables specifically (current value, trend, "
+          "threshold breaches). Do not answer with a general case overview "
+          "instead."
+    )
 
 
 def _score_entry(entry: dict, terms: list[str], query_norm: str) -> int:
@@ -1348,19 +1615,24 @@ def _score_entry(entry: dict, terms: list[str], query_norm: str) -> int:
     identifier_hits = 0  # terms matched in name / concept / alias
     for term in terms:
         hit = ident = False
-        if term in name_tokens:
+        # The written term OR its stem: a question says "spending" where the
+        # column says "spend". Scored identically — it is the same concept, and
+        # the stem is only accepted when it stays long enough to be specific.
+        variants = _term_variants(term)
+        if any(v in name_tokens for v in variants):
             score += 6                               # whole word in the name
             hit = ident = True
-        elif len(term) >= _SEARCH_MIN_SUBSTRING_TERM and term in name:
+        elif any(len(v) >= _SEARCH_MIN_SUBSTRING_TERM and v in name
+                 for v in variants):
             score += 4                               # substring, e.g. "rvlv"
             hit = ident = True
-        if term in concept_text:
+        if any(v in concept_text for v in variants):
             score += 5
             hit = ident = True
-        if term in alias_text:
+        if any(v in alias_text for v in variants):
             score += 2
             hit = ident = True
-        if term in desc:
+        if any(v in desc for v in variants):
             score += 2
             hit = True
         matched += hit
@@ -1394,6 +1666,22 @@ def _search_columns_impl(query: str, table_name: str = "", limit: int = 25) -> s
     entries = _build_search_index(_gateway.get_case_id())
     if table_name:
         wanted = _resolve_real_table(table_name)
+        known = {e["table"] for e in entries}
+        if wanted not in known and table_name not in known:
+            # A table that does not exist is NOT "no columns matched". Reported
+            # as a miss, the advice below ("try a broader term") sends the
+            # specialist to rephrase a query that was never the problem —
+            # observed costing two turns of a six-turn budget when a
+            # sub-question named `spend_payments` (a SPECIALIST) as a table.
+            # Same wording as get_table_schema so grounding reads it the same.
+            out = (f"Data unavailable: table '{table_name}' not found for "
+                   f"current case. Available tables: "
+                   f"{', '.join(sorted(known)) or '(none)'}. "
+                   f"Re-run with one of those, or omit table_name to search "
+                   f"every table.")
+            _log_result("search_columns", result=out,
+                        extra={"unknown_table": table_name})
+            return out
         entries = [e for e in entries if e["table"] in (wanted, table_name)]
 
     query_norm = _normalize(query)
@@ -3450,17 +3738,27 @@ def _summarize_trend_impl(
     else:
         missing = []  # not enumerated for day / week
 
+    # A landmark carries its own RECORD COUNT. These four are what a specialist
+    # quotes, and quoting an amount without the count behind it hides the thing
+    # a reviewer most needs: "$404,152 in May 2025" reads as a spending surge
+    # whether it came from 1,200 transactions or from 3. The counts were in the
+    # series all along, but reaching them meant cross-referencing by period —
+    # a step the specialist did not take, so answers arrived countless.
+    def _landmark(bucket: dict) -> dict:
+        return {"period": bucket["period"], "value": bucket["value"],
+                "n_records": bucket["n_records"]}
+
     summary = {
         "n_buckets": n_buckets,
         "n_records": sum(s["n_records"] for s in series),
-        "first": {"period": first["period"], "value": first["value"]},
-        "last":  {"period": last["period"],  "value": last["value"]},
+        "first": _landmark(first),
+        "last": _landmark(last),
         # Named `*_all_time` because these are the GLOBAL extremes over the
         # whole series. Called `peak`, it read as "the peak" and got quoted for
         # "recent spike" questions, pointing a year off — see `threshold` below,
         # which is what a recency question actually needs.
-        "peak_all_time":   {"period": peak["period"],   "value": peak["value"]},
-        "trough_all_time": {"period": trough["period"], "value": trough["value"]},
+        "peak_all_time": _landmark(peak),
+        "trough_all_time": _landmark(trough),
         "total":  _format_aggregate(total, value_column, "sum"),
         "mean_per_bucket": _format_aggregate(mean_v, value_column, "mean"),
         "slope_per_bucket": (
@@ -3510,13 +3808,17 @@ def _summarize_trend_impl(
                 ep = episodes[-1]
                 ep["end"], ep["_last_idx"] = s["period"], i
                 ep["n_periods"] += 1
+                ep["n_records"] += s["n_records"]
                 if s["raw_value"] > ep["_peak_raw"] if above else s["raw_value"] < ep["_peak_raw"]:
-                    ep["_peak_raw"], ep["peak"] = s["raw_value"], {
-                        "period": s["period"], "value": s["value"]}
+                    ep["_peak_raw"], ep["peak"] = s["raw_value"], _landmark(s)
             else:
                 episodes.append({
                     "start": s["period"], "end": s["period"], "n_periods": 1,
-                    "peak": {"period": s["period"], "value": s["value"]},
+                    # Records ACROSS the episode: a three-month breach carrying
+                    # 12 transactions is a different finding from one carrying
+                    # 1,200, and the episode window is what gets quoted.
+                    "n_records": s["n_records"],
+                    "peak": _landmark(s),
                     "_last_idx": i, "_peak_raw": s["raw_value"],
                 })
         for ep in episodes:
@@ -3532,10 +3834,8 @@ def _summarize_trend_impl(
             # a date filter for pulling that period's transactions.
             "latest_episode": episodes[-1] if episodes else None,
             "episodes": episodes[-_MAX_BREACH_EPISODES:],
-            "latest_breach": (
-                {"period": breached[-1]["period"], "value": breached[-1]["value"]}
-                if breached else None
-            ),
+            "n_breaching_records": sum(s["n_records"] for s in breached),
+            "latest_breach": _landmark(breached[-1]) if breached else None,
         }
 
     payload = {

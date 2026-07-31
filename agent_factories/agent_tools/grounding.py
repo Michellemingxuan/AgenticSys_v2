@@ -25,11 +25,17 @@ import re
 
 _EXCERPT_CHARS = 300
 
-# The ONE tool for which "table not found" is a benign negative rather than a
-# failure: schema probing is normal exploration — the specialist learns the
-# table is absent from this case and picks another. Every other tool asking for
-# that table wanted DATA and got none. See data_tools.py:1014 vs :1237-:2995.
-_SCHEMA_PROBE_TOOLS = frozenset({"get_table_schema"})
+# The tools for which "table not found" is a benign negative rather than a
+# failure: DISCOVERY is normal exploration — the specialist learns the table is
+# absent from this case and picks another. Every other tool asking for that
+# table wanted DATA and got none. See data_tools.py:1014 vs :1237-:2995.
+#
+# `search_columns` belongs here for the same reason `get_table_schema` does:
+# both answer "what is there?", and probing a name that turns out not to be a
+# table is how that question gets asked. Flagging it would quarantine a
+# specialist for exploring — the same over-flagging that made an honest DATA
+# GAP report indistinguishable from fabrication.
+_SCHEMA_PROBE_TOOLS = frozenset({"get_table_schema", "search_columns"})
 
 # Matches both "table 'x' not found for current case" and the
 # transaction_detail variant "base table 'x' not found for current case".

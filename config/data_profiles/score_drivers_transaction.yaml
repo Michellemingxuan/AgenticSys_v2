@@ -38,14 +38,17 @@ columns:
   index:
     dtype: int
     description: Row index within the case's transaction export.
+    short_description: Row index within the case's transaction export
   grms_cid:
     dtype: int
     description: Customer identifier (GRMS CID).
+    short_description: Customer identifier (GRMS CID)
     dtype_pending_review: true
   trans_dt:
     dtype: date
     parse_hint: '%Y-%m-%d'
     description: Transaction date (YYYY-MM-DD). DEFAULT time-range filter key.
+    short_description: Transaction date (YYYY-MM-DD). DEFAULT time-range filter key
   txn_date_time:
     dtype: date
     parse_hint: '%Y-%m-%d %H:%M:%S.%f'
@@ -63,63 +66,84 @@ columns:
   auto_decline_pos_deny_cd_s1:
     dtype: string
     description: Decline-reason code, populated only when appr_deny_cd = 2.
+    short_description: Decline-reason code, populated only when appr_deny_cd = 2
   top_cdss1:
     dtype: string
     description: Strongest feature pushing the CDSS score UP for this transaction.
+    short_description: rank-1 driver raising CDSS for this transaction (variable name)
   top_cdss2:
     dtype: string
     description: 2nd strongest feature pushing the CDSS score UP for this transaction.
+    short_description: rank-2 driver raising CDSS for this transaction (variable name)
   top_cdss3:
     dtype: string
     description: 3rd strongest feature pushing the CDSS score UP for this transaction.
+    short_description: rank-3 driver raising CDSS for this transaction (variable name)
   top_cdss4:
     dtype: string
     description: 4th strongest feature pushing the CDSS score UP for this transaction.
+    short_description: rank-4 driver raising CDSS for this transaction (variable name)
   top_cdss5:
     dtype: string
     description: 5th strongest feature pushing the CDSS score UP for this transaction.
+    short_description: rank-5 driver raising CDSS for this transaction (variable name)
   bottom_cdss1:
     dtype: string
     description: Strongest feature pushing the CDSS score DOWN for this transaction.
+    short_description: rank-1 driver lowering CDSS for this transaction (variable name)
   bottom_cdss2:
     dtype: string
     description: 2nd strongest feature pushing the CDSS score DOWN for this transaction.
+    short_description: rank-2 driver lowering CDSS for this transaction (variable name)
   bottom_cdss3:
     dtype: string
     description: 3rd strongest feature pushing the CDSS score DOWN for this transaction.
+    short_description: rank-3 driver lowering CDSS for this transaction (variable name)
   bottom_cdss4:
     dtype: string
     description: 4th strongest feature pushing the CDSS score DOWN for this transaction.
+    short_description: rank-4 driver lowering CDSS for this transaction (variable name)
   bottom_cdss5:
     dtype: string
     description: 5th strongest feature pushing the CDSS score DOWN for this transaction.
+    short_description: rank-5 driver lowering CDSS for this transaction (variable name)
   top_tsr1:
     dtype: string
     description: Strongest feature pushing the TSR score UP for this transaction.
+    short_description: rank-1 driver raising TSR for this transaction (variable name)
   top_tsr2:
     dtype: string
     description: 2nd strongest feature pushing the TSR score UP for this transaction.
+    short_description: rank-2 driver raising TSR for this transaction (variable name)
   top_tsr3:
     dtype: string
     description: 3rd strongest feature pushing the TSR score UP for this transaction.
+    short_description: rank-3 driver raising TSR for this transaction (variable name)
   top_tsr4:
     dtype: string
     description: 4th strongest feature pushing the TSR score UP for this transaction.
+    short_description: rank-4 driver raising TSR for this transaction (variable name)
   top_tsr5:
     dtype: string
     description: 5th strongest feature pushing the TSR score UP for this transaction.
+    short_description: rank-5 driver raising TSR for this transaction (variable name)
   bottom_tsr1:
     dtype: string
     description: Strongest feature pushing the TSR score DOWN for this transaction.
+    short_description: rank-1 driver lowering TSR for this transaction (variable name)
   bottom_tsr2:
     dtype: string
     description: 2nd strongest feature pushing the TSR score DOWN for this transaction.
+    short_description: rank-2 driver lowering TSR for this transaction (variable name)
   bottom_tsr3:
     dtype: string
     description: 3rd strongest feature pushing the TSR score DOWN for this transaction.
+    short_description: rank-3 driver lowering TSR for this transaction (variable name)
   bottom_tsr4:
     dtype: string
     description: 4th strongest feature pushing the TSR score DOWN for this transaction.
+    short_description: rank-4 driver lowering TSR for this transaction (variable name)
   bottom_tsr5:
     dtype: string
     description: 5th strongest feature pushing the TSR score DOWN for this transaction.
+    short_description: rank-5 driver lowering TSR for this transaction (variable name)

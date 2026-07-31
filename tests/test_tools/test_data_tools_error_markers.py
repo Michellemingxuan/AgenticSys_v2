@@ -32,6 +32,7 @@ _IMPL_TO_TOOL = {
     "_summarize_trend_impl": "summarize_trend",
     "_batch_summarize_trend_impl": "batch_summarize_trend",
     "_summarize_by_group_impl": "summarize_by_group",
+    "_search_columns_impl": "search_columns",
 }
 
 # Shared error helpers that are NOT `_*_impl` functions but DO own marker
@@ -123,16 +124,22 @@ def test_collection_found_the_expected_literals():
 @pytest.mark.parametrize("tool,literal", _CASES,
                          ids=[f"{t}:{lit[:40]}" for t, lit in _CASES])
 def test_every_error_literal_is_classified(tool, literal):
-    """Except the ONE deliberate carve-out: get_table_schema reporting a table
-    absent from this case is benign exploration, not a failure."""
+    """Except the deliberate carve-out: a DISCOVERY tool reporting a table
+    absent from this case is benign exploration, not a failure.
+
+    Read from grounding's own set rather than naming the tools here — this file
+    exists because hard-coded copies keep passing after the real thing changes.
+    """
+    from agent_factories.agent_tools.grounding import _SCHEMA_PROBE_TOOLS
+
     reason = classify_tool_output(tool, literal)
     is_carve_out = (
-        tool == "get_table_schema"
+        tool in _SCHEMA_PROBE_TOOLS
         and "not found for current case" in literal
     )
     if is_carve_out:
         assert reason is None, (
-            f"the get_table_schema carve-out should suppress {literal!r}"
+            f"the {tool} discovery carve-out should suppress {literal!r}"
         )
     else:
         assert reason is not None, (

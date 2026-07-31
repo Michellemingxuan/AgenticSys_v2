@@ -12,6 +12,7 @@ from tools.data_tools import (
     batch_aggregate,
     batch_query_table,
     batch_summarize_trend,
+    build_column_inventory,
     get_table_schema,
     join_table,
     list_available_tables,
@@ -109,8 +110,19 @@ def build_specialist_agent(skill: DomainSkill, pillar: dict, model) -> Agent:
         count = _call_count.get(key, 0) + 1
         _call_count[key] = count
         if count > 1:
+            # Synthesis rounds deliberately omit the inventory: by then the
+            # specialist has the DATA in context, and re-sending the catalog
+            # would re-pay for it on every round.
             return synthesis_prompt
-        return full_prompt
+        # Round 1 only. `tool_choice="required"` means this round MUST emit a
+        # tool call, so whatever the specialist knows here decides whether that
+        # call is aimed or a blind probe. Built per case at call time (the agent
+        # outlives any one case) and memoized in data_tools; scoped to this
+        # skill's own tables so a specialist does not pay for the whole catalog.
+        inventory = build_column_inventory(skill.data_hints)
+        if not inventory:
+            return full_prompt
+        return full_prompt + sep + inventory
 
     return Agent(
         name=skill.name,

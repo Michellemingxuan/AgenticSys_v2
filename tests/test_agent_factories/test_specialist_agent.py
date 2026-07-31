@@ -40,3 +40,91 @@ def test_build_specialist_agent_returns_agent():
     # behind the `get_chart_guidance` tool, lazy-loaded.
     # Charting guidance is now inline (specialist produces charts directly)
     assert "make_chart" in prompt
+
+
+# ── the case's column inventory reaches the prompt that decides turn 1 ───────
+
+
+def _real_data_layer():
+    from datalayer.catalog import DataCatalog
+    from datalayer.gateway import LocalDataGateway
+    import tools.data_tools as data_tools
+
+    gw = LocalDataGateway.from_case_folders("data_tables/real")
+    gw.set_case("366132845011")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+
+
+def _modeling_agent():
+    skill = DomainSkill(
+        name="modeling", system_prompt="You analyze model scores.",
+        data_hints=["model_scores", "score_drivers"],
+    )
+    return build_specialist_agent(skill, {}, model=None)
+
+
+def test_round_one_prompt_carries_the_case_inventory():
+    """Round 1 runs under tool_choice="required" — it MUST emit a tool call. What
+    the specialist knows HERE decides whether that call is aimed or a blind
+    probe, which is what exhausted `modeling`'s turn budget.
+
+    Asserted against the RENDERED inventory, not its header: `data_query.md` now
+    references the section by name, so a header check would pass even if nothing
+    were injected.
+    """
+    from unittest.mock import MagicMock
+    import tools.data_tools as data_tools
+
+    _real_data_layer()
+    agent = _modeling_agent()
+    prompt = agent.instructions(MagicMock(), agent)
+
+    inventory = data_tools.build_column_inventory(["model_scores", "score_drivers"])
+    assert inventory, "fixture produced no inventory — the test proves nothing"
+    assert inventory in prompt
+    assert "modelling_data" in prompt              # the REAL table name
+    assert "=INTOOP" in prompt                     # alias spellings, for recognition
+
+
+def test_synthesis_rounds_do_not_re_pay_for_the_inventory():
+    """By round 2 the specialist holds the DATA; re-sending the catalog would
+    charge for it on every round."""
+    from unittest.mock import MagicMock
+    import tools.data_tools as data_tools
+
+    _real_data_layer()
+    agent = _modeling_agent()
+    ctx = MagicMock()
+    first = agent.instructions(ctx, agent)
+    second = agent.instructions(ctx, agent)
+
+    inventory = data_tools.build_column_inventory(["model_scores", "score_drivers"])
+    assert inventory in first
+    assert inventory not in second
+
+
+def test_inventory_is_scoped_to_the_specialists_own_tables():
+    from unittest.mock import MagicMock
+
+    _real_data_layer()
+    skill = DomainSkill(name="spend_payments", system_prompt="x",
+                        data_hints=["spends"])
+    agent = build_specialist_agent(skill, {}, model=None)
+    prompt = agent.instructions(MagicMock(), agent)
+
+    assert "spends_data" in prompt
+    assert "modelling_data" not in prompt
+
+
+def test_prompt_still_builds_without_a_data_layer():
+    """Unit tests and any pre-case construction path must not blow up."""
+    from unittest.mock import MagicMock
+    import tools.data_tools as data_tools
+
+    data_tools.init_tools(None, None)
+    agent = _modeling_agent()
+    prompt = agent.instructions(MagicMock(), agent)
+    assert "You analyze model scores." in prompt
+    # The rendered block always opens with this; the skill's reference to the
+    # section by name must not be mistaken for the block itself.
+    assert "Every column below is PRESENT" not in prompt

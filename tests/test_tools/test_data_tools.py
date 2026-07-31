@@ -1675,19 +1675,27 @@ def test_a_name_that_is_not_a_column_says_NOT_FOUND_not_data_gap():
     assert classify_tool_output("summarize_trend", out) == "column_not_found"
 
 
-def test_every_declared_adl_alias_resolves_to_its_canonical():
-    """Drift guard for newly added ADL aliases.
+@pytest.mark.parametrize("table,min_checked", [
+    ("model_scores", 10),
+    ("model_scores_transaction", 5),
+])
+def test_every_declared_alias_resolves_to_its_canonical(table, min_checked):
+    """Drift guard for declared aliases (ADL codes, CAS names, business names).
 
     Asserts RESOLUTION, not presence: a real export carries only a subset of
     the catalog (44 of ~250 columns here), so `CUMNTHS2` correctly reports
     COLUMN NOT FOUND on a case whose export lacks `tpf_cust_mod_tenure_max`.
     What must hold is that the catalog can map every declared alias back to its
     canonical — a typo'd alias would resolve to nothing anywhere.
+
+    Covers BOTH grains. The monthly and transaction profiles carry overlapping
+    aliases for the same concept at different grains, and an alias added to only
+    one of them answers the same question on one table and misses on the other.
     """
     import yaml
     from datalayer.catalog import DataCatalog as _DC
 
-    prof = yaml.safe_load(open("config/data_profiles/model_scores.yaml"))
+    prof = yaml.safe_load(open(f"config/data_profiles/{table}.yaml"))
     cat = _DC(profile_dir="config/data_profiles")
     suffixes = ("_max", "_min", "_mean")
     checked = 0
@@ -1696,10 +1704,25 @@ def test_every_declared_adl_alias_resolves_to_its_canonical():
             if alias.endswith(suffixes) or alias == canon:
                 continue                      # aggregation alias / self-alias
             for spelling in (alias, alias.lower(), alias.upper()):
-                got = cat.resolve_real_column("model_scores", spelling, [canon])
+                got = cat.resolve_real_column(table, spelling, [canon])
                 assert got == canon, f"{spelling!r} resolved to {got!r}, want {canon!r}"
             checked += 1
-    assert checked >= 10, f"expected the ADL aliases to be checked, saw {checked}"
+    assert checked >= min_checked, f"expected aliases to be checked, saw {checked}"
+
+
+def test_exposure_alias_resolves_at_BOTH_grains():
+    """`overall_exposure` is the monthly roll-up of the transaction-level
+    `one_expsr_usd_currency_amt`; both spellings must land on the right column
+    for whichever table the question is asked against."""
+    from datalayer.catalog import DataCatalog as _DC
+
+    cat = _DC(profile_dir="config/data_profiles")
+    for spelling in ("business_exposure", "overall_exposure", "BUSINESS_EXPOSURE"):
+        assert cat.resolve_real_column(
+            "model_scores", spelling, ["overall_exposure"]) == "overall_exposure"
+        assert cat.resolve_real_column(
+            "model_scores_transaction", spelling,
+            ["one_expsr_usd_currency_amt"]) == "one_expsr_usd_currency_amt"
 
 
 def test_an_absent_column_is_reported_even_for_a_valid_alias():
@@ -1985,3 +2008,291 @@ def test_group_shares_are_omitted_for_non_additive_ops():
         table_name="t", value_column="amt", group_column="m",
         op="mean", top_n=10))
     assert "share_of_total" not in g["groups"][0]
+
+
+# ── search_columns: the two shapes that burned a specialist's turn budget ────
+#
+# Observed run (modeling, 2026-07-30): the sub-question said "for any months
+# flagged by spend_payments…", naming a SPECIALIST. modeling read it as a table
+# and spent turns 1-2 discovering it wasn't one, then turns 3-4 rediscovering
+# columns search_columns should have found — exhausting a 6-turn budget and
+# surfacing to the reviewer as "No model-based feature analysis is available due
+# to a data retrieval issue."
+#
+# Neither failure was a data problem. Both were tool OUTPUT SHAPES: one gave
+# misleading advice, the other gave a false negative.
+
+
+def test_unknown_table_is_not_reported_as_no_columns_matched():
+    """"no columns matched. Try a broader term" sent the specialist to rephrase
+    a query that was never the problem. Name the real fault and the way out."""
+    _real_case_tools()
+    out = data_tools._search_columns_impl(
+        query="spend spike", table_name="spend_payments", limit=25)
+
+    assert "not found for current case" in out
+    assert "no columns matched" not in out
+    assert "broader term" not in out, "the query was fine; the TABLE was wrong"
+    # The way out has to be in the message — a name it can actually pass next.
+    assert "spends_data" in out and "Available tables:" in out
+
+
+def test_an_unknown_table_from_search_is_benign_not_a_failed_call():
+    """Discovery is how a specialist finds its footing. Probing a name that
+    turns out not to be a table must not flag the run as ungrounded — the same
+    over-flagging that once quarantined an honest DATA GAP report."""
+    from agent_factories.agent_tools.grounding import classify_tool_output
+
+    _real_case_tools()
+    out = data_tools._search_columns_impl(query="x", table_name="spend_payments")
+    assert classify_tool_output("search_columns", out) is None
+
+
+def test_a_real_table_still_searches_normally():
+    """The unknown-table branch must not swallow the ordinary case."""
+    _real_case_tools()
+    out = data_tools._search_columns_impl(query="spend", table_name="model_scores")
+    assert "not found for current case" not in out
+    assert "matches" in out or "match" in out
+
+
+@pytest.mark.parametrize("asked,expected_column", [
+    ("spending", "cust_enhnc_one_way_spend_concentration_30day_rt1_max"),
+    ("payments", "payments"),          # any payment-named column
+    ("scores", "score"),
+])
+def test_question_form_finds_column_form(asked, expected_column):
+    """A question says "spending"; the column says "spend". Exact-token search
+    returned NOTHING for the very columns it exists to surface."""
+    _real_case_tools()
+    out = data_tools._search_columns_impl(query=asked, limit=25)
+    assert "no columns matched" not in out, f"{asked!r} found nothing"
+    assert expected_column.split("_")[0] in out.lower()
+
+
+def test_stem_never_shortens_below_the_substring_floor():
+    """Stemming must not undo `_SEARCH_MIN_SUBSTRING_TERM`. A 2-3 char stem
+    substring-matches half the catalog, which is the noise that floor exists
+    to stop."""
+    from tools.data_tools import _SEARCH_MIN_STEM, _stem
+
+    assert _stem("spending") == "spend"
+    assert _stem("payments") == "payment"
+    for junk in ("uses", "ties", "access", "is", "was", "ss"):
+        assert _stem(junk) == "" or len(_stem(junk)) >= _SEARCH_MIN_STEM
+
+
+def test_stemming_did_not_flatten_the_relevance_ranking():
+    """Widening the net is only safe if identifier matches still outrank
+    description-only ones — the specialist reads top-first."""
+    _real_case_tools()
+    entries = data_tools._build_search_index(_REAL_CASE)
+    terms = data_tools._search_tokens("spending")
+    qn = data_tools._normalize("spending")
+    scored = sorted(
+        ((data_tools._score_entry(e, terms, qn), e) for e in entries),
+        key=lambda se: -se[0])
+    top_score, top_entry = scored[0]
+    assert "spend" in top_entry["column"].lower()
+    # A column matched only via its description must not tie the best hit.
+    desc_only = [s for s, e in scored
+                 if s > 0 and "spend" not in e["column"].lower()
+                 and not any("spend" in c for c in e["concepts"])]
+    assert not desc_only or max(desc_only) < top_score
+
+
+# ── the case's column inventory, handed to specialists up front ──────────────
+#
+# `tool_choice="required"` makes the specialist's FIRST move a tool call. With
+# nothing in its prompt describing this case, that first move is a blind probe:
+# `modeling` spent four of six turns on list/search/schema round-trips and ran
+# out of budget, which the reviewer saw as "No model-based feature analysis is
+# available due to a data retrieval issue."
+
+
+def test_inventory_lists_real_column_names_verbatim():
+    _real_case_tools()
+    inv = data_tools.build_column_inventory(["model_scores"])
+    # The REAL name, not the canonical profile name — this is what tools accept.
+    assert "modelling_data" in inv
+    assert "cust_enhnc_one_way_spend_concentration_30day_rt1_max" in inv
+
+
+def test_inventory_carries_the_alias_spellings_a_reviewer_types():
+    """The point of aliases here is RECOGNITION, not resolution — the catalog
+    already resolves INTOOP. Without it in the inventory a specialist can decide
+    the variable does not exist and report a data gap for a live column."""
+    _real_case_tools()
+    inv = data_tools.build_column_inventory(["model_scores"])
+    assert "=INTOOP" in inv
+    assert "=CUIDINDX" in inv
+
+
+def test_inventory_omits_aliases_that_add_nothing():
+    """148 of 194 declared aliases are the column's own name or its
+    `_max`/`_min`/`_mean` form. Listing them triples the alias budget to repeat
+    what is already on the line."""
+    _real_case_tools()
+    inv = data_tools.build_column_inventory(["model_scores"])
+    assert "=oop_interaction_max" not in inv
+    assert "=cust_rnn_score_max" not in inv
+
+
+def test_inventory_marks_columns_that_are_empty_for_this_case():
+    """Present-but-blank is the difference between a usable column and a
+    guaranteed DATA GAP. `cust_sbfe_score_min` is all-blank in this case."""
+    _real_case_tools()
+    inv = data_tools.build_column_inventory(["model_scores"])
+    line = next(l for l in inv.splitlines() if "cust_sbfe_score_min" in l)
+    assert "(EMPTY)" in line
+    # A column WITH data must not be marked.
+    other = next(l for l in inv.splitlines() if "credit_loss_prob_max" in l)
+    assert "(EMPTY)" not in other
+
+
+def test_inventory_scopes_to_the_tables_asked_for():
+    _real_case_tools()
+    inv = data_tools.build_column_inventory(["spends"])
+    assert "spends_data" in inv
+    assert "modelling_data" not in inv, "a specialist should not pay for other domains"
+
+
+def test_inventory_is_empty_without_a_data_layer():
+    """Callers append it unconditionally, so it must degrade to nothing."""
+    data_tools.init_tools(None, None)
+    assert data_tools.build_column_inventory(["model_scores"]) == ""
+
+
+def test_inventory_does_not_survive_a_case_switch():
+    """A stale inventory would describe the PREVIOUS case's data — the one
+    mistake this must never make."""
+    _real_case_tools()
+    first = data_tools.build_column_inventory(["model_scores"])
+    assert first
+    data_tools.clear_schema_cache()
+    data_tools.init_tools(None, None)
+    assert data_tools.build_column_inventory(["model_scores"]) == ""
+
+
+@pytest.mark.parametrize("profile", [
+    "model_scores", "model_scores_transaction",
+    "score_drivers", "score_drivers_transaction",
+])
+def test_short_descriptions_stay_short_and_do_not_restate_thresholds(profile):
+    """`short_description` answers "is this the column I want?"; the full
+    `description` answers "how do I read it?". A short one that restates the
+    structured threshold is duplication — it is already rendered as
+    `(risky > 2.4)` from risk_threshold/risk_direction."""
+    import re as _re
+    import yaml
+
+    prof = yaml.safe_load(open(f"config/data_profiles/{profile}.yaml"))
+    thresh = _re.compile(r"(above|below)\s+[-0-9.]+\s+(are|is)\s+(considered\s+)?risky",
+                         _re.I)
+    for col, spec in (prof.get("columns") or {}).items():
+        s = (spec or {}).get("short_description")
+        if not s:
+            continue
+        assert len(s) <= data_tools._INVENTORY_MAX_SHORT, f"{col}: {len(s)} chars"
+        assert not thresh.search(s), f"{col} restates its risk_threshold"
+        assert ".g." not in s, f"{col} looks truncated mid-abbreviation: {s!r}"
+
+
+# ── ground truth for the screen: does this text name a real variable? ────────
+
+
+def test_known_variables_matches_an_adl_code_in_any_case():
+    _real_case_tools()
+    for spelling in ("intoop", "INTOOP", "IntOop"):
+        assert data_tools.known_variables_in(f"how is {spelling}") == \
+            ["oop_interaction_max"]
+
+
+def test_known_variables_matches_the_cas_name_despite_the_agg_suffix():
+    """A reviewer types `oop_interaction`; the case stores
+    `oop_interaction_max`. The `_max`/`_min`/`_mean` suffix is an aggregation
+    artefact, not part of the name they know."""
+    _real_case_tools()
+    assert data_tools.known_variables_in("trend of oop_interaction") == \
+        ["oop_interaction_max"]
+
+
+@pytest.mark.parametrize("question", [
+    "what is the date today",
+    "how much does it amount to",
+    "what to eat for lunch",
+    "tell me a joke",
+    "what is the total balance",
+])
+def test_known_variables_ignores_ordinary_english(question):
+    """`Date`, `Amount`, `Month`, `Balance` are real columns. This function
+    OVERRIDES a screen rejection, so a loose match here would wave through
+    anything."""
+    _real_case_tools()
+    assert data_tools.known_variables_in(question) == []
+
+
+def test_known_variables_is_quiet_without_a_data_layer():
+    data_tools.init_tools(None, None)
+    assert data_tools.known_variables_in("how is intoop") == []
+
+
+# ── every quoted number carries the record count behind it ──────────────────
+#
+# Reported: answers cite amounts with no transaction count. "$404,152 in May
+# 2025" reads as a spending surge whether it came from 1,200 transactions or 3,
+# and the count is what a case reviewer needs to tell those apart. The counts
+# were already in `series`; the SUMMARY landmarks a specialist actually quotes
+# omitted them, so reaching one meant cross-referencing by period.
+
+
+@pytest.mark.parametrize("landmark", ["first", "last", "peak_all_time",
+                                      "trough_all_time"])
+def test_trend_landmarks_carry_their_record_count(landmark):
+    _real_case_tools()
+    d = json.loads(data_tools._summarize_trend_impl(
+        table_name="spends", value_column="Amount",
+        time_column="Date", period="month", op="sum"))
+    mark = d["summary"][landmark]
+    assert "n_records" in mark, f"{landmark} quotes a value with no count"
+    assert isinstance(mark["n_records"], int) and mark["n_records"] > 0
+
+
+def test_landmark_counts_agree_with_the_series():
+    """The count must be the bucket's own, not a total or a placeholder."""
+    _real_case_tools()
+    d = json.loads(data_tools._summarize_trend_impl(
+        table_name="spends", value_column="Amount",
+        time_column="Date", period="month", op="sum"))
+    by_period = {s["period"]: s["n_records"] for s in d["series"]}
+    for landmark in ("first", "last", "peak_all_time", "trough_all_time"):
+        mark = d["summary"][landmark]
+        assert mark["n_records"] == by_period[mark["period"]]
+
+
+def test_a_partial_boundary_month_is_legible_from_its_count():
+    """This case's last bucket is a mid-month cut-off: 22 records against 682
+    at the peak. Without the count, the drop reads as collapsed spending
+    rather than a truncated month."""
+    _real_case_tools()
+    d = json.loads(data_tools._summarize_trend_impl(
+        table_name="spends", value_column="Amount",
+        time_column="Date", period="month", op="sum"))
+    assert d["summary"]["last"]["n_records"] < \
+        d["summary"]["peak_all_time"]["n_records"] / 4
+
+
+def test_breach_episodes_carry_counts_across_the_window():
+    """An episode window gets quoted and used as a date filter. A three-month
+    breach spanning 12 records is a different finding from one spanning 1,200."""
+    _real_case_tools()
+    d = json.loads(data_tools._summarize_trend_impl(
+        table_name="model_scores", value_column="tot_struct_risk_score_max",
+        time_column="trans_month", period="month", op="max"))
+    thr = d["summary"]["threshold"]
+    assert "n_breaching_records" in thr
+    for ep in thr["episodes"]:
+        assert "n_records" in ep and "n_records" in ep["peak"]
+    assert thr["latest_breach"]["n_records"] >= 1
+    # The episode total must be the sum of its periods, not a period count.
+    assert thr["latest_episode"]["n_records"] >= thr["latest_episode"]["n_periods"]

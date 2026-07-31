@@ -311,3 +311,107 @@ async def test_converse_no_tools_passes_none(mock_llm, logger):
     await agent.converse("Hi")
     call_kwargs = mock_llm.ainvoke.await_args.kwargs
     assert call_kwargs.get("tools") is None
+
+
+# ── naming a real variable overrides an out-of-scope rejection ──────────────
+#
+# Reported: "how is intoop" was rejected with "This is out of scope for case
+# review." `INTOOP` is a declared alias of `oop_interaction_max`, which is
+# sitting in this case's data. The relevance LLM knows the domain in general
+# but not THIS case's vocabulary — so ground truth has to win.
+
+
+@pytest.fixture
+def real_data_layer():
+    from datalayer.catalog import DataCatalog
+    from datalayer.gateway import LocalDataGateway
+    import tools.data_tools as data_tools
+
+    gw = LocalDataGateway.from_case_folders("data_tables/real")
+    gw.set_case("366132845011")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    yield
+    data_tools.init_tools(None, None)
+
+
+async def test_a_rejected_question_naming_a_real_variable_is_let_through(
+        mock_llm, logger, real_data_layer):
+    mock_llm.ainvoke = AsyncMock(side_effect=[
+        LLMResult(status="success",
+                  data={"passed": False, "reason": "This is out of scope for case review."}),
+    ])
+    agent = ChatAgent(mock_llm, logger)
+    verdict = await agent.screen("how is intoop")
+
+    assert verdict.passed is True
+    assert verdict.reason == "", "a passed verdict must not carry a rejection reason"
+
+
+async def test_the_override_is_case_insensitive(mock_llm, logger, real_data_layer):
+    mock_llm.ainvoke = AsyncMock(side_effect=[
+        LLMResult(status="success", data={"passed": False, "reason": "out of scope"}),
+    ])
+    agent = ChatAgent(mock_llm, logger)
+    assert (await agent.screen("how is INTOOP")).passed is True
+
+
+async def test_a_genuinely_off_topic_question_is_still_rejected(
+        mock_llm, logger, real_data_layer):
+    """The override must not become a blanket amnesty — it only fires when the
+    text names a column this case actually holds."""
+    mock_llm.ainvoke = AsyncMock(side_effect=[
+        LLMResult(status="success",
+                  data={"passed": False, "reason": "Off-topic — case review only."}),
+    ])
+    agent = ChatAgent(mock_llm, logger)
+    verdict = await agent.screen("What should I eat for lunch?")
+    assert verdict.passed is False
+    assert "case review" in verdict.reason.lower()
+
+
+async def test_ordinary_words_that_happen_to_be_columns_do_not_override(
+        mock_llm, logger, real_data_layer):
+    """`Date`, `Amount` and `Month` are real columns in spends_data. If those
+    counted, half of all off-topic questions would be waved through."""
+    mock_llm.ainvoke = AsyncMock(side_effect=[
+        LLMResult(status="success", data={"passed": False, "reason": "Off-topic."}),
+    ])
+    agent = ChatAgent(mock_llm, logger)
+    assert (await agent.screen("what is the date today")).passed is False
+
+
+async def test_the_override_never_flips_a_pass_into_a_rejection(
+        mock_llm, logger, real_data_layer):
+    """It is one-directional by construction — a rejection is the one outcome a
+    reviewer cannot work around."""
+    mock_llm.ainvoke = AsyncMock(side_effect=[
+        LLMResult(status="success", data={"passed": True, "reason": ""}),
+    ])
+    agent = ChatAgent(mock_llm, logger)
+    assert (await agent.screen("what to eat")).passed is True
+
+
+async def test_screening_survives_a_dead_data_layer(mock_llm, logger):
+    """No gateway wired: the override must degrade to a no-op, not an
+    exception — screening runs before anything else in the turn."""
+    import tools.data_tools as data_tools
+
+    data_tools.init_tools(None, None)
+    mock_llm.ainvoke = AsyncMock(side_effect=[
+        LLMResult(status="success", data={"passed": False, "reason": "Off-topic."}),
+    ])
+    agent = ChatAgent(mock_llm, logger)
+    assert (await agent.screen("how is intoop")).passed is False
+
+
+async def test_verdict_carries_resolved_variables_even_when_it_passes(
+        mock_llm, logger, real_data_layer):
+    """The orchestrator needs to know "intoop" is a column whether or not the
+    screen was going to reject — a passing question has the same ambiguity."""
+    mock_llm.ainvoke = AsyncMock(side_effect=[
+        LLMResult(status="success", data={"passed": True, "reason": ""}),
+    ])
+    agent = ChatAgent(mock_llm, logger)
+    verdict = await agent.screen("how is intoop trending")
+    assert verdict.passed is True
+    assert verdict.named_variables == ["oop_interaction_max"]

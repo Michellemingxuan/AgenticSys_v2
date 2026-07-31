@@ -361,6 +361,13 @@ class ScreenVerdict(BaseModel):
     the server replays that prior question's cached answer instead of
     re-running the orchestrator. Empty string when no match.
     `near_duplicate_reason` is a one-sentence justification for diagnostics.
+
+    `named_variables` are real column names the question mentions, resolved
+    against THIS case's data (`data_tools.known_variables_in`). Two uses, both
+    of which failed before it existed: it lets a rejection be overridden when
+    the reviewer names a live variable, and it tells the orchestrator that a
+    bare token like "intoop" is a COLUMN — without it, "how is intoop" was
+    answered as though INTOOP were the customer's name.
     """
 
     passed: bool
@@ -368,6 +375,7 @@ class ScreenVerdict(BaseModel):
     redacted_question: str
     near_duplicate_of: str = ""
     near_duplicate_reason: str = ""
+    named_variables: list[str] = Field(default_factory=list)
 
 
 # Backwards-compat alias — `GuardrailVerdict` was the old name when input

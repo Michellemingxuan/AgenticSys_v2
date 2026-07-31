@@ -27,6 +27,7 @@ columns:
     dtype: string
     description: Name of the rank-1 top contributing variable to the CDSS model score
       for this case-month.
+    short_description: rank-1 driver raising CDSS for this month (variable name)
     description_pending: false
     aliases:
     - top_cdss1
@@ -34,6 +35,7 @@ columns:
     dtype: string
     description: Name of the rank-2 top contributing variable to the CDSS model score
       for this case-month.
+    short_description: rank-2 driver raising CDSS for this month (variable name)
     description_pending: false
     aliases:
     - top_cdss2
@@ -41,6 +43,7 @@ columns:
     dtype: string
     description: Name of the rank-3 top contributing variable to the CDSS model score
       for this case-month.
+    short_description: rank-3 driver raising CDSS for this month (variable name)
     description_pending: false
     aliases:
     - top_cdss3
@@ -48,6 +51,7 @@ columns:
     dtype: string
     description: Name of the rank-4 top contributing variable to the CDSS model score
       for this case-month.
+    short_description: rank-4 driver raising CDSS for this month (variable name)
     description_pending: false
     aliases:
     - top_cdss4
@@ -55,6 +59,7 @@ columns:
     dtype: string
     description: Name of the rank-5 top contributing variable to the CDSS model score
       for this case-month.
+    short_description: rank-5 driver raising CDSS for this month (variable name)
     description_pending: false
     aliases:
     - top_cdss5
@@ -62,6 +67,7 @@ columns:
     dtype: string
     description: Name of the rank-1 bottom contributing variable to the CDSS model
       score for this case-month.
+    short_description: rank-1 driver lowering CDSS for this month (variable name)
     description_pending: false
     aliases:
     - bottom_cdss1
@@ -69,6 +75,7 @@ columns:
     dtype: string
     description: Name of the rank-2 bottom contributing variable to the CDSS model
       score for this case-month.
+    short_description: rank-2 driver lowering CDSS for this month (variable name)
     description_pending: false
     aliases:
     - bottom_cdss2
@@ -76,6 +83,7 @@ columns:
     dtype: string
     description: Name of the rank-3 bottom contributing variable to the CDSS model
       score for this case-month.
+    short_description: rank-3 driver lowering CDSS for this month (variable name)
     description_pending: false
     aliases:
     - bottom_cdss3
@@ -83,6 +91,7 @@ columns:
     dtype: string
     description: Name of the rank-4 bottom contributing variable to the CDSS model
       score for this case-month.
+    short_description: rank-4 driver lowering CDSS for this month (variable name)
     description_pending: false
     aliases:
     - bottom_cdss4
@@ -90,6 +99,7 @@ columns:
     dtype: string
     description: Name of the rank-5 bottom contributing variable to the CDSS model
       score for this case-month.
+    short_description: rank-5 driver lowering CDSS for this month (variable name)
     description_pending: false
     aliases:
     - bottom_cdss5
@@ -97,6 +107,7 @@ columns:
     dtype: string
     description: Name of the rank-1 top contributing variable to the TSR model score
       for this case-month.
+    short_description: rank-1 driver raising TSR for this month (variable name)
     description_pending: false
     aliases:
     - top_tsr1
@@ -104,6 +115,7 @@ columns:
     dtype: string
     description: Name of the rank-2 top contributing variable to the TSR model score
       for this case-month.
+    short_description: rank-2 driver raising TSR for this month (variable name)
     description_pending: false
     aliases:
     - top_tsr2
@@ -111,6 +123,7 @@ columns:
     dtype: string
     description: Name of the rank-3 top contributing variable to the TSR model score
       for this case-month.
+    short_description: rank-3 driver raising TSR for this month (variable name)
     description_pending: false
     aliases:
     - top_tsr3
@@ -118,6 +131,7 @@ columns:
     dtype: string
     description: Name of the rank-4 top contributing variable to the TSR model score
       for this case-month.
+    short_description: rank-4 driver raising TSR for this month (variable name)
     description_pending: false
     aliases:
     - top_tsr4
@@ -125,6 +139,7 @@ columns:
     dtype: string
     description: Name of the rank-5 top contributing variable to the TSR model score
       for this case-month.
+    short_description: rank-5 driver raising TSR for this month (variable name)
     description_pending: false
     aliases:
     - top_tsr5
@@ -132,6 +147,7 @@ columns:
     dtype: string
     description: Name of the rank-1 bottom contributing variable to the TSR model
       score for this case-month.
+    short_description: rank-1 driver lowering TSR for this month (variable name)
     description_pending: false
     aliases:
     - bottom_tsr1
@@ -139,6 +155,7 @@ columns:
     dtype: string
     description: Name of the rank-2 bottom contributing variable to the TSR model
       score for this case-month.
+    short_description: rank-2 driver lowering TSR for this month (variable name)
     description_pending: false
     aliases:
     - bottom_tsr2
@@ -146,6 +163,7 @@ columns:
     dtype: string
     description: Name of the rank-3 bottom contributing variable to the TSR model
       score for this case-month.
+    short_description: rank-3 driver lowering TSR for this month (variable name)
     description_pending: false
     aliases:
     - bottom_tsr3
@@ -153,6 +171,7 @@ columns:
     dtype: string
     description: Name of the rank-4 bottom contributing variable to the TSR model
       score for this case-month.
+    short_description: rank-4 driver lowering TSR for this month (variable name)
     description_pending: false
     aliases:
     - bottom_tsr4
@@ -160,6 +179,7 @@ columns:
     dtype: string
     description: Name of the rank-5 bottom contributing variable to the TSR model
       score for this case-month.
+    short_description: rank-5 driver lowering TSR for this month (variable name)
     description_pending: false
     aliases:
     - bottom_tsr5

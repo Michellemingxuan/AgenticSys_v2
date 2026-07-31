@@ -752,3 +752,54 @@ async def test_payload_keeps_the_dict_shape_consumers_render_from():
     assert dumped["findings"] == "TSR peaked at 39.6 in 2024-11."
     assert dumped["sub_question"] == "why?"
     assert _parse_sub_answer(dumped) == "TSR peaked at 39.6 in 2024-11."
+
+
+@pytest.mark.asyncio
+async def test_scope_reaches_the_emitted_trace_payload():
+    """Scope provenance is trace-only, so the WHOLE path has to be pinned —
+    not just the producer.
+
+    `_annotate_payload` attaching `scope` proves nothing on its own: the same
+    class of bug (verified at the producer, never at the consumer) is what made
+    the reasoning trace render an empty specialist panel. So walk it end to end:
+
+      agent_tool._annotate_payload  -> attaches `scope` / `measured_over`
+      conductor._safe_dump          -> must not drop unknown keys
+      sse.map_run_item              -> emits that dict as `agent_completed.payload`
+    """
+    from agents import RunContextWrapper
+    from runner.turn.conductor import TurnRunner
+    from models.types import SpecialistOutput
+
+    class _R:
+        final_output = SpecialistOutput(
+            domain="spend_payments", mode="chat",
+            findings="Top merchant is 10.0% of spend.")
+
+        def to_input_list(self):
+            # A share with NO date filter — the exact "right number, wrong set"
+            # case the scope line exists to expose.
+            return [{
+                "type": "function_call", "call_id": "c1",
+                "name": "aggregate_column",
+                "arguments": json.dumps({
+                    "table_name": "spends", "column": "amount", "op": "share",
+                    "filter_column": "merchant_name",
+                    "filter_value": "AMAZON MKTPLACE",
+                }),
+            }]
+
+    ctx = _make_failure_ctx()
+    with patch("agent_factories.agent_tools.agent_tool.Runner.run",
+               new=AsyncMock(return_value=_R())):
+        wrapped = agent_tool(Agent(name="inner", instructions="x", tools=[]),
+                             name="spend_payments", description="d")
+        out = await wrapped.on_invoke_tool(
+            RunContextWrapper(ctx), json.dumps({"sub_question": "top merchant?"}))
+
+    assert out["scope"] == "spends: all dates"
+    assert out["measured_over"], "per-call detail must accompany the one-liner"
+
+    # The dump the SSE `agent_completed` payload is built from must keep it.
+    dumped = TurnRunner.__new__(TurnRunner)._safe_dump(out)
+    assert dumped["scope"] == "spends: all dates"

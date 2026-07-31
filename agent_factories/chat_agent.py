@@ -126,9 +126,37 @@ class ChatAgent:
             redacted = question
         else:
             redacted = await self.redact(question)
+        # ── scope: decided by LOOKUP, before any judgment is asked for ───────
+        #
+        # A question naming a column this case actually holds is in scope by
+        # construction. The relevance LLM knows the domain in general but not
+        # THIS case's vocabulary, so left to judge it alone it rejected "how is
+        # intoop" as off-topic while `INTOOP` (`oop_interaction_max`) sat in the
+        # data.
+        #
+        # Resolved for EVERY question, not just ones that would be rejected: the
+        # orchestrator needs to know "intoop" is a column rather than a proper
+        # noun even when the screen was going to pass it.
+        try:
+            from tools.data_tools import known_variables_in
+            named_variables = known_variables_in(redacted)
+        except Exception:  # noqa: BLE001 - screening must never hard-fail
+            named_variables = []
+
+        # relevance_check still runs even when the lookup already settled scope
+        # — it also detects NEAR-DUPLICATES, and skipping it would make a
+        # repeated question re-run the whole orchestrator instead of replaying
+        # the cached answer. So: the lookup owns SCOPE, the LLM owns DUPLICATION.
         passed, reason, near_dup, near_dup_reason = await self.relevance_check(
             redacted, prior_questions=prior_questions or []
         )
+
+        if named_variables and not passed:
+            self.logger.log("chat_screen_scope_by_lookup", {
+                "llm_would_have_rejected": reason,
+                "named_variables": named_variables[:8],
+            })
+            passed, reason = True, ""
 
         verdict = ScreenVerdict(
             passed=passed,
@@ -136,12 +164,14 @@ class ChatAgent:
             redacted_question=redacted,
             near_duplicate_of=near_dup if passed else "",
             near_duplicate_reason=near_dup_reason if passed else "",
+            named_variables=named_variables,
         )
         self.logger.log(
             "chat_screen_done",
             {"passed": passed, "reason": verdict.reason,
              "near_duplicate_of": verdict.near_duplicate_of,
-             "near_duplicate_reason": verdict.near_duplicate_reason},
+             "near_duplicate_reason": verdict.near_duplicate_reason,
+             "named_variables": named_variables[:8]},
         )
         return verdict
 

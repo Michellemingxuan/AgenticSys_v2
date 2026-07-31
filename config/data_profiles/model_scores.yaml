@@ -23,6 +23,7 @@ columns:
   cbr_score_max:
     dtype: int
     description: customer credit bureau score (max)
+    short_description: customer credit bureau score (max)
     description_pending: false
     concept: bureau_derived
     aliases:
@@ -41,6 +42,7 @@ columns:
   ons_30_trd_mean:
     dtype: int
     description: ons 30 trades (mean)
+    short_description: ons 30 trades (mean)
     description_pending: false
     concept: internal_delinquency
     aliases:
@@ -52,6 +54,7 @@ columns:
     - 2025
     description: Date of the model scoring run (YYYY-MM-DD). Use this for time-range
       filtering.
+    short_description: Date of the model scoring run (YYYY-MM-DD). Use this for time-range filtering
   last_cycle_cut_revolve_rate:
     dtype: float
     distribution: normal
@@ -60,6 +63,7 @@ columns:
     min: 0.0
     max: 1.0
     description: last cycle cut revolve rate. Values below 0.46 are risky
+    short_description: last cycle cut revolve rate
     concept: capacity_paydown
     aliases:
     - last_cycle_cut_revolve_rate_min
@@ -73,6 +77,7 @@ columns:
     min: 0
     max: 10
     description: No. of times 30 days past due. Values above 1 are risky.
+    short_description: No. of times 30 days past due
     concept: internal_delinquency
     aliases:
     - times_30_dpd_max
@@ -87,6 +92,7 @@ columns:
     max: 10.0
     description: Customer Exposure / (Average Remit In 2-12 Months). Values above
       3.15 are risky.
+    short_description: Customer Exposure / (Average Remit In 2-12 Months)
     concept:
     - oop
     - exposure_leverage
@@ -102,6 +108,7 @@ columns:
     min: 0.0
     max: 5.0
     description: customer lending exposure minloc 6 months ratio
+    short_description: customer lending exposure minloc 6 months ratio
     concept: exposure_leverage
     aliases:
     - cust_lndexpsr_minloc_6m_ratio_max
@@ -113,6 +120,7 @@ columns:
     min: 1
     max: 50
     description: Customer daily Age
+    short_description: Customer daily Age
     concept: trends_tenure
     aliases:
     - max_agec_agel_dyldage_max
@@ -124,6 +132,7 @@ columns:
     min: 100
     max: 600
     description: Credit bureau tenure to company tenure
+    short_description: Credit bureau tenure to company tenure
     concept: trends_tenure
     aliases:
     - cb_ten_to_amex_tenure_max
@@ -135,6 +144,7 @@ columns:
     min: 0.0
     max: 20.0
     description: Internal Delinquency Index. Values above 5.8 are considered risky.
+    short_description: Internal Delinquency Index
     concept: internal_delinquency
     aliases:
     - tpf_internal_delinq_idx_max
@@ -149,6 +159,7 @@ columns:
     min: 1
     max: 200
     description: Customer Tenure
+    short_description: Customer Tenure
     concept: trends_tenure
     aliases:
     - tpf_cust_mod_tenure_max
@@ -162,6 +173,7 @@ columns:
     max: 5.0
     description: ratio of 30-90 days trigger amount. Values above 0 are considered
       risky.
+    short_description: ratio of 30-90 days trigger amount
     concept: internal_delinquency
     aliases:
     - ratio_30_90dys_trig_amt_max
@@ -191,6 +203,7 @@ columns:
     min: 0.0
     max: 1.0
     description: Ratio of Daily delinquency age by Max delinquency age in last 6 months
+    short_description: Ratio of Daily delinquency age by Max delinquency age in last 6 months
     concept: internal_delinquency
     aliases:
     - calx_ratio_daily_max_age_max
@@ -202,6 +215,7 @@ columns:
     min: -50.0
     max: 50.0
     description: FICO Trend Index. Values below -19 are risky.
+    short_description: FICO Trend Index
     concept:
     - bureau_derived
     - trends_tenure
@@ -217,6 +231,7 @@ columns:
     min: 0.0
     max: 5.0
     description: leverage commercial debt
+    short_description: leverage commercial debt
     concept: exposure_leverage
     aliases:
     - lvrg_debt_remit_max
@@ -227,6 +242,7 @@ columns:
     min: 0
     max: 10
     description: total risky events
+    short_description: total risky events
     concept: risk_events
     aliases:
     - sum_tot_rsky_evnt_max
@@ -238,6 +254,7 @@ columns:
     min: 0.0
     max: 1.0
     description: internal delinquency indicator. Values above 0.5 are risky.
+    short_description: internal delinquency indicator
     concept: internal_delinquency
     aliases:
     - delnqncy_ind_intrnl_mean
@@ -251,6 +268,7 @@ columns:
     min: 0.0
     max: 1.0
     description: debt to payment capacity
+    short_description: debt to payment capacity
     concept: capacity_paydown
     aliases:
     - cust_debt_pymcpty_tm_inc_max
@@ -263,6 +281,7 @@ columns:
     max: 100.0
     description: ML model score predicting likelihood of default in next 18 months.
       Scores from 10-100 are considered risky.
+    short_description: ML model score predicting likelihood of default in next 18 months
     risk_threshold: 10
     risk_direction: above
     concept: output_score
@@ -304,6 +323,7 @@ columns:
     min: 0
     max: 5
     description: positive events
+    short_description: positive events
     concept: risk_events
     aliases:
     - positive_events_max
@@ -316,6 +336,7 @@ columns:
     max: 500000
     description: The amount of a customer's highest revolving lines. Values below
       77 are risky.
+    short_description: The amount of a customer's highest revolving lines
     concept: exposure_leverage
     aliases:
     - tpf_cust_hi_rvlv_line_am_min
@@ -329,6 +350,7 @@ columns:
     min: 0.0
     max: 50.0
     description: Out of Pattern Spend index wrt to Exposure. Values above 28 are risky.
+    short_description: Out of Pattern Spend index wrt to Exposure
     concept:
     - oop
     - spend_pattern
@@ -345,6 +367,7 @@ columns:
     max: 10
     description: No of triggers greater than 30 days with amount > $500. Values on
       or above 1 are risky
+    short_description: No of triggers greater than 30 days with amount > $500
     concept: internal_delinquency
     risk_threshold: 1
     risk_direction: above
@@ -358,6 +381,7 @@ columns:
     min: -10.0
     max: 20.0
     description: hcam balance trend index. Values above 2.65 are risky.
+    short_description: hcam balance trend index
     concept:
     - trends_tenure
     - exposure_leverage
@@ -373,6 +397,7 @@ columns:
     min: 0.0
     max: 0.1
     description: product risk attribute
+    short_description: product risk attribute
     concept: risk_events
     aliases:
     - product_risk_attribute_max
@@ -384,6 +409,7 @@ columns:
     min: 0.0
     max: 20.0
     description: External Delinquency Index. Values above 5 are risky.
+    short_description: External Delinquency Index
     concept: external_delinquency
     aliases:
     - cust_ext_delinq_idx_max
@@ -397,6 +423,7 @@ columns:
     min: 0.0
     max: 100.0
     description: Time Weighted United Q Score (only for low tenure)
+    short_description: Time Weighted United Q Score (only for low tenure)
     concept: trends_tenure
     aliases:
     - tm_wt_q_score_max
@@ -427,6 +454,7 @@ columns:
     max: 0.5
     description: Total exposure to arbitrated income ratio. Values above 0.08 are
       risky.
+    short_description: Total exposure to arbitrated income ratio
     concept:
     - capacity_paydown
     - exposure_leverage
@@ -443,6 +471,7 @@ columns:
     min: 0.0
     max: 1.0
     description: customer level paydown on lending account. Values below 0.1 are risky.
+    short_description: customer level paydown on lending account
     concept: capacity_paydown
     aliases:
     - cust_lend_acct_paydown_min
@@ -457,6 +486,7 @@ columns:
     max: 30.0
     description: risk based index of inquiries from credit bureau. Values above 4.65
       are considered risky.
+    short_description: risk based index of inquiries from credit bureau
     concept: bureau_derived
     aliases:
     - cust_experian_trans_union_inq_idx_max
@@ -472,6 +502,7 @@ columns:
     max: 2.0
     description: Customer total debt servicing ratio. Values above 0.15 are considered
       risky.
+    short_description: Customer total debt servicing ratio
     concept: capacity_paydown
     aliases:
     - cust_intr_extnl_unscr_tt_debt_srvc_rt1_max
@@ -485,6 +516,7 @@ columns:
     min: 0.0
     max: 1.0
     description: customer level paydown on open account. Values below 0.3 are risky.
+    short_description: customer level paydown on open account
     concept: capacity_paydown
     aliases:
     - cust_open_acct_paydown_min
@@ -499,6 +531,7 @@ columns:
     min: 1
     max: 600
     description: time since the oldest recorded event for the card member
+    short_description: time since the oldest recorded event for the card member
     concept: trends_tenure
     aliases:
     - cust_old_rec_age_max
@@ -510,6 +543,7 @@ columns:
     min: 100
     max: 50000
     description: Arbitrated income
+    short_description: Arbitrated income
     concept: capacity_paydown
     aliases:
     - cust_atp_arb_incom_am_max
@@ -522,6 +556,7 @@ columns:
     max: 2.0
     description: ratio of cash to total liability corresponding to latest full year
       financial
+    short_description: ratio of cash to total liability corresponding to latest full year financial
     concept: capacity_paydown
     aliases:
     - cust_cash_tot_liab_yr1_rt_max
@@ -534,6 +569,7 @@ columns:
     max: 0.1
     description: Customer payment channel risk score. Values above 0.05 are considered
       risky.
+    short_description: Customer payment channel risk score
     concept: risk_events
     aliases:
     - cust_pymt_chan_risk_score_max
@@ -563,6 +599,7 @@ columns:
     max: 10.0
     description: one way spend concentration risk rate. Values above 2.4 are considered
       risky.
+    short_description: one way spend concentration risk rate
     concept: spend_pattern
     aliases:
     - cust_enhnc_one_way_spend_concentration_30day_rt1_max
@@ -576,6 +613,7 @@ columns:
     min: 0.0
     max: 1.0
     description: Internal Payment Return Index. Values above 0.2 are considered risky.
+    short_description: Internal Payment Return Index
     concept: internal_delinquency
     aliases:
     - time_wtd_return_index_max
@@ -589,6 +627,7 @@ columns:
     min: 0.0
     max: 0.1
     description: Timeseries Spend Variable. Values above 0.028 are considered risky.
+    short_description: Timeseries Spend Variable
     concept: spend_pattern
     aliases:
     - cust_rnn_score_max
@@ -604,6 +643,7 @@ columns:
     max: 1.0
     description: average number of only minimum due paid in last 12 months. Values
       above 0.08 are considered risky.
+    short_description: average number of only minimum due paid in last 12 months
     concept: capacity_paydown
     aliases:
     - cust_min_due_12mo_avg_max
@@ -635,6 +675,7 @@ columns:
     max: 500000.0
     description: Mortgage Loan (Actual Payment Amount). Sentinel -99999999999 = no
       mortgage on file
+    short_description: Mortgage Loan (Actual Payment Amount). Sentinel -99999999999 = no mortgage on file
     concept: capacity_paydown
     aliases:
     - gam_mtge_loan_actl_pymt_am_max
@@ -647,6 +688,7 @@ columns:
     max: 1.0
     description: normalised accum amount weighted by merchant percentage. Values above
       0 are risky.
+    short_description: normalised accum amount weighted by merchant percentage
     concept: risk_events
     aliases:
     - se_no_norm_wtd_pd_unpaid_amt_max
@@ -675,6 +717,7 @@ columns:
     max: 900
     description: score merges business and owner credit data. Values below 693 are
       risky.
+    short_description: score merges business and owner credit data
     concept:
     - third_party_score
     - bureau_derived
@@ -690,6 +733,7 @@ columns:
     min: 500
     max: 950
     description: Business credit score. Values below 863 are risky.
+    short_description: Business credit score
     concept: third_party_score
     aliases:
     - cust_sbfe_score_min
@@ -703,6 +747,7 @@ columns:
     min: 0
     max: 100
     description: Paydex score measures payment performance. Values below 61 are risky.
+    short_description: Paydex score measures payment performance
     concept: third_party_score
     aliases:
     - cust_dnb_paydex_score_min
@@ -715,6 +760,7 @@ columns:
     min: 0
     max: 15
     description: total consumer and commercial trades greater than 30
+    short_description: total consumer and commercial trades greater than 30
     concept:
     - external_delinquency
     - exposure_leverage

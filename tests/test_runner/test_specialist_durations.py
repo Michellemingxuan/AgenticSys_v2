@@ -205,3 +205,106 @@ def test_final_answer_never_carries_a_scope_footnote():
 
     assert not hasattr(conductor, "_scope_footnote")
     assert "_Scope:" not in inspect.getsource(conductor)
+
+
+# ── a bare variable name must not reach the orchestrator as a proper noun ────
+
+
+def test_framed_question_tells_the_orchestrator_intoop_is_a_column():
+    """Reported: "how is intoop" came back as "Intoop is a high-utilization
+    commercial customer with 3 cards…" — the orchestrator read the variable as
+    the CUSTOMER and dispatched a generic case overview, never touching
+    `oop_interaction_max`. The screen had already resolved the name; it just
+    never reached the orchestrator."""
+    from unittest.mock import MagicMock
+
+    from datalayer.catalog import DataCatalog
+    from datalayer.gateway import LocalDataGateway
+    import tools.data_tools as data_tools
+    from models.types import ScreenVerdict
+    from runner.turn.input_assembly import assemble_orchestrator_input
+
+    gw = LocalDataGateway.from_case_folders("data_tables/real")
+    gw.set_case("366132845011")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    try:
+        sess = MagicMock()
+        sess.specialist_kb = {}
+        sess.qa_cache = {}
+        verdict = ScreenVerdict(
+            passed=True, redacted_question="how is intoop",
+            named_variables=["oop_interaction_max"])
+        framed = assemble_orchestrator_input(sess, verdict, MagicMock())
+
+        assert "how is intoop" in framed, "the reviewer's own words must survive"
+        assert "oop_interaction_max" in framed
+        assert "NOT a person, company or customer" in framed
+        # The hint is LAST — a bare name is ambiguous right up to the question.
+        assert framed.index("RESOLVED VARIABLE NAMES") > framed.index("how is intoop")
+    finally:
+        data_tools.init_tools(None, None)
+
+
+def test_a_question_naming_no_variable_gets_no_hint():
+    from unittest.mock import MagicMock
+
+    from models.types import ScreenVerdict
+    from runner.turn.input_assembly import assemble_orchestrator_input
+
+    sess = MagicMock(); sess.specialist_kb = {}; sess.qa_cache = {}
+    framed = assemble_orchestrator_input(
+        sess, ScreenVerdict(passed=True, redacted_question="how is the customer"),
+        MagicMock())
+    assert "RESOLVED VARIABLE NAMES" not in framed
+
+
+def test_the_hint_names_the_specialist_that_owns_the_table():
+    """The orchestrator ROUTES — "table `modelling_data`" still leaves it a step
+    to infer, and inferring is what it got wrong."""
+    from unittest.mock import MagicMock
+
+    from datalayer.catalog import DataCatalog
+    from datalayer.gateway import LocalDataGateway
+    import tools.data_tools as data_tools
+    from models.types import ScreenVerdict
+    from runner.turn.input_assembly import assemble_orchestrator_input
+
+    gw = LocalDataGateway.from_case_folders("data_tables/real")
+    gw.set_case("366132845011")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    try:
+        sess = MagicMock(); sess.specialist_kb = {}; sess.qa_cache = {}
+        framed = assemble_orchestrator_input(
+            sess,
+            ScreenVerdict(passed=True, redacted_question="how is intoop",
+                          named_variables=["oop_interaction_max"]),
+            MagicMock())
+        assert "ask `modeling`" in framed
+    finally:
+        data_tools.init_tools(None, None)
+
+
+def test_table_owners_are_derived_from_the_skills_not_a_second_list():
+    """A hand-maintained copy would drift the moment a table moves skills."""
+    from datalayer.catalog import DataCatalog
+    from datalayer.gateway import LocalDataGateway
+    import tools.data_tools as data_tools
+    from runner.turn.input_assembly import _table_owners
+    from skills.domain.loader import load_domain_skill
+
+    # The catalog has to be wired for the REAL spellings: `_resolve_real_table`
+    # needs it, and the hint quotes whichever name the column index reports
+    # (`modelling_data`, not the canonical `model_scores`). A turn always has
+    # it; without it the map degrades to canonical names only.
+    gw = LocalDataGateway.from_case_folders("data_tables/real")
+    gw.set_case("366132845011")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    try:
+        owners = _table_owners()
+        modeling = load_domain_skill("modeling")
+        for table in modeling.data_hints:
+            assert owners.get(table) == "modeling", f"{table} not attributed"
+        assert owners.get("modelling_data") == "modeling"
+        assert owners.get("spends_data") == "spend_payments"
+    finally:
+        data_tools.init_tools(None, None)
