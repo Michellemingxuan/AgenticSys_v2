@@ -13,18 +13,54 @@ DATA GAP branch that told specialists to abandon a real column. So: measure the
 false-positive rate on a known-good question suite FIRST, then decide what may
 gate a retry. Never wire an auditor straight to the quarantine.
 
-Two checks, both chosen for low false-positive risk:
+FALSE POSITIVES, AS MEASURED. Three consecutive live runs produced nothing but
+noise — `['2025', '$404,152']`, `['$392K', '$319K', '17%', '17%']`,
+`['67%', '33%', '67%', '33%']` — from three distinct causes, all now handled:
 
-1. `unsupported_numbers` — numeric literals in `findings` / `evidence` that
-   appear nowhere in the run's tool outputs. Catches fabrication and bad
-   arithmetic. Expected noise: values the specialist legitimately DERIVED
-   (sums, ratios, percentages) won't appear verbatim, which is exactly what the
-   shadow period is for measuring.
+  - bare YEARS read as quantities ("fell sharply by 2025"). Masked.
+  - correctly ROUNDED values ("$392K" for a tool's $392,454.63) missed by an
+    exact match. Each written number now carries the tolerance its own
+    precision implies.
+  - COMPUTED percentages, which no tool ever emits verbatim. Own bucket.
 
-2. `sample_size_as_count` — a claimed count that equals a truncated display
+Three checks:
+
+1. `unsupported_numbers` — magnitudes in `findings` / `evidence` that appear
+   nowhere in the run's tool outputs. Catches fabrication and bad arithmetic.
+
+2. `derived_not_checkable` — figures written as a percentage or multiple, i.e.
+   arithmetic ON tool values. Not evidence of anything; listed so a human can
+   look, never a gate. Deliberately NOT "verified by re-derivation": measured,
+   60 of 60 random percentages could be reconstructed as a ratio of two numbers
+   drawn from the 101 that a mere two tool calls emit. Every percentage
+   "verifies", including a fabricated one, so re-deriving would launder bad
+   numbers rather than catch them.
+
+3. `sample_size_as_count` — a claimed count that equals a truncated display
    sample (`rows_returned`) while the true count (`rows_matching_filter`)
    differs. Very low FP: those two keys come from the same payload, so the
    coincidence is nearly always the known bug of counting `rows[]`.
+
+DERIVED NUMBERS ARE ALLOWED IN ANSWERS. This is a decision, not an oversight —
+do not "fix" `derived_not_checkable` into a gate. Small derivations are fine
+for a model to do: "2 of 3 cards are consumer -> 67%" will not come out wrong,
+and forcing a tool call for every such figure buys latency, not accuracy.
+
+The failure this system actually suffered was never the arithmetic. It was the
+OPERANDS: "top merchant is 10.0% of spend" was computed over all history while
+the question asked about 2025. Right division, wrong denominator. So the
+control lives elsewhere, and deliberately so:
+
+  - `claim_audit.scope_line` / `measured_over` put the table and time window
+    behind every answer into the trace, which is what lets a reviewer catch a
+    correct number measured over the wrong set.
+  - `aggregate_column` op=`share` (with `base_filter_*`) and op=`ratio` exist
+    for the cases where the DENOMINATOR is a genuine choice — a share of a
+    filtered base, top-1-among-top-5. Those are worth a tool call because the
+    choice is the thing that can be wrong; dividing 2 by 3 is not.
+
+Gating on derived figures would fire on nearly every answer while catching none
+of the errors that have actually occurred here.
 """
 from __future__ import annotations
 
@@ -42,6 +78,13 @@ _DATE_LIKE = re.compile(
     r"\b\d{4}-\d{1,2}(?:-\d{1,2})?\b"          # 2025-04, 2025-04-01
     r"|\b\d{1,2}/\d{1,2}/\d{2,4}\b"            # 04/01/2025
     r"|\b[A-Z][a-z]{2,8}'?-?\d{2,4}\b"         # Jul-25, July'2023
+    # A BARE YEAR. Measured on real runs, this was the single largest source of
+    # false positives — "spend fell sharply by 2025" contributed 2025 as an
+    # unsupported quantity in nearly every audited answer. Restricted to
+    # 1900-2099 so ordinary four-digit quantities are untouched; a genuine count
+    # that happens to equal a year is the accepted cost, and this is advisory
+    # output, never a gate.
+    r"|\b(?:19|20)\d{2}\b"
 )
 
 # A number with optional currency, thousands separators, and a scale/unit
@@ -57,36 +100,74 @@ _NUMBER = re.compile(
 _SCALE = {"k": 1e3, "m": 1e6, "b": 1e9, "bn": 1e9}
 
 
-def _candidate_values(raw_int: str, decimals: str, suffix: str) -> list[float]:
-    """Every reading a written number could plausibly mean.
+# Relative slack for a number written at full precision. Anything coarser gets
+# a tolerance derived from how it was ROUNDED — see `_candidate_values`.
+_DEFAULT_REL_TOL = 0.001
+
+
+def _candidate_values(raw_int: str, decimals: str,
+                      suffix: str) -> list[tuple[float, float]]:
+    """`[(value, absolute_tolerance), ...]` — every reading a written number
+    could plausibly mean, each with the slack its own precision implies.
 
     A claim of "41%" may be backed by a tool value of 41 or 0.41; "$3.93M" by
     3930000. Returning all readings makes the check LENIENT — the point is to
     surface numbers with no backing at all, not to police formatting.
+
+    ROUNDING is why the tolerance travels with the value. Specialists write
+    "$392K" for a tool's `$392,454.63`; matched exactly that reads as
+    fabrication, and it was the second-largest false positive on real runs.
+    The tolerance is ONE UNIT of the last digit written, which covers both
+    conventions seen in real answers: rounding ($392,454 -> "$392K") and
+    truncating ($174,897 -> "$174K", where rounding would have given "$175K").
+    A unit is still tight — "$392K" will not match $450,000.
     """
     try:
         base = float(f"{raw_int.replace(',', '')}{decimals or ''}")
     except ValueError:
         return []
     s = (suffix or "").strip().lower()
+    n_decimals = len(decimals) - 1 if decimals else 0      # `decimals` keeps '.'
+
+    def _rel(v: float) -> tuple[float, float]:
+        return (v, abs(v) * _DEFAULT_REL_TOL)
+
     if s in _SCALE:
-        return [base * _SCALE[s], base]
+        scaled = base * _SCALE[s]
+        unit_step = (10.0 ** -n_decimals) * _SCALE[s]
+        return [(scaled, max(unit_step, abs(scaled) * _DEFAULT_REL_TOL)),
+                _rel(base)]
     if s == "%":
-        return [base, base / 100.0]
-    return [base]
+        unit_step = 10.0 ** -n_decimals
+        return [(base, max(unit_step, abs(base) * _DEFAULT_REL_TOL)),
+                (base / 100.0, max(unit_step / 100.0,
+                                   abs(base / 100.0) * _DEFAULT_REL_TOL))]
+    unit_step = 10.0 ** -n_decimals
+    return [(base, max(unit_step, abs(base) * _DEFAULT_REL_TOL))]
 
 
-def _numbers_in(text: str) -> list[tuple[str, list[float]]]:
-    """`[(as_written, [possible values]), ...]` from prose, dates excluded."""
+def _numbers_in(text: str) -> list[tuple[str, list[tuple[float, float]]]]:
+    """`[(as_written, [(value, tolerance), ...]), ...]`, dates excluded."""
     if not isinstance(text, str) or not text:
         return []
     masked = _DATE_LIKE.sub(" ", text)
-    out: list[tuple[str, list[float]]] = []
+    out: list[tuple[str, list[tuple[float, float]]]] = []
     for m in _NUMBER.finditer(masked):
         values = _candidate_values(m.group(1), m.group(2), m.group(3))
         if values:
             out.append((m.group(0).strip(), values))
     return out
+
+
+# Percentages, ratios and multiples are ARITHMETIC on tool values, so they are
+# never quoted verbatim by a tool. Recognised by how they are written rather
+# than by trying to re-derive them — see `audit_claims` for why re-derivation
+# is worthless here.
+_COMPUTED_SUFFIX = ("%", "x")
+
+
+def _looks_computed(written: str) -> bool:
+    return written.strip().lower().endswith(_COMPUTED_SUFFIX)
 
 
 def _claim_text(final_output) -> str:
@@ -106,11 +187,13 @@ def _output_values(result) -> set[float]:
 
     Read from the raw output text rather than parsed JSON so a value inside a
     nested string (batch results carry their payload as a string) still counts.
+    Tolerances are dropped here — a tool output is exact; the slack belongs to
+    the CLAIM, which is what gets rounded.
     """
     values: set[float] = set()
     for _tool, _cid, output in _iter_call_outcomes(result):
         for _raw, candidates in _numbers_in(output):
-            values.update(candidates)
+            values.update(v for v, _tol in candidates)
     return values
 
 
@@ -142,7 +225,8 @@ def audit_claims(result, final_output) -> dict:
     Empty lists mean nothing suspicious. Never raises — a broken audit must not
     break the turn it is auditing.
     """
-    report: dict = {"unsupported_numbers": [], "sample_size_as_count": []}
+    report: dict = {"unsupported_numbers": [], "derived_not_checkable": [],
+                    "sample_size_as_count": []}
     try:
         claims = _numbers_in(_claim_text(final_output))
         if not claims:
@@ -150,15 +234,31 @@ def audit_claims(result, final_output) -> dict:
         supported = _output_values(result)
 
         for written, candidates in claims:
-            if not any(_values_match(c, v) for c in candidates for v in supported):
-                report["unsupported_numbers"].append(written)
+            if any(abs(value - v) <= tol
+                   for value, tol in candidates for v in supported):
+                continue
+            # A COMPUTED figure will not appear verbatim in any tool output,
+            # and this auditor cannot check it either way. Reporting it as
+            # "unsupported" reads as fabrication; staying silent hides it. So
+            # it gets its own bucket, and the name says what is true: not
+            # checkable here.
+            #
+            # It is tempting to go further and try to RECONSTRUCT it — confirm
+            # 67% as a/b for some pair of tool values. Measured, that proves
+            # nothing: 60 of 60 random percentages were reconstructible from
+            # the 101 numbers a mere two tool calls emit. Any percentage
+            # "verifies", including a fabricated one, so the check would launder
+            # bad numbers rather than catch them.
+            (report["derived_not_checkable"] if _looks_computed(written)
+             else report["unsupported_numbers"]).append(written)
 
         # A claimed count equal to a truncated sample size, when the true count
         # differs, is the known "counted rows[] instead of rows_matching_filter"
         # error rather than a coincidence.
         for returned, matching in _count_pairs(result):
             for written, candidates in claims:
-                if any(_values_match(c, float(returned)) for c in candidates):
+                if any(abs(value - float(returned)) <= tol
+                       for value, tol in candidates):
                     report["sample_size_as_count"].append({
                         "claimed": written,
                         "rows_returned": returned,

@@ -52,14 +52,16 @@ def test_dates_are_not_read_as_quantities():
     ("TSR 27.4", 27.4),
 ])
 def test_written_forms_normalize(text, expect_value):
-    vals = _numbers_in(text)[0][1]
+    # `_numbers_in` yields (value, tolerance) pairs — the tolerance carries the
+    # slack the written precision implies, so "$392K" can match $392,454.63.
+    vals = [v for v, _tol in _numbers_in(text)[0][1]]
     assert any(abs(v - expect_value) < 1e-6 for v in vals)
 
 
 def test_percentages_allow_both_readings():
     """A claim of "41%" may be backed by 41 or 0.41 — accepting both keeps the
     check lenient, which is the right bias for an auditor."""
-    vals = _numbers_in("utilization 41%")[0][1]
+    vals = [v for v, _tol in _numbers_in("utilization 41%")[0][1]]
     assert 41.0 in vals and pytest.approx(0.41) in vals
 
 
@@ -138,7 +140,8 @@ def test_unreadable_transcript_returns_an_empty_report():
             raise RuntimeError("boom")
 
     assert audit_claims(_Broken(), _out("Spend was 123.")) == {
-        "unsupported_numbers": [], "sample_size_as_count": []}
+        "unsupported_numbers": [], "derived_not_checkable": [],
+        "sample_size_as_count": []}
 
 
 def test_missing_final_output_returns_an_empty_report():
@@ -260,3 +263,72 @@ def test_scope_line_covers_every_table_touched():
 
 def test_scope_line_is_empty_without_data_calls():
     assert scope_line(_Calls([("kb_lookup", {"topic": "t"})])) == ""
+
+
+# ── the false positives measured on real runs ───────────────────────────────
+#
+# Three consecutive live runs flagged essentially nothing but noise:
+#   modeling       -> ['2025', '$404,152']
+#   spend_payments -> ['$392K', '$319K', '17%', '17%']
+#   crossbu        -> ['67%', '33%', '67%', '33%']
+# Bare years, correctly-rounded values, and computed percentages. An auditor
+# whose output is all noise gets ignored, which is worse than not running it.
+
+
+def test_a_bare_year_is_not_a_quantity():
+    """Largest FP source on real runs: "spend fell sharply by 2025"."""
+    r = _Result(['{"total": 3927582.20}'])
+    rep = audit_claims(r, _out("Spend peaked in 2025 and fell through 2024."))
+    assert rep["unsupported_numbers"] == []
+
+
+def test_a_year_inside_a_larger_number_is_still_read():
+    """The mask must not swallow real quantities that merely contain a year."""
+    r = _Result(['{"total": 1}'])
+    rep = audit_claims(r, _out("The balance was 20250 dollars."))
+    assert rep["unsupported_numbers"] == ["20250"]
+
+
+@pytest.mark.parametrize("written,exact", [
+    ("$392K", 392454.63),        # tool said $392,454.63
+    ("$319K", 319419.90),
+    ("$3.93M", 3927582.20),
+    ("$174K", 174897.36),
+])
+def test_a_correctly_rounded_value_is_not_fabrication(written, exact):
+    """"$392K" for a tool's $392,454.63 is a reviewer-friendly rounding, not an
+    invented number. The tolerance is half a unit of the last digit written."""
+    r = _Result(['{"value": %s}' % exact])
+    rep = audit_claims(r, _out(f"Top merchant spend was {written}."))
+    assert rep["unsupported_numbers"] == []
+
+
+def test_rounding_slack_does_not_swallow_a_genuinely_wrong_number():
+    """Half-a-unit, not a blank cheque: $392K must not match $450,000."""
+    r = _Result(['{"value": 450000.00}'])
+    rep = audit_claims(r, _out("Top merchant spend was $392K."))
+    assert rep["unsupported_numbers"] == ["$392K"]
+
+
+def test_a_computed_percentage_is_reported_separately_not_as_unsupported():
+    """It cannot appear verbatim in any tool output, and this auditor cannot
+    check it either way. Calling it "unsupported" reads as fabrication."""
+    r = _Result(['{"a": 2, "b": 3}'])
+    rep = audit_claims(r, _out("Consumer cards are 67% of the portfolio."))
+    assert rep["unsupported_numbers"] == []
+    assert rep["derived_not_checkable"] == ["67%"]
+
+
+def test_a_percentage_the_tools_actually_returned_is_not_flagged_at_all():
+    """`share_of_total` comes back as a percentage — that one IS checkable."""
+    r = _Result(['{"share_of_total": "10.0%"}'])
+    rep = audit_claims(r, _out("The top merchant is 10.0% of spend."))
+    assert rep["unsupported_numbers"] == []
+    assert rep["derived_not_checkable"] == []
+
+
+def test_a_fabricated_magnitude_still_gets_flagged():
+    """The whole point survives the loosening."""
+    r = _Result(['{"rows_matching_filter": 8888, "total": 3927582.20}'])
+    rep = audit_claims(r, _out("Spend totalled $9,412,003 across 8,888 txns."))
+    assert rep["unsupported_numbers"] == ["$9,412,003"]
