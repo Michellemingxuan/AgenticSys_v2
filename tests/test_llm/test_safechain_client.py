@@ -5,9 +5,9 @@ response-synthesis logic, which are pure-Python and don't require safechain.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import sys
-import time
 import types
 
 import pytest
@@ -271,17 +271,22 @@ async def test_invoking_without_safechain_raises_clear_error():
         )
 
 
-# ── model build via amodel + blocking chain.invoke in a worker thread ───────
+# ── model build via amodel + native-async chain.ainvoke ─────────────────────
 #
 # Prod API (per the private env): the model is built with `await amodel(id)`
 # (async — token acquisition), cached and reused; the chain
-# (`prompt | model | StrOutputParser`) is invoked SYNCHRONOUSLY in a dedicated
-# worker thread, bounded by a per-call timeout. These tests pin that shape.
+# (`prompt | model | StrOutputParser`) is run with `await chain.ainvoke(...)`,
+# bounded by a per-call timeout. `ainvoke` is genuinely native-async on this
+# build (`SafeAzureChatOpenAI._agenerate` is overridden), so a timeout or
+# cancellation ABORTS the in-flight request instead of orphaning a worker
+# thread — the old sync `chain.invoke`-in-a-thread-pool could not be
+# interrupted and its orphan pileup caused "stuck at team construction".
+# These tests pin that shape.
 
 
 class _FakeModel:
     """Stand-in for the amodel-built model. `behavior(inputs)` is the result
-    of the sync `chain.invoke` (or it raises)."""
+    of `chain.ainvoke` (or it raises). May be sync or a coroutine function."""
     def __init__(self, behavior):
         self.behavior = behavior
 
@@ -293,8 +298,13 @@ class _FakeChain:
     def __or__(self, _parser):  # `... | StrOutputParser()` → same chain
         return self
 
-    def invoke(self, inputs):
-        return self._model.behavior(inputs)
+    async def ainvoke(self, inputs):
+        result = self._model.behavior(inputs)
+        # Behaviors may be plain functions (immediate result / raise) or
+        # coroutine functions (to simulate a slow in-flight call).
+        if inspect.isawaitable(result):
+            return await result
+        return result
 
 
 class _FakePrompt:
@@ -360,11 +370,13 @@ async def test_invoke_builds_via_amodel_and_reuses_it(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_invoke_per_call_timeout_raises(monkeypatch):
-    """A hung (blocking) chain.invoke must surface as TimeoutError so the turn
-    fails cleanly and releases the firewall semaphore + turn lock."""
+    """A hung chain.ainvoke must surface as TimeoutError so the turn fails
+    cleanly and releases the firewall semaphore + turn lock. Because `ainvoke`
+    is native-async, `wait_for` also cancels the in-flight call rather than
+    leaving it running to completion."""
     def _factory():
-        def _slow(_in):
-            time.sleep(0.5)  # blocking, in the worker thread
+        async def _slow(_in):
+            await asyncio.sleep(0.5)
             return "late"
         return _FakeModel(_slow)
 
@@ -406,12 +418,13 @@ async def test_invoke_rebuilds_and_retries_on_401(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_concurrent_calls_overlap_via_thread_pool(monkeypatch):
-    """Concurrent calls run in the dedicated thread pool — they OVERLAP rather
-    than serializing behind a single worker."""
+async def test_concurrent_calls_overlap(monkeypatch):
+    """Concurrent calls OVERLAP rather than serializing. With `ainvoke` the
+    overlap comes from the event loop itself — no thread pool involved — so a
+    hung call can no longer occupy a worker and starve the next turn."""
     def _factory():
-        def _slow(_in):
-            time.sleep(0.2)
+        async def _slow(_in):
+            await asyncio.sleep(0.2)
             return '{"output": {"answer": "ok"}}'
         return _FakeModel(_slow)
 
@@ -429,5 +442,5 @@ async def test_concurrent_calls_overlap_via_thread_pool(monkeypatch):
     t0 = loop.time()
     await asyncio.gather(one_call(), one_call(), one_call())
     elapsed = loop.time() - t0
-    # 3 × 0.2s serialized would be ≥0.6s; overlapping in the pool is ≈0.2s.
-    assert elapsed < 0.45, f"calls serialized ({elapsed:.2f}s) — pool not used"
+    # 3 × 0.2s serialized would be ≥0.6s; overlapping on the loop is ≈0.2s.
+    assert elapsed < 0.45, f"calls serialized ({elapsed:.2f}s) — not overlapping"

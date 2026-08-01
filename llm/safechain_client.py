@@ -84,18 +84,20 @@ except ImportError:
 
 
 # Per-call wall-clock cap on a single safechain LLM call. The safechain model
-# is built async (`await amodel(...)`, which does the token acquisition), but
-# the chain INVOKE is blocking/sync — so we run it in a worker thread and bound
-# it with `asyncio.wait_for`. On timeout the asyncio side gives up promptly
-# (freeing the firewall semaphore + turn lock); the underlying thread may
-# linger until safechain returns, which is why we use a DEDICATED, generously
-# sized pool below so a few stuck calls can't starve the shared default
-# executor (the original "stuck at team construction" mechanism).
+# is built async (`await amodel(...)`, which does the token acquisition) and the
+# chain is run via `ainvoke` (native async on this build). `asyncio.wait_for`
+# bounds it and, because `ainvoke` is genuinely cancellable, a timeout actually
+# aborts the in-flight request and frees the firewall semaphore + turn lock
+# promptly — no lingering worker thread. (Previously the chain was invoked
+# synchronously in a thread pool, where a timeout could NOT interrupt the call;
+# that orphaned-thread pileup was the original "stuck at team construction"
+# mechanism. See .claude/memory/safechain_async_and_thread_occupation.md.)
 _SAFECHAIN_CALL_TIMEOUT_S = float(os.environ.get("SAFECHAIN_CALL_TIMEOUT_S", "180"))
 
-# Dedicated thread pool for the blocking `chain.invoke()`. Sized well above the
-# total LLM concurrency (specialist + orchestrator firewall caps) so a hung
-# call holds a worker without queueing new calls behind dead threads.
+# Retained thread pool. No longer used for the LLM call itself (that is now
+# `ainvoke`), but kept so the loop's default executor can optionally be pinned
+# to it — `loop.set_default_executor(_SAFECHAIN_EXECUTOR)` — so safechain's brief
+# internal redaction offload lands on a sized pool instead of the shared default.
 _SAFECHAIN_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=int(os.environ.get("SAFECHAIN_THREAD_POOL", "32")),
     thread_name_prefix="safechain-invoke",
@@ -171,8 +173,8 @@ class SafeChainAsyncOpenAI:
         """Return the cached safechain model, building it once on first use.
 
         `amodel` is an ASYNC factory (it performs token acquisition), so it
-        MUST be awaited — the model is then reused for every blocking
-        `chain.invoke()`. A concurrent first-build race just builds twice and
+        MUST be awaited — the model is then reused for every
+        `await chain.ainvoke()`. A concurrent first-build race just builds twice and
         keeps the last; harmless (no lock, since the client is shared across
         per-turn event loops and an asyncio.Lock can't span loops)."""
         if self._llm is None:
@@ -347,24 +349,28 @@ class _SafeChainChatCompletions:
             ) from e
 
         # Build the model ASYNC (`await amodel(...)` does the token acquisition),
-        # cached + reused. The chain INVOKE is blocking/sync, so run it in a
-        # dedicated worker thread bounded by a per-call timeout: on timeout the
-        # asyncio side gives up promptly (freeing the firewall semaphore + turn
-        # lock) even though the worker may linger until safechain returns.
+        # cached + reused. Run the chain via `ainvoke`: this build's
+        # `SafeAzureChatOpenAI._agenerate` is a genuine async path (verified in
+        # the private env — cancellable in ~0s, and cancellation ABORTS the
+        # in-flight request rather than orphaning a worker thread). That is the
+        # fix for "stuck after rewind": the old sync `chain.invoke` in a thread
+        # pool could NOT be interrupted, so a rewind/timeout left the worker
+        # running its full 20-120s call, holding a pool slot and burning Azure
+        # quota. Enough of those exhausted the pool and produced "stuck at team
+        # construction" / "input not captured".
+        # See .claude/memory/safechain_async_and_thread_occupation.md.
         llm = await self._parent._aensure_llm()
 
-        def _sync_invoke(active_model: Any) -> str:
-            chain = (
+        def _chain(active_model: Any):
+            return (
                 ValidChatPromptTemplate.from_messages([("human", "{__input__}")])
                 | active_model
                 | StrOutputParser()
             )
-            return chain.invoke({"__input__": combined})
 
         async def _run(active_model: Any) -> str:
-            loop = asyncio.get_running_loop()
             return await asyncio.wait_for(
-                loop.run_in_executor(_SAFECHAIN_EXECUTOR, _sync_invoke, active_model),
+                _chain(active_model).ainvoke({"__input__": combined}),
                 timeout=_SAFECHAIN_CALL_TIMEOUT_S,
             )
 
