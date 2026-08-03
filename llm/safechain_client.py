@@ -82,6 +82,16 @@ except ImportError:
     _nest_asyncio = None  # type: ignore[assignment]
 
 
+# Per-call wall-clock cap on a single safechain LLM call, and on the model
+# build (`amodel()` acquires a token over the network, so it can hang too).
+# Without a cap a stuck call holds the firewall semaphore and the turn lock
+# forever, which surfaces as a round that is "stale, no input/output captured,
+# never recovers". Because the chain now runs via `ainvoke` — native async on
+# this build — `asyncio.wait_for` genuinely ABORTS the in-flight request
+# instead of leaking the worker that was running it.
+_SAFECHAIN_CALL_TIMEOUT_S = float(os.environ.get("SAFECHAIN_CALL_TIMEOUT_S", "180"))
+
+
 _ROLE_LABELS = {
     "system": "Context",
     "user": "Request",
@@ -147,22 +157,45 @@ class SafeChainAsyncOpenAI:
         # SDK reads these for tracing/logging only. Return None.
         return None
 
-    def _ensure_llm(self) -> Any:
+    async def _aensure_llm(self) -> Any:
+        """Return the cached safechain model, building it once on first use.
+
+        `amodel` is an ASYNC factory — it performs token acquisition — so it
+        MUST be awaited. A concurrent first-build race just builds twice and
+        keeps the last; harmless (no lock, since the client is shared across
+        per-turn event loops and an asyncio.Lock cannot span loops)."""
         if self._llm is None:
-            self._refresh_llm()
+            await self._arefresh_llm()
         return self._llm
 
-    def _refresh_llm(self) -> None:
-        """(Re)load the safechain model. Used on first call and on 401 retry."""
+    async def _arefresh_llm(self) -> None:
+        """(Re)build the safechain model via `await amodel(...)`. First call and
+        401 token-expiry retry. Caches on `self._llm`.
+
+        The prod factory is `amodel`, not the sync `model`. The sync one drives
+        its token acquisition through its own `asyncio.run`, which is why this
+        module had to patch in nest_asyncio and still raised "asyncio.run
+        cannot be called from a running event loop" under the server. Awaiting
+        the async factory removes that failure mode at the source."""
         try:
-            from safechain.core.model import model as safechain_model  # type: ignore[import-not-found]
+            from safechain.core.model import amodel  # type: ignore[import-not-found]
         except ImportError as e:
             raise NotImplementedError(
                 "safechain is not installed in this environment. "
                 "SafeChainAsyncOpenAI is only usable in the private/prod env."
             ) from e
         model_id = os.environ.get("SAFECHAIN_MODEL", self._model_name)
-        self._llm = safechain_model(model_id)
+        # Bound the build too: `amodel()` goes over the network, and an
+        # unbounded hang here stalls the whole turn with no timeout at all.
+        try:
+            self._llm = await asyncio.wait_for(
+                amodel(model_id), timeout=_SAFECHAIN_CALL_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError as e:
+            raise TimeoutError(
+                f"safechain amodel() build did not return within "
+                f"{_SAFECHAIN_CALL_TIMEOUT_S:.0f}s"
+            ) from e
 
 
 class _SafeChainChat:
@@ -305,38 +338,39 @@ class _SafeChainChatCompletions:
                 "the private/prod environment only."
             ) from e
 
-        llm = self._parent._ensure_llm()
+        # Build ASYNC (`await amodel(...)` does the token acquisition) and run
+        # the chain with `ainvoke`. The old path invoked the chain
+        # SYNCHRONOUSLY on the shared default `to_thread` pool (~12 workers): a
+        # blocked thread cannot be interrupted, so a rewind or timeout left the
+        # worker running its full call, and enough orphans exhausted the pool —
+        # the documented "stuck at team construction" / "input not captured".
+        llm = await self._parent._aensure_llm()
 
-        def _sync_invoke() -> str:
-            chain = ValidChatPromptTemplate.from_messages(
+        def _chain(active_model: Any):
+            return ValidChatPromptTemplate.from_messages(
                 [("human", "{__input__}")]
-            ) | llm
-            r = chain.invoke({"__input__": combined})
+            ) | active_model
+
+        async def _run(active_model: Any) -> str:
+            r = await asyncio.wait_for(
+                _chain(active_model).ainvoke({"__input__": combined}),
+                timeout=_SAFECHAIN_CALL_TIMEOUT_S,
+            )
             return r.content if hasattr(r, "content") else str(r)
 
-        async def _do_invoke() -> str:
-            return await asyncio.to_thread(_sync_invoke)
-
         try:
-            text = await _do_invoke()
-        except RuntimeError as e:
-            es = str(e)
-            if "running event loop" in es and not _NEST_ASYNCIO_APPLIED:
-                raise RuntimeError(
-                    "safechain hit 'asyncio.run cannot be called from a "
-                    "running event loop'. Install nest_asyncio in this "
-                    "environment (`pip install nest_asyncio`) — it is "
-                    "auto-applied by llm.safechain_client when present "
-                    "and resolves the sync→async bridge inside safechain's "
-                    "token acquisition."
-                ) from e
-            raise
+            text = await _run(llm)
+        except asyncio.TimeoutError as e:
+            raise TimeoutError(
+                f"safechain LLM call did not return within "
+                f"{_SAFECHAIN_CALL_TIMEOUT_S:.0f}s"
+            ) from e
         except Exception as e:  # noqa: BLE001 — we re-classify below
             es = str(e)
             if "401" in es:
-                # Token expiry — refresh and retry once.
-                self._parent._refresh_llm()
-                text = await _do_invoke()
+                # Token expiry — rebuild the model and retry once.
+                await self._parent._arefresh_llm()
+                text = await _run(await self._parent._aensure_llm())
             elif "403" in es:
                 raise FirewallRejection("403", f"safechain blocked: {es}")
             elif "400" in es:
