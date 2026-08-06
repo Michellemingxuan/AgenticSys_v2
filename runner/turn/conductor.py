@@ -131,6 +131,22 @@ _NO_REPORTS_NOTE = (
 )
 
 
+# The complement of the note above, and the reason it exists: report_agent
+# returns `coverage="not_mentioned"` for BOTH "the folder is empty" and "no file
+# was relevant to this question". Synthesis Path A keys off that one value, so a
+# case WITH reports whose reports simply do not discuss the question was telling
+# the reviewer that no reports exist — a falsifiable claim, and wrong. Only the
+# server knows which is true, so it says so here.
+_REPORTS_PRESENT_NOTE = (
+    "[NOTE] This case HAS curated reports. If `report_agent` returns "
+    "coverage=\"not_mentioned\", that means the reports do not address THIS "
+    "question — it does NOT mean the case has no reports. In that case prefix "
+    "the answer with \"Prior reports do not address this question — answer is "
+    "from live specialist analysis only.\" Never state or imply that no curated "
+    "reports exist for this case."
+)
+
+
 
 # Scope provenance lives in the REASONING TRACE, not the final answer.
 #
@@ -167,21 +183,39 @@ def _cacheable_tool_calls(tool_calls: list, degraded_names) -> list[dict]:
     ]
 
 
+# The suffixes report_agent can actually open. Kept in step with the case-folder
+# lister in `agent_tools/agent_tool.py`, which shows it only these — detecting a
+# report the agent cannot then read would buy a wasted (and, on safechain,
+# failure-prone) round. A curated `.docx` or `.pdf` is therefore still invisible
+# to the whole path, which is a reader limitation, not a detection one.
+_REPORT_SUFFIXES = frozenset({".md", ".txt", ".csv"})
+
+
 def _case_has_reports(case_id: str) -> bool:
-    """True iff the case has at least one curated report (.md) to look up.
+    """True iff the case has at least one curated report file to look up.
 
     A case with no reports has either no ``reports/<case_id>`` folder at all, or
     one holding only generated artifacts (e.g. a ``charts/`` subdir) and no
     report files. Such cases must not be hindered by the mandatory-report_agent
     machinery — there is simply nothing to consult.
+
+    Recursive and case-insensitive on purpose. The old check counted only
+    top-level, exactly-``.md`` files, so a report filed one directory down or
+    saved as ``.MD``/``.txt`` read as "this case has no reports" — which both
+    suppresses report_agent AND makes the answer assert to the reviewer that no
+    reports exist. Charts still do not count: ``.png`` is not in the set.
     """
     folder = _REPORTS_DIR / case_id
     try:
         return folder.is_dir() and any(
-            p.is_file() and p.suffix == ".md" for p in folder.iterdir()
+            p.is_file() and p.suffix.lower() in _REPORT_SUFFIXES
+            for p in folder.rglob("*")
         )
     except OSError:
-        return False
+        # A transient IO error (network/Drive-backed folders) must not be read
+        # as "no reports" — that is a claim about the CASE, not about the disk.
+        # Assume reports exist and let report_agent report what it finds.
+        return True
 
 
 class _PlanningTimeout(Exception):
@@ -711,6 +745,8 @@ class TurnRunner:
         if not self.has_reports:
             framed_question = f"{framed_question}\n\n{_NO_REPORTS_NOTE}"
             sess.logger.log("case_has_no_reports", {"turn_id": turn_id})
+        else:
+            framed_question = f"{framed_question}\n\n{_REPORTS_PRESENT_NOTE}"
         self.run_input = framed_question
 
         # Each turn starts fresh — no accumulated conversation history.

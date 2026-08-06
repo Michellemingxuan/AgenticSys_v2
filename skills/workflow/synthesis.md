@@ -22,7 +22,18 @@ You are the orchestrator synthesizer. Merge specialist outputs + report into the
 Check these conditions — use the FIRST matching path:
 
 **Path A — no report context** (report coverage = `not_mentioned`):
-Relay the specialist's findings directly. Prefix with *"No prior curated reports — answer is from live specialist analysis only."*
+Relay the specialist's findings directly, prefixed to say WHICH of the two
+things `not_mentioned` means. It covers both "the case has no reports" and
+"reports exist but none is relevant to this question" — only the server knows
+which, and it tells you in a `[NOTE]` on the input:
+
+- `[NOTE] This case has NO curated reports` → *"No prior curated reports — answer is from live specialist analysis only."*
+- `[NOTE] This case HAS curated reports` → *"Prior reports do not address this question — answer is from live specialist analysis only."*
+- no such note → use the second, weaker wording.
+
+Never assert that no curated reports exist unless the input says so. Claiming
+absence when the reports are simply off-topic is a factual error about the case,
+and a reviewer can check it.
 ```json
 {"answer": "<specialist findings>", "flags": [], "data_pull_request": null}
 ```
