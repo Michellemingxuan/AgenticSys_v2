@@ -73,10 +73,19 @@ def build_records(qa_cache: dict, window: int = EPISODIC_WINDOW) -> list[dict]:
             sub_answers.append({"specialist": tc.get("tool"),
                                 "sub_question": tc.get("sub_question"),
                                 "sub_answer": sa})
-        records.append({"turn_id": e.get("turn_id_origin"),
-                        "question": e.get("origin_question"),
-                        "sub_answers": sub_answers,
-                        "final_answer": (e.get("answer") or "")[:EPISODIC_ANSWER_CHARS]})
+        record = {"turn_id": e.get("turn_id_origin"),
+                  "question": e.get("origin_question"),
+                  "sub_answers": sub_answers,
+                  "final_answer": (e.get("answer") or "")[:EPISODIC_ANSWER_CHARS]}
+        # The orchestrator-error fallback writes its turn here so the exchange
+        # is REMEMBERED (a follow-up must be able to refer to it) while staying
+        # unreplayable. But that answer was assembled after synthesis failed, so
+        # it is not settled fact — say so, rather than letting the next turn
+        # build on it as if it were a clean result. Only stamped when true, so
+        # ordinary records stay lean.
+        if e.get("partial_answer"):
+            record["partial_answer"] = True
+        records.append(record)
     return records
 
 
@@ -105,7 +114,16 @@ def render_orchestrator_block(records: list[dict]) -> str:
     if not records:
         return ""
     return ('[EPISODIC — recent turns this session, newest first. Use to resolve '
-            'references ("it", "the second spike") and to avoid re-asking:\n'
+            'references ("it", "the second spike") and to avoid re-asking. '
+            'The FIRST record is the IMMEDIATELY PRECEDING turn, and it is the '
+            'antecedent for any follow-up that carries no subject of its own '
+            '("think harder", "go deeper", "why is that?", "what contradicts '
+            'it?", "are you sure?"). Resolve those against the first record — '
+            'never against an older turn, and never against the KB-warmth block '
+            'below, which is undated. A record marked "partial_answer": true is '
+            'one where synthesis FAILED and the answer was assembled from '
+            'whatever the specialists had returned — treat it as incomplete, '
+            'not as a settled result, and re-query rather than building on it:\n'
             + json.dumps(records, ensure_ascii=False, default=str) + "\n]")
 
 

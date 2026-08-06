@@ -38,6 +38,10 @@ class _FakeSess:
         self.qa_cache = qa_cache
         self.specialist_kb = {}
         self.case_id = "case-1"
+        # Real CaseSession carries this; `_store_cached_qa` bumps it to order
+        # episodic records. The replay path stores an entry too (so a replayed
+        # turn still becomes the session's newest turn), so the fake needs it.
+        self._qa_turn_seq = 1
         self.cancel_in_flight = threading.Event()
         self.logger = types.SimpleNamespace(
             log=lambda *a, **k: None, session_id="chat-1",
@@ -116,6 +120,51 @@ async def test_cache_replay_emits_full_sse_set(monkeypatch):
     assert sess.events[:5] == [
         "team_plan", "agent_started", "agent_completed", "chart", "final",
     ]
+
+
+@pytest.mark.asyncio
+async def test_near_duplicate_replay_becomes_the_newest_episodic_turn(monkeypatch):
+    """A replayed turn must enter the transcript under the REVIEWER'S wording.
+
+    `episodic.build_records` orders turns by `turn_seq`, which only
+    `_store_cached_qa` bumps — the LRU touch in `_get_cached_qa` does not. So a
+    near-duplicate replay used to leave NO record of the question just asked,
+    and the next subject-less follow-up ("think harder", "what contradicts
+    it?") coreferenced against whichever turn last actually ran. The answer came
+    back coherent but about a different question, which is why this is worth a
+    lock: the failure is invisible in the SSE stream.
+    """
+    monkeypatch.setattr(conductor, "_NODE_TRACE_STORE", None)
+    prior = "any large spending right after a small payment"
+    asked = "any large spending closely followed small payments"
+    cache = _seeded_cache()
+    # Re-key the seeded entry onto the PRIOR question, as a real session would.
+    entry = cache.pop(_normalize_q("the cached question"))
+    entry["origin_question"] = prior
+    cache[_normalize_q(prior)] = entry
+    sess = _FakeSess(cache)
+
+    runner = TurnRunner(sess, turn_id="t9", question=asked)
+    verdict = _FakeVerdict(asked)
+    verdict.near_duplicate_of = prior          # what relevance_check returned
+    runner.verdict = verdict
+
+    assert await runner._replay_from_cache() is True
+
+    from tools.episodic import build_records
+    records = build_records(sess.qa_cache)
+
+    # The newest record is the question the reviewer actually typed — not the
+    # older wording it was matched against.
+    assert records[0]["question"] == asked
+    assert records[0]["turn_id"] == "t9"
+    # The matched prior turn survives as its own, older record.
+    assert [r["question"] for r in records] == [asked, prior]
+    # The stored answer is the ORIGINAL text: the "reused from a prior
+    # question" line is a display decoration, and re-appending it on a second
+    # replay would compound it.
+    assert records[0]["final_answer"] == "The cached answer text."
+    assert sess.qa_cache[_normalize_q(asked)]["replay_of"] == "t0"
 
 
 @pytest.mark.asyncio
@@ -294,3 +343,37 @@ async def test_ensure_report_agent_noop_when_nothing_dispatched(monkeypatch):
 
     assert fired["n"] == 0
     assert runner.final_answer == "OLD"
+
+
+def test_no_replay_entries_are_invisible_to_the_replay_cache():
+    """`qa_cache` does two jobs: replay cache AND the source of episodic memory.
+
+    The orchestrator-error fallback needs them split — its partial,
+    synthesis-failed answer must never be served again, but the next turn still
+    has to know the exchange happened or a subject-less follow-up binds to the
+    wrong antecedent. `no_replay` is what splits them.
+    """
+    from runner.turn.cache import _get_cached_qa, _store_cached_qa
+
+    sess = _FakeSess({})
+    key = _normalize_q("a question whose synthesis blew up")
+    _store_cached_qa(sess, key, {
+        "answer": "Partial answer assembled from what survived.",
+        "origin_question": "a question whose synthesis blew up",
+        "turn_id_origin": "t1", "tool_calls": [],
+        "no_replay": True, "partial_answer": True,
+    })
+
+    # Remembered: it is in the cache, so episodic sees it...
+    assert key in sess.qa_cache
+    from tools.episodic import build_records
+    assert build_records(sess.qa_cache)[0]["partial_answer"] is True
+    # ...but never replayed.
+    assert _get_cached_qa(sess, key) is None
+
+    # A later SUCCESSFUL run of the same question makes it replayable again.
+    _store_cached_qa(sess, key, {
+        "answer": "The real answer.", "origin_question": "a question whose synthesis blew up",
+        "turn_id_origin": "t2", "tool_calls": [],
+    })
+    assert _get_cached_qa(sess, key)["answer"] == "The real answer."

@@ -27,11 +27,23 @@ def _get_cached_qa(sess, cache_key: str | None) -> dict | None:
     ``dict`` preserves insertion order on supported Python versions, so a
     pop/reinsert gives us LRU behavior without changing the stored type or
     existing tests/fixtures.
+
+    Entries flagged ``no_replay`` are INVISIBLE here. The qa_cache does two
+    jobs — it is the replay cache AND the sole source of episodic memory
+    (``episodic.build_records`` reads it) — and the orchestrator-error fallback
+    needs those jobs split: its partial, synthesis-failed answer must never be
+    served again, but the next turn still has to know the exchange happened, or
+    a subject-less follow-up ("think harder") binds to the wrong antecedent.
+    Writing the entry with ``no_replay`` gets the memory without the replay. A
+    later SUCCESSFUL run of the same question overwrites the key with an
+    unflagged entry, which makes it replayable again — as it should be.
     """
     if not cache_key:
         return None
     cached = sess.qa_cache.get(cache_key)
     if cached is None:
+        return None
+    if cached.get("no_replay"):
         return None
     try:
         sess.qa_cache[cache_key] = sess.qa_cache.pop(cache_key)

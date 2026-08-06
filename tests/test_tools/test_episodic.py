@@ -152,3 +152,19 @@ def test_degraded_specialist_is_invisible_to_its_own_episodic():
         _degraded_call("modeling", "trend?", {"findings": "TSR fell to 12.0"}),
     ])})
     assert select_specialist_episodic(recs, "modeling", k=5) == []
+
+
+def test_partial_answer_is_stamped_on_the_record_only_when_set():
+    """The orchestrator-error fallback stores its turn so the exchange is
+    REMEMBERED, but the answer was assembled after synthesis failed. The record
+    has to say so, or the next turn builds on a partial result as if it were a
+    clean one. Ordinary records stay lean (no key at all)."""
+    ok = _entry(1, "Q1", [])
+    broken = {**_entry(2, "Q2", []), "partial_answer": True, "no_replay": True}
+    recs = build_records({"q1": ok, "q2": broken})
+
+    assert recs[0]["question"] == "Q2"
+    assert recs[0]["partial_answer"] is True
+    assert "partial_answer" not in recs[1]
+    # The instruction the orchestrator reads must explain what the flag means.
+    assert "partial_answer" in render_orchestrator_block(recs)

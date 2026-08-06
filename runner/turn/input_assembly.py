@@ -63,7 +63,13 @@ def _format_kb_warmth_hint(specialist_kb: dict) -> str:
         + "\n".join(lines)
         + "\n"
         + "Reuse warm specialists for in-domain follow-ups. "
-        + "Reference specific cached findings in sub-questions when relevant.]"
+        + "Reference specific cached findings in sub-questions when relevant. "
+        + "This block is UNDATED and unordered — it is NOT a recency signal. "
+        + "Never use it to decide what a subject-less follow-up (\"think "
+        + "harder\", \"it\", \"that\", \"are you sure?\") refers to: the "
+        + "EPISODIC block above is the only authority on which turn came last. "
+        + "A topic appearing here means a specialist once cached it, not that "
+        + "it is what the reviewer is currently asking about.]"
     )
 
 

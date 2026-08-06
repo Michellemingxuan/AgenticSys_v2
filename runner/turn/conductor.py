@@ -529,6 +529,40 @@ class TurnRunner:
                 "turn_id": turn_id, "ended_at": ts,
                 "duration_ms": ts - self.started_at, "outcome": "ok",
             })
+            # A REPLAYED TURN MUST STILL BECOME THE SESSION'S MOST RECENT TURN.
+            # `turn_seq` is the only ordering `episodic.build_records` trusts,
+            # and it is bumped ONLY by `_store_cached_qa`; the LRU touch inside
+            # `_get_cached_qa` reorders the dict but leaves `turn_seq` alone.
+            # So without this, the question the reviewer just asked never enters
+            # the episodic transcript under its own wording — and the NEXT
+            # subject-less follow-up ("think harder", "why is that?", "what
+            # contradicts it?") coreferences against whichever turn last
+            # actually RAN, which is a different question than the one on the
+            # reviewer's screen. That is a silent wrong-antecedent bug: the
+            # answer is coherent, just about something else.
+            #
+            # On an exact hit this rewrites the same key with a fresh seq (it
+            # becomes newest). On a near-duplicate it creates an entry under the
+            # NEW question's key, so the reviewer's actual wording is what the
+            # transcript carries. Stores the ORIGINAL answer text, not
+            # `replayed_text` — the "reused from a prior question" line is a
+            # display decoration, and re-appending it on a second replay would
+            # compound it.
+            # Guarded: this runs AFTER `turn_done`, so a bookkeeping failure
+            # here must not raise into the outer handler and emit a second
+            # terminal event for a turn the reviewer already saw complete.
+            try:
+                _store_cached_qa(sess, cache_key, {
+                    **cached,
+                    "origin_question": verdict.redacted_question,
+                    "turn_id_origin": turn_id,
+                    "answer": cached_text,
+                    "replay_of": cached.get("turn_id_origin"),
+                })
+            except Exception as exc:  # noqa: BLE001
+                sess.logger.log("qa_cache_replay_store_failed", {
+                    "turn_id": turn_id, "error": repr(exc),
+                })
             self.turn_timer.summary(outcome="qa_cache_hit", cache_hit_kind=cache_hit_kind)
             return True
         return False
@@ -1058,6 +1092,37 @@ class TurnRunner:
                     "outcome": "orchestrator_error_fallback" if is_model_behavior
                                else "orchestrator_error",
                 })
+                # Register the turn in episodic memory WITHOUT making it
+                # replayable. The reviewer saw a normal-looking answer here, so
+                # the next turn must know this exchange happened — otherwise a
+                # subject-less follow-up ("think harder", "what contradicts
+                # it?") binds to whichever turn last reached the cache, and
+                # answers a different question coherently. But the answer
+                # itself is PARTIAL (synthesis failed; this text was assembled
+                # from whatever specialists returned), so `no_replay` keeps
+                # `_get_cached_qa` from ever serving it again, and
+                # `partial_answer` tells the next turn not to treat it as
+                # settled. Guarded: this runs after `turn_done`, so a
+                # bookkeeping failure must not raise a second terminal event.
+                try:
+                    _degraded = set(
+                        getattr(ctx, "_degraded_specialists", None) or {})
+                    _store_cached_qa(sess, self.cache_key, {
+                        "answer": answer_text,
+                        "flags": flags,
+                        "data_pull_request": None,
+                        "turn_id_origin": turn_id,
+                        "origin_question": self.verdict.redacted_question,
+                        "charts": [],
+                        "tool_calls": _cacheable_tool_calls(
+                            self.tool_calls, _degraded),
+                        "no_replay": True,
+                        "partial_answer": True,
+                    })
+                except Exception as exc:  # noqa: BLE001
+                    sess.logger.log("qa_cache_fallback_store_failed", {
+                        "turn_id": turn_id, "error": repr(exc),
+                    })
                 self.turn_timer.summary(
                     outcome="orchestrator_error_fallback" if is_model_behavior
                     else "orchestrator_error",
