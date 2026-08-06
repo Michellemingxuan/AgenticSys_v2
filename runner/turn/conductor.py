@@ -1591,6 +1591,36 @@ class TurnRunner:
                 "n_charts": len(chart_payloads),
                 "topics": [p["topic"] for p in chart_payloads],
             })
+
+        # Retract placeholders that will never be filled. `chart_pending` fires
+        # per specialist DURING the turn, but `chart` is emitted here, AFTER
+        # `_collect_turn_charts` dedups identical figures across specialists.
+        # Every dropped chart therefore leaves a placeholder waiting on a
+        # `chart` event that never comes — it hangs as a second,
+        # permanently-loading card beside the real one, which is exactly what
+        # "two specialists drew the same plot" looks like on screen. The
+        # frontend cannot detect this on its own: nothing in the stream says
+        # the pending chart was superseded. Emitting the difference is the only
+        # place that knows. Additive and backward-compatible — a client that
+        # ignores `chart_cancelled` behaves exactly as it does today.
+        try:
+            pending = getattr(self.ctx, "_charts_pending", None) or set()
+            emitted = {(p["specialist"], p["topic"]) for p in chart_payloads}
+            orphaned = sorted(pending - emitted)
+            for spec, topic in orphaned:
+                sess.emit("chart_cancelled", {
+                    "turn_id": turn_id, "specialist": spec, "topic": topic,
+                    "reason": "superseded_by_identical_chart",
+                })
+            if orphaned:
+                sess.logger.log("chart_pending_retracted", {
+                    "turn_id": turn_id,
+                    "n_retracted": len(orphaned),
+                    "retracted": [{"specialist": s, "topic": t}
+                                  for s, t in orphaned],
+                })
+        except Exception:  # noqa: BLE001 — trace/UI bookkeeping is never load-bearing
+            pass
         self.turn_timer.record(
             "chart_collect_emit",
             int((time.perf_counter() - timer_t0) * 1000),

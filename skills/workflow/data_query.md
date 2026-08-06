@@ -488,5 +488,6 @@ When your sub-question asks for the **drivers or causes of a phenomenon that liv
 2. **Label cross-domain values with the SOURCE TABLE** in `evidence`: *"TSR (`tot_struct_risk_score` on `model_scores`): 24.5 in 2025-Q1."*
 3. **Quote, don't interpret** unfamiliar columns. *"TSR is 24.5"* is fine; *"TSR is risky because…"* on a column outside your `data_hints` is the subject specialist's call.
 4. **Match depth to your role.** Condition role → 1-2 cross-peek queries max, NOT a full trend / driver analysis.
+4b. **Never TREND another domain's metric — that draws their chart.** Charts render automatically from your `summarize_trend` / `batch_summarize_trend` / `summarize_by_group` outputs, so trending a column you don't own emits the owning specialist's figure under YOUR name. When they are on the team, the reviewer sees the same plot twice; the server now suppresses the duplicate, so the round you spent on it bought nothing. Anchor a cross-peek with a POINT value instead — `aggregate_column` for the level at a date, or `kb_lookup` for what they already found — and cite it in `evidence` per rule 2. Trend only what your own `data_hints` cover.
 5. **Flag missing columns in `data_gaps`** — don't guess.
 6. **`general_specialist` reconciles** across the team. Your cross-peek anchors your finding; don't try to do its job.

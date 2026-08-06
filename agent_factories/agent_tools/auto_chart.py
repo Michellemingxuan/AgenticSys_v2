@@ -10,6 +10,102 @@ from agent_factories.agent_tools.series_extract import _ParsedSeries, _parse_ser
 from tools.viz_renderer import render_chart, _infer_unit
 
 
+def _table_owners() -> dict[str, str]:
+    """``{real table name: specialist that owns it}``, from the skills' own
+    ``data_hints``.
+
+    Derived rather than declared twice, so adding a table to a skill is enough.
+    (``runner.turn.input_assembly`` derives the same map for the orchestrator's
+    variable-routing hint; it is not imported here because ``runner`` imports
+    ``agent_factories``, not the other way round.) Imports are local and
+    guarded so a chart path can never be what breaks a turn.
+    """
+    owners: dict[str, str] = {}
+    try:
+        from skills.domain.loader import list_domain_skills, load_domain_skill
+        from tools.data_tools import _resolve_real_table
+    except Exception:  # noqa: BLE001
+        return owners
+    for skill_name in list_domain_skills():
+        skill = load_domain_skill(skill_name)
+        if not skill:
+            continue
+        for table in skill.data_hints or []:
+            owners.setdefault(table, skill.name)
+            try:
+                owners.setdefault(_resolve_real_table(table), skill.name)
+            except Exception:  # noqa: BLE001
+                pass
+    return owners
+
+
+def record_chart_pending(app_ctx, specialist: str, topic: str) -> None:
+    """Remember that a `chart_pending` placeholder was emitted for this key.
+
+    `chart_pending` fires per specialist DURING the turn (the auto-chart task
+    starts the moment a specialist returns), but the real `chart` events are
+    emitted at END of turn from `_collect_turn_charts`, which dedups identical
+    figures across specialists. Anything dedup drops therefore leaves a
+    placeholder the frontend clears on a matching `chart` event that never
+    arrives — it hangs as a second, permanently-loading card next to the real
+    one, which is what "two specialists drew the same plot" looks like on
+    screen. `_finalize` diffs this set against what it actually emitted and
+    retracts the difference. Best-effort: never break a render over bookkeeping.
+    """
+    try:
+        pending = getattr(app_ctx, "_charts_pending", None)
+        if pending is None:
+            pending = set()
+            setattr(app_ctx, "_charts_pending", pending)
+        pending.add((specialist, topic))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _drop_foreign_series(parsed, name: str, app_ctx, logger):
+    """Keep only the series this specialist is entitled to CHART.
+
+    Specialists may query any table — the cross-domain peek is deliberate and
+    useful in the TEXT of a finding. Charting it is different: the chart is the
+    owning specialist's deliverable, and when a peeker renders it too the turn
+    shows the same figure twice. Measured live: `bureau` trended
+    `credit_loss_prob_max` and `tot_struct_risk_score_max` (CDSS / TSR —
+    `modeling`'s metrics) alongside its own FICO series, so the turn emitted 13
+    charts and, because cross-specialist dedup is first-writer-wins, the CDSS
+    and TSR plots ended up attributed to `bureau` while `modeling` — which
+    owns them and analysed them properly — showed none.
+
+    Only suppressed when the OWNER also ran this turn: if `modeling` wasn't on
+    the team, `bureau`'s peek is the only source of that chart and dropping it
+    would lose the figure entirely. Unknown table, unknown owner, or
+    owner-not-dispatched all keep the series — this never removes a chart
+    nobody else is going to draw.
+    """
+    called = getattr(app_ctx, "_domain_specialists_called", None)
+    called = called if isinstance(called, set) else set()
+    if not called:
+        return parsed
+    owners = _table_owners()
+    if not owners:
+        return parsed
+    kept, dropped = [], []
+    for ps in parsed:
+        table = (getattr(ps, "table_name", "") or "").strip()
+        owner = owners.get(table) if table else None
+        if owner and owner != name and owner in called:
+            dropped.append((ps.column_name, table, owner))
+            continue
+        kept.append(ps)
+    if dropped and logger:
+        logger.log("auto_chart_foreign_series_dropped", {
+            "specialist": name,
+            "n_dropped": len(dropped),
+            "dropped": [{"column": c, "table": t, "owner": o}
+                        for c, t, o in dropped],
+        })
+    return kept
+
+
 async def _auto_chart_from_tool_outputs(
     app_ctx, name: str, tool_outputs: str,
 ) -> int:
@@ -50,6 +146,16 @@ async def _auto_chart_from_tool_outputs(
                 "tool_outputs_chars": len(tool_outputs)})
         return 0
 
+    # Drop series belonging to another specialist's tables BEFORE the split, so
+    # the log below reflects what is actually charted rather than what was
+    # parsed.
+    parsed = _drop_foreign_series(parsed, name, app_ctx, logger)
+    if not parsed:
+        if logger:
+            logger.log("auto_chart_skipped", {
+                "specialist": name, "reason": "all_series_foreign"})
+        return 0
+
     # Group series by key_field type (period vs group)
     trend_series = [ps for ps in parsed if ps.key_field == "period"]
     group_series = [ps for ps in parsed if ps.key_field in ("group", "merchant")]
@@ -70,6 +176,7 @@ async def _auto_chart_from_tool_outputs(
         charts_rendered = _render_auto_charts(
             trend_series, group_series, name, charts_dir,
             kb, turn_id, catalog, logger, emit_event, turn_seq,
+            app_ctx=app_ctx,
         )
     except Exception as exc:  # noqa: BLE001
         if logger:
@@ -91,6 +198,7 @@ async def _auto_chart_from_tool_outputs(
 def _render_auto_charts(
     trend_series, group_series, name, charts_dir,
     kb, turn_id, catalog, logger, emit_event=None, turn_seq=None,
+    app_ctx=None,
 ) -> int:
 
     def _emit_pending(topic: str, kind: str) -> None:
@@ -106,6 +214,7 @@ def _render_auto_charts(
                 emit_event("chart_pending", {
                     "specialist": name, "topic": topic, "kind": kind,
                 })
+                record_chart_pending(app_ctx, name, topic)
             except Exception:  # noqa: BLE001 - emit must never break rendering
                 pass
 

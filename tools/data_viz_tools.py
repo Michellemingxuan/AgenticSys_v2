@@ -215,6 +215,11 @@ def build_make_chart_tool(specialist_name: str):
                 "topic": topic.strip(),
                 "kind": kind,
             })
+            # Track it so `_finalize` can retract the placeholder if end-of-turn
+            # dedup drops this chart — otherwise the card hangs in the loading
+            # state forever. Same bookkeeping as the auto-chart path.
+            from agent_factories.agent_tools.auto_chart import record_chart_pending
+            record_chart_pending(app_ctx, specialist_name, topic.strip())
 
         # Build a KnowledgePoint-shaped dict matching the auto-distiller's
         # output schema. `confidence='high'` because the specialist
