@@ -290,6 +290,11 @@ _SCOPE_TOOLS = frozenset({
 
 _MAX_SCOPE_LINES = 8
 
+# Filters render structurally, so this is generous enough that a realistic
+# multi-filter call fits whole. Raised from the old 120 because the previous
+# budget was spent on JSON punctuation rather than on the filters themselves.
+_MAX_FILTER_CHARS = 160
+
 
 def _iter_calls(result):
     """Yield `(tool_name, params)` for each function_call in the transcript."""
@@ -314,6 +319,45 @@ def _iter_calls(result):
         yield name, (params if isinstance(params, dict) else {})
 
 
+def _clip(text: str, limit: int) -> str:
+    """Truncate VISIBLY. A silent cut reads as a complete line, so nobody
+    checks the part that went missing."""
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
+def _filter_bits(value) -> str:
+    """Render a filters list as `column op value; …` instead of raw JSON.
+
+    The raw form was dumped and hard-cut at 120 chars, which sliced mid-token
+    (`"op":"gte","valu`) and — the real damage — dropped the THRESHOLD, which
+    is exactly what a reviewer needs to judge whether a number was measured
+    over the right set. Structured, the same filters run about half as long,
+    so they usually survive intact; matches the `where X eq 'v'` idiom already
+    used for the single-filter case.
+    """
+    items = value
+    if isinstance(items, str):
+        try:
+            items = json.loads(items)
+        except (json.JSONDecodeError, ValueError):
+            return _clip(items, _MAX_FILTER_CHARS)
+    if not isinstance(items, list):
+        return _clip(str(value), _MAX_FILTER_CHARS)
+    parts: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            parts.append(str(item))
+            continue
+        column = item.get("column") or item.get("name") or "?"
+        op = item.get("op") or "eq"
+        raw = item.get("value")
+        text = ",".join(str(v) for v in raw) if isinstance(raw, list) else str(raw)
+        # `between` carries its endpoints as "lo,hi"; `..` reads as a range and
+        # keeps it distinguishable from an `in` list.
+        parts.append(f"{column} {op} {text.replace(',', '..') if op == 'between' else text}")
+    return _clip("; ".join(parts), _MAX_FILTER_CHARS)
+
+
 def _one_scope(tool: str, p: dict) -> str:
     """One compact line naming the table, column, op and every filter."""
     table = p.get("table_name") or p.get("left_table") or p.get("base_table") or ""
@@ -335,17 +379,17 @@ def _one_scope(tool: str, p: dict) -> str:
         bits.append(f"where {p['filter_column']} "
                     f"{p.get('filter_op', 'eq')} {p['filter_value']!r}")
     if p.get("filters"):
-        bits.append(f"filters={str(p['filters'])[:120]}")
+        bits.append(f"filters=[{_filter_bits(p['filters'])}]")
     if p.get("base_filter_column"):
         bits.append(f"base={p['base_filter_column']} "
                     f"{p.get('base_filter_op', 'eq')} {p.get('base_filter_value')!r}")
     if p.get("timestamps"):
-        bits.append(f"timestamps={str(p['timestamps'])[:60]}")
+        bits.append(f"timestamps={_clip(str(p['timestamps']), 60)}")
     for k in ("top_n", "limit"):
         if p.get(k):
             bits.append(f"{k}={p[k]}")
     if p.get("specs_json"):
-        bits.append(f"specs={str(p['specs_json'])[:140]}")
+        bits.append(f"specs={_clip(str(p['specs_json']), 140)}")
 
     return f"{tool}({head}" + (f", {', '.join(bits)}" if bits else "") + ")"
 
@@ -398,6 +442,38 @@ def _window_of(params: dict) -> str:
     return lo if lo == hi else f"{lo}..{hi}"
 
 
+def _scope_targets(params: dict):
+    """The ``(table, params)`` pairs one call constrained.
+
+    The batch tools (`batch_aggregate`, `batch_summarize_trend`) carry their
+    tables inside `specs_json` instead of a top-level `table_name`, so looking
+    only at the direct params drops those calls entirely — and a specialist
+    that used ONLY batch tools then produced an empty scope, scoring 0 on
+    provenance even though `measured_over` had captured every table. Yield
+    each spec's table so the batch tools count like any other call.
+    """
+    table = (params.get("table_name") or params.get("left_table")
+             or params.get("base_table") or "")
+    if table:
+        yield str(table), params
+        return
+    specs = params.get("specs_json")
+    if isinstance(specs, str):
+        try:
+            specs = json.loads(specs)
+        except (json.JSONDecodeError, ValueError):
+            return
+    for spec in specs if isinstance(specs, list) else []:
+        if not isinstance(spec, dict):
+            continue
+        spec_table = (spec.get("table_name") or spec.get("left_table")
+                      or spec.get("base_table") or "")
+        if spec_table:
+            # The spec's own filters win; anything it omits falls back to the
+            # enclosing call, which is where a shared window usually lives.
+            yield str(spec_table), {**params, **spec}
+
+
 def scope_line(result) -> str:
     """`spends: all dates; model_scores_transaction: 2025-05-01..2025-05-31`.
 
@@ -410,11 +486,8 @@ def scope_line(result) -> str:
         for tool, params in _iter_calls(result):
             if tool not in _SCOPE_TOOLS:
                 continue
-            table = (params.get("table_name") or params.get("left_table")
-                     or params.get("base_table") or "")
-            if not table:
-                continue
-            windows.setdefault(table, set()).add(_window_of(params))
+            for table, scoped in _scope_targets(params):
+                windows.setdefault(table, set()).add(_window_of(scoped))
     except Exception:  # noqa: BLE001
         return ""
 

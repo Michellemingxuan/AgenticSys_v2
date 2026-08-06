@@ -265,6 +265,94 @@ def test_scope_line_is_empty_without_data_calls():
     assert scope_line(_Calls([("kb_lookup", {"topic": "t"})])) == ""
 
 
+def test_measured_over_keeps_the_threshold_in_a_multi_filter_call():
+    """Regression: filters were dumped as raw JSON and hard-cut at 120 chars.
+
+    The cut landed mid-token (`"op":"gte","valu`) and dropped the THRESHOLD —
+    the one part a reviewer needs to tell whether a number was measured over
+    the right set. Rendering structurally halves the length, so it fits.
+    """
+    r = _Calls([("transaction_detail", {
+        "table_name": "model_scores_transaction",
+        "filters": '[{"column":"trans_dt","op":"between",'
+                   '"value":"2024-01-01,2025-06-30"},'
+                   '{"column":"tot_struct_risk_score","op":"gte","value":"850"}]',
+        "limit": 20})])
+    line = measured_over(r)[0]
+    assert "tot_struct_risk_score gte 850" in line       # threshold survives
+    assert "trans_dt between 2024-01-01..2025-06-30" in line
+    assert "limit=20" in line
+    assert "…" not in line                                # nothing was cut
+    assert '"column"' not in line                         # no raw JSON
+
+
+def test_measured_over_marks_a_truncated_filter_list():
+    """When a cap does bite it must be VISIBLE, not a line that ends mid-word."""
+    filters = [
+        {"column": f"column_with_a_long_name_{i}", "op": "eq", "value": f"value_{i}"}
+        for i in range(12)
+    ]
+    line = measured_over(_Calls([("query_table", {
+        "table_name": "spends", "filters": json.dumps(filters)})]))[0]
+    assert "…" in line                       # the cut announces itself
+    assert line.endswith("])")               # and the line still closes cleanly
+    assert "column_with_a_long_name_0 eq value_0" in line  # earliest kept
+
+
+def test_measured_over_survives_unparseable_filters():
+    """Provenance must never break the turn."""
+    line = measured_over(_Calls([("query_table", {
+        "table_name": "spends", "filters": "{not json"})]))[0]
+    assert "spends" in line
+
+
+def test_scope_line_reads_tables_out_of_batch_specs():
+    """The batch tools keep their tables in `specs_json`, not `table_name`.
+
+    Regression: a specialist that used ONLY batch tools produced an EMPTY
+    scope and scored 0 on provenance, even though `measured_over` had captured
+    every table — the trace showed `batch_aggregate(?, specs=[…])` with the
+    name sitting right there in the spec. Observed on payment_returns and
+    tsr_cdss_trend across a 10-repeat run.
+    """
+    r = _Calls([("batch_aggregate", {"specs_json": json.dumps([
+        {"table_name": "payments_data", "column": "Payment Date", "op": "count"},
+    ])})])
+    assert scope_line(r) == "payments_data: all dates"
+
+
+def test_scope_line_covers_every_table_in_a_multi_spec_batch():
+    r = _Calls([("batch_summarize_trend", {"specs_json": json.dumps([
+        {"table_name": "modelling_data", "value_column": "credit_loss_prob"},
+        {"table_name": "model_scores", "value_column": "cdss"},
+    ])})])
+    out = scope_line(r)
+    assert "modelling_data: all dates" in out
+    assert "model_scores: all dates" in out
+
+
+def test_scope_line_takes_the_window_from_the_spec():
+    r = _Calls([("batch_summarize_trend", {"specs_json": json.dumps([
+        {"table_name": "model_scores",
+         "filters": '[{"column":"trans_month","op":"between",'
+                    '"value":"2024-09,2025-04"}]'},
+    ])})])
+    assert scope_line(r) == "model_scores: 2024-09..2025-04"
+
+
+def test_scope_line_accepts_specs_already_parsed():
+    """`specs_json` arrives as a list when the arguments were not re-encoded."""
+    r = _Calls([("batch_aggregate", {"specs_json": [
+        {"table_name": "spends", "column": "Amount", "op": "sum"},
+    ]})])
+    assert scope_line(r) == "spends: all dates"
+
+
+def test_scope_line_survives_unparseable_specs():
+    """Provenance must never break the turn — a bad spec yields no scope."""
+    assert scope_line(_Calls([("batch_aggregate", {"specs_json": "{not json"})])) == ""
+
+
 # ── the false positives measured on real runs ───────────────────────────────
 #
 # Three consecutive live runs flagged essentially nothing but noise:
