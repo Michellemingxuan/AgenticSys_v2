@@ -803,3 +803,65 @@ async def test_scope_reaches_the_emitted_trace_payload():
     # The dump the SSE `agent_completed` payload is built from must keep it.
     dumped = TurnRunner.__new__(TurnRunner)._safe_dump(out)
     assert dumped["scope"] == "spends: all dates"
+
+
+@pytest.mark.asyncio
+async def test_max_turns_exceeded_retries_converged_instead_of_giving_up():
+    """A blown turn budget must degrade to a partial answer, not to silence.
+
+    Terminal failure here is expensive in a way that is easy to miss: the
+    orchestrator gets NOTHING from that domain and answers from the curated
+    report alone, which a reviewer reads as "the live data found nothing" — a
+    much stronger claim than "we ran out of rounds". Measured live on a
+    cross-table question ("large spend shortly after a small payment"), which
+    needs 4-5 rounds before synthesis even starts.
+
+    `MaxTurnsExceeded` carries no partial result, so the retry restarts from the
+    sub-question with its scope collapsed by `_CONVERGE_DIRECTIVE`.
+    """
+    from agents import RunContextWrapper
+    from agents.exceptions import MaxTurnsExceeded
+    from agent_factories.agent_tools.agent_tool import _CONVERGE_DIRECTIVE
+
+    inner_agent = Agent(name="inner", instructions="x", tools=[])
+    ctx = _make_failure_ctx()
+    seen_inputs = []
+
+    async def _blow_then_converge(_agent, run_input, **_kw):
+        seen_inputs.append(run_input)
+        if len(seen_inputs) == 1:
+            raise MaxTurnsExceeded("Max turns (10) exceeded")
+        return type("R", (), {"final_output": "narrow but grounded",
+                              "to_input_list": lambda self_: []})()
+
+    with patch("agent_factories.agent_tools.agent_tool.Runner.run",
+               new=_blow_then_converge):
+        wrapped = agent_tool(inner_agent, name="spend_payments", description="d")
+        out = await wrapped.on_invoke_tool(
+            RunContextWrapper(ctx), json.dumps({"sub_question": "large spend after small payment?"})
+        )
+
+    # Retried, and the answer survives instead of a [FAILED ...] payload.
+    # (Success returns the structured payload; only failures are [FAILED ...]
+    # strings.)
+    assert len(seen_inputs) == 2
+    rendered = out if isinstance(out, str) else json.dumps(out, default=str)
+    assert not rendered.startswith("[FAILED")
+    assert "narrow but grounded" in rendered
+    # The retry carries the converge directive; the first attempt does not.
+    assert _CONVERGE_DIRECTIVE not in str(seen_inputs[0])
+    assert _CONVERGE_DIRECTIVE in str(seen_inputs[1])
+    # A recovered turn is not a failure — nothing recorded for the orchestrator.
+    assert ctx._specialist_errors == []
+    assert any(e[0] == "specialist_max_turns_retry" for e in ctx.logger.events)
+
+
+def test_converge_directive_is_appended_once_not_stacked():
+    """Guard against the directive piling up across attempts."""
+    from agent_factories.agent_tools.agent_tool import (
+        _CONVERGE_DIRECTIVE, _converge_input,
+    )
+
+    once = _converge_input("the sub-question")
+    assert str(once).count(_CONVERGE_DIRECTIVE) == 1
+    assert _converge_input(once) == once

@@ -27,15 +27,32 @@ from agent_factories.agent_tools.specialist_input_tool import (
 )
 
 
-# Inner-specialist turn budget. SDK default is 10. Lowered from 15 → 6
-# after measuring real traces: data specialists were consistently using
-# 2-3 rounds with the system_prompt batching guidance, and the rare
-# 4th round was almost always over-exploration that didn't improve the
-# answer. 6 gives a small safety margin for genuinely hard questions
-# while shaving ~25-30s off the wall-clock outliers. Pair with the
-# "emit final output ASAP" rule in data_query.md — together they
-# discourage the model from looping past a clear answer.
-_SPECIALIST_MAX_TURNS = 6
+# Inner-specialist turn budget — a CEILING, not a target. Raising it does NOT
+# slow a fast question down: a narrow lookup still emits SpecialistOutput on
+# turn 2 whatever this is set to. It only decides when a genuinely multi-step
+# question gets KILLED instead of answered.
+#
+# History: the SDK default is 10; this was lowered 15 → 6 after measuring real
+# traces where data specialists used 2-3 rounds and a 4th was usually
+# over-exploration. That measurement was taken on FETCH questions ("how many",
+# "what's the total") and still describes them correctly.
+#
+# It does not describe the shape this system now dispatches. A cross-table
+# temporal question ("any large spend shortly after a small payment") has no
+# single tool behind it: the specialist has to establish the thresholds, pull
+# each side, and correlate them — 4-5 rounds before synthesis starts. Measured
+# live: `spend_payments` hit the 6-turn cap in 8.9s (fast calls, so a budget
+# ceiling, not a loop) and returned NOTHING, leaving the orchestrator to answer
+# from the curated report alone — the exact failure the reviewer reads as "the
+# live data found nothing". Investigation mandates (`data_query.md`
+# § INVESTIGATION MANDATES) make that multi-step shape ordinary, not rare.
+#
+# So the ceiling returns to the SDK default while the BEHAVIOURAL budget stays
+# exactly where it was: `data_query.md` §1.1 still calls round 5+ a smell and
+# §1.2 still says emit the moment one result answers. Those shape what the model
+# does; this only decides what happens when it legitimately needs more. The real
+# wall-clock fence is `_SPECIALIST_TIMEOUT_S` below.
+_SPECIALIST_MAX_TURNS = int(os.environ.get("SPECIALIST_MAX_TURNS", "10"))
 
 # Wall-clock budget per specialist call. Bounds hangs from stalled LLM /
 # transport layers that ``max_turns`` alone can't catch. 240s is generous
@@ -228,6 +245,44 @@ def _retry_input(result, errors: list[dict], fallback):
             {"role": "user", "content": str(fallback)}]
         return base + [{"role": "user", "content": directive}]
     return prior + [{"role": "user", "content": directive}]
+
+
+# Injected when a specialist exhausts its turn budget. Terminal failure there is
+# expensive in a way that is easy to miss: the orchestrator gets NOTHING from
+# that domain, so it answers from the curated report alone — and the reviewer
+# reads a report-sourced answer as "the live data found nothing", which is a
+# different and much stronger claim than "we ran out of rounds".
+#
+# `MaxTurnsExceeded` carries no partial result, so the retry cannot resume the
+# transcript the way `_retry_input` does. It restarts from the sub-question
+# instead, with the SCOPE COLLAPSED — one decisive call, then emit. A narrow
+# grounded answer plus an honest `data_gaps` beats silence.
+_CONVERGE_DIRECTIVE = (
+    "[BUDGET EXHAUSTED — CONVERGE NOW] Your previous attempt at this "
+    "sub-question ran out of tool-call rounds and returned nothing usable. Do "
+    "NOT explore. Pick the SINGLE most decisive data point the question needs, "
+    "get it in ONE batched call (`batch_aggregate` / `batch_query_table` / "
+    "`batch_summarize_trend` — put every column you need into that one call), "
+    "then emit `SpecialistOutput` on your very next turn. Answer the narrowest "
+    "version of the question you can actually settle, and name what you had to "
+    "drop in `data_gaps`. A partial, grounded answer is the goal — another "
+    "round of exploration is not available."
+)
+
+
+def _converge_input(fallback):
+    """The original sub-question plus the converge directive.
+
+    Appended once: across attempts the directive stays present rather than
+    stacking duplicate copies (the same guard the orchestrator's dispatch
+    retry uses).
+    """
+    base = fallback if isinstance(fallback, list) else [
+        {"role": "user", "content": str(fallback)}]
+    if any(isinstance(m, dict) and m.get("content") == _CONVERGE_DIRECTIVE
+           for m in base):
+        return base
+    return base + [{"role": "user", "content": _CONVERGE_DIRECTIVE}]
 
 
 def _normalize_subq(text: str) -> str:
@@ -522,6 +577,25 @@ def agent_tool(
                     continue
                 break  # success (grounded, or out of retry budget)
             except MaxTurnsExceeded as exc:
+                # Retry once, collapsed to a single decisive call, before giving
+                # up. A blown budget used to be terminal, which handed the
+                # orchestrator nothing from this domain and let a report-sourced
+                # answer read as a live-data finding. Shares the same 2-attempt
+                # cap as the ModelBehaviorError / ungrounded retries, so a
+                # specialist still costs at most two inner runs however it went
+                # wrong.
+                if _attempt + 1 < _MAX_SPECIALIST_ATTEMPTS:
+                    if logger is not None:
+                        logger.log("specialist_max_turns_retry", {
+                            "specialist": name,
+                            "attempt": _attempt,
+                            "max_turns": max_turns,
+                            "sub_question": redacted_in,
+                        })
+                    retry_kind = "max_turns_retry"
+                    run_input = _converge_input(run_input)
+                    result = None
+                    continue
                 timer.summary(
                     outcome="failed",
                     error_type="max_turns_exceeded",

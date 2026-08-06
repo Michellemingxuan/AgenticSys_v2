@@ -193,7 +193,7 @@ So: KB has what you need → use it, no query (fast). KB is missing a needed dat
 point → query for that point. KB has only a near-miss for the asked metric →
 query (a near-miss is not an answer; see above).
 
-## 1.1 Round budget (hard cap: 6)
+## 1.1 Round budget (targets below; hard cap 10, and hitting it kills your answer)
 
 | Question shape | Target rounds | Pattern |
 |---|---|---|
@@ -203,6 +203,8 @@ query (a near-miss is not an answer; see above).
 | Falsification / investigation mandate (§1.2 EXCEPTION) | **4-5** | 1 WIDE batch covering every check + synthesis |
 
 **Round 5+ is a strong smell that you're over-exploring** — unless a §1.2 exception applies, and even then the extra work belongs in a wider batch, not more rounds. Hit round 5 without an answer? Emit partial `SpecialistOutput` with the gap in `data_gaps`.
+
+**Running out of rounds returns NOTHING — worse than a partial answer.** The cap is enforced, not advisory: exceed it and your entire run is discarded, the orchestrator receives no data from your domain, and the reviewer gets an answer sourced from the curated reports that reads as though the live data found nothing. **Always emit a narrow, grounded `SpecialistOutput` while you still have a round left**, with whatever you could not reach named in `data_gaps`. Cross-table questions ("X shortly after Y") are where this bites: establish thresholds and pull both sides in ONE batch, then correlate in your head — do not spend a round per side.
 
 ## 1.2 Stop condition
 
