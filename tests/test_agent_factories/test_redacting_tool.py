@@ -550,9 +550,15 @@ async def test_redacting_tool_skips_kb_digest_on_intra_turn_followup():
 
 
 @pytest.mark.asyncio
-async def test_distiller_persists_knowledge_points_to_session_kb():
+async def test_distiller_persists_knowledge_points_to_session_kb(monkeypatch):
     """After a successful specialist run, the distiller's knowledge_points
     must land in `_specialist_kb[name]` keyed by specialist."""
+    import agent_factories.redacting_tool as rt_mod
+    # The distiller is OFF by default in this baseline build
+    # (tools/kb_tools.py::DISTILLER_ENABLED). These tests cover the
+    # distiller itself, so they opt in explicitly — patching the name
+    # bound into `redacting_tool`, which imported it by value.
+    monkeypatch.setattr(rt_mod, "DISTILLER_ENABLED", True)
     from agents import RunContextWrapper
     from models.types import KnowledgePoint, DistillerOutput
 
@@ -621,9 +627,15 @@ async def test_distiller_persists_knowledge_points_to_session_kb():
 
 
 @pytest.mark.asyncio
-async def test_distiller_failure_does_not_break_specialist_response():
+async def test_distiller_failure_does_not_break_specialist_response(monkeypatch):
     """When the distiller errors out, the specialist's payload still
     returns to the orchestrator and the KB simply doesn't grow this turn."""
+    import agent_factories.redacting_tool as rt_mod
+    # The distiller is OFF by default in this baseline build
+    # (tools/kb_tools.py::DISTILLER_ENABLED). These tests cover the
+    # distiller itself, so they opt in explicitly — patching the name
+    # bound into `redacting_tool`, which imported it by value.
+    monkeypatch.setattr(rt_mod, "DISTILLER_ENABLED", True)
     from agents import RunContextWrapper
 
     distiller = Agent(name="distiller", instructions="x", tools=[])

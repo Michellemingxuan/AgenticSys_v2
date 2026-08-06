@@ -59,6 +59,7 @@ from llm.factory import FirewalledChatShim, build_session_clients
 from llm.firewall_stack import FirewallStack, redact_payload
 from logger.event_logger import EventLogger
 from logger.process_timer import ProcessTimer
+from tools.kb_tools import DISTILLER_ENABLED
 from tools.node_trace import (
     NodeTrace, NodeTraceRunHooks, NodeTraceStore, TURN_SCOPE, TurnScope,
     _open_node, attach_io, attach_latency, attach_tag, attach_usage,
@@ -515,6 +516,15 @@ def _format_kb_warmth_hint(specialist_kb: dict) -> str:
 
     Returns "" when no specialist has any KPs (e.g. first turn).
     """
+    # Baseline ablation: with the distiller off there is no cross-turn
+    # specialist memory, so the hint must not fire. This check is NOT
+    # redundant with the empty-KB check below — the auto-chart path writes its
+    # own KPs into `specialist_kb` (that is how a chart reaches
+    # `_collect_turn_charts`), and those carry a full `claim` string. Without
+    # this line the baseline would keep a cross-turn memory made entirely of
+    # chart claims. See tools/kb_tools.py::DISTILLER_ENABLED.
+    if not DISTILLER_ENABLED:
+        return ""
     if not isinstance(specialist_kb, dict) or not specialist_kb:
         return ""
     lines: list[str] = []

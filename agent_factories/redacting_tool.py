@@ -14,6 +14,7 @@ from agents.exceptions import AgentsException, MaxTurnsExceeded
 
 from logger.process_timer import ProcessTimer
 from llm.firewall_stack import LLM_CALL_KIND, redact_payload, sanitize_message
+from tools.kb_tools import DISTILLER_ENABLED
 from tools.node_trace import _open_node, attach_extra, attach_tag
 from tools.viz_renderer import kp_to_vega_spec, render_chart
 
@@ -1483,15 +1484,28 @@ def redacting_tool(agent: Agent, name: str, description: str):
             # Fire TWO parallel async tasks:
             # 1. Distiller: extract claims into KB for follow-ups
             # 2. Auto-chart: render charts from tool outputs (no LLM needed)
-            task = asyncio.create_task(
-                _distill_and_persist(
-                    app_ctx, name, redacted_in, result.final_output,
-                    tool_outputs=tool_outputs,
-                ),
-                name=f"distill-{name}",
-            )
-            if isinstance(pending, list):
-                pending.append(task)
+            # Baseline ablation: the distiller is OFF by default in this build
+            # (DISTILLER_ENABLED=1 restores it). Only the KNOWLEDGE pass is
+            # skipped — auto-chart below still runs, because charts reach
+            # `_collect_turn_charts` by writing their own KPs into the same
+            # `specialist_kb`. See tools/kb_tools.py for why the READ paths
+            # (warmth hint, kb_lookup) have to be gated too.
+            if DISTILLER_ENABLED:
+                task = asyncio.create_task(
+                    _distill_and_persist(
+                        app_ctx, name, redacted_in, result.final_output,
+                        tool_outputs=tool_outputs,
+                    ),
+                    name=f"distill-{name}",
+                )
+                if isinstance(pending, list):
+                    pending.append(task)
+            elif logger is not None and name != "report_agent":
+                logger.log("distiller_disabled", {
+                    "specialist": name,
+                    "reason": "baseline_ablation",
+                    "env": "DISTILLER_ENABLED=1 to re-enable",
+                })
             # Auto-chart: parse tool outputs for series data, render charts
             if name != "report_agent" and tool_outputs:
                 chart_task = asyncio.create_task(

@@ -8,9 +8,41 @@ Two tools:
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 from agents import RunContextWrapper, function_tool
+
+
+# ── Ablation switch: cross-turn specialist memory ───────────────────────────
+#
+# THIS IS THE BASELINE BUILD, so the default here is OFF — the distiller's
+# second pass does not run, no KnowledgePoints are extracted, and specialists
+# start every turn cold. Set `DISTILLER_ENABLED=1` to restore the accumulating
+# behaviour for an A/B run without editing code.
+#
+# "Off" has to mean off on all three surfaces, or the ablation silently leaks:
+#   1. the distiller task itself (`redacting_tool` — the LLM pass + the
+#      narrow-output direct insert),
+#   2. the `[KB-warmth]` preface the orchestrator reads (`server.py`),
+#   3. the `kb_lookup` / `kb_list_topics` tools below.
+#
+# (2) is the subtle one. The AUTO-CHART path writes its own KPs into the SAME
+# `specialist_kb` — that is how a rendered chart reaches `_collect_turn_charts`
+# — and those KPs carry a full `claim` string ("2024-01 to 2025-06: FICO Score:
+# 620 -> 710 (peak 715…)"). So disabling only the distiller would still leave
+# the warmth hint populated from chart claims, and the baseline would quietly
+# keep a cross-turn memory through the chart side-channel. Charts must keep
+# writing to the KB; the READ paths are what get gated.
+DISTILLER_ENABLED = os.environ.get(
+    "DISTILLER_ENABLED", "0"
+).strip().lower() not in {"0", "false", "no", "off", ""}
+
+_KB_DISABLED_MSG = (
+    "Knowledge base is DISABLED for this run (baseline configuration): no "
+    "knowledge points are retained between turns. This is expected — do not "
+    "retry, and do not report it as a data gap. Query the tables directly."
+)
 
 
 def _get_kb(ctx: RunContextWrapper) -> dict[str, list] | None:
@@ -33,6 +65,8 @@ async def kb_list_topics(ctx: RunContextWrapper) -> str:
     """List all cached topics in the knowledge base from previous turns.
     Returns topic names + one-line claims. Use kb_lookup(topic) to get
     the full data including numbers."""
+    if not DISTILLER_ENABLED:
+        return _KB_DISABLED_MSG
     kb = _get_kb(ctx)
     if not kb:
         return "KB is empty."
@@ -57,6 +91,8 @@ async def kb_lookup(ctx: RunContextWrapper, topic: str) -> str:
     Returns the full claim + numbers + source_call if found.
     Use this BEFORE re-running an expensive summarize_trend call —
     if the topic is cached, you can skip the query."""
+    if not DISTILLER_ENABLED:
+        return _KB_DISABLED_MSG
     kb = _get_kb(ctx)
     if not kb:
         return f"Topic '{topic}' not found — KB is empty."
