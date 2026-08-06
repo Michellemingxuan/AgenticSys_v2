@@ -54,6 +54,12 @@ class AppContext:
     # Current turn id, threaded so distilled KPs can be tagged with the
     # turn that produced them — useful for audit + chronological supersession.
     _turn_id: str | None = None
+    # Sequence number this turn will be assigned in the session's episodic
+    # ordering (``CaseSession._qa_turn_seq`` + 1 — the counter is bumped at
+    # end of turn by `_store_cached_qa`). Stamped onto every KP created this
+    # turn as `captured_at_seq`, giving the KB a SORTABLE age marker that
+    # `_turn_id` (random hex) cannot provide. None outside a session.
+    _turn_seq: int | None = None
     # Fire-and-forget distiller tasks. Each agent_tool wrapper schedules
     # distillation as an asyncio.Task here BEFORE returning the specialist's
     # payload to the orchestrator — so the orchestrator gets the answer

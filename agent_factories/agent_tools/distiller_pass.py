@@ -33,6 +33,11 @@ from agent_factories.agent_tools.series_extract import _parse_series_from_tool_o
 # drain doesn't blow up.
 _DISTILLER_TIMEOUT_S = float(os.environ.get("DISTILLER_TIMEOUT_S", "120"))
 
+# How many existing topic slugs to show the distiller so it can reuse one
+# instead of forking a near-identical name. Slugs are short (~25 chars), so 40
+# costs ~1KB of prompt — cheap next to the 8-18KB SpecialistOutput payload.
+_MAX_EXISTING_TOPICS = 40
+
 # Keywords that signal series/trend/concentration data — the kind the
 # distiller actually extracts into chartable KPs. These come from tool
 # outputs (summarize_trend summary block, summarize_by_group concentration
@@ -69,6 +74,37 @@ def _slug_topic(sub_question: str, name: str, max_tokens: int = 5) -> str:
     if slug:
         return slug
     return f"{name}_q_{hashlib.md5((sub_question or '').encode()).hexdigest()[:8]}"
+
+
+def _topic_key(topic: str) -> frozenset:
+    """Order-insensitive identity of a topic slug: its token set.
+
+    `cdss_tsr_trajectory` and `tsr_cdss_trajectory` are the same topic said two
+    ways, but `_active_kps` keys on the exact string — so the second one does
+    NOT supersede the first. Both then sit in the digest as separate cached
+    topics, and `kb_lookup("cdss_tsr_trajectory")` returns the STALE claim while
+    the fresh one hides under a name the specialist has no reason to guess.
+    Observed 9x on one topic in case 366132845011.
+    """
+    return frozenset(t for t in re.split(r"[^a-z0-9]+", (topic or "").lower()) if t)
+
+
+def _snap_topic(topic: str, existing: list[str]) -> str:
+    """Return the prior slug for this topic when the new one is a token
+    PERMUTATION of it, else `topic` unchanged.
+
+    Deliberately conservative — exact token-set equality only. Fuzzier matching
+    (stemming, synonyms, substrings) risks collapsing genuinely distinct topics
+    into one, which silently destroys a claim; the distillation skill's rule is
+    that two KPs share a topic only when they answer the SAME question.
+    """
+    key = _topic_key(topic)
+    if not key:
+        return topic
+    for prior in existing:
+        if prior and prior != topic and _topic_key(prior) == key:
+            return prior
+    return topic
 
 
 def _is_narrow_output(specialist_output, sub_question: str = "") -> bool:
@@ -134,8 +170,15 @@ async def _distill_and_persist(
     # so it's visible in the trace viewer.
     if _is_narrow_output(specialist_output, sub_question):
         findings = getattr(specialist_output, "findings", "") or ""
+        # `_slug_topic` derives the slug from the sub-question's wording, so a
+        # re-asked question phrased in a different order yields a permuted slug
+        # — same snap as the distiller path.
+        from tools.kb_tools import _active_kps as _active
         kp_dict = {
-            "topic": _slug_topic(sub_question, name),
+            "topic": _snap_topic(
+                _slug_topic(sub_question, name),
+                [kp.get("topic") for kp in _active(kb.get(name, []))
+                 if isinstance(kp, dict) and kp.get("topic")]),
             "claim": findings,
             "numbers": [],
             "source_call": "",
@@ -144,6 +187,9 @@ async def _distill_and_persist(
         turn_id = getattr(app_ctx, "_turn_id", None)
         if turn_id is not None:
             kp_dict["captured_at_turn"] = turn_id
+        turn_seq = getattr(app_ctx, "_turn_seq", None)
+        if turn_seq is not None:
+            kp_dict["captured_at_seq"] = turn_seq
         sess_list = kb.setdefault(name, [])
         sess_list.append(kp_dict)
         if logger is not None:
@@ -192,9 +238,29 @@ async def _distill_and_persist(
         payload_chars=len(output_payload),
     )
 
+    # Existing slugs for THIS specialist, so a re-capture of a topic already in
+    # the KB reuses its exact slug and supersedes it (rather than forking a
+    # near-identical name that `_active_kps` treats as a separate topic). Only
+    # the active set — superseded entries share their slug with the active one
+    # by definition. Bounded so a long case can't crowd out the payload.
+    from tools.kb_tools import _active_kps
+    existing_topics = [kp.get("topic") for kp in _active_kps(kb.get(name, []))
+                       if isinstance(kp, dict) and kp.get("topic")]
+    # The PROMPT is truncated to the most recent slugs; `_snap_topic` below
+    # still checks the full list — it's a pure set comparison, so there is no
+    # reason to let an older topic drift just because it fell off the prompt.
+    existing_block = (
+        "\n--- Topic slugs already in this specialist's KB ---\n"
+        + ", ".join(existing_topics[-_MAX_EXISTING_TOPICS:])
+        + "\nIf a KP you emit answers the SAME question as one of these, reuse "
+          "that slug EXACTLY (it supersedes the old entry). Only invent a new "
+          "slug for a genuinely different question.\n"
+    ) if existing_topics else ""
+
     distiller_input = (
         f"Specialist: {name}\n"
-        f"Sub-question: {sub_question}\n\n"
+        f"Sub-question: {sub_question}\n"
+        f"{existing_block}\n"
         f"--- SpecialistOutput (JSON) ---\n{output_payload}"
     )
     # Raw tool outputs are NOT included in the distiller input — they
@@ -245,6 +311,7 @@ async def _distill_and_persist(
     parsed_series = _parse_series_from_tool_outputs(tool_outputs)
 
     turn_id = getattr(app_ctx, "_turn_id", None)
+    turn_seq = getattr(app_ctx, "_turn_seq", None)
     case_folder = getattr(app_ctx, "case_folder", None)
     sess_list = kb.setdefault(name, [])
     added_topics: list[str] = []
@@ -257,8 +324,26 @@ async def _distill_and_persist(
             kp_dict = kp.model_dump() if hasattr(kp, "model_dump") else dict(kp)
         except Exception:
             continue
+        # Backstop for the prompt rule above: the instruction is advisory, this
+        # is not. A token-permutation of an existing slug is snapped back onto
+        # it so supersession actually fires.
+        _emitted = kp_dict.get("topic") or ""
+        _snapped = _snap_topic(_emitted, existing_topics)
+        if _snapped != _emitted:
+            kp_dict["topic"] = _snapped
+            if logger is not None:
+                logger.log("distiller_topic_snapped", {
+                    "specialist": name, "emitted": _emitted,
+                    "snapped_to": _snapped, "turn_id": turn_id,
+                })
+
         if turn_id is not None and not kp_dict.get("captured_at_turn"):
             kp_dict["captured_at_turn"] = turn_id
+        # Unconditional: `captured_at_seq` is ours to assign, not the
+        # distiller's — a value hallucinated into the structured output would
+        # corrupt the age ordering the compaction depends on.
+        if turn_seq is not None:
+            kp_dict["captured_at_seq"] = turn_seq
 
         # Post-fill: fill/construct numbers from parsed tool outputs.
         # Mode 1: numbers is empty → construct full array from series.
@@ -293,6 +378,9 @@ async def _distill_and_persist(
         sess_list.append(kp_dict)
         if kp_dict.get("topic"):
             added_topics.append(kp_dict["topic"])
+            # Also snap-able by later KPs in THIS batch, so a run that emits
+            # two permutations of one topic collapses them too.
+            existing_topics.append(kp_dict["topic"])
 
     if added_topics and logger is not None:
         logger.log("distiller_kps_added", {

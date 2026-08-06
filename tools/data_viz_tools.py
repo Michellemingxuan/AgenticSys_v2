@@ -189,6 +189,7 @@ def build_make_chart_tool(specialist_name: str):
         kb = getattr(app_ctx, "_specialist_kb", None)
         case_folder = getattr(app_ctx, "case_folder", None)
         turn_id = getattr(app_ctx, "_turn_id", None)
+        turn_seq = getattr(app_ctx, "_turn_seq", None)
         logger = getattr(app_ctx, "logger", None)
         emit_event = getattr(app_ctx, "_emit_event", None)
 
@@ -229,6 +230,7 @@ def build_make_chart_tool(specialist_name: str):
             },
             "source_call": source_call.strip(),
             "captured_at_turn": turn_id,
+            "captured_at_seq": turn_seq,
             "confidence": "high",
         }
 

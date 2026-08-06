@@ -25,6 +25,7 @@ async def _auto_chart_from_tool_outputs(
     kb = getattr(app_ctx, "_specialist_kb", None)
     case_folder = getattr(app_ctx, "case_folder", None)
     turn_id = getattr(app_ctx, "_turn_id", None)
+    turn_seq = getattr(app_ctx, "_turn_seq", None)
     catalog = getattr(app_ctx, "_catalog", None)
     emit_event = getattr(app_ctx, "_emit_event", None)
 
@@ -68,7 +69,7 @@ async def _auto_chart_from_tool_outputs(
     try:
         charts_rendered = _render_auto_charts(
             trend_series, group_series, name, charts_dir,
-            kb, turn_id, catalog, logger, emit_event,
+            kb, turn_id, catalog, logger, emit_event, turn_seq,
         )
     except Exception as exc:  # noqa: BLE001
         if logger:
@@ -89,7 +90,7 @@ async def _auto_chart_from_tool_outputs(
 
 def _render_auto_charts(
     trend_series, group_series, name, charts_dir,
-    kb, turn_id, catalog, logger, emit_event=None,
+    kb, turn_id, catalog, logger, emit_event=None, turn_seq=None,
 ) -> int:
 
     def _emit_pending(topic: str, kind: str) -> None:
@@ -309,6 +310,7 @@ def _render_auto_charts(
                 "viz": {"kind": kind, "x_field": "period", "y_fields": y_fields},
                 "source_call": ", ".join(source_parts),
                 "captured_at_turn": turn_id,
+                "captured_at_seq": turn_seq,
                 "confidence": "high",
             }
             # vega_spec is regenerated at emit time (finalize._build_chart_payload),
@@ -358,6 +360,7 @@ def _render_auto_charts(
             "viz": {"kind": "share", "x_field": ps.key_field, "y_fields": ["value"]},
             "source_call": f"summarize_by_group('{ps.table_name}', '{ps.key_field}', '{ps.column_name}', op='sum')",
             "captured_at_turn": turn_id,
+            "captured_at_seq": turn_seq,
             "confidence": "high",
         }
         # vega_spec is regenerated at emit time (finalize._build_chart_payload),

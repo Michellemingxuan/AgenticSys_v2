@@ -139,6 +139,14 @@ class KnowledgePoint(BaseModel):
     # ints. Typing as ``str | None`` avoids Pydantic coercion / validation
     # surprises when KPs round-trip through ``model_dump`` / ``model_validate``.
     captured_at_turn: str | None = None
+    # Monotonic per-session turn counter (``CaseSession._qa_turn_seq``) stamped
+    # at capture time. Unlike ``captured_at_turn`` — a random hex id that does
+    # NOT sort — this orders KPs by age, which is what the working-set
+    # compaction needs to protect the newest KPs from being dropped, and what
+    # restores chronology after a relevance-ordered reload from Amem (see
+    # ``memory/loader.py``). Missing (legacy KPs written before this field) is
+    # treated as -1 = oldest, matching ``tools/episodic.py``'s convention.
+    captured_at_seq: int | None = None
     confidence: Literal["high", "medium", "low"] = "medium"
 
 

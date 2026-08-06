@@ -60,6 +60,14 @@ Short snake_case slug. Examples: `monthly_spend_trend`, `top_merchants_by_sum`,
 Put the metric name IN the slug (not `model_scores_trend` — use
 `cdss_score_trend` and `tsr_score_trend` separately).
 
+**Reuse an existing slug EXACTLY when the question is the same.** The input
+lists the slugs already in this specialist's KB. A re-capture of one of those
+topics must come back under the identical string — that is what supersedes the
+old entry. A near-miss is NOT a match: `tsr_cdss_trajectory` does not supersede
+`cdss_trajectory_tsr`, it forks a second topic, and follow-up lookups then
+return the stale claim. Same tokens in a different order = same topic = reuse
+the existing slug. Only invent a new slug for a genuinely different question.
+
 When 2+ metrics share the same x-axis: emit ONE multi-series KP with a
 combined topic (e.g. `cdss_tsr_trajectory`) instead of separate KPs.
 

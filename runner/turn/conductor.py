@@ -41,6 +41,8 @@ from memory import (
     kps_for_agent_turn,
     load_active_kps,
     load_case_kps,
+    max_kp_seq,
+    merge_recent_kps,
     load_case_summary,
     write_conversation,
     write_specialist_memory,
@@ -619,6 +621,17 @@ class TurnRunner:
                 kb = sess.specialist_kb if isinstance(sess.specialist_kb, dict) else {}
                 if not kb:
                     kb = load_case_kps(_amem, _amem_cfg, case_id=sess.case_id)
+                # `_qa_turn_seq` counts turns in THIS SESSION; the KB it stamps
+                # is per-CASE and durable, so KPs seeded from Amem (or restored
+                # from a snapshot whose qa_cache didn't survive) can carry seq
+                # values from earlier sessions that outrank anything this
+                # session will produce for the next N turns — which would pin
+                # the OLDEST KPs as "newest" in the compaction below. Move the
+                # counter above whatever we loaded. Skipped numbers are
+                # harmless: episodic ordering is relative, not contiguous.
+                _seen_seq = max_kp_seq(kb)
+                if _seen_seq > getattr(sess, "_qa_turn_seq", 0):
+                    sess._qa_turn_seq = _seen_seq
                 n = sum(len(v) for v in kb.values())
                 if n > ACTIVE_KP_THRESHOLD:
                     compacted = await load_active_kps(
@@ -626,11 +639,19 @@ class TurnRunner:
                         question=self.verdict.redacted_question,
                         limit=ACTIVE_KP_KEEP)
                     if compacted:      # empty (timeout/miss) → keep accumulating
+                        # Union, don't replace: Amem ranks on similarity with no
+                        # recency term, so a bare swap can discard the KPs the
+                        # previous turn just produced. Result is bounded at ~2*K2.
+                        merged = merge_recent_kps(compacted, kb, keep=ACTIVE_KP_KEEP)
+                        n_relevance = sum(len(v) for v in compacted.values())
+                        n_after = sum(len(v) for v in merged.values())
                         sess.logger.log("active_kp_compacted", {
                             "turn_id": self.turn_id, "n_before": n,
-                            "n_after": sum(len(v) for v in compacted.values()),
+                            "n_after": n_after,
+                            "n_relevance": n_relevance,
+                            "n_recent_kept": n_after - n_relevance,
                             "k1": ACTIVE_KP_THRESHOLD, "k2": ACTIVE_KP_KEEP})
-                        kb = compacted
+                        kb = merged
                 sess.specialist_kb = kb
             except Exception:
                 pass
@@ -641,6 +662,11 @@ class TurnRunner:
             _specialist_kb=sess.specialist_kb,
             _distiller=getattr(orchestrator, "distiller_agent", None),
             _turn_id=turn_id,
+            # The seq this turn will be assigned when `_store_cached_qa` bumps
+            # the counter at end of turn. Stamped onto every KP created now, so
+            # "newest" is decidable without relying on list order or on
+            # `_turn_id` (random hex — unsortable).
+            _turn_seq=getattr(sess, "_qa_turn_seq", 0) + 1,
             _emit_event=self._emit_event,
             _node_trace_store=_NODE_TRACE_STORE,
             _catalog=sess.catalog,

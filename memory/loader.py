@@ -27,6 +27,76 @@ ACTIVE_KP_KEEP = int(os.environ.get("AMEM_ACTIVE_KP_KEEP", "20"))             # 
 _ACTIVE_LOAD_TIMEOUT_S = 6.0    # generous: this batch search only fires at compaction
 
 
+def kp_seq(kp: dict) -> int:
+    """Sortable age of a KP: its `captured_at_seq` stamp, or -1 when absent.
+
+    -1 (= oldest) covers KPs written before the field existed, matching the
+    `e.get("turn_seq", -1)` convention in `tools/episodic.py`."""
+    try:
+        value = kp.get("captured_at_seq")
+        return int(value) if value is not None else -1
+    except (AttributeError, TypeError, ValueError):
+        return -1
+
+
+def max_kp_seq(kb: dict) -> int:
+    """Highest `captured_at_seq` across a `{agent: [kp, ...]}` KB, or -1."""
+    best = -1
+    for kps in (kb or {}).values():
+        for kp in kps or []:
+            if isinstance(kp, dict):
+                best = max(best, kp_seq(kp))
+    return best
+
+
+def _identity(agent: str, kp: dict) -> tuple:
+    """Dedup key for a KP. `topic` alone is not enough — the same topic is
+    legitimately re-captured across turns (that IS the supersession trail) —
+    so the turn that produced it is part of the identity."""
+    return (agent, kp.get("topic"), kp.get("captured_at_turn"), kp_seq(kp))
+
+
+def merge_recent_kps(compacted: dict, previous: dict, *, keep: int = ACTIVE_KP_KEEP) -> dict:
+    """Union a relevance-compacted KB with the newest `keep` KPs of the
+    pre-compaction working set.
+
+    Amem's hybrid search ranks on embedding + keyword similarity ONLY — there
+    is no recency term (`_rank_matches` in Amem/core/manager.py). So a plain
+    replacement can drop the KPs the last turn just produced, which is exactly
+    what a follow-up ("think harder", "what contradicts that?") needs and what
+    carries the least lexical signal toward the new question. Pinning the
+    newest `keep` by `captured_at_seq` makes that impossible.
+
+    The result is bounded at ~2*keep. Recent KPs already present in `compacted`
+    (they ARE in Amem by now, so the search can legitimately return them) are
+    deduped rather than doubled. Each agent's list comes out ordered oldest →
+    newest so `_active_kps`'s latest-wins supersession still holds.
+    """
+    out: dict[str, list] = {a: list(kps or []) for a, kps in (compacted or {}).items()}
+    flat: list[tuple[int, int, str, dict]] = []
+    for agent, kps in (previous or {}).items():
+        for idx, kp in enumerate(kps or []):
+            if isinstance(kp, dict):
+                flat.append((kp_seq(kp), idx, agent, kp))
+    if not flat or keep <= 0:
+        return out
+    # Ties (same seq, e.g. several KPs from one turn) keep their original
+    # in-list order — `idx` is the tiebreak, and the sort is a stable ascending
+    # one whose tail is the newest `keep`.
+    flat.sort(key=lambda item: (item[0], item[1]))
+    seen = {_identity(a, kp) for a, kps in out.items()
+            for kp in kps if isinstance(kp, dict)}
+    for _seq, _idx, agent, kp in flat[-keep:]:
+        ident = _identity(agent, kp)
+        if ident in seen:
+            continue
+        seen.add(ident)
+        out.setdefault(agent, []).append(kp)
+    for kps in out.values():
+        kps.sort(key=kp_seq)   # stable: preserves insertion order within a turn
+    return out
+
+
 def load_case_kps(amem, cfg: AmemConfig, *, case_id: str) -> dict:
     """Return `{agent_id: [kp_dict, ...]}` reconstructed from the case's durable
     per-specialist conversation records. Chronological (oldest-first) so the
@@ -94,7 +164,13 @@ async def load_active_kps(amem, cfg: AmemConfig, *, case_id: str, question: str,
     except Exception:
         return {}
 
-    out: dict[str, list] = {}
+    # SELECT by relevance, ORDER by time. The search returns records ranked by
+    # similarity; taking KPs in that order and stopping at `limit` is correct
+    # for *which* KPs survive, but it scrambles their chronology — and
+    # `_active_kps` resolves a repeated topic by taking the LAST entry in the
+    # list. Rebuilding in age order keeps latest-wins meaning latest, so a
+    # compaction can't resurrect a superseded claim into the digest.
+    selected: list[tuple[int, str, str, dict]] = []
     count = 0
     for r in results or []:
         rec = getattr(r, "record", None)
@@ -103,10 +179,19 @@ async def load_active_kps(amem, cfg: AmemConfig, *, case_id: str, question: str,
         agent = getattr(getattr(rec, "scope", None), "agent_id", None)
         if not agent or agent == "orchestrator":
             continue
+        created = str(getattr(rec, "created_at", "") or "")
         kps = (getattr(rec, "metadata", None) or {}).get("knowledge_points") or []
         for kp in kps:
             if count >= limit:
-                return out
-            out.setdefault(agent, []).append(kp)
+                break
+            selected.append((kp_seq(kp), created, agent, kp))
             count += 1
+        if count >= limit:
+            break
+    # `created_at` breaks ties for legacy KPs that predate `captured_at_seq`
+    # (all seq -1) — within one record it degrades to arrival order.
+    selected.sort(key=lambda item: (item[0], item[1]))
+    out: dict[str, list] = {}
+    for _seq, _created, agent, kp in selected:
+        out.setdefault(agent, []).append(kp)
     return out
