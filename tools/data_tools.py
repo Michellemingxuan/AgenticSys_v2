@@ -78,6 +78,13 @@ _TREND_MAX_CHARS = 8000
 # blames the join. Give it a much larger budget so a real extraction (limit 20-30)
 # comes back whole, and sample uniformly (not head-truncate) when it must shrink.
 _TXN_DETAIL_MAX_CHARS = 16000
+# Below this row count every row is load-bearing: a monthly table is 12-36 rows
+# (one per period), a quarterly one fewer. Above it, sampling rows is legitimate
+# — nobody reads 3865 spend transactions — but below it, dropping a row deletes
+# a PERIOD from a series. Small results therefore lose columns, not rows.
+_SMALL_RESULT_ROWS = 40
+# Never trim past this; a table with one column is not an answer.
+_MIN_KEPT_COLUMNS = 2
 _LOG_PREVIEW_CHARS = 500  # how much of tool output to snapshot in tool_result events
 
 # ── Duplicate-call guard ────────────────────────────────────────────────────
@@ -1965,6 +1972,54 @@ def _query_table_impl(
             rows = [{k: row[k] for k in keep_keys if k in row} for row in rows]
             truncation_notes.append(f"showing {len(keep_keys)}/{total_cols} columns")
 
+        # Step 1b: on a SMALL result set, shrink COLUMNS before ROWS.
+        #
+        # Rows and columns are not interchangeable. On the monthly tables one
+        # row IS one month, so halving rows deletes periods out of the middle of
+        # a series the specialist asked for AS a series. Observed in the logs as
+        # `score_drivers_data` "showing 9/18 rows" and, at worst, "showing 2/18
+        # rows" — the specialist then narrates a trend from a quarter of it.
+        # Columns are far more often redundant to the question, and the caller
+        # can name the ones it wants; it cannot re-request a deleted month.
+        # `summarize_trend` already refuses to down-sample month/quarter/year
+        # for this exact reason — this is the same rule on the raw-row path.
+        #
+        # Step 1 above only fires when ONE row busts the budget, which a monthly
+        # row never does (they are narrow, just numerous in columns), so without
+        # this the small-but-wide case goes straight to deleting rows.
+        #
+        # A small result is BOUNDED, so it can carry the larger budget the trend
+        # series already gets: 18 monthly rows x 7 columns is ~6.6 KB, inside
+        # `_TREND_MAX_CHARS`, and it is exactly the payload a trajectory question
+        # needs whole. Only a genuinely large match set keeps the tight budget —
+        # that is the one that could otherwise dump 3865 rows.
+        _budget = (
+            _TREND_MAX_CHARS if len(rows) <= _SMALL_RESULT_ROWS
+            else _MAX_CHARS - 500
+        )
+
+        def _as_text(kept_rows, kept_keys=None):
+            if kept_keys is None:
+                return json.dumps(kept_rows, indent=2, default=str)
+            return json.dumps(
+                [{k: r[k] for k in kept_keys if k in r} for r in kept_rows],
+                indent=2, default=str,
+            )
+
+        if len(rows) <= _SMALL_RESULT_ROWS and len(_as_text(rows)) > _budget:
+            keys = list(rows[0].keys())
+            while len(keys) > _MIN_KEPT_COLUMNS and len(_as_text(rows, keys)) > _budget:
+                keys.pop()
+            if len(keys) < len(rows[0]):
+                dropped = [k for k in rows[0] if k not in keys]
+                rows = [{k: row[k] for k in keys if k in row} for row in rows]
+                truncation_notes.append(
+                    f"showing {len(keys)}/{total_cols} columns to keep all "
+                    f"{len(rows)} rows — dropped: {', '.join(dropped[:8])}"
+                    + (" …" if len(dropped) > 8 else "")
+                    + ". Re-query with `columns` to choose which to keep."
+                )
+
         # Step 2: reduce rows until JSON fits. For an UNSORTED, unlimited result
         # the first N rows are arbitrary and cluster on one date/value (which the
         # model mistakes for the whole match set) — so sample EVENLY across the
@@ -1973,7 +2028,10 @@ def _query_table_impl(
         _even = not sort_descriptor and limit_applied is None
         _full_rows = list(rows)
         text = json.dumps(rows, indent=2, default=str)
-        while len(text) > _MAX_CHARS - 500 and len(rows) > 1:
+        # Measured against the SAME budget Step 1b used. With the old literal
+        # here, a small result whose rows had just been preserved by trimming
+        # columns was immediately halved again by this loop — undoing the fix.
+        while len(text) > _budget and len(rows) > 1:
             target = max(1, len(rows) // 2)
             sampled = _even_sample(_full_rows, target) if _even else rows[:target]
             # GUARANTEE PROGRESS. `_even_sample` returns its input UNCHANGED

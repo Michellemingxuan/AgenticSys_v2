@@ -1822,7 +1822,14 @@ def test_query_table_terminates_on_a_wide_table(monkeypatch):
 
     q = json.loads(box["out"])
     assert q["total_rows_in_table"] == 18
-    assert 1 <= q["rows_returned"] < 18 and q["truncated"] is True
+    # Termination is what this test is for. The result must also SHRINK — but a
+    # small result now shrinks along the column axis, keeping every row: on the
+    # monthly tables a row is a month, and halving rows deleted periods out of a
+    # series the specialist asked for as a series ("showing 9/18 rows", and at
+    # worst 2/18, in the evaluation logs).
+    assert q["truncated"] is True
+    assert q["rows_returned"] == 18, "rows are periods — trim columns, not rows"
+    assert len(q["rows"][0]) < 44, "the result must still shrink to fit"
 
 
 def test_query_table_still_samples_evenly_when_it_can():
@@ -2296,3 +2303,45 @@ def test_breach_episodes_carry_counts_across_the_window():
     assert thr["latest_breach"]["n_records"] >= 1
     # The episode total must be the sum of its periods, not a period count.
     assert thr["latest_episode"]["n_records"] >= thr["latest_episode"]["n_periods"]
+
+
+def test_query_table_keeps_every_month_of_a_monthly_table():
+    """A row on the monthly tables IS a month — never sample them away.
+
+    From the evaluation logs: `query_table("score_drivers_data")` reported
+    "showing 9/18 rows", and elsewhere "showing 2/18 rows". The specialist then
+    narrated an 18-month trajectory from a quarter of it. Columns are the safe
+    axis to shed — the caller can re-request a column by name, but cannot
+    re-request a month it was never shown.
+    """
+    rows = [
+        {"trans_month": f"2024-{m:02d}" if m <= 12 else f"2025-{m - 12:02d}",
+         "top_cdss1": "delinquency_severity_index_recent_24m",
+         "top_cdss2": "utilization_trailing_six_month_average",
+         "top_cdss3": "external_inquiry_velocity_90d",
+         "top_tsr1": "structural_risk_balance_growth_ratio",
+         "top_tsr2": "merchant_concentration_top3_share",
+         "top_tsr3": "payment_shortfall_persistence_score"}
+        for m in range(1, 19)
+    ]
+    gw = LocalDataGateway(case_data={"C": {"score_drivers_data": rows}})
+    gw.set_case("C")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+
+    q = json.loads(data_tools._query_table_impl(table_name="score_drivers_data"))
+    assert q["rows_returned"] == 18, "all 18 months must survive"
+    months = [r["trans_month"] for r in q["rows"] if "trans_month" in r]
+    assert months == sorted(months) and len(months) == 18
+
+
+def test_query_table_still_samples_a_genuinely_large_result():
+    """The row-sampling path must stay intact — it is what stops a 3865-row dump."""
+    rows = [{"txn_id": i, "amount": 100 + i, "merchant": f"M{i % 7}_" + "x" * 40}
+            for i in range(3865)]
+    gw = LocalDataGateway(case_data={"C": {"spends_data": rows}})
+    gw.set_case("C")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+
+    q = json.loads(data_tools._query_table_impl(table_name="spends_data"))
+    assert q["total_rows_in_table"] == 3865
+    assert q["rows_returned"] < 3865 and q["truncated"] is True
