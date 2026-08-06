@@ -35,7 +35,39 @@ Pick specialist tool(s) to call and frame each one's sub-question. The team rost
 | **case overview / "what is this case about"** | `crossbu` + `spend_payments` + `report_agent` | A case overview is NOT a full review — it's an overview summary. `crossbu`: card portfolio snapshot (how many cards, types, limits, balances). `spend_payments`: how many returned payments, spend and successful payment totals over the full window. `report_agent`: main risks and descriptive risk signals from curated reports. **Principle: numbers in the overview must come from specialists (crossbu, spend_payments), not from reports.** report_agent provides qualitative risk narrative only — never quote report numbers as verified facts. |
 | **broad / "full review"** | all specialists | Only when genuinely cross-domain and the reviewer explicitly asks for a comprehensive review. |
 
-For everything else, single- or 2-specialist teams. Widen to 3+ only when the table above says so.
+For everything else, single- or 2-specialist teams. Widen to 3+ only when the table above says so, or when the MAXIMAL principle below applies.
+
+## Leadership questions — the MAXIMAL principle (deliberate inversion of minimum-set)
+
+Everything above optimises for the SMALLEST team. One class of question inverts that. When the reviewer asks an **open, senior-level question** — one that names no metric and no table, and whose value is in what the team FINDS rather than what it fetches — dispatch the MAXIMAL relevant team.
+
+Recognise them by shape, not keyword:
+
+| Shape | Examples |
+|---|---|
+| **Opportunity / action** | *"any model opportunities?"*, *"what could we do better here?"*, *"where's the upside?"*, *"what should change?"* |
+| **Notability** | *"anything interesting?"*, *"what stands out?"*, *"what's atypical?"*, *"what would you flag to a reviewer?"* |
+| **Judgement / explanation** | *"is this behaviour intentional, accidental or explainable?"*, *"is there a pattern here?"*, *"what's really going on?"*, *"what transactions are connected?"* |
+| **Exposure / blind spot** | *"what's the biggest risk we're not seeing?"*, *"what would you want to know before deciding?"* |
+| **Escalation of any of the above** | *"think harder"*, *"go deeper"*, *"what did we miss?"* on a prior turn of this kind |
+
+None of these has an owning column. Single-routing them yields one number and an empty answer — and then the curated report is the only source that addressed the question, which is the exact failure this section exists to prevent. Numbers must still come from specialists; the report never carries the answer alone.
+
+### How to dispatch them
+
+1. **Team = every specialist with a plausible angle**, typically 4+ — `modeling` + `spend_payments` + `crossbu` + `bureau` as the floor, plus `strategy` / `wcc` / `capacity_afford` when the case holds that data. All in parallel, one round. An extra specialist costs one parallel call; an omitted one is a blind spot in an answer whose entire purpose is to have none. This is the one turn where breadth beats precision.
+2. **Give each a DIRECTION OF INVESTIGATION, not a fetch.** Name the hypothesis to test and what evidence would settle it, and leave the column choice to the specialist — they know their tables better than you do. Shape: *what to look for → what would count as a finding → what would count as a non-finding.*
+3. **Make the directions ORTHOGONAL** — each specialist owns a DIFFERENT candidate explanation, so the results compose into a picture instead of three votes on one point.
+4. **State the verification standard in every sub-question**: *"Verify each direction against the data before asserting it. Report which directions hold, which the data contradicts, and which are not checkable in this case — a checked non-finding is a result."* (The specialist's own § INVESTIGATION MANDATES section in `data_query.md` tells it how to execute this.)
+
+Worked example — *"any model opportunities?"*:
+
+- `modeling`: *"Investigate where the internal scores are mis-serving this case. Directions: (a) a score that stayed flat through a period other evidence says was deteriorating — a lag or blind spot; (b) drivers dominating the score that track something already captured elsewhere — redundancy; (c) a threshold breached with no downstream consequence, or a consequence with no breach. Test each against the score and driver series; report which hold and which do not."*
+- `spend_payments`: *"Investigate whether spend/payment behaviour carries a signal the model does not. Directions: (a) a behavioural shift (merchant mix, cadence, amount distribution) that PRECEDES the score's move — quantify the lead time; (b) recurring structure a monthly aggregate hides."*
+- `bureau`: *"Investigate whether external data would have called this earlier or differently than the internal scores. Direction: external delinquency / derog timing vs the internal score's move. If the bureau moved first, quantify by how much."*
+- `crossbu`: *"Investigate whether exposure sits where the scoring does not see it — cross-product, limit-vs-balance headroom, or a card behaving unlike the rest of the portfolio."*
+
+Same shape for *"is this intentional, accidental or explainable?"*: give each specialist ONE candidate explanation to test (deliberate structuring / operational artefact / genuine distress) and have it report whether its own data supports it, contradicts it, or cannot speak to it.
 
 **Edge cases:**
 - balance vs spend: balance is `crossbu_cards.balance` (point-in-time); spend is a flow. Don't substitute.
@@ -55,7 +87,7 @@ Examples: "Does **the model** have info about spending?" → `modeling`. "Does *
 
 ## Selection rules
 
-1. **Minimum set** — but the Cross-domain table above is the authoritative team size for matching topics; don't shrink those.
+1. **Minimum set** — but the Cross-domain table above is the authoritative team size for matching topics; don't shrink those. And it is INVERTED for open leadership questions: see the MAXIMAL principle above, which overrides this rule.
 2. Every pick carries weight — no "for context" / "in case relevant".
 3. Match data, not name (`customer_rel` ≠ "questions about the customer").
 4. **Follow-ups REUSE THE PRIOR TEAM.** When the new question is in the same domain as the previous turn (or a near-paraphrase), reuse the exact same team. Each specialist carries a session-scoped knowledge base (`CaseSession.specialist_kb`) prepended as a digest to every new sub-question — so reusing them lets each specialist build on what they already found, instead of restarting. Don't reshuffle for follow-ups that are the same question with small variations.

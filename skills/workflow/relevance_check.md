@@ -58,8 +58,21 @@ Compare along **four dimensions** — a near-duplicate must match on ALL FOUR:
 2. **Metric** — the kind of measurement being asked for. **count** ("how many", "the number of") ≠ **sum** ("total amount", "what's the total") ≠ **mean** ("average", "typical") ≠ **min/max** ("largest", "earliest") ≠ **shape** ("pattern", "trajectory", "trend"). Two questions about the same subject but different metrics are NOT duplicates — the answers are genuinely different. *"How many successful payments?"* (count) is NOT a duplicate of *"What is the total successful payment amount?"* (sum), even though both target the same successful-payments subject.
 3. **Time range** — same window, or both unspecified. "Last 6 months" ≠ "since Jan-2024" ≠ "current". An unspecified window matches another unspecified window. A narrower window does NOT match a broader prior window (the prior answer would over-cover).
 4. **Scope** — same level of aggregation / same filter. "Top merchant" ≠ "top 5 merchants"; "all returned payments" ≠ "returned payments by industry"; "this customer" ≠ "all customers".
+5. **Relation & its qualifier** — when the question asks about a RELATION between two things (X after Y, X above Y, X near Y, X driving Y), the qualifier that operationalizes that relation is part of the question, and **loosening or tightening it makes a different question**. Proximity: *"right after"* / *"immediately"* (same or next day) ≠ *"closely followed"* / *"shortly after"* (days) ≠ *"eventually"* / *"at some point"*. Magnitude: *"large"* ≠ *"any"*; *"significantly above"* ≠ *"above"*. Direction: *"X then Y"* ≠ *"Y then X"*. A reviewer who rewords the qualifier is **re-operationalizing the test** — they are asking whether the previous answer was an artifact of where the line was drawn. That is a new question with a possibly different answer, so it is NEVER a near-duplicate.
 
-When all four match, set `near_duplicate_of` to the **verbatim text** of the matched prior question and explain in `near_duplicate_reason` (one sentence naming which dimensions matched). When ANY dimension differs, leave `near_duplicate_of` as the empty string.
+When all five match, set `near_duplicate_of` to the **verbatim text** of the matched prior question and explain in `near_duplicate_reason` (one sentence naming which dimensions matched). When ANY dimension differs, leave `near_duplicate_of` as the empty string.
+
+**Why dimension 5 matters most on a NULL result.** A prior answer of "none found" is a claim about a threshold as much as about the case — *"no large spend within 1 day of a small payment"* says nothing about 3 days. Rewording after a negative answer is the single most common way a reviewer probes whether the null was real or an artifact of the cutoff, and replaying the null is the one response that cannot be right. When the qualifier moved at all, run it fresh.
+
+## NEVER a near-duplicate — regardless of the four dimensions
+
+Some questions LOOK like the prior one because they BORROW its subject, but ask for something the prior answer does not contain. Replaying a cached answer for these is always wrong. Set `near_duplicate_of` to `""` whenever the question is:
+
+1. **A question with no subject of its own** — the subject arrives via a pronoun or deictic carried from the prior turn. *"What evidence contradicts it?"*, *"Why is that?"*, *"Is that reliable?"*, *"What about the other side?"*, *"And the rest?"*. Dimension 1 matches only because the subject was INHERITED; the question asks something NEW about that subject. Coreference is not duplication.
+2. **A request for more, deeper, or different analysis of the same subject** — *"think harder"*, *"go deeper"*, *"look again"*, *"dig into that"*, *"are you sure?"*, *"double-check that"*, *"any other angle?"*, *"expand on that"*. These are explicit statements that the prior answer was NOT sufficient. Replaying it verbatim is the one response guaranteed to be wrong.
+3. **A challenge or falsification request** — *"what would argue against it?"*, *"what did you miss?"*, *"is there a counter-example?"*, *"could that be wrong?"*. The prior answer is the thing being TESTED, so it cannot also be the reply.
+
+Rule of thumb: a near-duplicate is a question a reviewer asks having **forgotten** they already asked it. If the question only makes sense **because** the prior answer exists, it is a follow-up — never a duplicate.
 
 Examples:
 
@@ -74,6 +87,11 @@ Examples:
 - **Prior: *"How many successful payments?"* — New: *"What is the average successful payment amount?"* → NOT a duplicate** (different metric: count vs. mean).
 - **Prior: *"How many successful payments?"* — New: *"How many commercial cards does this customer have?"* → NOT a duplicate** (completely different subject — payments vs. cards — even though metric=count matches).
 - Prior: *"What is the largest payment?"* — New: *"What is the maximum payment?"* → near-duplicate (largest ≡ max — same metric).
+- **Prior: *"Is there a default pattern in these transactions?"* — New: *"What evidence contradicts it?"* → NOT a duplicate** (no subject of its own; asks to falsify the prior answer, which the prior answer cannot supply).
+- **Prior: *"What is the customer's spending pattern?"* — New: *"think harder"* / *"go deeper on that"* → NOT a duplicate** (explicit statement that the prior answer was insufficient).
+- **Prior: *"Any model opportunities?"* — New: *"Are you sure?"* → NOT a duplicate** (a challenge; the prior answer is what's being tested).
+- **Prior: *"Any large spending right after a small payment?"* — New: *"Any large spending closely followed small payments?"* → NOT a duplicate** (dimension 5: the proximity qualifier loosened from same/next-day to within-days — a different test, and the prior answer was a null that this rewording exists to re-probe).
+- **Prior: *"Any spend above $10,000?"* — New: *"Any unusually large spend?"* → NOT a duplicate** (magnitude qualifier moved from a fixed cutoff to a relative one).
 
 Be conservative — when in doubt, treat as NOT a duplicate. A false positive replays a stale answer; a false negative just runs the orchestrator afresh (cost only, no correctness loss).
 

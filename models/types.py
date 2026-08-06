@@ -48,7 +48,20 @@ class SpecialistOutput(BaseModel):
     """Specialist's structured answer. Field descriptions are reflected
     into the OpenAI structured-output schema, so they directly shape how
     much the model emits per field. Every extra token = ~20ms of
-    generation wall-clock — keep brevity targets aggressive."""
+    generation wall-clock — keep brevity targets aggressive.
+
+    The ≤50-word `findings` budget is calibrated for the FETCH question that
+    dominates traffic ("how many", "what's the total") — one number is the
+    whole answer, and prose around it is pure latency. It is the wrong budget
+    for the OTHER shape: a sub-question that hands the specialist several
+    DIRECTIONS to investigate, or asks what CONTRADICTS a claim. There the
+    per-direction verdicts ARE the answer, and at 50 words across three
+    directions the model drops the negatives first — which is exactly the half
+    a reviewer needs ("(b) does not hold" is a result, not filler). So both
+    fields carry a conditional widening, triggered by the sub-question's own
+    shape. Default stays tight; only the mandate shape pays the extra tokens.
+    See `skills/workflow/data_query.md` § INVESTIGATION MANDATES and § 1.2
+    EXCEPTION, which must stay in step with the budgets stated here."""
 
     domain: str = Field(description="Domain key (one word, e.g. 'spend_payments').")
     mode: str = Field(description='"report" or "chat". Pick one word.')
@@ -56,7 +69,14 @@ class SpecialistOutput(BaseModel):
         description=(
             "The answer in ≤50 words (≤2 sentences). State the concrete "
             "number, fact, or conclusion. NO restating the question, NO "
-            "'I observed', NO methodology preamble. Numbers > prose."
+            "'I observed', NO methodology preamble. Numbers > prose. "
+            "EXCEPTION — when the sub-question gave you DIRECTIONS to "
+            "investigate, or asked what CONTRADICTS a claim: ≤40 words PER "
+            "direction (~150 words total, ~200 max), one line each, and "
+            "state the verdict for EVERY direction — including the ones the "
+            "data did not support. A checked non-finding is a result; "
+            "dropping it to save words is the failure mode. Still no "
+            "preamble, still numbers > prose."
         ),
     )
     evidence: list[str] = Field(
@@ -64,7 +84,10 @@ class SpecialistOutput(BaseModel):
         description=(
             "≤3 bullets, ≤15 words each. Specific numbers / dates / "
             "row counts that back the finding. Skip the list entirely if "
-            "findings already contains the key data points."
+            "findings already contains the key data points. EXCEPTION — "
+            "under the investigation / contradiction shape above: ≤1 bullet "
+            "per direction (≤5), ≤25 words each, each naming the column or "
+            "window that settled that direction."
         ),
     )
     data_gaps: list[str] = Field(
