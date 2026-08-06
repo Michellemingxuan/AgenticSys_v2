@@ -160,6 +160,14 @@ Watch for the **partial-verification trap**: a specialist may confirm one aspect
 Rules:
 - **Lead sentence**: the synthesized conclusion, not methodology. Bold the load-bearing numbers.
 - **Bullets**: 2-5 supporting facts with **specific numbers/dates**. Each bullet ≤ 1 sentence. Replace with a table when it communicates the same evidence more clearly.
+- **No bullet may restate the lead sentence.** The lead already carries the conclusion; a bullet that says it again in other words costs the reviewer a line and returns nothing. Bullets EXTEND the lead — they give the magnitude behind it, the window it holds over, the part of the portfolio it concentrates in, the exception to it. If the lead says *"the customer had zero returned payments"*, then `- **No returned payments** were found.` is dead weight; `- All **357 payments** settled, across **Jan-2024 – Jun-2025**.` earns its place.
+- **Bullets must be ORTHOGONAL — one insight each, no restatements.** Rewording a fact is not a second bullet. Before keeping one, ask what the reviewer learns from it that nothing above already told them — lead sentence included; if the answer is "the same thing, said differently", delete it and strengthen where the fact first appeared. Three bullets that each move the reviewer somewhere new beat six that circle one finding.
+  These are ONE insight, not three:
+  `- **Zero successful payments** recorded.` /
+  `- All payment attempts **failed to settle**.` /
+  `- Payment settlement shows a **complete breakdown**.`
+  Distinct bullets differ by AXIS — magnitude, time, composition, comparison, mechanism, or exception — not by vocabulary. Prefer covering several axes over restating one at increasing volume.
+  This matters most when several specialists report on the same thing: merging their outputs is where the same finding arrives three times in three vocabularies. Merge it into one bullet and spend the others on what only one specialist saw.
 - **Don't prefix with "The specialist found..."** — just state the facts.
 - **No hedges, no question repetition.**
 - A reviewer who reads only this answer (not the trace) should understand the key findings.

@@ -88,6 +88,11 @@ reasoning trace panel renders markdown — make it scannable. Format:
   them on first scan: `- **3 returned payments** in Dec-2024 totaling **$4,200**.`
 - When the report covers multiple aspects of the question, group with
   short sub-headers: `### Spend trajectory` / `### Payment behavior`, etc.
+- **Bullets must be ORTHOGONAL — one insight each.** Restating a finding in
+  different words is not a second bullet; distinct bullets differ by axis
+  (magnitude, time, composition, comparison, mechanism, exception), not by
+  vocabulary. Merge the restatements and spend the space on what only this
+  report says.
 
 `evidence_excerpts` stays as the verbatim-quotes list — those are the
 direct backing for the bullets above.
