@@ -40,9 +40,19 @@ from typing import Any
 # directly. Standalone scripts (notebooks, datalayer.sync) already do
 # this — server.py was the missing one. Lazy/optional import so the
 # server still starts if python-dotenv isn't installed (e.g. private env).
+#
+# Do NOT pass `override=True`. The bug this block fixes is `.env` being
+# ignored ENTIRELY, which the plain call already solves — `.env` still wins
+# over nothing-set, which is every normal `python server.py` run. `override`
+# additionally makes `.env` beat variables the PARENT PROCESS set, which
+# silently breaks anything that configures the server through the
+# environment: `NODE_TRACE_DB=… python server.py`, containers, and the
+# AgenticEval harness (which injects PORT / NODE_TRACE_DB per target and
+# then reads the trace DB it asked for — with override it read an empty
+# file and reported every token/latency metric as missing).
 try:
     from dotenv import load_dotenv as _load_dotenv, find_dotenv as _find_dotenv
-    _load_dotenv(_find_dotenv(), override=True)
+    _load_dotenv(_find_dotenv())
 except ImportError:
     pass
 

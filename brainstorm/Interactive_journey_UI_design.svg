@@ -1,0 +1,697 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1640" height="1682" viewBox="0 0 1640 1682" fill="#0F172A" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif">
+  <title>Interactive Journey UI Design — Report &amp; Q&amp;A (US SBS Credit &amp; Risk, case 366132845011)</title>
+
+  <defs>
+    <style><![CDATA[
+      /* NB: no `text{fill}` rule — a CSS rule would beat every inline fill attribute. */
+      .h1   { font-size:20px; font-weight:700; }
+      .h2   { font-size:11.5px; font-weight:700; letter-spacing:.7px; }
+      .h3   { font-size:12.5px; font-weight:700; }
+      .b    { font-size:11.5px; font-weight:600; }
+      .t    { font-size:11px;   fill:#334155; }
+      .t2   { font-size:10.5px; fill:#475569; }
+      .tr   { font-size:10px;   fill:#475569; }
+      .trb  { font-size:10px;   fill:#334155; font-weight:700; }
+      .sec  { font-size:11.5px; font-weight:700; fill:#0F172A; }
+      .mono { font-size:9.5px;  font-weight:600; fill:#475569; font-family:"SF Mono",Menlo,Consolas,monospace; }
+      /* dark "system" palette — reasoning trace only */
+      .dcard{ fill:#1E2A3F; stroke:#2C3A54; }
+      .dbox { fill:#17212F; stroke:#2E3B54; }
+      .dblk { fill:#243149; stroke:#34435F; }
+      .ddiv { stroke:#2E3B54; }
+      .dh2  { fill:#E8EEF9; font-size:11.5px; font-weight:700; letter-spacing:.7px; }
+      .dsec { fill:#FFFFFF; font-size:11.5px; font-weight:700; }
+      .db   { fill:#FFFFFF; font-size:11.5px; font-weight:600; }
+      .dsm  { fill:#8FA3C2; font-size:9.5px; }
+      .dt   { fill:#A9BCD8; font-size:10px; }
+      .dtb  { fill:#E2EAF7; font-size:10px; font-weight:700; }
+      .dlnk { fill:#7FB0FF; font-size:10px; font-weight:600; }
+      .dmono{ fill:#C7D6EE; font-size:9.5px; font-weight:600; font-family:"SF Mono",Menlo,Consolas,monospace; }
+      .lbl  { font-size:9.5px;  fill:#7C8DA6; letter-spacing:.5px; }
+      .sm   { font-size:9.5px;  fill:#94A3B8; }
+      .lnk  { font-size:10px;   fill:#2563EB; font-weight:600; }
+      .wht  { fill:#FFFFFF; }
+      .card { fill:#FFFFFF; stroke:#E3E8EF; stroke-width:1; }
+      .soft { fill:#FAFBFD; stroke:#EDF1F6; stroke-width:1; }
+      .div  { stroke:#EDF1F6; stroke-width:1; }
+    ]]></style>
+
+    <symbol id="ico-pin" viewBox="0 0 16 16">
+      <path d="M9.6 1.4 14.6 6.4l-1.2 1.2-1.1-.3-2.6 2.6.3 2.1-1.2 1.2-3.1-3.1-3.3 3.3-.8-.8 3.3-3.3-3.1-3.1L3 5l2.1.3 2.6-2.6-.3-1.1z"
+            fill="currentColor"/>
+    </symbol>
+    <symbol id="ico-check" viewBox="0 0 16 16">
+      <circle cx="8" cy="8" r="7" fill="#16A34A"/>
+      <path d="M4.8 8.2 7 10.4l4.2-4.6" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="ico-chev" viewBox="0 0 16 16">
+      <path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="ico-x" viewBox="0 0 16 16">
+      <path d="M4.5 4.5 11.5 11.5M11.5 4.5 4.5 11.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="ico-send" viewBox="0 0 16 16">
+      <path d="M2 8 14 2.5 9.6 14 8 9.4z" fill="currentColor"/>
+    </symbol>
+    <symbol id="ico-spark" viewBox="0 0 16 16">
+      <path d="M8 1.2 9.5 6 14.3 7.5 9.5 9 8 13.8 6.5 9 1.7 7.5 6.5 6z" fill="currentColor"/>
+      <path d="M13 1.5 13.6 3.2 15.3 3.8 13.6 4.4 13 6.1 12.4 4.4 10.7 3.8 12.4 3.2z" fill="currentColor" opacity=".7"/>
+    </symbol>
+    <symbol id="ico-rewind" viewBox="0 0 16 16">
+      <path d="M2.9 8a5.1 5.1 0 1 0 1.7-3.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      <path d="M2.2 2.9v3.4h3.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="ico-user" viewBox="0 0 16 16">
+      <circle cx="8" cy="5.6" r="2.6" fill="currentColor"/>
+      <path d="M2.6 14c.6-3 2.8-4.4 5.4-4.4S12.8 11 13.4 14z" fill="currentColor"/>
+    </symbol>
+    <filter id="sh" x="-8%" y="-8%" width="126%" height="126%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0F172A" flood-opacity="0.09"/>
+    </filter>
+    <linearGradient id="fadeW" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="1"/>
+    </linearGradient>
+    <clipPath id="clipFig"><rect x="1264" y="442" width="352" height="192"/></clipPath>
+    <clipPath id="clipIns"><rect x="1264" y="692" width="352" height="174"/></clipPath>
+    <symbol id="ico-shield" viewBox="0 0 24 24">
+      <path d="M12 2.5 20 6v6.5c0 4.6-3.3 8.3-8 9.5-4.7-1.2-8-4.9-8-9.5V6z" fill="#fff" opacity=".95"/>
+      <path d="M8.4 12.2 11 14.8l4.8-5.2" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+  </defs>
+
+  <!-- ===================== PAGE ===================== -->
+  <rect width="1640" height="1682" fill="#F4F6FA"/>
+
+  <!-- ===================== SIDEBAR ===================== -->
+  <rect x="0" y="0" width="190" height="1040" fill="#0E1A2B"/>
+
+  <rect x="20" y="22" width="30" height="30" rx="9" fill="#2563EB"/>
+  <use href="#ico-shield" x="25" y="27" width="20" height="20"/>
+  <text x="58" y="36" class="wht" font-size="13" font-weight="700">SBS Risk Desk</text>
+  <text x="58" y="49" class="lbl">US SMALL BUSINESS</text>
+
+  <!-- nav (single source of navigation — the duplicate top tab bar is gone) -->
+  <text x="20" y="82" class="lbl">WORKSPACE</text>
+  <g font-size="11.5">
+    <text x="34" y="112" fill="#9FB0C6">Overview</text>
+    <rect x="16" y="96" width="14" height="14" rx="3" fill="none" stroke="#4B5F7D" stroke-width="1.3"/>
+
+    <rect x="8" y="128" width="174" height="32" rx="8" fill="#16294A"/>
+    <rect x="8" y="128" width="3" height="32" rx="1.5" fill="#4D8DF7"/>
+    <text x="34" y="148" fill="#FFFFFF" font-weight="600">Report</text>
+    <rect x="16" y="132" width="14" height="14" rx="3" fill="none" stroke="#7FA9E8" stroke-width="1.3"/>
+
+    <rect x="8" y="164" width="174" height="32" rx="8" fill="#16294A"/>
+    <rect x="8" y="164" width="3" height="32" rx="1.5" fill="#4D8DF7"/>
+    <text x="34" y="184" fill="#FFFFFF" font-weight="600">Case Review Assistant</text>
+    <rect x="16" y="168" width="14" height="14" rx="3" fill="none" stroke="#7FA9E8" stroke-width="1.3"/>
+
+    <text x="34" y="220" fill="#9FB0C6">Opportunities</text>
+    <rect x="16" y="204" width="14" height="14" rx="3" fill="none" stroke="#4B5F7D" stroke-width="1.3"/>
+    <text x="34" y="256" fill="#9FB0C6">Actions</text>
+    <rect x="16" y="240" width="14" height="14" rx="3" fill="none" stroke="#4B5F7D" stroke-width="1.3"/>
+    <text x="34" y="292" fill="#9FB0C6">Audit Trail</text>
+    <rect x="16" y="276" width="14" height="14" rx="3" fill="none" stroke="#4B5F7D" stroke-width="1.3"/>
+  </g>
+
+  <line x1="16" y1="320" x2="174" y2="320" stroke="#1D3050" stroke-width="1"/>
+
+  <text x="20" y="346" class="lbl">CASE INFO</text>
+  <g>
+    <text x="20" y="372" class="lbl">Case ID</text>
+    <text x="20" y="388" fill="#E6EDF7" font-size="12" font-weight="600">366132845011</text>
+
+    <text x="20" y="414" class="lbl">Account</text>
+    <text x="20" y="430" fill="#E6EDF7" font-size="12" font-weight="600">US SBS Card Member</text>
+
+    <text x="20" y="456" class="lbl">Review Type</text>
+    <text x="20" y="472" fill="#E6EDF7" font-size="12" font-weight="600">Default Review</text>
+
+    <text x="20" y="498" class="lbl">Snapshot Date</text>
+    <text x="20" y="514" fill="#E6EDF7" font-size="12" font-weight="600">2025-09-30</text>
+
+    <text x="20" y="540" class="lbl">Pillar</text>
+    <rect x="18" y="548" width="150" height="22" rx="11" fill="#16294A" stroke="#2B4470"/>
+    <text x="28" y="563" fill="#8FB6F5" font-size="10" font-weight="600">US SBS · Credit &amp; Risk</text>
+  </g>
+
+  <rect x="16" y="984" width="158" height="34" rx="9" fill="transparent" stroke="#2A3D5C"/>
+  <text x="42" y="1005" fill="#B9C7D9" font-size="11.5">Case Settings</text>
+  <circle cx="30" cy="1001" r="5" fill="none" stroke="#B9C7D9" stroke-width="1.2"/>
+
+  <!-- ===================== HEADER ===================== -->
+  <rect x="190" y="0" width="1450" height="76" fill="#FFFFFF"/>
+  <line x1="190" y1="76" x2="1640" y2="76" class="div"/>
+
+  <text x="214" y="24" class="lnk">← Back to Cases</text>
+  <text x="214" y="56" class="h1">366132845011</text>
+  <text x="366" y="56" font-size="17" font-weight="600" fill="#334155">· Default Review</text>
+
+  <rect x="522" y="40" width="74" height="21" rx="10.5" fill="#FEF3C7"/>
+  <text x="559" y="55" font-size="10" font-weight="600" fill="#92400E" text-anchor="middle">In Review</text>
+  <rect x="604" y="40" width="150" height="21" rx="10.5" fill="#E8F0FE"/>
+  <text x="679" y="55" font-size="10" font-weight="700" fill="#1D4ED8" text-anchor="middle">US SBS · Credit &amp; Risk</text>
+
+  <rect x="1150" y="20" width="168" height="36" rx="9" fill="#FFFFFF" stroke="#D6DEE9"/>
+  <text x="1234" y="43" font-size="11.5" font-weight="600" fill="#334155" text-anchor="middle">Export review package</text>
+  <rect x="1330" y="20" width="112" height="36" rx="9" fill="#FFFFFF" stroke="#D6DEE9"/>
+  <text x="1386" y="43" font-size="11.5" font-weight="600" fill="#334155" text-anchor="middle">Share</text>
+  <rect x="1454" y="20" width="170" height="36" rx="9" fill="#2563EB"/>
+  <text x="1539" y="43" font-size="11.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">✓  Complete Review</text>
+
+  <!-- ===================== COLUMN A — CASE REPORT (the real generated sections) ===================== -->
+  <rect x="206" y="92" width="390" height="932" rx="12" class="card"/>
+  <rect x="206" y="92" width="390" height="40" rx="12" fill="#F4F6F9"/>
+  <rect x="206" y="116" width="390" height="16" fill="#F4F6F9"/>
+  <line x1="206" y1="132" x2="596" y2="132" stroke="#E3E8EF"/>
+  <rect x="222" y="106" width="3" height="14" rx="1.5" fill="#94A3B8"/>
+  <text x="234" y="117" class="h2" fill="#475569">CASE REPORT</text>
+  <rect x="330" y="105" width="56" height="16" rx="8" fill="#E7EBF1"/>
+  <text x="358" y="117" font-size="9" font-weight="700" fill="#64748B" text-anchor="middle">DOCUMENT</text>
+  <text x="580" y="117" class="sm" text-anchor="end">Generated 2025-10-02 ⟳</text>
+
+  <!-- section chips = the report's own sections (no nested column, no Documents) -->
+  <g font-size="10" font-weight="600">
+    <rect x="222" y="144" width="96" height="24" rx="12" fill="#2563EB"/>
+    <text x="270" y="160" fill="#FFFFFF" text-anchor="middle">Exec Summary</text>
+    <rect x="324" y="144" width="104" height="24" rx="12" fill="#F1F5FA" stroke="#E3E8EF"/>
+    <text x="376" y="160" fill="#475569" text-anchor="middle">Default Journey</text>
+    <rect x="434" y="144" width="58" height="24" rx="12" fill="#F1F5FA" stroke="#E3E8EF"/>
+    <text x="463" y="160" fill="#475569" text-anchor="middle">Bureau</text>
+
+    <rect x="222" y="176" width="106" height="24" rx="12" fill="#F1F5FA" stroke="#E3E8EF"/>
+    <text x="275" y="192" fill="#475569" text-anchor="middle">Payment &amp; Spend</text>
+    <rect x="334" y="176" width="70" height="24" rx="12" fill="#F1F5FA" stroke="#E3E8EF"/>
+    <text x="369" y="192" fill="#475569" text-anchor="middle">Modeling</text>
+    <rect x="410" y="176" width="62" height="24" rx="12" fill="#F1F5FA" stroke="#E3E8EF"/>
+    <text x="441" y="192" fill="#475569" text-anchor="middle">Drivers</text>
+
+    <rect x="222" y="208" width="68" height="24" rx="12" fill="#F1F5FA" stroke="#E3E8EF"/>
+    <text x="256" y="224" fill="#475569" text-anchor="middle">Cross-BU</text>
+    <rect x="296" y="208" width="96" height="24" rx="12" fill="#F1F5FA" stroke="#E3E8EF"/>
+    <text x="344" y="224" fill="#475569" text-anchor="middle">Interestingness</text>
+    <rect x="398" y="208" width="66" height="24" rx="12" fill="#F1F5FA" stroke="#E3E8EF"/>
+    <text x="431" y="224" fill="#475569" text-anchor="middle">Strategy</text>
+    <rect x="470" y="208" width="52" height="24" rx="12" fill="#F1F5FA" stroke="#E3E8EF"/>
+    <text x="496" y="224" fill="#475569" text-anchor="middle">Notes</text>
+  </g>
+
+  <!-- report body: executive_summary_exp_0.md, rendered as written -->
+  <text x="222" y="262" class="h3">1. Why and how the default occurred?</text>
+
+  <circle cx="227" cy="284" r="3" fill="#2563EB"/>
+  <text x="238" y="288" class="b">Exposure management and increase attempts</text>
+  <text x="240" y="308" class="t2">– Jan 2025: Multiple limit-increase requests (RLI) declined</text>
+  <text x="250" y="323" class="t2">for bankruptcy — reactive attempts to access credit.</text>
+  <text x="240" y="343" class="t2">– Feb 2025: Global limit reduced and letter requested —</text>
+  <text x="250" y="358" class="t2">company-driven risk containment.</text>
+
+  <circle cx="227" cy="382" r="3" fill="#2563EB"/>
+  <text x="238" y="386" class="b">Distress signals and operational remediation</text>
+  <text x="240" y="406" class="t2">– Jan 2025: Outbound calls with no contact or message only</text>
+  <text x="250" y="421" class="t2">— difficulty engaging the customer.</text>
+  <text x="240" y="441" class="t2">– Sep 2025: Balance accelerated, referred O/A CPE 1.0 with</text>
+  <text x="250" y="456" class="t2">O/A code 42 — formal recognition of default.</text>
+
+  <circle cx="227" cy="480" r="3" fill="#2563EB"/>
+  <text x="238" y="484" class="b">Terminal outcomes and account closure</text>
+  <text x="240" y="504" class="t2">– Sep 2025: Proactive cancellation processed and delivered</text>
+  <text x="250" y="519" class="t2">— exposure contained, account closed.</text>
+
+  <text x="222" y="556" class="h3">2. Early risk indicators (&gt;6m before default)</text>
+  <circle cx="227" cy="578" r="2.6" fill="#94A3B8"/>
+  <text x="238" y="582" class="t2">External revolving utilization held at 92–93%, Jan–Apr 2024.</text>
+  <circle cx="227" cy="604" r="2.6" fill="#94A3B8"/>
+  <text x="238" y="608" class="t2">Amex ≥ 40% of overall exposure through Jan–Dec 2024.</text>
+  <circle cx="227" cy="630" r="2.6" fill="#94A3B8"/>
+  <text x="238" y="634" class="t2">Bureau inquiry index 11.5 (Jan 2024) → 20.3 (Apr 2024).</text>
+  <circle cx="227" cy="656" r="2.6" fill="#94A3B8"/>
+  <text x="238" y="660" class="t2">4 external trades utilized above 75%, Jan–Apr 2024.</text>
+
+  <line x1="222" y1="684" x2="580" y2="684" class="div"/>
+
+  <text x="222" y="710" class="h3">3. How did modeling scores react?</text>
+
+  <text x="222" y="734" font-size="9.5" font-weight="700" fill="#64748B" letter-spacing=".4">EARLY WINDOW (&gt;6M BEFORE DEFAULT)</text>
+  <circle cx="227" cy="754" r="2.6" fill="#94A3B8"/>
+  <text x="238" y="758" class="t2">Both model scores stayed below threshold Aug–Dec 2024 —</text>
+  <text x="238" y="773" class="t2">internal default probability &lt; 10, structural risk &lt; 20.</text>
+  <circle cx="227" cy="791" r="2.6" fill="#94A3B8"/>
+  <text x="238" y="795" class="t2">Risk drivers: inquiry activity, elevated balance and utilization,</text>
+  <text x="238" y="810" class="t2">high pay-in-full amounts, merchant spend concentration.</text>
+  <circle cx="227" cy="828" r="2.6" fill="#94A3B8"/>
+  <text x="238" y="832" class="t2">Bottom drivers: stable bureau score, limited delinquency</text>
+  <text x="238" y="847" class="t2">history, positive supplementary-card activity.</text>
+
+  <text x="222" y="876" font-size="9.5" font-weight="700" fill="#64748B" letter-spacing=".4">LATE WINDOW (&lt;6M BEFORE DEFAULT)</text>
+  <circle cx="227" cy="896" r="2.6" fill="#94A3B8"/>
+  <text x="238" y="900" class="t2">Largely below threshold Feb–Jun 2025, with one structural-risk</text>
+  <text x="238" y="915" class="t2">breach in April (27.4) before reverting.</text>
+  <circle cx="227" cy="933" r="2.6" fill="#94A3B8"/>
+  <text x="238" y="937" class="t2">Drivers shift to weak paydown, rising asset stress and internal</text>
+  <text x="238" y="952" class="t2">delinquency factors.</text>
+
+  <!-- ===================== COLUMN B — INVESTIGATOR (Q&amp;A): the chat surface ===================== -->
+  <rect x="608" y="92" width="636" height="932" rx="12" fill="#F4F9FF" stroke="#D2E2F7"/>
+  <rect x="608" y="92" width="636" height="52" rx="12" fill="#E6F0FE"/>
+  <rect x="608" y="120" width="636" height="24" fill="#E6F0FE"/>
+  <line x1="608" y1="144" x2="1244" y2="144" stroke="#C9DCF6"/>
+  <rect x="624" y="110" width="3" height="14" rx="1.5" fill="#2563EB"/>
+  <text x="636" y="122" class="h2" fill="#1D4ED8">CASE REVIEW ASSISTANT</text>
+  <rect x="812" y="106" width="60" height="22" rx="11" fill="#ECFDF3" stroke="#B7E4C7"/>
+  <circle cx="826" cy="117" r="5.5" fill="#16A34A" opacity=".18"/>
+  <circle cx="826" cy="117" r="3.2" fill="#16A34A"/>
+  <text x="836" y="121" font-size="10.5" font-weight="600" fill="#15803D">Live</text>
+  <text x="1212" y="123" font-size="14" font-weight="700" fill="#7C9BC4">⋯</text>
+
+  <text x="624" y="166" class="sm">Session · Default review 366132845011 · 4 turns</text>
+  <text x="1220" y="166" class="lnk" text-anchor="end">Clear</text>
+
+  <!-- the turn stream scrolls; the composer below stays pinned -->
+  <rect x="1234" y="178" width="4" height="688" rx="2" fill="#E1E9F3"/>
+  <rect x="1234" y="196" width="4" height="520" rx="2" fill="#B6C6D8"/>
+
+  <!-- ===== collapsed turns (question only; answer folded away) ===== -->
+  <rect x="624" y="178" width="596" height="32" rx="10" fill="#EDF3FB" stroke="#DBE7F6"/>
+  <circle cx="642" cy="194" r="10" fill="#C6D4E6"/>
+  <use href="#ico-user" x="636" y="188" width="12" height="12" color="#FFFFFF"/>
+  <text x="660" y="198" font-size="9.5" font-weight="700" fill="#64748B">TURN 1</text>
+  <text x="706" y="198" class="t" fill="#64748B">What is this case about?</text>
+  <text x="1140" y="198" class="sm" text-anchor="end">10:21</text>
+  <use href="#ico-chev" x="1182" y="188" width="12" height="12" color="#94A3B8"/>
+
+  <rect x="624" y="216" width="596" height="32" rx="10" fill="#EDF3FB" stroke="#DBE7F6"/>
+  <circle cx="642" cy="232" r="10" fill="#C6D4E6"/>
+  <use href="#ico-user" x="636" y="226" width="12" height="12" color="#FFFFFF"/>
+  <text x="660" y="236" font-size="9.5" font-weight="700" fill="#64748B">TURN 2</text>
+  <text x="706" y="236" class="t" fill="#64748B">Any spending spikes? What are the drivers for it?</text>
+  <text x="1140" y="236" class="sm" text-anchor="end">10:24</text>
+  <use href="#ico-chev" x="1182" y="226" width="12" height="12" color="#94A3B8"/>
+
+  <!-- ===== Turn 3 — PLOTS tab ===== -->
+  <rect x="624" y="254" width="596" height="52" rx="12" fill="#EDF3FB" stroke="#DBE7F6"/>
+  <circle cx="644" cy="280" r="11" fill="#B7C6DA"/>
+  <use href="#ico-user" x="638" y="274" width="12" height="12" color="#FFFFFF"/>
+  <text x="664" y="276" font-size="9.5" font-weight="700" fill="#64748B">TURN 3</text>
+  <text x="712" y="276" font-size="11" font-weight="600" fill="#334155">In this case, how did TSR and CDSS react? While the TSR and CDSS</text>
+  <text x="712" y="292" font-size="11" font-weight="600" fill="#334155">were reacting, how was the bureau profile?</text>
+  <text x="1140" y="276" class="sm" text-anchor="end">10:27</text>
+  <use href="#ico-chev" x="1182" y="274" width="12" height="12" color="#94A3B8" transform="rotate(90 1188 280)"/>
+
+  <rect x="624" y="312" width="596" height="322" rx="12" fill="#FFFFFF" stroke="#DDE8F6" filter="url(#sh)"/>
+
+  <g font-size="11" font-weight="600">
+    <text x="640" y="338" fill="#94A3B8">Answer</text>
+    <text x="702" y="338" fill="#1D4ED8">Plots</text>
+    <rect x="700" y="346" width="34" height="2.5" rx="1.25" fill="#2563EB"/>
+    <rect x="740" y="328" width="18" height="14" rx="7" fill="#E8F0FE"/>
+    <text x="749" y="338" font-size="9" fill="#1D4ED8" font-weight="700" text-anchor="middle">2</text>
+  </g>
+  <line x1="624" y1="348" x2="1220" y2="348" class="div"/>
+
+  <!-- chart -->
+  <text x="648" y="376" font-size="10" font-weight="700" fill="#334155">TSR / CDSS trend</text>
+  <line x1="800" y1="372" x2="824" y2="372" stroke="#2563EB" stroke-width="2"/>
+  <text x="830" y="375" class="sm" fill="#64748B">TSR</text>
+  <line x1="864" y1="372" x2="888" y2="372" stroke="#0E9F6E" stroke-width="2"/>
+  <text x="894" y="375" class="sm" fill="#64748B">CDSS</text>
+  <line x1="936" y1="372" x2="960" y2="372" stroke="#DC2626" stroke-width="1.6" stroke-dasharray="4 3"/>
+  <text x="966" y="375" class="sm" fill="#64748B">Risky threshold (TSR 20)</text>
+
+  <g stroke="#EEF2F7" stroke-width="1">
+    <line x1="686" y1="390" x2="1094" y2="390"/>
+    <line x1="686" y1="432" x2="1094" y2="432"/>
+    <line x1="686" y1="475" x2="1094" y2="475"/>
+    <line x1="686" y1="517" x2="1094" y2="517"/>
+  </g>
+  <line x1="686" y1="560" x2="1094" y2="560" stroke="#D6DEE9" stroke-width="1"/>
+  <g class="sm" text-anchor="end">
+    <text x="678" y="393">40</text>
+    <text x="678" y="435">30</text>
+    <text x="678" y="478">20</text>
+    <text x="678" y="520">10</text>
+    <text x="678" y="563">0</text>
+  </g>
+  <line x1="686" y1="475" x2="1094" y2="475" stroke="#DC2626" stroke-width="1.4" stroke-dasharray="5 4" opacity=".7"/>
+
+  <polyline points="686,509 727,505 768,501 808,496 849,492 890,484 931,488 992,444 1033,479 1094,492"
+            fill="none" stroke="#2563EB" stroke-width="2.2" stroke-linejoin="round"/>
+  <polyline points="686,539 727,537 768,535 808,535 849,530 890,528 931,526 992,520 1033,522 1094,524"
+            fill="none" stroke="#0E9F6E" stroke-width="2" stroke-linejoin="round"/>
+  <circle cx="992" cy="444" r="4" fill="#DC2626"/>
+  <text x="992" y="434" font-size="9" font-weight="700" fill="#B91C1C" text-anchor="middle">27.4</text>
+  <g class="sm">
+    <text x="686" y="576">2024-01</text>
+    <text x="808" y="576">2024-07</text>
+    <text x="931" y="576">2025-01</text>
+    <text x="1053" y="576">2025-07</text>
+  </g>
+
+  <rect x="1112" y="382" width="102" height="60" rx="8" fill="#F0F6FF" stroke="#C7DBFB"/>
+  <text x="1122" y="398" font-size="9" font-weight="700" fill="#1D4ED8">Fig 1 · TSR/CDSS</text>
+  <polyline points="1122,428 1140,424 1158,426 1170,410 1184,424 1198,428" fill="none" stroke="#2563EB" stroke-width="1.6"/>
+  <polyline points="1122,436 1140,435 1158,434 1170,432 1184,433 1198,434" fill="none" stroke="#0E9F6E" stroke-width="1.4"/>
+  <rect x="1112" y="452" width="102" height="60" rx="8" fill="#FAFBFD" stroke="#E3E8EF"/>
+  <text x="1122" y="468" font-size="9" font-weight="700" fill="#475569">Fig 2 · Bureau</text>
+  <polyline points="1122,482 1140,486 1158,490 1176,498 1198,502" fill="none" stroke="#94A3B8" stroke-width="1.6"/>
+
+  <text x="648" y="592" class="sm">Fig 1 · TSR and CDSS vs their own risky thresholds; bureau profile read over the same window (Fig 2).</text>
+
+  <line x1="624" y1="600" x2="1220" y2="600" class="div"/>
+  <g font-size="10" font-weight="600">
+    <rect x="640" y="606" width="98" height="22" rx="8" fill="#FFF8EC" stroke="#F3D9A6"/>
+    <use href="#ico-pin" x="650" y="611" width="11" height="11" color="#B45309"/>
+    <text x="667" y="621" fill="#B45309">Pin Insight</text>
+
+    <rect x="746" y="606" width="98" height="22" rx="8" fill="#FFF8EC" stroke="#F3D9A6"/>
+    <use href="#ico-pin" x="756" y="611" width="11" height="11" color="#B45309"/>
+    <text x="773" y="621" fill="#B45309">Pin Figures</text>
+
+    <rect x="852" y="606" width="94" height="22" rx="8" fill="#F7F9FC" stroke="#E3E8EF"/>
+    <use href="#ico-rewind" x="862" y="611" width="11" height="11" color="#64748B"/>
+    <text x="879" y="621" fill="#475569">Regenerate</text>
+
+    <rect x="954" y="606" width="84" height="22" rx="8" fill="#F7F9FC" stroke="#E3E8EF"/>
+    <text x="996" y="621" fill="#475569" text-anchor="middle">Flag Issue</text>
+  </g>
+
+  <!-- ===== Turn 4 — follow-up, ANSWER tab ===== -->
+  <rect x="624" y="648" width="596" height="52" rx="12" fill="#EDF3FB" stroke="#DBE7F6"/>
+  <circle cx="644" cy="674" r="11" fill="#B7C6DA"/>
+  <use href="#ico-user" x="638" y="668" width="12" height="12" color="#FFFFFF"/>
+  <text x="664" y="670" font-size="9.5" font-weight="700" fill="#64748B">TURN 4</text>
+  <text x="712" y="670" font-size="11" font-weight="600" fill="#334155">Summarize the abnormal transactions when TSR was</text>
+  <text x="712" y="686" font-size="11" font-weight="600" fill="#334155">reacting in 2025/2026.</text>
+  <text x="1140" y="670" class="sm" text-anchor="end">10:31</text>
+  <use href="#ico-chev" x="1182" y="668" width="12" height="12" color="#94A3B8" transform="rotate(90 1188 674)"/>
+
+  <rect x="624" y="706" width="596" height="158" rx="12" fill="#FFFFFF" stroke="#DDE8F6" filter="url(#sh)"/>
+
+  <g font-size="11" font-weight="600">
+    <text x="640" y="732" fill="#1D4ED8">Answer</text>
+    <rect x="638" y="740" width="46" height="2.5" rx="1.25" fill="#2563EB"/>
+    <text x="702" y="732" fill="#94A3B8">Plots</text>
+    <rect x="738" y="722" width="18" height="14" rx="7" fill="#EEF2F7"/>
+    <text x="747" y="732" font-size="9" fill="#64748B" text-anchor="middle">1</text>
+  </g>
+  <line x1="624" y1="742" x2="1220" y2="742" class="div"/>
+
+  <text x="640" y="764" class="t2">Reaction window read as 2025-03 → 2025-06 (TSR above 20, peak 27.4 in Apr 2025):</text>
+  <circle cx="644" cy="784" r="2.5" fill="#2563EB"/>
+  <text x="654" y="788" class="t2">12 charges at AMAZON MARKEPLACE NA PA in that window — 4× this account’s typical merchant frequency.</text>
+  <circle cx="644" cy="803" r="2.5" fill="#2563EB"/>
+  <text x="654" y="807" class="t2">Three same-day pairs at one merchant, each above the 90th-percentile ticket for the account.</text>
+  <circle cx="644" cy="822" r="2.5" fill="#2563EB"/>
+  <text x="654" y="826" class="t2">Cluster sits inside the reaction window, not before it — 2 of 12 fall outside and are excluded.</text>
+
+  <line x1="624" y1="834" x2="1220" y2="834" class="div"/>
+  <g font-size="10" font-weight="600">
+    <rect x="640" y="838" width="98" height="22" rx="8" fill="#FFF8EC" stroke="#F3D9A6"/>
+    <use href="#ico-pin" x="650" y="843" width="11" height="11" color="#B45309"/>
+    <text x="667" y="853" fill="#B45309">Pin Insight</text>
+
+    <rect x="746" y="838" width="98" height="22" rx="8" fill="#FFF8EC" stroke="#F3D9A6"/>
+    <use href="#ico-pin" x="756" y="843" width="11" height="11" color="#B45309"/>
+    <text x="773" y="853" fill="#B45309">Pin Figures</text>
+
+    <rect x="852" y="838" width="94" height="22" rx="8" fill="#F7F9FC" stroke="#E3E8EF"/>
+    <use href="#ico-rewind" x="862" y="843" width="11" height="11" color="#64748B"/>
+    <text x="879" y="853" fill="#475569">Regenerate</text>
+
+    <rect x="954" y="838" width="84" height="22" rx="8" fill="#F7F9FC" stroke="#E3E8EF"/>
+    <text x="996" y="853" fill="#475569" text-anchor="middle">Flag Issue</text>
+  </g>
+
+  <!-- ===== 对话框 / composer (pinned below the scrolling stream) ===== -->
+  <line x1="608" y1="876" x2="1244" y2="876" stroke="#D2E2F7"/>
+  <use href="#ico-spark" x="624" y="884" width="12" height="12" color="#1D4ED8"/>
+  <text x="642" y="894" font-size="10.5" font-weight="700" fill="#1D4ED8">Ask the assistant</text>
+  <rect x="1094" y="880" width="126" height="22" rx="11" fill="#FFFFFF" stroke="#C7D6EA"/>
+  <use href="#ico-rewind" x="1104" y="885" width="12" height="12" color="#475569"/>
+  <text x="1122" y="895" font-size="9.5" font-weight="600" fill="#475569">Rewind last turn</text>
+
+  <g font-size="9.5" font-weight="600">
+    <rect x="624" y="908" width="196" height="22" rx="11" fill="#E9F1FE" stroke="#C7DBFB"/>
+    <text x="722" y="923" fill="#1D4ED8" text-anchor="middle">What transactions are connected?</text>
+    <rect x="828" y="908" width="152" height="22" rx="11" fill="#E9F1FE" stroke="#C7DBFB"/>
+    <text x="904" y="923" fill="#1D4ED8" text-anchor="middle">What evidence supports it?</text>
+    <rect x="988" y="908" width="162" height="22" rx="11" fill="#E9F1FE" stroke="#C7DBFB"/>
+    <text x="1069" y="923" fill="#1D4ED8" text-anchor="middle">What evidence contradicts it?</text>
+  </g>
+
+  <rect x="618" y="944" width="614" height="60" rx="18" fill="#D9E7FC" opacity=".55"/>
+  <rect x="624" y="948" width="596" height="52" rx="15" fill="#FFFFFF" stroke="#2563EB" stroke-width="1.6"/>
+  <text x="648" y="980" font-size="12" fill="#94A3B8">Ask a follow-up about this case…</text>
+  <rect x="1098" y="962" width="26" height="26" rx="8" fill="#F1F5FA"/>
+  <text x="1111" y="980" font-size="12" fill="#64748B" text-anchor="middle">#</text>
+  <rect x="1132" y="962" width="26" height="26" rx="8" fill="#F1F5FA"/>
+  <text x="1145" y="980" font-size="12" fill="#64748B" text-anchor="middle">@</text>
+  <rect x="1170" y="958" width="34" height="34" rx="11" fill="#2563EB"/>
+  <use href="#ico-send" x="1179" y="967" width="16" height="16" color="#FFFFFF"/>
+
+  <!-- ===================== COLUMN C — TRACE + PIN PANELS ===================== -->
+  <!-- reasoning trace runs on the dark "system" palette; PROGRESS view -->
+  <rect x="1256" y="92" width="368" height="294" rx="12" class="dcard"/>
+  <text x="1272" y="117" class="dh2">REASONING TRACE</text>
+  <text x="1608" y="117" class="dsm" text-anchor="end">Turn 4 of 4</text>
+
+  <rect x="1272" y="132" width="132" height="22" rx="11" fill="#16202F"/>
+  <rect x="1274" y="134" width="62" height="18" rx="9" fill="#35496B"/>
+  <text x="1305" y="147" font-size="9.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">Progress</text>
+  <text x="1371" y="147" font-size="9.5" font-weight="600" fill="#8FA3C2" text-anchor="middle">Detail</text>
+  <text x="1608" y="147" class="dlnk" text-anchor="end">Expand ⤢</text>
+  <line x1="1256" y1="164" x2="1624" y2="164" class="ddiv"/>
+
+  <use href="#ico-check" x="1272" y="172" width="13" height="13"/>
+  <text x="1294" y="183" class="db">Question Check</text>
+  <text x="1294" y="197" class="dsm">Screen passed · in scope · outcome completed</text>
+
+  <use href="#ico-check" x="1272" y="206" width="13" height="13"/>
+  <text x="1294" y="217" class="db">Team Construction</text>
+  <text x="1294" y="231" class="dsm">2 domain specialists + report agent</text>
+
+  <use href="#ico-check" x="1272" y="240" width="13" height="13"/>
+  <text x="1294" y="251" class="db">Specialist Analysis</text>
+  <rect x="1422" y="242" width="86" height="15" rx="7.5" fill="#35496B"/>
+  <text x="1465" y="253" font-size="8.5" font-weight="700" fill="#BFD4F5" text-anchor="middle">⇉ IN PARALLEL</text>
+  <path d="M1300 262 v34" fill="none" stroke="#44577A" stroke-width="1.2"/>
+  <path d="M1300 271 h10" fill="none" stroke="#44577A" stroke-width="1.2"/>
+  <path d="M1300 291 h10" fill="none" stroke="#44577A" stroke-width="1.2"/>
+  <circle cx="1315" cy="271" r="3" fill="#22C55E"/>
+  <text x="1326" y="274" class="dt">spending &amp; payment specialist · 4.86 s</text>
+  <circle cx="1315" cy="291" r="3" fill="#22C55E"/>
+  <text x="1326" y="294" class="dt">modeling specialist · 5.12 s</text>
+
+  <use href="#ico-check" x="1272" y="306" width="13" height="13"/>
+  <text x="1294" y="317" class="db">Report Agent Analysis</text>
+  <text x="1294" y="331" class="dsm">5.99 s · coverage partial · 2 files consulted</text>
+
+  <use href="#ico-check" x="1272" y="340" width="13" height="13"/>
+  <text x="1294" y="351" class="db">Final Synthesis</text>
+  <text x="1294" y="365" class="dsm">16.94 s total · 3 findings · 1 figure</text>
+
+  <!-- ===== pinned figures (scrolls) ===== -->
+  <rect x="1256" y="398" width="368" height="248" rx="12" class="card"/>
+  <use href="#ico-pin" x="1270" y="414" width="13" height="13" color="#B45309"/>
+  <text x="1290" y="424" class="h2">PINNED FIGURES</text>
+  <rect x="1400" y="412" width="20" height="16" rx="8" fill="#FFF3DF"/>
+  <text x="1410" y="424" font-size="9.5" font-weight="700" fill="#B45309" text-anchor="middle">4</text>
+  <line x1="1256" y1="438" x2="1624" y2="438" class="div"/>
+
+  <g clip-path="url(#clipFig)">
+    <rect x="1272" y="446" width="330" height="72" rx="10" class="soft"/>
+    <rect x="1284" y="456" width="76" height="52" rx="6" fill="#FFFFFF" stroke="#E3E8EF"/>
+    <line x1="1290" y1="484" x2="1354" y2="484" stroke="#DC2626" stroke-width="1" stroke-dasharray="3 3" opacity=".7"/>
+    <polyline points="1291,494 1303,490 1315,492 1325,472 1337,488 1352,492" fill="none" stroke="#2563EB" stroke-width="1.6"/>
+    <polyline points="1291,501 1303,500 1315,500 1325,498 1337,499 1352,500" fill="none" stroke="#0E9F6E" stroke-width="1.3"/>
+    <text x="1372" y="470" class="b">TSR / CDSS trend</text>
+    <text x="1372" y="485" class="sm">Turn 3 · Fig 1 · Apr-2025 breach 27.4</text>
+    <text x="1372" y="504" class="lnk">Insert into Modeling</text>
+    <use href="#ico-x" x="1580" y="454" width="12" height="12" color="#A3B4C8"/>
+
+    <rect x="1272" y="526" width="330" height="72" rx="10" class="soft"/>
+    <rect x="1284" y="536" width="76" height="52" rx="6" fill="#FFFFFF" stroke="#E3E8EF"/>
+    <polyline points="1291,550 1303,556 1315,564 1327,570 1339,578 1352,582" fill="none" stroke="#DC2626" stroke-width="1.6"/>
+    <text x="1372" y="550" class="b">Bureau profile · FICO</text>
+    <text x="1372" y="565" class="sm">Turn 3 · Fig 2 · same window as the reaction</text>
+    <text x="1372" y="584" class="lnk">Insert into Bureau</text>
+    <use href="#ico-x" x="1580" y="534" width="12" height="12" color="#A3B4C8"/>
+
+    <rect x="1272" y="606" width="330" height="72" rx="10" class="soft"/>
+    <rect x="1284" y="616" width="76" height="52" rx="6" fill="#FFFFFF" stroke="#E3E8EF"/>
+    <text x="1372" y="630" class="b">Spend vs peer median</text>
+    <text x="1372" y="645" class="sm">Turn 2 · Fig 1 · spend spike, May 2025</text>
+  </g>
+  <rect x="1264" y="610" width="352" height="24" fill="url(#fadeW)"/>
+  <rect x="1610" y="446" width="4" height="188" rx="2" fill="#EDF1F6"/>
+  <rect x="1610" y="446" width="4" height="100" rx="2" fill="#C6D0DC"/>
+
+  <!-- ===== pinned insights (scrolls) + AI summary ===== -->
+  <rect x="1256" y="658" width="368" height="366" rx="12" class="card"/>
+  <use href="#ico-pin" x="1270" y="674" width="13" height="13" color="#B45309"/>
+  <text x="1290" y="684" class="h2">PINNED INSIGHTS</text>
+  <rect x="1404" y="672" width="20" height="16" rx="8" fill="#FFF3DF"/>
+  <text x="1414" y="684" font-size="9.5" font-weight="700" fill="#B45309" text-anchor="middle">5</text>
+  <rect x="1498" y="670" width="110" height="21" rx="10.5" fill="#EEF4FF" stroke="#C7DBFB"/>
+  <use href="#ico-spark" x="1508" y="674" width="12" height="12" color="#1D4ED8"/>
+  <text x="1526" y="685" font-size="9.5" font-weight="700" fill="#1D4ED8">Summarize</text>
+  <line x1="1256" y1="698" x2="1624" y2="698" class="div"/>
+
+  <g clip-path="url(#clipIns)">
+    <rect x="1272" y="706" width="330" height="66" rx="10" class="soft"/>
+    <rect x="1272" y="706" width="3" height="66" rx="1.5" fill="#F59E0B"/>
+    <text x="1288" y="726" class="t2">Spend spiked to 324K in May 2025 — 2.6× the</text>
+    <text x="1288" y="741" class="t2">rolling 12-month median for this account.</text>
+    <rect x="1288" y="748" width="62" height="17" rx="8.5" fill="#E8F0FE"/>
+    <text x="1319" y="760" font-size="9" font-weight="700" fill="#1D4ED8" text-anchor="middle">Turn 2</text>
+    <text x="1358" y="760" class="sm">10:24 · specialist spends</text>
+    <use href="#ico-x" x="1580" y="714" width="12" height="12" color="#A3B4C8"/>
+
+    <rect x="1272" y="780" width="330" height="66" rx="10" class="soft"/>
+    <rect x="1272" y="780" width="3" height="66" rx="1.5" fill="#F59E0B"/>
+    <text x="1288" y="800" class="t2">TSR peaked at 27.4 in Apr 2025 while CDSS</text>
+    <text x="1288" y="815" class="t2">stayed under 10 across the same window.</text>
+    <rect x="1288" y="822" width="62" height="17" rx="8.5" fill="#E8F0FE"/>
+    <text x="1319" y="834" font-size="9" font-weight="700" fill="#1D4ED8" text-anchor="middle">Turn 3</text>
+    <text x="1358" y="834" class="sm">10:27 · linked to Fig 1</text>
+    <use href="#ico-x" x="1580" y="788" width="12" height="12" color="#A3B4C8"/>
+
+    <rect x="1272" y="854" width="330" height="66" rx="10" class="soft"/>
+    <rect x="1272" y="854" width="3" height="66" rx="1.5" fill="#F59E0B"/>
+    <text x="1288" y="874" class="t2">12 charges at one merchant inside the TSR</text>
+  </g>
+  <rect x="1264" y="842" width="352" height="24" fill="url(#fadeW)"/>
+  <rect x="1610" y="706" width="4" height="160" rx="2" fill="#EDF1F6"/>
+  <rect x="1610" y="706" width="4" height="92" rx="2" fill="#C6D0DC"/>
+
+  <!-- AI summary of the pinned insights — the one hand-off to Opportunities -->
+  <rect x="1272" y="876" width="336" height="136" rx="10" fill="#F2F7FF" stroke="#93B4F5"/>
+  <use href="#ico-spark" x="1288" y="888" width="12" height="12" color="#1D4ED8"/>
+  <text x="1306" y="898" font-size="9.5" font-weight="700" fill="#1D4ED8" letter-spacing=".5">AI SUMMARY OF PINNED INSIGHTS</text>
+  <text x="1596" y="898" class="sm" text-anchor="end">5 pins</text>
+  <text x="1288" y="918" class="t2">Spend spiked in May 2025 and TSR reacted the following month;</text>
+  <text x="1288" y="933" class="t2">the abnormal merchant cluster falls inside that window, so the</text>
+  <text x="1288" y="948" class="t2">behaviour and the score reaction are the same episode.</text>
+  <rect x="1288" y="962" width="176" height="32" rx="9" fill="#2563EB"/>
+  <use href="#ico-spark" x="1302" y="971" width="13" height="13" color="#FFFFFF"/>
+  <text x="1322" y="982" font-size="10.5" font-weight="700" fill="#FFFFFF">Add to Opportunities</text>
+  <text x="1596" y="982" class="lnk" text-anchor="end">Regenerate</text>
+
+  <!-- REASONING TRACE — DETAIL VIEW (what ⤢ opens; same sections as today's frontend) -->
+  <rect x="206" y="1060" width="1418" height="600" rx="12" class="dcard"/>
+  <text x="222" y="1085" class="dh2">REASONING TRACE</text>
+  <rect x="352" y="1070" width="132" height="22" rx="11" fill="#16202F"/>
+  <text x="386" y="1085" font-size="9.5" font-weight="600" fill="#8FA3C2" text-anchor="middle">Progress</text>
+  <rect x="420" y="1072" width="62" height="18" rx="9" fill="#35496B"/>
+  <text x="451" y="1085" font-size="9.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">Detail</text>
+  <text x="1500" y="1085" class="dsm" text-anchor="end">Turn 4 · 16.94 s total</text>
+  <text x="1608" y="1085" class="dlnk" text-anchor="end">Collapse ⤡</text>
+  <line x1="206" y1="1100" x2="1624" y2="1100" class="ddiv"/>
+  <line x1="706" y1="1112" x2="706" y2="1644" class="ddiv"/>
+  <line x1="1174" y1="1112" x2="1174" y2="1644" class="ddiv"/>
+
+  <!-- column 1 -->
+  <text x="222" y="1128" class="dsec">[ Question Check ]</text>
+  <rect x="222" y="1138" width="74" height="17" rx="8.5" fill="#2A3A56"/>
+  <text x="259" y="1150" class="dmono" text-anchor="middle">chat_agent</text>
+  <text x="222" y="1174" class="dt"><tspan class="dtb">Safety / PII screen: </tspan>passed</text>
+  <text x="222" y="1192" class="dt"><tspan class="dtb">Scope check: </tspan>in scope</text>
+  <text x="222" y="1210" class="dt"><tspan class="dtb">Outcome: </tspan>Completed</text>
+
+  <text x="222" y="1248" class="dsec">[ Team Construction ]</text>
+  <rect x="222" y="1258" width="82" height="17" rx="8.5" fill="#2A3A56"/>
+  <text x="263" y="1270" class="dmono" text-anchor="middle">orchestrator</text>
+  <text x="222" y="1294" class="dt">Orchestrator consulted the Report agent and constructed a team of</text>
+  <text x="222" y="1310" class="dt">2 domain specialists, dispatched in parallel on this turn:</text>
+
+  <circle cx="228" cy="1336" r="2.6" fill="#7FB0FF"/>
+  <text x="240" y="1340" class="dtb">spends_payments (spending &amp; payment specialist)</text>
+  <text x="240" y="1358" class="dt"><tspan class="dtb">sub-question: </tspan>Which transactions are abnormal while TSR was</text>
+  <text x="240" y="1374" class="dt">reacting? Report merchant, amount and date at row level, and state the</text>
+  <text x="240" y="1390" class="dt">yardstick used to call them abnormal.</text>
+
+  <circle cx="228" cy="1416" r="2.6" fill="#7FB0FF"/>
+  <text x="240" y="1420" class="dtb">modeling (modeling specialist)</text>
+  <text x="240" y="1438" class="dt"><tspan class="dtb">sub-question: </tspan>Over which months was TSR reacting? Bound the</text>
+  <text x="240" y="1454" class="dt">window using each metric’s own risky threshold, and date the peak.</text>
+
+  <circle cx="228" cy="1480" r="2.6" fill="#7FB0FF"/>
+  <text x="240" y="1484" class="dtb">report_agent (report agent)</text>
+  <text x="240" y="1502" class="dt"><tspan class="dtb">sub-question: </tspan>Do the curated reports describe abnormal spend in</text>
+  <text x="240" y="1518" class="dt">this window? Cite explicit rows; if not mentioned, state so clearly.</text>
+
+  <!-- column 2 — the two specialists, run in parallel -->
+  <rect x="722" y="1120" width="96" height="17" rx="8.5" fill="#35496B"/>
+  <text x="770" y="1132" font-size="8.5" font-weight="700" fill="#BFD4F5" text-anchor="middle">⇉ IN PARALLEL</text>
+  <path d="M730 1146 v352" fill="none" stroke="#44577A" stroke-width="1.2"/>
+  <path d="M730 1166 h14" fill="none" stroke="#44577A" stroke-width="1.2"/>
+  <path d="M730 1372 h14" fill="none" stroke="#44577A" stroke-width="1.2"/>
+
+  <rect x="744" y="1146" width="404" height="184" rx="10" class="dblk"/>
+  <text x="760" y="1170" class="dsec" font-size="11">[ Specialist Analysis — spends &amp; payments ]</text>
+  <rect x="760" y="1180" width="132" height="17" rx="8.5" fill="#2A3A56"/>
+  <text x="826" y="1192" class="dmono" text-anchor="middle">spends_payments · 4.86 s</text>
+  <text x="760" y="1216" class="dtb">Findings:</text>
+  <text x="760" y="1232" class="dt">12 charges at AMAZON MARKEPLACE NA PA between 2025-03 and</text>
+  <text x="760" y="1248" class="dt">2025-06 — 4× this account’s typical merchant frequency. Three</text>
+  <text x="760" y="1264" class="dt">same-day pairs sit above the 90th-percentile ticket.</text>
+  <text x="760" y="1286" class="dtb">Evidence:</text>
+  <circle cx="766" cy="1298" r="2.2" fill="#7C90B0"/>
+  <text x="778" y="1302" class="dt">Median ticket 2,140 vs 8,760 for the three flagged pairs.</text>
+  <circle cx="766" cy="1316" r="2.2" fill="#7C90B0"/>
+  <text x="778" y="1320" class="dt">2 of 12 charges fall outside the window and are excluded.</text>
+
+  <rect x="744" y="1352" width="404" height="164" rx="10" class="dblk"/>
+  <text x="760" y="1376" class="dsec" font-size="11">[ Specialist Analysis — modeling ]</text>
+  <rect x="760" y="1386" width="108" height="17" rx="8.5" fill="#2A3A56"/>
+  <text x="814" y="1398" class="dmono" text-anchor="middle">modeling · 5.12 s</text>
+  <text x="760" y="1422" class="dtb">Findings:</text>
+  <text x="760" y="1438" class="dt">TSR sat above its threshold (20) from 2025-03 to 2025-06, peaking</text>
+  <text x="760" y="1454" class="dt">at 27.4 in Apr 2025; CDSS never crossed its own threshold of 10.</text>
+  <text x="760" y="1476" class="dtb">Evidence:</text>
+  <circle cx="766" cy="1488" r="2.2" fill="#7C90B0"/>
+  <text x="778" y="1492" class="dt">Monthly max TSR 27.4 (2025-04); next highest 19.1 (2025-06).</text>
+  <circle cx="766" cy="1506" r="2.2" fill="#7C90B0"/>
+  <text x="778" y="1510" class="dt">Window handed to the spends specialist to bound its scan.</text>
+
+  <rect x="744" y="1540" width="404" height="42" rx="8" class="dbox"/>
+  <text x="758" y="1556" class="dsm">Both specialists were dispatched from one team_plan and completed</text>
+  <text x="758" y="1572" class="dsm">independently; synthesis waits for the slower of the two (5.12 s).</text>
+
+  <!-- column 3 -->
+  <text x="1190" y="1128" class="dsec">[ Report Agent Analysis ]</text>
+  <rect x="1190" y="1138" width="116" height="17" rx="8.5" fill="#2A3A56"/>
+  <text x="1248" y="1150" class="dmono" text-anchor="middle">report_agent · 5.99 s</text>
+  <text x="1190" y="1174" class="dt"><tspan class="dtb">Report coverage: </tspan>partial</text>
+  <text x="1190" y="1192" class="dt"><tspan class="dtb">Files consulted: </tspan>payment_spend_exp_0.md,</text>
+  <text x="1190" y="1208" class="dt">modeling_exp_0.md</text>
+  <text x="1190" y="1230" class="dtb">Report’s answer:</text>
+  <text x="1190" y="1246" class="dt">The curated reports describe elevated merchant spend</text>
+  <text x="1190" y="1262" class="dt">concentration in this period but do not enumerate individual</text>
+  <text x="1190" y="1278" class="dt">transactions. The April 2025 structural-risk breach is stated</text>
+  <text x="1190" y="1294" class="dt">explicitly.</text>
+  <text x="1190" y="1316" class="dtb">Quoted from the reports:</text>
+  <rect x="1190" y="1326" width="418" height="64" rx="8" class="dbox"/>
+  <text x="1204" y="1346" class="dt" fill="#8FA3C2">“…spend concentration crossing threshold (2.4) in</text>
+  <text x="1204" y="1362" class="dt" fill="#8FA3C2">Jan-2024 (value 3.3)…”</text>
+  <text x="1204" y="1380" class="dt" fill="#8FA3C2">“…fluctuating below 20 except for a breach in April (27.4)…”</text>
+
+  <text x="1190" y="1424" class="dsec">[ Final Synthesis ]</text>
+  <rect x="1190" y="1434" width="134" height="17" rx="8.5" fill="#2A3A56"/>
+  <text x="1257" y="1446" class="dmono" text-anchor="middle">synthesis · 16.94 s total</text>
+  <text x="1190" y="1470" class="dtb">Answer</text>
+  <text x="1190" y="1486" class="dt">12 charges at a single merchant cluster inside the TSR</text>
+  <text x="1190" y="1502" class="dt">reaction window of 2025-03 → 2025-06.</text>
+
+  <circle cx="1196" cy="1524" r="2.6" fill="#7FB0FF"/>
+  <text x="1208" y="1528" class="dt">The window comes from the modeling specialist, not from</text>
+  <text x="1208" y="1544" class="dt">the transaction data itself.</text>
+  <circle cx="1196" cy="1566" r="2.6" fill="#7FB0FF"/>
+  <text x="1208" y="1570" class="dt">Abnormality is measured against a stated yardstick — 4×</text>
+  <text x="1208" y="1586" class="dt">typical frequency, above the 90th-percentile ticket.</text>
+  <circle cx="1196" cy="1608" r="2.6" fill="#7FB0FF"/>
+  <text x="1208" y="1612" class="dt">Reports corroborate the concentration but not the rows.</text>
+
+  <text x="1190" y="1638" class="dsm">Scope: spends, model_scores · 2025-03 → 2025-06</text>
+</svg>

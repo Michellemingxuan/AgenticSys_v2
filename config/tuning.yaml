@@ -14,22 +14,22 @@ memory:
   # Recent turns shown to the orchestrator verbatim (episodic coreference).
   # The durable Amem case summary is injected as condensed "older context" only
   # once a case runs past this many turns.  [env: EPISODIC_TURNS]
-  episodic_turns: 2
+  episodic_turns: 5
 
   # How often the Amem case summary is (re)built — every N turns, not every turn.
   # The recent-episodic window covers the gap between refreshes.
   # [env: AMEM_CONSOLIDATE_EVERY_N]
-  consolidate_every_n_turns: 2
+  consolidate_every_n_turns: 5
 
   # K1 — compact trigger. specialist_kb ACCUMULATES KPs in RAM across turns;
   # once it grows past this many, we pay ONE Amem hybrid search to compact it
   # down to active_kp_keep (K2) most-relevant KPs, then it accumulates again.
   # So this is the ceiling, not a per-turn cap. e.g. 5 → compact once >5 KPs.
   # [env: AMEM_ACTIVE_KP_THRESHOLD]
-  active_kp_threshold: 5
+  active_kp_threshold: 100
 
   # K2 — compact target (should be << K1). How many most-relevant KPs to keep
   # after a compaction. The gap (K1 - K2) is the hysteresis: bigger gap → the
   # ~3s search fires less often. e.g. K1=5, K2=2 → compact 6→2, accumulate to
   # 6 again. In production ~ K1=100, K2=20.  [env: AMEM_ACTIVE_KP_KEEP]
-  active_kp_keep: 2
+  active_kp_keep: 20
