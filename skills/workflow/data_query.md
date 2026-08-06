@@ -5,7 +5,7 @@ type: workflow
 owner: [base_specialist]
 mode: inline
 replaces: [BASE_INSTRUCTIONS]
-tools: [list_available_tables, get_table_schema, search_columns, query_table, batch_query_table, join_table, transaction_detail, score_driver_values, aggregate_column, batch_aggregate, summarize_trend, batch_summarize_trend, summarize_by_group, make_chart, get_chart_guidance]
+tools: [list_available_tables, get_table_schema, search_columns, query_table, batch_query_table, join_table, sequence_join, transaction_detail, score_driver_values, aggregate_column, batch_aggregate, summarize_trend, batch_summarize_trend, summarize_by_group, make_chart, get_chart_guidance]
 ---
 
 Specialist analyst. Three parallel concerns per call:
@@ -298,6 +298,29 @@ Tool signatures are in their docstrings. Key routing:
 | Shape over time | `summarize_trend` or `batch_summarize_trend` |
 | Shape across a category | `summarize_by_group` |
 | Top groups + per-group trend | `summarize_by_group` → per-top-N `summarize_trend` |
+| Same row in two tables (shared key) | `join_table` |
+| **"B shortly after A" across two tables** | **`sequence_join`** |
+
+## Order-and-proximity questions → `sequence_join`, in ONE call
+
+*"Any large spend right after a small payment?"*, *"returned payments soon after a limit increase"*, *"score breaches following a spend spike"* — these are about ORDER and CLOSENESS IN TIME across two tables with no shared key, so `join_table` (equal keys) cannot express them.
+
+**Do NOT hand-correlate.** Pulling the two sides separately and eyeballing the dates costs 4-5 rounds, is where the turn budget dies (§1.1), and produces a "none found" nobody can check. One call instead:
+
+```
+sequence_join("payments", "spends",
+  anchor_time_column="payment_date", follow_time_column="Date",
+  within_days=3, direction="after",
+  anchor_filters='[{"column":"Payment Amount","op":"lt","value":"1000"}]',
+  follow_filters='[{"column":"Amount","op":"gt","value":"10000"}]',
+  anchor_columns="payment_date,Payment Amount",
+  follow_columns="Date,Merchant Name,Amount")
+```
+
+- **You define "large" and "small"** in the filters, and you must **state those thresholds in your finding** — the answer means nothing without them. Derive them from the data first (`aggregate_column` op=`mean`/`max`, or a percentile) rather than inventing a round number; put that call in the SAME batch.
+- **A zero-pair result is a REAL finding here** — each side reports `rows_matching`, so you can write *"checked 250 payments against 49 large spends, no pair within 3 days"*. Quote those counts; a bare "no" is not an answer.
+- **`not_tested: true` is NOT a negative finding.** It means one side's filter matched 0 rows, so nothing could have paired regardless of the data. Fix the threshold / column / value format and re-run — never report it as "the pattern is absent".
+- **Grain is DAYS.** `within_days=0` means the same calendar day, not within 24 hours, and intraday order is unresolved. If the question turns on intraday sequence, say so in `data_gaps`.
 
 Charts render automatically from tool outputs — no `make_chart` call needed.
 

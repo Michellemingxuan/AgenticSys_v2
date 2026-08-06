@@ -2392,6 +2392,321 @@ def join_table(
     )
 
 
+# ── sequence_join: "did B happen within N days of A?" ───────────────────────
+#
+# `join_table` matches rows by EQUAL keys, which cannot express a question
+# about ORDER and PROXIMITY IN TIME — "a large spend shortly after a small
+# payment", "a returned payment soon after a limit increase", "a score breach
+# following a spend spike". Those live across two tables with no shared key,
+# and without a tool they decompose into: establish the thresholds, pull side
+# A, pull side B, then correlate the two lists by hand. Measured live, that is
+# 4-5 rounds before synthesis starts, and it is what blew the specialist turn
+# budget and returned nothing at all.
+#
+# It also produces a NULL RESULT the reviewer can trust. A hand-correlated
+# "I didn't find any" says nothing about how hard anyone looked; this returns
+# the search space with the answer — `250 anchors x 49 follows, window 3d
+# after -> 0 pairs` — so "none found" becomes a measured finding rather than
+# an absence of effort. See `data_query.md` §1.2 EXCEPTION (falsification).
+
+_MAX_SEQUENCE_PAIRS = 500
+
+
+def _conditions_from_filters(filters: str) -> list[tuple[str, str, str]]:
+    """Parse a `query_table`-style JSON filter list into (column, value, op).
+
+    Deliberately a separate reader rather than a refactor of the equivalent
+    block inside `_query_table_impl`: that function is on the hot path for
+    every specialist, and the sequence tools are new. Accepts the same key
+    aliases so a specialist can copy a filter list between tools verbatim.
+    """
+    out: list[tuple[str, str, str]] = []
+    if not filters:
+        return out
+    try:
+        parsed = json.loads(filters)
+    except (ValueError, TypeError):
+        return out
+    if not isinstance(parsed, list):
+        return out
+    for f in parsed:
+        if not isinstance(f, dict):
+            continue
+        col = f.get("column", f.get("filter_column"))
+        val = f.get("value", f.get("filter_value"))
+        op = f.get("op", f.get("filter_op", "eq"))
+        if col is None or val is None:
+            continue
+        out.append((str(col), str(val), str(op or "eq")))
+    return out
+
+
+def _filtered_rows(table: str, filters: str) -> tuple[list[dict], str, str]:
+    """`(rows, real_table, filter_description)` for one side of a sequence join."""
+    real = _resolve_real_table(table)
+    rows = _gateway.query(real, filters=None)
+    if rows is None:
+        return [], real, ""
+    parts: list[str] = []
+    for col, val, op in _conditions_from_filters(filters):
+        real_col = _resolve_real_column(rows, col, real)
+        rows = _apply_filter(rows, real_col, val, op)
+        parts.append(f"{col} {op} {val}")
+    return rows, real, "; ".join(parts)
+
+
+def _ordinal_of(row: dict, column: str) -> int | None:
+    """Day-ordinal for a row's time column, or None when unparseable.
+
+    Day grain, because `_date_key` is day grain — it is the one date reader in
+    this file that handles every format the prod/dev profiles ship (see the
+    "Date / time format handling is LOAD-BEARING" note in CLAUDE.md). Sub-day
+    ordering is therefore NOT available here, and the tool says so in its
+    output rather than letting a caller imply minute precision it never had.
+    """
+    key = _date_key(row.get(column))
+    if key is None:
+        return None
+    try:
+        return date(key[0], key[1], key[2]).toordinal()
+    except (ValueError, TypeError):
+        return None
+
+
+def _pick_columns(row: dict, columns: str) -> dict:
+    """Project a row down to `columns` (empty = whole row)."""
+    wanted = [c.strip() for c in (columns or "").split(",") if c.strip()]
+    if not wanted:
+        return dict(row)
+    out: dict = {}
+    for c in wanted:
+        real = _resolve_real_column([row], c, "")
+        if real in row:
+            out[real] = row[real]
+    return out
+
+
+def _sequence_join_impl(
+    anchor_table: str,
+    follow_table: str,
+    anchor_time_column: str,
+    follow_time_column: str = "",
+    within_days: int = 3,
+    direction: str = "after",
+    anchor_filters: str = "",
+    follow_filters: str = "",
+    anchor_columns: str = "",
+    follow_columns: str = "",
+    limit: int = 50,
+) -> str:
+    """Pair rows across two tables by TIME PROXIMITY. See ``sequence_join``."""
+    _log_call("sequence_join", {
+        "anchor_table": anchor_table, "follow_table": follow_table,
+        "within_days": within_days, "direction": direction,
+        "anchor_filters": anchor_filters, "follow_filters": follow_filters,
+    })
+    if _gateway is None:
+        out = ("Data unavailable: data layer is not initialized for this session "
+               "(no gateway bound). This is an infrastructure error, not a finding.")
+        _log_result("sequence_join", result=out, extra={"reason": "no_gateway_bound"})
+        return out
+
+    direction = (direction or "after").strip().lower()
+    if direction not in {"after", "before", "either"}:
+        direction = "after"
+    follow_time_column = follow_time_column or anchor_time_column
+    try:
+        within_days = max(0, int(within_days))
+    except (TypeError, ValueError):
+        within_days = 3
+
+    a_rows, a_real, a_desc = _filtered_rows(anchor_table, anchor_filters)
+    f_rows, f_real, f_desc = _filtered_rows(follow_table, follow_filters)
+    if not a_rows and _gateway.query(a_real, filters=None) is None:
+        out = f"Data unavailable: table '{anchor_table}' not found for current case."
+        _log_result("sequence_join", result=out, extra={"missing": anchor_table})
+        return out
+    if not f_rows and _gateway.query(f_real, filters=None) is None:
+        out = f"Data unavailable: table '{follow_table}' not found for current case."
+        _log_result("sequence_join", result=out, extra={"missing": follow_table})
+        return out
+
+    a_time = _resolve_real_column(a_rows, anchor_time_column, a_real) if a_rows \
+        else anchor_time_column
+    f_time = _resolve_real_column(f_rows, follow_time_column, f_real) if f_rows \
+        else follow_time_column
+
+    # Index the follow side by day-ordinal so each anchor scans only its window
+    # instead of the whole table.
+    by_ord: dict[int, list[dict]] = {}
+    f_unparseable = 0
+    for r in f_rows:
+        o = _ordinal_of(r, f_time)
+        if o is None:
+            f_unparseable += 1
+            continue
+        by_ord.setdefault(o, []).append(r)
+
+    lo_off, hi_off = {
+        "after": (0, within_days),
+        "before": (-within_days, 0),
+        "either": (-within_days, within_days),
+    }[direction]
+
+    pairs: list[dict] = []
+    anchors_with_match = 0
+    a_unparseable = 0
+    truncated = False
+    for a in a_rows:
+        ao = _ordinal_of(a, a_time)
+        if ao is None:
+            a_unparseable += 1
+            continue
+        matched = False
+        for off in range(lo_off, hi_off + 1):
+            for f in by_ord.get(ao + off, ()):
+                matched = True
+                if len(pairs) < _MAX_SEQUENCE_PAIRS:
+                    pairs.append({
+                        "gap_days": off,
+                        "anchor": _pick_columns(a, anchor_columns),
+                        "follow": _pick_columns(f, follow_columns),
+                    })
+                else:
+                    truncated = True
+        if matched:
+            anchors_with_match += 1
+
+    pairs.sort(key=lambda p: (abs(p["gap_days"]), p["gap_days"]))
+    shown = pairs[:limit] if limit and limit > 0 else pairs
+
+    result = {
+        "anchor": {"table": a_real, "time_column": a_time,
+                   "filter": a_desc or None, "rows_matching": len(a_rows)},
+        "follow": {"table": f_real, "time_column": f_time,
+                   "filter": f_desc or None, "rows_matching": len(f_rows)},
+        "window": {"within_days": within_days, "direction": direction},
+        # Day grain is a real limit, not a rounding detail: `within_days=0`
+        # means SAME CALENDAR DAY, not "within 24 hours", and ordering inside a
+        # day is not resolved. Stated in every response so an answer built on
+        # this cannot imply a precision it never had.
+        "time_grain": "day",
+        "pairs_found": len(pairs) + (1 if truncated else 0),
+        "anchors_with_match": anchors_with_match,
+        "rows_returned": len(shown),
+        "truncated": truncated or len(shown) < len(pairs),
+        "pairs": shown,
+    }
+    if a_unparseable or f_unparseable:
+        result["unparseable_dates"] = {
+            "anchor_rows": a_unparseable, "follow_rows": f_unparseable,
+        }
+    if not pairs:
+        # Say what was actually searched. "None found" is only a finding if the
+        # search space comes with it — AND an empty side is a different claim
+        # from an empty result. Zero anchors means the FILTER selected nothing
+        # (thresholds too tight, wrong column, wrong format), so the question
+        # was never actually tested; reporting that as "no such pattern" would
+        # be a false negative. Named separately so it cannot be confused.
+        empty = [side for side, n in (("anchor", len(a_rows)),
+                                      ("follow", len(f_rows))) if n == 0]
+        if empty:
+            result["not_tested"] = True
+            result["no_match_summary"] = (
+                f"NOT TESTED: the {' and '.join(empty)} filter matched 0 rows, so "
+                f"no pair could exist regardless of the data. Check the threshold, "
+                f"column name and value format before reporting anything — this is "
+                f"NOT evidence that the pattern is absent."
+            )
+        else:
+            result["not_tested"] = False
+            result["no_match_summary"] = (
+                f"Checked {len(a_rows)} anchor row(s) against {len(f_rows)} follow "
+                f"row(s) within {within_days} day(s) {direction}; no pair matched. "
+                f"This is a measured negative, not missing data."
+            )
+    out = json.dumps(result, default=str)
+    _log_result("sequence_join", result=out, extra={
+        "pairs_found": len(pairs), "anchors": len(a_rows), "follows": len(f_rows),
+        "unparseable_anchor_dates": a_unparseable,
+        "unparseable_follow_dates": f_unparseable,
+    })
+    return out
+
+
+@function_tool
+def sequence_join(
+    anchor_table: str,
+    follow_table: str,
+    anchor_time_column: str,
+    follow_time_column: str = "",
+    within_days: int = 3,
+    direction: str = "after",
+    anchor_filters: str = "",
+    follow_filters: str = "",
+    anchor_columns: str = "",
+    follow_columns: str = "",
+    limit: int = 50,
+) -> str:
+    """Pair rows across two tables by TIME PROXIMITY — "did B happen within N
+    days of A?" — in ONE call.
+
+    Use this for any question about ORDER + CLOSENESS IN TIME across tables,
+    where `join_table` cannot help because there is no shared key: *"any large
+    spend right after a small payment"*, *"returned payments soon after a limit
+    increase"*, *"score breaches following a spend spike"*.
+
+    Canonical use — large spend within 3 days after a small payment::
+
+        sequence_join("payments", "spends",
+                      anchor_time_column="payment_date",
+                      follow_time_column="Date",
+                      within_days=3, direction="after",
+                      anchor_filters='[{"column":"Payment Amount","op":"lt","value":"1000"}]',
+                      follow_filters='[{"column":"Amount","op":"gt","value":"10000"}]',
+                      anchor_columns="payment_date,Payment Amount",
+                      follow_columns="Date,Merchant Name,Amount")
+
+    Returns `{anchor, follow, window, time_grain, pairs_found,
+    anchors_with_match, rows_returned, truncated, pairs: [{gap_days, anchor,
+    follow}]}`. Each side reports `rows_matching` — the size of the search
+    space — so a zero-pair result is a MEASURED negative you can report as a
+    finding ("checked 250 payments against 49 large spends, no pair within 3
+    days"), not an absence of data. `no_match_summary` states this for you.
+
+    TIME GRAIN IS DAYS. `within_days=0` means the SAME CALENDAR DAY, not
+    "within 24 hours", and ordering within a day is not resolved. Say so if the
+    question turns on intraday sequence.
+
+    Args:
+        anchor_table: the table holding the FIRST event (the "after a …" side).
+        follow_table: the table holding the event you are looking for.
+        anchor_time_column / follow_time_column: date columns on each side.
+            `follow_time_column` defaults to `anchor_time_column`. Any date
+            format the other tools accept works here.
+        within_days: window size in days (default 3). 0 = same day only.
+        direction: "after" (default — follow happens at or after the anchor),
+            "before", or "either".
+        anchor_filters / follow_filters: JSON condition lists, exactly the shape
+            `query_table(filters=…)` takes — `[{"column","op","value"}]`. This
+            is where "large" and "small" get defined; make the thresholds
+            explicit and state them in your finding.
+        anchor_columns / follow_columns: comma-separated columns to keep in the
+            output rows (empty = all). Narrow these — pairs multiply.
+        limit: max pairs returned (default 50). `pairs_found` reports the true
+            total.
+    """
+    return _sequence_join_impl(
+        anchor_table=anchor_table, follow_table=follow_table,
+        anchor_time_column=anchor_time_column,
+        follow_time_column=follow_time_column,
+        within_days=within_days, direction=direction,
+        anchor_filters=anchor_filters, follow_filters=follow_filters,
+        anchor_columns=anchor_columns, follow_columns=follow_columns,
+        limit=limit,
+    )
+
+
 # Canonical schema for the per-transaction "detail" join: spend identity +
 # model scores + top drivers, all keyed on the transaction timestamp. Column
 # names are resolved leniently and any that are absent for a case are simply

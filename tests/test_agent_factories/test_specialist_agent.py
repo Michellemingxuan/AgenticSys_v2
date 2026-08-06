@@ -24,11 +24,11 @@ def test_build_specialist_agent_returns_agent():
     prompt = agent.instructions(mock_ctx, agent)
     assert "You analyze credit risk." in prompt
     assert "2025-12-01" in prompt
-    # 13 data tools + make_chart + get_chart_guidance + kb_list_topics + kb_lookup
-    assert len(agent.tools) == 17
+    # 14 data tools + make_chart + get_chart_guidance + kb_list_topics + kb_lookup
+    assert len(agent.tools) == 18
     assert {t.name for t in agent.tools} == {
         "list_available_tables", "get_table_schema", "search_columns",
-        "query_table", "batch_query_table", "join_table",
+        "query_table", "batch_query_table", "join_table", "sequence_join",
         "transaction_detail", "score_driver_values",
         "aggregate_column", "batch_aggregate",
         "summarize_trend", "batch_summarize_trend", "summarize_by_group",
