@@ -807,20 +807,29 @@ def _zero_match_diagnostic(
     dump, and it goes through the same redaction as any other tool output.
 
     WHICH CONDITION ZEROED IT is the other half, and it is the half that
-    produces FALSE NEGATIVES. A conjunction like `trans_dt between ... AND
-    tot_struct_risk_score gte 20 AND amount gt 10000` returns 0 rows if ANY ONE
-    condition is wrong, and the per-column vocabulary above looks perfectly
-    healthy in that case — every column exists, every column holds plausible
-    values — so the specialist reads "genuinely no such rows" and reports a
+    produces FALSE NEGATIVES. A conjunction empties if ANY ONE condition is
+    wrong, and the per-column vocabulary above can look perfectly healthy while
+    it happens — so the specialist reads "genuinely no such rows" and reports a
     live-data null. Observed: "no spend transactions with high TSR (>20), large
     amounts, or flagged outlier patterns were found" on a case that has them,
-    while the curated report described those very transactions by merchant and
-    month.
+    published beside the curated report describing those very transactions by
+    merchant and month.
 
-    So each condition is ALSO re-run alone against the unfiltered rows. One that
-    matches 0 by itself IS the culprit and nothing else needs debating; if every
-    condition matches alone but the conjunction does not, the emptiness is real
-    and the specialist can report it with the counts behind it.
+    Each condition is therefore ALSO re-run alone, and the three outcomes rank:
+
+      1. A condition names a column this table DOES NOT HAVE. It was never
+         tested, so nothing about the empty result speaks to it — `testable:
+         false`. This outranks the counts, and it is the shape the live failure
+         took: `spends` carries Amount / Merchant Name but no model scores,
+         `model_scores_transaction` carries tot_struct_risk_score but no amount
+         or merchant, so no single-table filter can express the question at all.
+         (Thresholds were NOT the problem: tot_struct_risk_score is documented
+         at 20 on BOTH tables and 2,072 of 9,639 transactions clear it.)
+      2. A condition matches 0 BY ITSELF — that one is the culprit, and the
+         rest are fine.
+      3. Every condition matches alone and only the combination is empty — the
+         negative is REAL and should be reported with these counts as its
+         search space.
     """
     if not unfiltered or not conditions:
         return None
@@ -830,30 +839,57 @@ def _zero_match_diagnostic(
     # culprit instead of leaving the caller to guess.
     if len(conditions) > 1:
         alone: dict = {}
+        missing: list[str] = []
         for col, value, op in conditions:
             if col not in real_keys:
+                missing.append(col)
                 continue
             try:
                 n = len(_apply_filter(unfiltered, col, value, op))
             except Exception:  # noqa: BLE001 — a diagnostic must never raise
                 continue
             alone[f"{col} {op} {value}"] = n
-        if alone:
+        if alone or missing:
             zeroing = [k for k, n in alone.items() if n == 0]
-            out["_conditions_alone"] = {
-                "rows_matching_each_condition_by_itself": alone,
-                "total_rows_before_filtering": len(unfiltered),
-                "hint": (
+            # Order matters. A MISSING column outranks everything: the filter
+            # never tested that condition at all, so the surviving conditions
+            # matching on their own says nothing. Reporting "real negative"
+            # here would be the precise false reassurance this block exists to
+            # prevent — and it is the shape the live failure actually took
+            # (`tot_struct_risk_score` filtered against `spends_data`, which
+            # carries amount and merchant but no model scores).
+            if missing:
+                hint = (
+                    f"NOT A NEGATIVE FINDING. These condition(s) name columns "
+                    f"this table does not have: {missing} — they were never "
+                    f"tested, so the empty result says nothing about them. The "
+                    f"column almost certainly lives on ANOTHER table: use "
+                    f"`transaction_detail`, or `join_table` on the transaction "
+                    f"key, instead of filtering one table by a column it does "
+                    f"not carry."
+                )
+            elif zeroing:
+                hint = (
                     f"These condition(s) match NOTHING on their own and are why "
                     f"the combined filter is empty: {zeroing}. Fix or relax "
                     f"THOSE — the rest are fine. Do NOT report this as 'no such "
                     f"rows exist'."
-                    if zeroing else
+                )
+            else:
+                hint = (
                     "Every condition matches rows on its own, so the emptiness "
                     "is the COMBINATION — this is a real negative. Report it "
                     "with these counts as the search space."
-                ),
+                )
+            block: dict = {
+                "rows_matching_each_condition_by_itself": alone,
+                "total_rows_before_filtering": len(unfiltered),
+                "hint": hint,
             }
+            if missing:
+                block["columns_not_on_this_table"] = missing
+                block["testable"] = False
+            out["_conditions_alone"] = block
     for col, value, op in conditions:
         if col not in real_keys:
             out[col] = {

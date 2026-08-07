@@ -2407,15 +2407,29 @@ def test_zero_match_skips_attribution_for_a_single_condition():
     assert "_conditions_alone" not in (d or {})
 
 
-def test_zero_match_attribution_ignores_unknown_columns():
-    """An unknown column is already reported as column_exists=False; it must
-    not also appear in the per-condition counts."""
+def test_missing_column_is_never_read_as_a_real_negative():
+    """The live failure's actual shape, and the one that must not regress.
+
+    `spends` carries Amount / Merchant Name but no model scores;
+    `model_scores_transaction` carries tot_struct_risk_score but no amount or
+    merchant. Filtering one by the other's column returns 0 rows and looks
+    exactly like absence. A missing column OUTRANKS the per-condition counts:
+    the surviving conditions matching on their own says nothing, because the
+    missing one was never tested at all.
+    """
     from tools.data_tools import _zero_match_diagnostic
 
     d = _zero_match_diagnostic(_txn_rows(), [
         ("no_such_column", "1", "eq"),
-        ("amount", "10000", "gt"),
+        ("amount", "10000", "gt"),          # matches on its own
     ])
     assert d["no_such_column"]["column_exists"] is False
-    counts = d["_conditions_alone"]["rows_matching_each_condition_by_itself"]
-    assert "no_such_column eq 1" not in counts
+    block = d["_conditions_alone"]
+    # Not attributed a count — it was never evaluated.
+    assert "no_such_column eq 1" not in block["rows_matching_each_condition_by_itself"]
+    # And crucially, NOT reported as a real negative.
+    assert block["testable"] is False
+    assert block["columns_not_on_this_table"] == ["no_such_column"]
+    assert "NOT A NEGATIVE FINDING" in block["hint"]
+    assert "real negative" not in block["hint"]
+    assert "transaction_detail" in block["hint"]
