@@ -2511,3 +2511,71 @@ def test_join_still_sheds_rows_on_a_genuinely_large_result(monkeypatch):
     assert r["matched_rows"] == 400
     assert r["rows_returned"] < 400
     assert "joined rows" in r["truncation_note"]
+
+
+# ── aggregate_column: ABSENT column vs EMPTY column ────────────────────────
+#
+# Two states, two answers. `summarize_trend` already split them and its comment
+# explains why conflating them is actively harmful: the DATA GAP wording says
+# "do NOT retry", so a name miss would make the specialist abandon a variable
+# that exists; the "check the column name" wording sends it chasing a name that
+# was already correct. `aggregate_column` used to return the SAME string for
+# both — measured on `bureau_data.SBFE Score` (26 rows, all blank) versus a typo
+# of that name.
+
+def _blank_col_rows():
+    return [{"month": f"2024-{i+1:02d}", "SBFE Score": "", "FICO Score": str(700 + i)}
+            for i in range(6)]
+
+
+def _agg(monkeypatch, **kw):
+    rows = _blank_col_rows()
+
+    class _GW:
+        def query(self, table, filters=None):
+            return [dict(r) for r in rows] if table == "T" else None
+
+    monkeypatch.setattr(data_tools, "_gateway", _GW())
+    monkeypatch.setattr(data_tools, "_resolve_real_table", lambda t: t)
+    kw.setdefault("table_name", "T")
+    return data_tools._aggregate_column_impl(**kw)
+
+
+@pytest.mark.parametrize("op", ["mean", "max", "min", "sum"])
+def test_aggregate_empty_column_is_a_data_gap_not_a_name_problem(monkeypatch, op):
+    out = _agg(monkeypatch, column="SBFE Score", op=op)
+
+    assert "DATA GAP" in out
+    assert "EMPTY for this case" in out
+    assert "Record it as a data_gap" in out
+    # Must NOT send the specialist off to fix a name that is already right.
+    assert "search_columns" not in out
+    assert "COLUMN NOT FOUND" not in out
+
+
+@pytest.mark.parametrize("op", ["mean", "max", "sum"])
+def test_aggregate_absent_column_is_a_mistake_not_a_data_gap(monkeypatch, op):
+    out = _agg(monkeypatch, column="SBFE_Scoree", op=op)
+
+    assert "COLUMN NOT FOUND" in out
+    assert "search_columns" in out
+    assert "Do NOT report this as a data gap" in out
+    assert "DATA GAP:" not in out
+
+
+def test_count_on_an_all_blank_column_says_it_counted_rows(monkeypatch):
+    """`count` is a ROW count. On a blank column that reads as a data volume it
+    is not — "how many SBFE scores?" would be answered with the row count."""
+    out = _agg(monkeypatch, column="SBFE Score", op="count")
+
+    assert "count = 6" in out
+    assert "counts ROWS, not values" in out
+    assert "DATA GAP" in out
+
+
+def test_count_on_a_populated_column_is_unchanged(monkeypatch):
+    out = _agg(monkeypatch, column="FICO Score", op="count")
+
+    assert "count = 6" in out
+    assert "DATA GAP" not in out
+    assert "counts ROWS" not in out

@@ -3516,6 +3516,22 @@ def _aggregate_column_impl(
             f"count{filter_descr} = {result_str} "
             f"(out of {total_rows:,} total rows in {real_table})"
         )
+        # count is a ROW count, and on an all-blank column that reads as a data
+        # volume it is not: `count('SBFE Score')` returned 26 on a case whose
+        # SBFE column is blank in all 26 rows, which answers "how many SBFE
+        # scores does this case have?" with 26 instead of none. Say so, and name
+        # it as the data gap it is — the other ops now do the same.
+        _real = _resolve_real_column(all_rows, column, real_table) if all_rows else column
+        if rows and _real in rows[0] and not _numeric_column_values(rows, _real):
+            _non_blank = sum(
+                1 for r in rows if str(r.get(_real, "")).strip() not in ("", "None")
+            )
+            if not _non_blank:
+                out += (
+                    f" — NOTE: this counts ROWS, not values. Column {_real!r} is "
+                    f"EMPTY in every one of them (a DATA GAP for this case), so "
+                    f"do NOT read {n_matching:,} as a count of {_real} values."
+                )
         _log_result("aggregate_column", result=out,
                     extra={"op": op, "n_matching": n_matching, "total": total_rows})
         return out
@@ -3682,12 +3698,39 @@ def _aggregate_column_impl(
                 )
                 return out
 
+        # ABSENT vs EMPTY — two different answers that this branch used to
+        # collapse into one message. `summarize_trend` already splits them and
+        # explains why conflating them is actively harmful: the DATA GAP wording
+        # says "do NOT retry", so a simple name miss would make the specialist
+        # abandon a variable that exists, while the "check the column name"
+        # wording sends it chasing a name that was already correct. Measured on
+        # `bureau_data.SBFE Score` (26 rows, all blank) vs a typo of the same
+        # name: both returned the identical "No numeric or date values …
+        # Check column name + dtype." Same string, opposite meanings.
+        if all_rows and real_col not in all_rows[0]:
+            out = (
+                f"COLUMN NOT FOUND: {real_col!r} is not a column of "
+                f"{real_table!r} for this case — nothing was measured. Call "
+                f"search_columns({column!r}) to find the right name (ADL/CAS "
+                f"aliases resolve), or get_table_schema({real_table!r}) to list "
+                f"what IS here, then re-issue. Do NOT report this as a data gap."
+            )
+            _log_result("aggregate_column", result=out,
+                        extra={"op": op, "reason": "column_not_found",
+                               "column": column, "resolved_to": real_col})
+            return out
+
         out = (
-            f"No numeric or date values for column {real_col!r} in "
-            f"{n_matching:,} matching row(s). Check column name + dtype."
+            f"{op}({real_col}){filter_descr} = (DATA GAP: column {real_col!r} is "
+            f"EMPTY for this case — {n_matching:,} matching row(s), every one "
+            f"blank or non-numeric. The tool worked; this case has no "
+            f"{real_col} data. Record it as a data_gap and move on — re-issuing "
+            f"the same column will return this again.)"
         )
         _log_result("aggregate_column", result=out,
-                    extra={"op": op, "n_matching": n_matching, "skipped": skipped})
+                    extra={"op": op, "reason": "column_empty",
+                           "column": real_col,
+                           "n_matching": n_matching, "skipped": skipped})
         return out
 
     if op == "sum":

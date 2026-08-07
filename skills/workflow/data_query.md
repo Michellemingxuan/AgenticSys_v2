@@ -37,6 +37,11 @@ Every claim in `findings` / `evidence` / `raw_data` must trace to a tool result 
   recall peaks/trends/values as if it succeeded. Re-issue the call correctly
   (fix the JSON), or emit a `data_gap`. Fabricating numbers around a failed tool
   is the worst failure mode: it also poisons the KB for later turns.
+- **Two states that both look like "no data", and they get OPPOSITE responses.** Every aggregating tool now names which one you hit, so you never have to guess:
+  - `COLUMN NOT FOUND: 'X' is not a column of 'T'` → a MISTAKE. Nothing was measured. `search_columns('X')` for the right name (ADL/CAS aliases resolve), then re-issue. **Not a data gap.**
+  - `DATA GAP: column 'X' is EMPTY for this case` → an ANSWER. The column exists, the rows are there, every value is blank. The tool worked and this case simply has no X. Record it and move on.
+  Getting these backwards is costly in both directions: retrying an empty column burns rounds for a result that cannot change, and filing a typo as a data gap abandons a variable the case actually has.
+- **`count` is a ROW count, not a value count.** `count('X')` on a column that is blank in every row still returns the row total — it answers "how many rows matched", not "how many X values exist". When the column is entirely empty the tool now says so explicitly; don't quote that number as a data volume.
 - **`DATA GAP:` in a tool result is an ANSWER, not an error — record it, don't retry.**
   It means the column exists but is empty for THIS case (cases carry different
   data). The tool worked. Add a `data_gaps` entry naming the column, say plainly
