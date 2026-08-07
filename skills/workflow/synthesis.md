@@ -58,6 +58,38 @@ Two signals carry the same meaning and get the same treatment:
   filter matched 0 rows) — the comparison never ran;
 - a specialist's own `data_gaps` entry saying it could not reach a column.
 
+### A null that CONTRADICTS the report is not publishable — go check it
+
+When a specialist reports "none found" and `report_agent` describes the very
+thing it did not find, you are not looking at a disagreement to narrate. You are
+looking at the report handing you a **free, specific, checkable test case** that
+the team has not run.
+
+Observed: *"no spend transactions with high TSR (>20), large amounts, or flagged
+outlier patterns were found"* published alongside the report's *"a large,
+uncharacteristic transaction at Merchant X in 2024-09"* — and the transactions
+were really there. The specialist's filter was mis-specified (a threshold
+carried from monthly grain onto transaction rows), so it tested a broken query,
+not the question.
+
+A live-data null NEVER "wins" over the report by default. Specialist data
+outranks report text on a CONTESTED VALUE — different number, different date —
+where both sides measured the same thing. Absence is not a measurement.
+
+So before writing the answer:
+
+1. **Dispatch one more targeted round** against the report's own example — name
+   the merchant, the month, the amount the report cites, and drop every
+   incidental threshold. One narrow query settles it.
+2. **Found it** → the null was an artifact. Report the transactions, and say
+   which filter had hidden them.
+3. **Genuinely absent** → NOW you have a real disagreement. Report it as one,
+   with the search space quoted ("checked all 412 transactions in 2024-09; no
+   merchant matching X"), and flag *"Report-vs-data disagreement."*
+4. **No round left** → say the check is outstanding. *"The reports describe X;
+   live analysis did not surface it, and the discrepancy is unresolved."* Never
+   lead with the null as though it settled the matter.
+
 **The mirror case matters too.** When a specialist DID run and genuinely found
 nothing, say so plainly and quote the search space — *"no pair within 3 days
 across 250 payments and 49 large spends"*. A checked negative is a finding and

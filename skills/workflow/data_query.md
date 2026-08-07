@@ -335,6 +335,10 @@ Charts render automatically from tool outputs — no `make_chart` call needed.
   `get_table_schema` / `search_columns` are for what the inventory can't tell
   you (units, wire format, row grain, or finding a column by meaning).
 - **Schema is ground truth.** Probe `get_table_schema` before filtering on unseen columns. If a filter returns 0, suspect vocab mismatch.
+- **0 rows from a MULTI-condition filter is a suspect null — read `_conditions_alone` before you believe it.** A conjunction empties if ANY ONE condition is wrong, and the other conditions look perfectly healthy while it happens. The tool now re-runs each condition BY ITSELF and reports the counts:
+  - **some condition matches 0 alone** → that one is the culprit. Fix or relax IT (threshold too tight, wrong grain, wrong format) and re-query. **Never report this as "no such rows exist"** — you have not tested the question, you have tested a broken filter.
+  - **every condition matches alone, the combination does not** → the null is REAL. Report it, and quote the per-condition counts as the search space ("412 transactions in the window, 38 above the amount threshold, none both").
+  - **Thresholds are the usual culprit, and grain is why.** A score's transaction-level values are NOT distributed like its monthly aggregate — `tot_struct_risk_score > 20` can be routine on `model_scores` and match nothing on `model_scores_transaction`. Derive the cut from the data you are actually querying (`aggregate_column` op=`max`/`mean` on THAT table) instead of carrying a number over from the monthly view.
 - **ADL codes work as column names — pass them straight through.** Reviewers ask
   by the ADL name (`INTOOP`, `CUIDINDX`, `cbsfico`) as often as the CAS name
   (`oop_interaction`, `tpf_internal_delinq_idx`, `cbr_score`). Both resolve, in

@@ -805,11 +805,55 @@ def _zero_match_diagnostic(
 
     Values only, bounded and truncated — this is a vocabulary hint, not a data
     dump, and it goes through the same redaction as any other tool output.
+
+    WHICH CONDITION ZEROED IT is the other half, and it is the half that
+    produces FALSE NEGATIVES. A conjunction like `trans_dt between ... AND
+    tot_struct_risk_score gte 20 AND amount gt 10000` returns 0 rows if ANY ONE
+    condition is wrong, and the per-column vocabulary above looks perfectly
+    healthy in that case — every column exists, every column holds plausible
+    values — so the specialist reads "genuinely no such rows" and reports a
+    live-data null. Observed: "no spend transactions with high TSR (>20), large
+    amounts, or flagged outlier patterns were found" on a case that has them,
+    while the curated report described those very transactions by merchant and
+    month.
+
+    So each condition is ALSO re-run alone against the unfiltered rows. One that
+    matches 0 by itself IS the culprit and nothing else needs debating; if every
+    condition matches alone but the conjunction does not, the emptiness is real
+    and the specialist can report it with the counts behind it.
     """
     if not unfiltered or not conditions:
         return None
     real_keys = set(unfiltered[0].keys())
     out: dict = {}
+    # Per-condition match counts, so a zero-row conjunction names its own
+    # culprit instead of leaving the caller to guess.
+    if len(conditions) > 1:
+        alone: dict = {}
+        for col, value, op in conditions:
+            if col not in real_keys:
+                continue
+            try:
+                n = len(_apply_filter(unfiltered, col, value, op))
+            except Exception:  # noqa: BLE001 — a diagnostic must never raise
+                continue
+            alone[f"{col} {op} {value}"] = n
+        if alone:
+            zeroing = [k for k, n in alone.items() if n == 0]
+            out["_conditions_alone"] = {
+                "rows_matching_each_condition_by_itself": alone,
+                "total_rows_before_filtering": len(unfiltered),
+                "hint": (
+                    f"These condition(s) match NOTHING on their own and are why "
+                    f"the combined filter is empty: {zeroing}. Fix or relax "
+                    f"THOSE — the rest are fine. Do NOT report this as 'no such "
+                    f"rows exist'."
+                    if zeroing else
+                    "Every condition matches rows on its own, so the emptiness "
+                    "is the COMBINATION — this is a real negative. Report it "
+                    "with these counts as the search space."
+                ),
+            }
     for col, value, op in conditions:
         if col not in real_keys:
             out[col] = {

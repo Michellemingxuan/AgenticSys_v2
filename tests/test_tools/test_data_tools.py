@@ -2345,3 +2345,77 @@ def test_query_table_still_samples_a_genuinely_large_result():
     q = json.loads(data_tools._query_table_impl(table_name="spends_data"))
     assert q["total_rows_in_table"] == 3865
     assert q["rows_returned"] < 3865 and q["truncated"] is True
+
+
+# ── zero-match: which condition zeroed a conjunction ────────────────────────
+#
+# A conjunction empties if ANY ONE condition is wrong, and the per-column
+# vocabulary hints look healthy while it happens — every column exists, every
+# column holds plausible values. Observed live: "no spend transactions with
+# high TSR (>20), large amounts, or flagged outlier patterns were found" on a
+# case that had them, because a threshold from MONTHLY grain was applied to
+# transaction rows.
+
+def _txn_rows():
+    return [
+        {"trans_dt": "2024-09-14", "tot_struct_risk_score": "8.2", "amount": "14500"},
+        {"trans_dt": "2024-09-21", "tot_struct_risk_score": "9.1", "amount": "22000"},
+        {"trans_dt": "2025-01-08", "tot_struct_risk_score": "7.4", "amount": "18000"},
+    ]
+
+
+def test_zero_match_names_the_condition_that_zeroed_the_conjunction():
+    from tools.data_tools import _zero_match_diagnostic
+
+    d = _zero_match_diagnostic(_txn_rows(), [
+        ("trans_dt", "2024-09-01,2024-09-30", "between"),
+        ("tot_struct_risk_score", "20", "gte"),   # the culprit
+        ("amount", "10000", "gt"),
+    ])
+    alone = d["_conditions_alone"]
+    counts = alone["rows_matching_each_condition_by_itself"]
+
+    assert counts["tot_struct_risk_score gte 20"] == 0
+    assert counts["trans_dt between 2024-09-01,2024-09-30"] == 2
+    assert counts["amount gt 10000"] == 3
+    # The hint must name the culprit AND forbid the false-negative reading.
+    assert "tot_struct_risk_score gte 20" in alone["hint"]
+    assert "no such rows exist" in alone["hint"]
+
+
+def test_zero_match_calls_a_real_negative_a_real_negative():
+    """Every condition matches alone but the AND does not — the emptiness is
+    the combination, which IS a finding and must not be blamed on a filter."""
+    from tools.data_tools import _zero_match_diagnostic
+
+    d = _zero_match_diagnostic(_txn_rows(), [
+        ("trans_dt", "2025-01-01,2025-01-31", "between"),
+        ("amount", "20000", "gt"),
+    ])
+    alone = d["_conditions_alone"]
+
+    assert all(n > 0 for n in alone["rows_matching_each_condition_by_itself"].values())
+    assert "real negative" in alone["hint"]
+    assert alone["total_rows_before_filtering"] == 3
+
+
+def test_zero_match_skips_attribution_for_a_single_condition():
+    """With one condition there is nothing to attribute — no noise block."""
+    from tools.data_tools import _zero_match_diagnostic
+
+    d = _zero_match_diagnostic(_txn_rows(), [("amount", "999999", "gt")])
+    assert "_conditions_alone" not in (d or {})
+
+
+def test_zero_match_attribution_ignores_unknown_columns():
+    """An unknown column is already reported as column_exists=False; it must
+    not also appear in the per-condition counts."""
+    from tools.data_tools import _zero_match_diagnostic
+
+    d = _zero_match_diagnostic(_txn_rows(), [
+        ("no_such_column", "1", "eq"),
+        ("amount", "10000", "gt"),
+    ])
+    assert d["no_such_column"]["column_exists"] is False
+    counts = d["_conditions_alone"]["rows_matching_each_condition_by_itself"]
+    assert "no_such_column eq 1" not in counts
