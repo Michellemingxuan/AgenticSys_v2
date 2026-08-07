@@ -300,6 +300,45 @@ Tool signatures are in their docstrings. Key routing:
 | Top groups + per-group trend | `summarize_by_group` → per-top-N `summarize_trend` |
 | Same row in two tables (shared key) | `join_table` |
 | **"B shortly after A" across two tables** | **`sequence_join`** |
+| **One transaction's spend facts AND its model scores** | **`transaction_detail`** |
+
+## Spend facts + model scores = `transaction_detail`, never a single-table filter
+
+**No table carries both.** `spends` has `Date` / `Amount` / `Merchant Name` /
+`Merchant Risk Score` and NO model scores. `model_scores_transaction` has
+`tot_struct_risk_score`, `credit_loss_prob` and 45 more model columns, and NO
+amount or merchant. So a question like *"abnormal spend transactions with high
+TSR and large amounts"* **cannot be written as a filter on either one** — and
+filtering the wrong table by the other's column returns 0 rows that look exactly
+like absence. That is a real reported failure, not a hypothetical.
+
+`transaction_detail` is the pre-joined record: time + merchant + amount + spend
+variables + risk scores + top/bottom drivers, joined on the transaction
+timestamp. Choose which side you SELECT from with `base_table`:
+
+```
+# "transactions where TSR reacted, in Sep-2024" — select from the SCORE side
+transaction_detail(base_table="model_scores_transaction",
+  filters='[{"column":"trans_dt","op":"between","value":"2024-09-01,2024-09-30"},
+            {"column":"tot_struct_risk_score","op":"gte","value":"20"}]',
+  sort_by="tot_struct_risk_score", sort_desc=true, limit=20,
+  columns="trans_dt,Merchant Name,Amount,tot_struct_risk_score,credit_loss_prob")
+# -> 352 transactions on the case where a single-table filter reported none
+```
+
+Use `base_table="spends"` (the default) when you select by a SPEND attribute
+(merchant, amount) instead.
+
+- **Read `joined_match_counts`.** The score table covers more transactions than
+  `spends` — auths and declines that never settle — so some rows legitimately
+  carry no merchant/amount. That is coverage, not failure; say which side your
+  count came from.
+- **Don't conflate "high score" with "abnormal spend".** `tot_struct_risk_score`
+  is a genuine per-transaction score (it varies within a day on most days), but
+  a high-TSR transaction is not automatically a large or unusual one — in the
+  window above the top-TSR rows are ordinary small retail spends. If the question
+  is about atypical SPENDING, select on the spend side (amount, merchant,
+  concentration) and read the scores as context.
 
 ## Order-and-proximity questions → `sequence_join`, in ONE call
 
