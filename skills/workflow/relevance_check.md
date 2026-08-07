@@ -43,6 +43,13 @@ Any of these fail:
 - A question that starts out-of-scope but pivots ("I was hungry earlier, anyway what's the bureau score?") → PASS. The intent is case-review.
 - A general-knowledge question with no tie to THIS case ("just curious, do FICO scores exist?") → REJECT as low-value; suggest the reviewer ask about the actual case. NOTE the distinction: this is *general knowledge*, not a request about the case. "What is this case about?" is the OPPOSITE — it asks to summarize THIS specific case, which is grounded, in-scope intent → PASS.
 - Ambiguous OR broad questions → PASS. The next step (`clarify_intent`) handles ambiguity, and the orchestrator handles breadth. Never reject a question for being vague, broad, or high-level — only for being off-topic.
+- **A short or unfamiliar token is NOT evidence of off-topic.** Reviewers name things two ways, and both look like nothing to a general-purpose reader:
+  - a **pillar CONCEPT** — `oop` (out-of-pattern: exposure vs. trailing-12-month remit), `spend_pattern`, `output_score`, `capacity_paydown`;
+  - a **VARIABLE** under one — `intoop`, `cbsfico`, `hcam_bal_trnd_indx`, `avutil_exrvlv_balgt50`.
+
+  Both are resolved for you against THIS case's data before you are consulted, and either one settles scope by construction. Measured: *"how is intoop"* passed while *"how is oop"* was rejected on the very next turn — the same subject, named at the concept level instead of the variable level.
+
+  So **not recognising a word tells you about your vocabulary, not about the question's topic.** When a question is short and its subject is a bare token you cannot place, PASS it. A wasted turn costs one dispatch; a wrongly rejected question tells the reviewer their own data is out of scope.
 
 # Strictness on rejection
 

@@ -2579,3 +2579,75 @@ def test_count_on_a_populated_column_is_unchanged(monkeypatch):
     assert "count = 6" in out
     assert "DATA GAP" not in out
     assert "counts ROWS" not in out
+
+
+# ── concepts vs variables in the screen's scope lookup ─────────────────────
+#
+# `intoop` is a VARIABLE; `oop` is the pillar CONCEPT it sits under
+# ("out-of-pattern: exposure vs. trailing-12-month remit"). The variable lookup
+# cannot see `oop` — it is not a column name — so on consecutive live turns
+# "how is intoop" PASSED while "how is oop" was REJECTED as off-topic. Both are
+# ground truth about this case and must override an LLM rejection.
+
+@pytest.fixture
+def _concept_env(monkeypatch):
+    idx = [
+        {"column": "oop_interaction_max", "table": "model_scores",
+         "aliases": ["INTOOP"], "concepts": ["oop"]},
+        {"column": "cust_expsr_avg_rem_12m_ratio", "table": "model_scores",
+         "aliases": [], "concepts": ["oop", "exposure_leverage"]},
+        {"column": "spend_concentration", "table": "spends",
+         "aliases": [], "concepts": ["spend_pattern"]},
+    ]
+    monkeypatch.setattr(data_tools, "_gateway",
+                        type("G", (), {"get_case_id": lambda self: "C1"})())
+    monkeypatch.setattr(data_tools, "_catalog", object())
+    monkeypatch.setattr(data_tools, "_build_search_index", lambda case_id: idx)
+    return idx
+
+
+def _concepts(text):
+    return [m["concept"] for m in data_tools.known_concepts_in(text)]
+
+
+def test_bare_concept_key_resolves(_concept_env):
+    """The reported failure: three characters, no column of that name."""
+    assert _concepts("how is oop") == ["oop"]
+    assert _concepts("how is OOP") == ["oop"]
+
+
+def test_spelled_out_concept_resolves(_concept_env):
+    """Reviewers write the glossary's own phrasing, not the key."""
+    assert _concepts("what about out-of-pattern") == ["oop"]
+    assert _concepts("how is the out of pattern signal") == ["oop"]
+    assert _concepts("any spend pattern issues") == ["spend_pattern"]
+
+
+def test_variable_and_concept_stay_distinct(_concept_env):
+    """`intoop` is the variable, `oop` the concept — neither should answer for
+    the other, which is exactly the conflation that caused the bug."""
+    assert _concepts("how is intoop") == []
+    assert [m["column"] for m in data_tools.known_variable_matches("how is intoop")] \
+        == ["oop_interaction_max"]
+    assert [m["column"] for m in data_tools.known_variable_matches("how is oop")] == []
+
+
+def test_ordinary_and_offtopic_questions_resolve_to_nothing(_concept_env):
+    """This overrides a rejection, so a false positive lets genuinely
+    off-topic questions through."""
+    for q in ("how is the customer doing", "give me a summary",
+              "who won the super bowl", "what is this case about",
+              "any large spending right after a small payment"):
+        assert _concepts(q) == [], q
+
+
+def test_only_concepts_this_case_carries_are_matched(monkeypatch):
+    """A concept no column in this case is tagged with is not ground truth."""
+    monkeypatch.setattr(data_tools, "_gateway",
+                        type("G", (), {"get_case_id": lambda self: "C1"})())
+    monkeypatch.setattr(data_tools, "_catalog", object())
+    monkeypatch.setattr(data_tools, "_build_search_index",
+                        lambda case_id: [{"column": "x", "table": "t",
+                                          "aliases": [], "concepts": ["spend_pattern"]}])
+    assert data_tools.known_concepts_in("how is oop") == []
+    assert _concepts("any spend pattern issues") == ["spend_pattern"]

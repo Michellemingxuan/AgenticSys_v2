@@ -399,6 +399,15 @@ class ScreenVerdict(BaseModel):
     the reviewer names a live variable, and it tells the orchestrator that a
     bare token like "intoop" is a COLUMN — without it, "how is intoop" was
     answered as though INTOOP were the customer's name.
+
+    `named_concepts` is the same idea one level up, and the distinction is
+    load-bearing: `intoop` is a VARIABLE, `oop` is the pillar CONCEPT it sits
+    under ("out-of-pattern: exposure vs. trailing-12-month remit"). A reviewer
+    asks about either. Measured on consecutive turns, "how is intoop" passed
+    while "how is oop" was REJECTED as off-topic — the variable lookup could
+    not see it because oop is not a column name. Concepts are resolved against
+    the ones THIS case's columns actually carry, so they override a rejection
+    on the same footing as a variable.
     """
 
     passed: bool
@@ -407,6 +416,7 @@ class ScreenVerdict(BaseModel):
     near_duplicate_of: str = ""
     near_duplicate_reason: str = ""
     named_variables: list[str] = Field(default_factory=list)
+    named_concepts: list[str] = Field(default_factory=list)
 
 
 # Backwards-compat alias — `GuardrailVerdict` was the old name when input

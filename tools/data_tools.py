@@ -13,7 +13,7 @@ from datetime import date, timedelta
 from typing import Any, Callable
 
 from agents import function_tool
-from datalayer.catalog import DataCatalog
+from datalayer.catalog import CONCEPT_GLOSS, DataCatalog
 from datalayer.gateway import DataGateway
 
 # Module state — guarded against autoreload reset.
@@ -1589,6 +1589,7 @@ _GENERIC_COLUMN_WORDS = frozenset({
 })
 
 
+
 def _variable_key(name: str) -> str:
     """Comparison key for a variable name, ignoring case, punctuation and the
     `_max`/`_min`/`_mean` aggregation suffix — so `oop_interaction` (the CAS
@@ -1606,6 +1607,11 @@ def known_variable_matches(text: str) -> list[dict]:
 
     Deliberately conservative. Only whole tokens of 4+ characters that are not
     ordinary English words, so this can be trusted to OVERRIDE a rejection.
+
+    Names VARIABLES only. A reviewer naming a CONCEPT ("how is oop") is handled
+    by `known_concepts_in` — `oop` is a declared concept, `intoop` the variable
+    under it, and conflating the two was the bug that made the short form read
+    as off-topic.
     """
     if _gateway is None or _catalog is None or not text:
         return []
@@ -1636,6 +1642,70 @@ def known_variable_matches(text: str) -> list[dict]:
 def known_variables_in(text: str) -> list[str]:
     """Just the real column names — see `known_variable_matches`."""
     return [m["column"] for m in known_variable_matches(text)]
+
+
+def _concept_spellings(concept: str, gloss: str) -> set[str]:
+    """How a reviewer might type a concept: its key, and the human phrase the
+    glossary leads with (`"oop": "out-of-pattern: exposure vs …"` → `oop`,
+    `outofpattern`). Normalised through `_variable_key`, so punctuation,
+    hyphens and spacing don't matter."""
+    out = {_variable_key(concept)}
+    head = (gloss or "").split(":", 1)[0]
+    if head and len(head) <= 40:
+        out.add(_variable_key(head))
+    out.discard("")
+    return out
+
+
+def known_concepts_in(text: str) -> list[dict]:
+    """`[{typed, concept, gloss}, ...]` for pillar CONCEPTS this text names.
+
+    The sibling of `known_variable_matches`, and the distinction is the whole
+    point: `intoop` is a VARIABLE, `oop` is the CONCEPT it belongs to
+    (`out-of-pattern: exposure vs. trailing-12-month remit`). Reviewers ask
+    about either, and the concept form is the one that reads as gibberish to a
+    general-purpose relevance check — measured on consecutive turns, "how is
+    intoop" passed while "how is oop" was rejected as off-topic.
+
+    Restricted to concepts this case's columns actually carry, so it can be
+    trusted to OVERRIDE a rejection the same way a variable name is: if the
+    data holds columns tagged `oop`, a question about oop is in scope by
+    construction, whatever the phrasing looks like.
+    """
+    if _gateway is None or _catalog is None or not text:
+        return []
+    case_id = _gateway.get_case_id()
+    if case_id is None:
+        return []
+
+    present: set[str] = set()
+    for e in _build_search_index(case_id):
+        present.update(e.get("concepts") or [])
+    if not present:
+        return []
+
+    spelling_to_concept: dict[str, str] = {}
+    for concept in present:
+        for sp in _concept_spellings(concept, CONCEPT_GLOSS.get(concept, "")):
+            if len(sp) >= 3:
+                spelling_to_concept.setdefault(sp, concept)
+
+    # Whole tokens AND adjacent word pairs/triples, so a spelled-out concept
+    # ("out of pattern", "spend pattern") matches as readily as the key.
+    words = re.findall(r"[A-Za-z][A-Za-z0-9_]*", text)
+    candidates: list[str] = list(words)
+    for n in (2, 3):
+        candidates += ["".join(words[i:i + n]) for i in range(len(words) - n + 1)]
+
+    out: list[dict] = []
+    seen: set[str] = set()
+    for cand in candidates:
+        concept = spelling_to_concept.get(_variable_key(cand))
+        if concept and concept not in seen:
+            seen.add(concept)
+            out.append({"typed": cand, "concept": concept,
+                        "gloss": CONCEPT_GLOSS.get(concept, "")})
+    return out
 
 
 def variable_routing_hint(text: str, owners: dict[str, str] | None = None) -> str:

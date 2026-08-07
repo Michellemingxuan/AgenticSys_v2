@@ -137,11 +137,18 @@ class ChatAgent:
         # Resolved for EVERY question, not just ones that would be rejected: the
         # orchestrator needs to know "intoop" is a column rather than a proper
         # noun even when the screen was going to pass it.
+        # CONCEPTS travel the same path, and the split matters: `intoop` is a
+        # variable, `oop` is the concept it sits under. The variable lookup
+        # cannot see `oop` — it is not a column name — so "how is oop" was
+        # rejected as off-topic on the turn after "how is intoop" passed.
+        # Concepts are resolved against the ones this case's columns carry, so
+        # they are ground truth in exactly the same way.
         try:
-            from tools.data_tools import known_variables_in
+            from tools.data_tools import known_concepts_in, known_variables_in
             named_variables = known_variables_in(redacted)
+            named_concepts = [m["concept"] for m in known_concepts_in(redacted)]
         except Exception:  # noqa: BLE001 - screening must never hard-fail
-            named_variables = []
+            named_variables, named_concepts = [], []
 
         # relevance_check still runs even when the lookup already settled scope
         # — it also detects NEAR-DUPLICATES, and skipping it would make a
@@ -151,10 +158,11 @@ class ChatAgent:
             redacted, prior_questions=prior_questions or []
         )
 
-        if named_variables and not passed:
+        if (named_variables or named_concepts) and not passed:
             self.logger.log("chat_screen_scope_by_lookup", {
                 "llm_would_have_rejected": reason,
                 "named_variables": named_variables[:8],
+                "named_concepts": named_concepts[:8],
             })
             passed, reason = True, ""
 
@@ -165,13 +173,15 @@ class ChatAgent:
             near_duplicate_of=near_dup if passed else "",
             near_duplicate_reason=near_dup_reason if passed else "",
             named_variables=named_variables,
+            named_concepts=named_concepts,
         )
         self.logger.log(
             "chat_screen_done",
             {"passed": passed, "reason": verdict.reason,
              "near_duplicate_of": verdict.near_duplicate_of,
              "near_duplicate_reason": verdict.near_duplicate_reason,
-             "named_variables": named_variables[:8]},
+             "named_variables": named_variables[:8],
+             "named_concepts": named_concepts[:8]},
         )
         return verdict
 
