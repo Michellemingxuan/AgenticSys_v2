@@ -103,11 +103,19 @@ _REPORT_AGENT_DIRECTIVE = (
     "by the reports') — surface that briefly rather than omitting it."
 )
 
-# Injected on the no-tools retry. On safechain, `tool_choice="required"` is only
-# a text instruction (no native function-calling), so the orchestrator sometimes
-# emits a direct — and ungrounded — FinalAnswer on round 1 instead of dispatching.
-# Re-running verbatim tends to repeat the mistake, so the retry escalates with a
-# hard, format-specific directive.
+# Injected on the no-tools retry: the orchestrator emitted a direct — and
+# ungrounded — FinalAnswer on round 1 instead of dispatching. Re-running
+# verbatim tends to repeat the mistake, so the retry escalates with a hard,
+# format-specific directive.
+#
+# NOT a safechain limitation. This comment used to say `tool_choice="required"`
+# was "only a text instruction" there; that was measured FALSE in the private
+# env on 2026-07-29 (`tools/safechain_probe.py`) and the text protocol was
+# deleted in b97375c — safechain is a real `AzureChatOpenAI` subclass and
+# enforces `tool_choice` natively, same as the OpenAI path. So this is a
+# model-behaviour backstop on BOTH transports, not compensation for a missing
+# capability. See `.claude/memory/safechain_dual_environment.md`, whose open
+# item is to retire this machinery once a prod run validates the removal.
 _NO_TOOLS_RETRY_DIRECTIVE = (
     "[REQUIRED — you called ZERO specialists] Your previous response was a "
     "direct answer with NO tool call. That answer is UNGROUNDED and forbidden: "
@@ -806,9 +814,11 @@ class TurnRunner:
         # the new attempt's events under the same turn_id.
         _MAX_ORCH_ATTEMPTS = 2  # ModelBehaviorError: 1 initial + 1 retry
         # Dispatch is MANDATORY, so the "answered with zero tool calls" case
-        # (safechain can't natively enforce tool_choice="required") gets a
-        # LARGER budget with an escalating directive — R1 planning is cheap
-        # (~3s) and an ungrounded answer is far worse than one extra round.
+        # gets a LARGER budget with an escalating directive — R1 planning is
+        # cheap (~3s) and an ungrounded answer is far worse than one extra
+        # round. (The budget is NOT sized for a transport that lacks native
+        # `tool_choice`; both transports enforce it natively — see
+        # `_NO_TOOLS_RETRY_DIRECTIVE`.)
         _MAX_DISPATCH_ATTEMPTS = 4
         _orch_attempt = 0
         while True:
@@ -940,8 +950,8 @@ class TurnRunner:
                 # fresh. Follow-up context lives in specialist_kb + warmth hint.
 
                 # Guard: if orchestrator emitted zero tool calls (skipped
-                # specialists entirely), retry once — this is a safechain
-                # flake where tool_choice="required" was ignored.
+                # specialists entirely), retry — a model-behaviour flake where
+                # `tool_choice="required"` did not take, on either transport.
                 if (not self.tool_calls
                         and _orch_attempt + 1 < _MAX_DISPATCH_ATTEMPTS):
                     _orch_attempt += 1
@@ -1019,9 +1029,9 @@ class TurnRunner:
                 # guardrail tripwires) are not retried — they reflect a real
                 # protocol or configuration problem, not transient malformity.
                 # A ModelBehaviorError with NO specialists dispatched yet is the
-                # orchestrator SKIPPING DISPATCH: on safechain the required-round
-                # enforcement rejects its stray direct answer, which surfaces
-                # here as an unparseable FinalAnswer (prose/markdown, not JSON).
+                # orchestrator SKIPPING DISPATCH: the required-round enforcement
+                # rejects its stray direct answer, which surfaces here as an
+                # unparseable FinalAnswer (prose/markdown, not JSON).
                 # Treat it like the no-tools case — the LARGER dispatch budget
                 # plus the escalating "call a specialist" directive, not a
                 # verbatim re-run (which just reproduces the same skip → 1 retry
@@ -1474,8 +1484,9 @@ class TurnRunner:
             raise _TurnAborted("rewind before finalize")
         # Guard: if orchestrator finished with zero tool calls (skipped all
         # specialists), the answer is ungrounded — treat as a failure and
-        # log it. This happens on safechain where tool_choice="required"
-        # is enforced via prompt text and the LLM sometimes ignores it.
+        # log it. Rare on both transports — `tool_choice="required"` is
+        # enforced natively by each (measured for safechain, b97375c) — but the
+        # model can still return a bare answer, so the guard stays.
         if not tool_calls and final_answer is not None:
             sess.logger.log("orchestrator_no_tool_calls", {
                 "turn_id": turn_id,
