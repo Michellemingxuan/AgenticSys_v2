@@ -2433,3 +2433,81 @@ def test_missing_column_is_never_read_as_a_real_negative():
     assert "NOT A NEGATIVE FINDING" in block["hint"]
     assert "real negative" not in block["hint"]
     assert "transaction_detail" in block["hint"]
+
+
+# ── join_table: small results lose COLUMNS, never ROWS ──────────────────────
+#
+# A join is where this bites hardest: the whole point is to widen rows by
+# gluing two tables together, so the output is small-but-wide by construction.
+# Measured before the fix — joining `bureau` to `model_scores` on the month key
+# matched all 18 months and returned 9, silently dropping every other month of
+# a series someone joined precisely to compare month by month.
+
+def _wide_monthly_pair(n_rows=18, n_cols=30):
+    """Two monthly tables that join 1:1 and are wide enough to bust the budget."""
+    left, right = [], []
+    for i in range(n_rows):
+        # UNIQUE months — a repeated key would fan out into a many-to-many
+        # join and `matched_rows` would exceed the row count.
+        m = f"{2024 + i // 12}-{i % 12 + 1:02d}"
+        left.append({"month": m, "FICO Score": str(600 + i),
+                     **{f"L{c}": "x" * 60 for c in range(n_cols)}})
+        right.append({"trans_month": m, "cbr_score_max": str(600 + i),
+                      **{f"R{c}": "y" * 60 for c in range(n_cols)}})
+    return left, right
+
+
+def _join(monkeypatch, left, right, **kw):
+    class _GW:
+        def query(self, table, filters=None):
+            return {"L": [dict(r) for r in left], "R": [dict(r) for r in right]}.get(table)
+    monkeypatch.setattr(data_tools, "_gateway", _GW())
+    monkeypatch.setattr(data_tools, "_resolve_real_table", lambda t: t)
+    kw.setdefault("left_on", "month")
+    kw.setdefault("right_on", "trans_month")
+    return json.loads(data_tools._join_table_impl(left_table="L", right_table="R", **kw))
+
+
+def test_join_keeps_every_row_on_a_small_wide_result(monkeypatch):
+    left, right = _wide_monthly_pair()
+    r = _join(monkeypatch, left, right)
+
+    assert r["matched_rows"] == 18
+    assert r["rows_returned"] == 18, "a monthly series must not lose periods"
+    assert len(r["rows"][0]) < 62, "columns should have been shed instead"
+    assert "columns to keep all 18 joined rows" in r["truncation_note"]
+
+
+def test_join_never_drops_the_join_key(monkeypatch):
+    """A key sitting late in the column order would otherwise be shed first,
+    leaving rows nobody can line up against either source table."""
+    left, right = _wide_monthly_pair()
+    # Push the key to the END of each row's column order.
+    left = [{**{k: v for k, v in r.items() if k != "month"}, "month": r["month"]}
+            for r in left]
+    right = [{**{k: v for k, v in r.items() if k != "trans_month"},
+              "trans_month": r["trans_month"]} for r in right]
+
+    r = _join(monkeypatch, left, right)
+
+    assert r["rows_returned"] == 18
+    assert "month" in r["rows"][0]
+
+
+def test_join_leaves_a_result_that_already_fits_alone(monkeypatch):
+    left, right = _wide_monthly_pair(n_rows=18, n_cols=0)
+    r = _join(monkeypatch, left, right)
+
+    assert r["rows_returned"] == 18
+    assert r["truncated"] is False
+    assert set(r["rows"][0]) == {"month", "FICO Score", "trans_month", "cbr_score_max"}
+
+
+def test_join_still_sheds_rows_on_a_genuinely_large_result(monkeypatch):
+    """Above the small-result threshold, sampling rows stays legitimate."""
+    left, right = _wide_monthly_pair(n_rows=400, n_cols=20)
+    r = _join(monkeypatch, left, right)
+
+    assert r["matched_rows"] == 400
+    assert r["rows_returned"] < 400
+    assert "joined rows" in r["truncation_note"]

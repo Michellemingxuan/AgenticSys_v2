@@ -2426,8 +2426,59 @@ def _join_table_impl(
 
     truncation_notes: list[str] = []
     if merged:
+        # Same rule as `query_table`: on a SMALL result set shrink COLUMNS
+        # before ROWS. A join is where this bites hardest — the whole point is
+        # to widen rows by gluing two tables together, so the output is
+        # small-but-wide by construction, and the row loop below halves it
+        # without ever being provoked by a single oversized row. Measured:
+        # joining `bureau` to `model_scores` on the month key matched all 18
+        # months and returned 9, silently dropping every other month of a
+        # series someone joined precisely to compare month by month.
+        #
+        # A bounded result carries the larger trend budget, exactly as on the
+        # query path; only a genuinely large match set keeps the tight one.
+        _budget = (
+            _TREND_MAX_CHARS if len(merged) <= _SMALL_RESULT_ROWS
+            else _MAX_CHARS - 500
+        )
+        _total_cols = len(merged[0])
+
+        def _join_text(kept_rows, kept_keys=None):
+            if kept_keys is None:
+                return json.dumps(kept_rows, indent=2, default=str)
+            return json.dumps(
+                [{k: r[k] for k in kept_keys if k in r} for r in kept_rows],
+                indent=2, default=str,
+            )
+
+        if len(merged) <= _SMALL_RESULT_ROWS and len(_join_text(merged)) > _budget:
+            # The JOIN KEY is never droppable. Columns are shed from the end,
+            # and a key sitting late in the requested order would otherwise be
+            # the first thing to go — leaving rows nobody can line up against
+            # either source table, which is the one column a join output cannot
+            # be read without.
+            _protected = {k for k in (l_on, r_on) if k in merged[0]}
+            keys = list(merged[0].keys())
+            while len(keys) > _MIN_KEPT_COLUMNS and len(_join_text(merged, keys)) > _budget:
+                droppable = [k for k in keys if k not in _protected]
+                if not droppable:
+                    break
+                keys.remove(droppable[-1])
+            if len(keys) < _total_cols:
+                dropped = [k for k in merged[0] if k not in keys]
+                merged = [{k: row[k] for k in keys if k in row} for row in merged]
+                truncation_notes.append(
+                    f"showing {len(keys)}/{_total_cols} columns to keep all "
+                    f"{len(merged)} joined rows — dropped: "
+                    f"{', '.join(dropped[:8])}"
+                    + (" …" if len(dropped) > 8 else "")
+                    + ". Re-query with `columns` to choose which to keep."
+                )
+
         text = json.dumps(merged, indent=2, default=str)
-        while len(text) > _MAX_CHARS - 500 and len(merged) > 1:
+        # Measured against the SAME budget the column pass used, so a small
+        # result whose rows were just preserved is not halved right back.
+        while len(text) > _budget and len(merged) > 1:
             merged = merged[: len(merged) // 2]
             text = json.dumps(merged, indent=2, default=str)
         if len(merged) < matched_n:
