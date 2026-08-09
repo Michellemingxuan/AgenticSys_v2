@@ -377,3 +377,43 @@ def test_no_replay_entries_are_invisible_to_the_replay_cache():
         "turn_id_origin": "t2", "tool_calls": [],
     })
     assert _get_cached_qa(sess, key)["answer"] == "The real answer."
+
+
+# NOTE for anyone adding tests here: `TurnRunner.__init__` calls
+# `TURN_SCOPE.set(...)`. The async tests above are safe because pytest-asyncio
+# runs each in its own context, but a SYNCHRONOUS test that constructs a
+# TurnRunner leaks that contextvar into every test that follows — which
+# switches on `query_table`'s per-turn `repeated_call` dedup guard and breaks
+# unrelated data_tools tests with a `repeated_call` payload instead of rows.
+# Cost me three confusing failures; don't construct one outside a coroutine.
+
+
+def _domain_calls(tool_calls):
+    """The report-only predicate as `_finalize` computes it."""
+    return [c for c in tool_calls
+            if c.get("tool") not in ("report_agent", "general_specialist")]
+
+
+def test_report_only_predicate_identifies_a_report_subject_turn():
+    """A report-only turn is ALLOWED — the PROTOCOL carve-out covers a question
+    whose subject is the curated report ("summarize the spending patterns FROM
+    THE REPORT"). It is logged rather than blocked, because the runtime cannot
+    judge whether the question qualified; only the orchestrator can. Measured
+    live: the same question ran four times and split two report-only / two
+    data-only, so this needs to be observable rather than silent."""
+    report_only = [{"tool": "report_agent", "payload": {}}]
+    assert report_only and not _domain_calls(report_only)
+
+
+def test_report_only_predicate_ignores_the_reviewer_node():
+    """`general_specialist` is the coherence reviewer, not a data source — a
+    turn with report_agent + reviewer is still report-only."""
+    calls = [{"tool": "report_agent", "payload": {}},
+             {"tool": "general_specialist", "payload": {}}]
+    assert calls and not _domain_calls(calls)
+
+
+def test_a_turn_with_any_domain_specialist_is_not_report_only():
+    for tool in ("spend_payments", "modeling", "bureau"):
+        calls = [{"tool": "report_agent", "payload": {}}, {"tool": tool, "payload": {}}]
+        assert _domain_calls(calls) == [{"tool": tool, "payload": {}}], tool

@@ -1487,6 +1487,26 @@ class TurnRunner:
         # log it. Rare on both transports — `tool_choice="required"` is
         # enforced natively by each (measured for safechain, b97375c) — but the
         # model can still return a bare answer, so the guard stays.
+        # Report-only turn: `report_agent` ran, no domain specialist did. This
+        # is ALLOWED — the PROTOCOL carve-out covers a question whose subject is
+        # the curated report itself ("summarize the spending patterns FROM THE
+        # REPORT"), where the report is the complete answer. It is logged rather
+        # than blocked because the runtime cannot judge whether the question
+        # qualified; only the orchestrator can, and the exception is written
+        # narrowly. The log is what makes drift auditable: if these turns start
+        # showing up for questions about the CASE rather than about the report,
+        # the carve-out is being over-applied and the answer is report narrative
+        # standing in for live data.
+        _domain = [c for c in tool_calls
+                   if c.get("tool") not in ("report_agent", "general_specialist")]
+        if tool_calls and not _domain and final_answer is not None:
+            sess.logger.log("report_only_turn", {
+                "turn_id": turn_id,
+                "tools": sorted({c.get("tool") for c in tool_calls}),
+                "question": getattr(self.verdict, "redacted_question", "")[:160],
+                "answer_preview": str(getattr(final_answer, "answer", ""))[:160],
+            })
+
         if not tool_calls and final_answer is not None:
             sess.logger.log("orchestrator_no_tool_calls", {
                 "turn_id": turn_id,

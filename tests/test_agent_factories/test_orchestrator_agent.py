@@ -67,3 +67,29 @@ def test_build_general_specialist_still_importable():
     from agent_factories.general_specialist import build_general_specialist
     reviewer = build_general_specialist(model=None)
     assert reviewer is not None
+
+
+def test_report_only_carveout_is_narrow_and_defaults_to_dispatch():
+    """The carve-out lets a question ABOUT the report skip specialists, but it
+    must stay narrow: four runs of "summarize the spending patterns from the
+    report" split two report-only / two data-only, because the prompt demanded
+    BOTH and the model resolved the contradiction differently each time."""
+    from agent_factories.orchestrator_agent import _compose_orchestrator_instructions
+
+    p = _compose_orchestrator_instructions()
+
+    # The default is unchanged: both are still mandatory.
+    assert "MUST have called BOTH (1) report_agent and (2) at least one domain specialist" in p
+    # The exception exists, is flagged as narrow, and is scoped to the report
+    # being the SUBJECT.
+    assert "ONE EXCEPTION, and it is NARROW" in p
+    assert "SUBJECT of the question" in p
+    # It carries a decision test and a default, so an ambiguous question
+    # dispatches rather than silently answering from report narrative.
+    assert "When in DOUBT, dispatch" in p
+    assert "unanswerable" in p
+    # And it must be attributed, so the reviewer knows the source.
+    assert "the curated reports state" in p
+    # Worked examples on BOTH sides — the qualifying and the disqualifying.
+    assert "FROM THE REPORT" in p
+    assert "what is the spending pattern" in p
