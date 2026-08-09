@@ -19,6 +19,13 @@ Thresholds are auto-injected from the catalog.
 
 **Skip charting** for: single scalars, counts, yes/no, 1-3 data points.
 
+**`points_json` is a JSON STRING, not a list.** Pass the series as a JSON array
+of row objects in a single-quoted string — `points_json='[{"period":"2025-01",
+"value":120.5}, …]'` — exactly like `query_table(filters=…)` and
+`batch_aggregate(specs_json=…)`. The tool is STRICT (a strict schema cannot
+accept an open-ended object array), and on the prod transport a non-strict tool
+fails the whole turn.
+
 ## Pick the kind
 
 | Kind | When | y_fields shape |
@@ -49,25 +56,24 @@ Tell same-scale from different-scale by checking the source columns' units via `
 
 When 2+ metrics share an x-axis, emit **ONE** `make_chart` call with `y_fields=[var1, var2, ...]`. **Never** emit N separate `kind="trend"` calls for variables on the same x — one informative multi-line chart beats N single-line charts the reviewer has to mentally align.
 
-Merge data from MULTIPLE tool calls into one `points` list by aligning on a shared `x_field` (typically `period` or `group`):
+Merge data from MULTIPLE tool calls into one `points_json` array by aligning on a shared `x_field` (typically `period` or `group`):
 
 ```
-points = [
-  {"period": "2024-11", "credit_loss_prob": 0.12, "tot_struct_risk_score": 22.0},
-  {"period": "2024-12", "credit_loss_prob": 0.18, "tot_struct_risk_score": 25.4},
-  ... ALL rows from BOTH underlying aggregates ...
-]
-make_chart(topic='cdss_tsr_trajectory', kind='trend_dual', ...,
+make_chart(topic='cdss_tsr_trajectory', kind='trend_dual',
+           points_json='[{"period":"2024-11","credit_loss_prob":0.12,"tot_struct_risk_score":22.0},
+                         {"period":"2024-12","credit_loss_prob":0.18,"tot_struct_risk_score":25.4},
+                         ... ALL rows from BOTH underlying aggregates ...]',
+           x_field='period',
            y_fields=['credit_loss_prob', 'tot_struct_risk_score'], ...)
 ```
 
-**Pass EVERY row from the underlying aggregates in `points` — not just the periods/groups you mention in the claim.** The renderer plots `points` exactly as given; dropping interior rows produces a chart with gaps that misrepresents the data and contradicts the claim's stated time window.
+**Pass EVERY row from the underlying aggregates in `points_json` — not just the periods/groups you mention in the claim.** The renderer plots the decoded rows exactly as given; dropping interior rows produces a chart with gaps that misrepresents the data and contradicts the claim's stated time window.
 
 **Table (show specific rows):**
 ```python
-points=[{"date":"2024-03-04","amount":120.50,"decision":"declined","reason":"R12"},
-        {"date":"2024-03-09","amount":80.00,"decision":"approved","reason":""}]
 make_chart(topic="march_transactions", kind="table",
+           points_json='[{"date":"2024-03-04","amount":120.50,"decision":"declined","reason":"R12"},
+                         {"date":"2024-03-09","amount":80.00,"decision":"approved","reason":""}]',
            x_field="date", y_fields=["amount","decision","reason"],
            claim="Two March transactions; one declined (R12).", source_call="query_table(...)")
 # kind="table": x_field = the row-label column (optional);
@@ -77,7 +83,7 @@ make_chart(topic="march_transactions", kind="table",
 
 ## Threshold reference lines
 
-When the catalog description for a metric named a risky threshold (e.g. *"Scores from 10-100 are considered risky"* on `credit_loss_prob` → threshold = 10; *"Scores from 20-100 are considered risky"* on `tot_struct_risk_score` → threshold = 20; *"Values above 0.5 are risky"* on a probability column → threshold = 0.5), carry that threshold on every `points` row so the renderer draws a horizontal dashed reference line at that y. The threshold value MUST come from the column's catalog description (visible via `get_table_schema`) — never from memory or a generic guess.
+When the catalog description for a metric named a risky threshold (e.g. *"Scores from 10-100 are considered risky"* on `credit_loss_prob` → threshold = 10; *"Scores from 20-100 are considered risky"* on `tot_struct_risk_score` → threshold = 20; *"Values above 0.5 are risky"* on a probability column → threshold = 0.5), carry that threshold on every `points_json` row so the renderer draws a horizontal dashed reference line at that y. The threshold value MUST come from the column's catalog description (visible via `get_table_schema`) — never from memory or a generic guess.
 
 - **Single-series `trend`** — use the bare `threshold` key on every row:
   ```

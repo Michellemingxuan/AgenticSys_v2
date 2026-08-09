@@ -18,6 +18,7 @@ SDK doesn't surface it — so factory binding is the cleanest path.)
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -70,7 +71,6 @@ def _load_data_viz_body() -> str:
 
 
 @function_tool(
-    strict_mode=False,
     name_override="get_chart_guidance",
     description_override=(
         "Returns the chart-construction rulebook (how to pick `kind`, "
@@ -86,11 +86,17 @@ async def get_chart_guidance(ctx: RunContextWrapper) -> str:  # noqa: ARG001
 def build_make_chart_tool(specialist_name: str):
     """Return a ``function_tool`` bound to ``specialist_name`` for KB writes.
 
-    Use ``strict_mode=False`` so we can accept ``list[dict]`` for the
-    points array — strict mode rejects open-ended object schemas.
+    STRICT. `points` arrives as a JSON STRING rather than `list[dict]`,
+    because a strict schema rejects open-ended object arrays — the same reason
+    `query_table(filters=…)` and `batch_aggregate(specs_json=…)` take JSON
+    strings. Non-strict tools are not merely suboptimal here: on the safechain
+    transport, langchain routes any call carrying `response_format` through
+    OpenAI's auto-parse, which refuses a tool that is not strict —
+    "ValueError: 'make_chart' is not strict. Only 'strict' function can be
+    auto-parsed" — so a non-strict tool breaks the whole turn in prod while
+    working fine in dev.
     """
     @function_tool(
-        strict_mode=False,
         name_override="make_chart",
         description_override=(
             "Render a chart in the reasoning trace. Call after summarize_trend "
@@ -109,11 +115,26 @@ def build_make_chart_tool(specialist_name: str):
         topic: str,
         kind: str,
         claim: str,
-        points: list[dict],
+        points_json: str,
         x_field: str,
         y_fields: list[str],
         source_call: str,
     ) -> str:
+        # `points_json` is a JSON string so the tool can stay STRICT (see the
+        # factory docstring). Decode first; a malformed payload gets the same
+        # structured, self-correctable error as every other bad argument.
+        try:
+            points = json.loads(points_json) if isinstance(points_json, str) \
+                else points_json
+        except (json.JSONDecodeError, ValueError, TypeError) as exc:
+            return (
+                f"[make_chart error] `points_json` is not valid JSON ({exc}). "
+                f"Pass a JSON ARRAY of row objects as a string, e.g. "
+                f"'[{{\"period\":\"2025-01\",\"value\":120.5}}, …]' — the "
+                f"complete series from your prior summarize_trend / "
+                f"summarize_by_group call."
+            )
+
         # ── Input validation: return a structured error string the LLM can
         # read and self-correct from, rather than raising.
         if kind not in _VALID_KINDS:
@@ -128,9 +149,10 @@ def build_make_chart_tool(specialist_name: str):
         if not isinstance(points, list) or len(points) < 1:
             n = len(points) if isinstance(points, list) else "n/a"
             return (
-                f"[make_chart error] `points` must be a list of 1+ dicts; "
-                f"got {type(points).__name__} of len {n}. Pass the series "
-                f"from your prior summarize_trend / summarize_by_group call."
+                f"[make_chart error] `points_json` must decode to a list of "
+                f"1+ objects; got {type(points).__name__} of len {n}. Pass the "
+                f"series from your prior summarize_trend / summarize_by_group "
+                f"call as a JSON array string."
             )
         if not all(isinstance(p, dict) for p in points):
             return (

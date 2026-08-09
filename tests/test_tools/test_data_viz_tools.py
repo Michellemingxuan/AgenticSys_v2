@@ -64,7 +64,7 @@ async def test_make_chart_writes_png_and_persists_kp(tmp_path):
             "topic": "monthly_spend_trend",
             "kind": "trend",
             "claim": "Spend rose 2.7× from Nov-2024 to Jan-2025.",
-            "points": _good_points(),
+            "points_json": json.dumps(_good_points()),
             "x_field": "period",
             "y_fields": ["value"],
             "source_call": "summarize_trend('spends','Amount','Date',period='month',op='sum')",
@@ -109,7 +109,7 @@ async def test_make_chart_rejects_bad_kind(tmp_path):
         RunContextWrapper(ctx),
         json.dumps({
             "topic": "x", "kind": "scatter",
-            "claim": "anything", "points": _good_points(),
+            "claim": "anything", "points_json": json.dumps(_good_points()),
             "x_field": "period", "y_fields": ["value"], "source_call": "",
         }),
     )
@@ -133,10 +133,10 @@ async def test_make_chart_rejects_too_few_points(tmp_path):
         json.dumps({
             "topic": "x", "kind": "trend",
             "claim": "c",
-            "points": [
+            "points_json": json.dumps([
                 {"period": "2024-11", "value": 1},
                 {"period": "2024-12", "value": 2},
-            ],
+            ]),
             "x_field": "period", "y_fields": ["value"], "source_call": "",
         }),
     )
@@ -144,17 +144,17 @@ async def test_make_chart_rejects_too_few_points(tmp_path):
     assert "at least 4 datapoints" in out_two
     assert "kind='table'" in out_two
 
-    # Empty list — fails the basic 1+ dicts check.
+    # Empty array — fails the basic 1+ objects check.
     out_zero = await tool.on_invoke_tool(
         RunContextWrapper(ctx),
         json.dumps({
             "topic": "x", "kind": "trend",
-            "claim": "c", "points": [],
+            "claim": "c", "points_json": json.dumps([]),
             "x_field": "period", "y_fields": ["value"], "source_call": "",
         }),
     )
     assert "[make_chart error]" in out_zero
-    assert "1+ dicts" in out_zero
+    assert "1+ objects" in out_zero
 
 
 @pytest.mark.asyncio
@@ -165,7 +165,7 @@ async def test_make_chart_rejects_blank_topic_or_claim(tmp_path):
         RunContextWrapper(ctx),
         json.dumps({
             "topic": "  ", "kind": "trend", "claim": "fine",
-            "points": _good_points(),
+            "points_json": json.dumps(_good_points()),
             "x_field": "period", "y_fields": ["value"], "source_call": "",
         }),
     )
@@ -184,12 +184,12 @@ async def test_make_chart_returns_error_on_bad_axes(tmp_path):
         RunContextWrapper(ctx),
         json.dumps({
             "topic": "bad_axes", "kind": "trend", "claim": "c",
-            "points": [
+            "points_json": json.dumps([
                 {"label": "a", "score": 1},
                 {"label": "b", "score": 2},
                 {"label": "c", "score": 3},
                 {"label": "d", "score": 4},
-            ],
+            ]),
             "x_field": "period", "y_fields": ["value"],   # neither key in points
             "source_call": "",
         }),
@@ -211,7 +211,7 @@ async def test_make_chart_no_session_returns_clear_error():
         RunContextWrapper(ctx),
         json.dumps({
             "topic": "x", "kind": "trend", "claim": "c",
-            "points": _good_points(),
+            "points_json": json.dumps(_good_points()),
             "x_field": "period", "y_fields": ["value"], "source_call": "",
         }),
     )
@@ -238,7 +238,7 @@ async def test_make_chart_multi_series_renders_one_chart_with_all_fields(tmp_pat
             "topic": "spend_vs_payment",
             "kind": "trend",
             "claim": "Spend rose faster than payment over Nov-Jan.",
-            "points": points,
+            "points_json": json.dumps(points),
             "x_field": "period",
             "y_fields": ["spend", "payment"],
             "source_call": "",
@@ -271,12 +271,12 @@ async def test_make_chart_share_kind_rejects_multi_series(tmp_path):
         RunContextWrapper(ctx),
         json.dumps({
             "topic": "x", "kind": "share", "claim": "c",
-            "points": [
+            "points_json": json.dumps([
                 {"group": "A", "x": 1, "y": 2},
                 {"group": "B", "x": 3, "y": 4},
                 {"group": "C", "x": 5, "y": 6},
                 {"group": "D", "x": 7, "y": 8},
-            ],
+            ]),
             "x_field": "group", "y_fields": ["x", "y"],
             "source_call": "",
         }),
@@ -296,7 +296,7 @@ async def test_make_chart_factory_isolates_specialist_kbs(tmp_path):
 
     payload = {
         "topic": "shared_topic", "kind": "trend", "claim": "c",
-        "points": _good_points(),
+        "points_json": json.dumps(_good_points()),
         "x_field": "period", "y_fields": ["value"], "source_call": "",
     }
     await tool_a.on_invoke_tool(RunContextWrapper(ctx), json.dumps(payload))
@@ -319,7 +319,7 @@ async def test_trend_dual_requires_exactly_two_y_fields(tmp_path):
         RunContextWrapper(ctx),
         json.dumps({
             "topic": "x", "kind": "trend_dual", "claim": "c",
-            "points": _good_points(),
+            "points_json": json.dumps(_good_points()),
             "x_field": "period", "y_fields": ["value"], "source_call": "",
         }),
     )
@@ -339,7 +339,7 @@ async def test_trend_dual_requires_exactly_two_y_fields(tmp_path):
         RunContextWrapper(ctx),
         json.dumps({
             "topic": "x", "kind": "trend_dual", "claim": "c",
-            "points": points_three,
+            "points_json": json.dumps(points_three),
             "x_field": "period", "y_fields": ["a", "b", "c"], "source_call": "",
         }),
     )
@@ -360,7 +360,7 @@ async def test_trend_grid_requires_two_to_six_y_fields(tmp_path):
         RunContextWrapper(ctx),
         json.dumps({
             "topic": "x", "kind": "trend_grid", "claim": "c",
-            "points": _good_points(),
+            "points_json": json.dumps(_good_points()),
             "x_field": "period", "y_fields": ["value"], "source_call": "",
         }),
     )
@@ -380,7 +380,7 @@ async def test_trend_grid_requires_two_to_six_y_fields(tmp_path):
         RunContextWrapper(ctx),
         json.dumps({
             "topic": "x", "kind": "trend_grid", "claim": "c",
-            "points": points_seven,
+            "points_json": json.dumps(points_seven),
             "x_field": "period", "y_fields": keys, "source_call": "",
         }),
     )
@@ -409,7 +409,7 @@ async def test_make_chart_trend_dual_end_to_end(tmp_path):
             "topic": "score_vs_dpd",
             "kind": "trend_dual",
             "claim": "Score declined as DPD climbed over Nov-Feb.",
-            "points": points,
+            "points_json": json.dumps(points),
             "x_field": "period",
             "y_fields": ["score", "dpd"],
             "source_call": "summarize_trend(...) x 2 merged",
@@ -449,7 +449,7 @@ async def test_make_chart_trend_grid_end_to_end(tmp_path):
             "topic": "credit_risk_panel",
             "kind": "trend_grid",
             "claim": "All three risk indicators deteriorated together.",
-            "points": points,
+            "points_json": json.dumps(points),
             "x_field": "period",
             "y_fields": ["tsr", "cdss", "txn_count"],
             "source_call": "summarize_trend(...) x 3 merged",
@@ -488,12 +488,12 @@ async def test_make_chart_emits_chart_pending_before_render(tmp_path):
             "topic": "score_vs_dpd",
             "kind": "trend_dual",
             "claim": "Score declined as DPD climbed.",
-            "points": [
+            "points_json": json.dumps([
                 {"period": "2024-11", "score": 720, "dpd": 0},
                 {"period": "2024-12", "score": 705, "dpd": 15},
                 {"period": "2025-01", "score": 690, "dpd": 30},
                 {"period": "2025-02", "score": 680, "dpd": 45},
-            ],
+            ]),
             "x_field": "period",
             "y_fields": ["score", "dpd"],
             "source_call": "summarize_trend(...)",
@@ -525,7 +525,7 @@ async def test_make_chart_skips_chart_pending_when_no_emit_hook(tmp_path):
         RunContextWrapper(ctx),
         json.dumps({
             "topic": "x", "kind": "trend", "claim": "c",
-            "points": _good_points(),
+            "points_json": json.dumps(_good_points()),
             "x_field": "period", "y_fields": ["value"], "source_call": "",
         }),
     )
@@ -545,7 +545,7 @@ async def test_make_chart_skips_pending_event_when_validation_fails(tmp_path):
         RunContextWrapper(ctx),
         json.dumps({
             "topic": "x", "kind": "scatter",  # invalid kind
-            "claim": "c", "points": _good_points(),
+            "claim": "c", "points_json": json.dumps(_good_points()),
             "x_field": "period", "y_fields": ["value"], "source_call": "",
         }),
     )
@@ -573,7 +573,7 @@ async def test_make_chart_table_kind_skips_render_and_persists_kp(tmp_path):
             "topic": "spend_last_two_months",
             "kind": "table",
             "claim": "Spend halved May → June 2025.",
-            "points": rows,
+            "points_json": json.dumps(rows),
             "x_field": "month",
             "y_fields": ["spend"],
             "source_call": "summarize_trend('spends', 'Amount', 'Date', "
@@ -604,7 +604,7 @@ async def test_make_chart_table_kind_accepts_one_row(tmp_path):
         RunContextWrapper(ctx),
         json.dumps({
             "topic": "single_fact", "kind": "table", "claim": "Latest score.",
-            "points": [{"month": "2025-07", "score": 642}],
+            "points_json": json.dumps([{"month": "2025-07", "score": 642}]),
             "x_field": "month", "y_fields": ["score"],
             "source_call": "",
         }),
@@ -627,7 +627,7 @@ async def test_make_chart_table_kind_accepts_empty_y_fields(tmp_path):
             "topic": "march_declines",
             "kind": "table",
             "claim": "Two declined transactions in March.",
-            "points": [{"date": "2024-03-04", "amount": 120.5, "decision": "declined"}],
+            "points_json": json.dumps([{"date": "2024-03-04", "amount": 120.5, "decision": "declined"}]),
             "x_field": "date",
             "y_fields": [],
             "source_call": "query_table('model_scores_transaction', ...)",
@@ -638,3 +638,46 @@ async def test_make_chart_table_kind_accepts_empty_y_fields(tmp_path):
     kp = ctx._specialist_kb["modeling"][0]
     assert kp["viz"]["kind"] == "table"
     assert kp["numbers"]
+
+
+# ── strictness: every specialist tool must be strict ────────────────────────
+#
+# Reported from the private env:
+#   ValueError: 'make_chart' is not strict. Only 'strict' function can be
+#   auto-parsed
+#
+# On safechain, langchain routes any call carrying `response_format` through
+# OpenAI's auto-parse, which refuses a tool that is not strict — so one
+# non-strict tool breaks the whole turn in prod while working fine in dev,
+# where the plain chat-completions path never validates tool strictness.
+# `make_chart` and `get_chart_guidance` were the only two.
+
+def test_every_tool_a_specialist_can_call_is_strict():
+    from agent_factories.specialist_agent import build_specialist_agent  # noqa: F401
+    from tools.data_viz_tools import build_make_chart_tool, get_chart_guidance
+    from tools import data_tools as dtools
+    from tools.kb_tools import kb_lookup, kb_list_topics
+
+    tools = [
+        dtools.query_table, dtools.batch_query_table, dtools.join_table,
+        dtools.sequence_join, dtools.transaction_detail, dtools.aggregate_column,
+        dtools.batch_aggregate, dtools.summarize_trend, dtools.batch_summarize_trend,
+        dtools.summarize_by_group, dtools.get_table_schema, dtools.search_columns,
+        dtools.list_available_tables, dtools.score_driver_values,
+        get_chart_guidance, kb_lookup, kb_list_topics,
+        build_make_chart_tool("spend_payments"),
+    ]
+    not_strict = [t.name for t in tools if getattr(t, "strict_json_schema", None) is not True]
+    assert not_strict == [], f"non-strict tools break the safechain turn: {not_strict}"
+
+
+def test_make_chart_takes_points_as_a_json_string():
+    """A strict schema cannot accept an open-ended object array, so the series
+    arrives as a JSON string — the same shape `query_table(filters=…)` uses."""
+    tool = build_make_chart_tool("spend_payments")
+    props = tool.params_json_schema.get("properties", {})
+
+    assert "points_json" in props
+    assert props["points_json"].get("type") == "string"
+    assert "points" not in props
+    assert tool.params_json_schema.get("additionalProperties") is False
