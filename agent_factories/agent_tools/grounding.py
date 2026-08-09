@@ -240,3 +240,83 @@ def scan_tool_errors(result) -> list[dict]:
             }
 
     return list(errors_by_tool.values())
+
+
+# ── absence asserted against rows that came back ────────────────────────────
+#
+# The other checks here ask "did a tool FAIL". This asks the one question that
+# caught nothing before: does the answer DENY what a tool returned?
+#
+# Measured, case 11854808010. The specialist issued exactly the right call —
+# `query_table(payments, "Return Flag" eq "1")` — the tool returned
+# `rows_matching_filter: 1` with the row populated ($105,818.60 on 2025-04-28,
+# INSUFFICIENT FUNDS), and the answer said "No payment returns were found;
+# there are zero records in the payments table with Return Flag == 1". One row
+# in, zero reported. The distiller then wrote that into the KB as a
+# high-confidence knowledge point, so every later turn inherited it as fact.
+#
+# Nothing existing could see it: the tool did not fail, no filter matched zero,
+# the claim carried no number to trace. It is a pure misreading of a correct
+# result, and the only evidence is that the two disagree.
+#
+# THE RULE, and it is narrow on purpose: an assertion of absence must be backed
+# by a tool result that actually returned NOTHING. If every data call in the run
+# came back with rows, "none/zero/no such" has no source. Requiring a zero
+# SOMEWHERE is what keeps the false-positive rate near nil — a specialist that
+# legitimately found nothing always has that zero to point at.
+
+_ABSENCE_CLAIM = re.compile(
+    r"\b(?:"
+    r"no\s+(?:such\s+)?(?:\w+\s+){0,3}(?:record|row|transaction|payment|return|entr|instance|case|match)"
+    r"|zero\s+(?:\w+\s+){0,3}(?:record|row|transaction|payment|return|entr|instance|case|match)"
+    r"|none\s+(?:were|was|found|present)"
+    r"|(?:were|was)\s+(?:not\s+)?(?:found|identified|present|observed)"
+    r"|(?:did\s+not|does\s+not|didn't|doesn't)\s+(?:have|show|contain|find)"
+    r"|no\s+evidence\s+of"
+    r")",
+    re.IGNORECASE,
+)
+
+# `rows_matching_filter` is the true count; `rows_returned` is a display sample.
+_ROWS_MATCHING = re.compile(r'"rows_matching_filter"\s*:\s*(\d+)')
+# Countable results that legitimately establish an absence.
+_COUNT_RESULT = re.compile(r"=\s*(?:count\s*)?(\d[\d,]*)\b")
+
+
+def absence_contradicted_by_rows(result, final_output) -> dict | None:
+    """`{claim, max_rows_matching, calls}` when the answer asserts absence and
+    NO data call in the run returned zero. `None` otherwise.
+
+    Never raises — a broken check must not break the turn it is checking.
+    """
+    try:
+        parts: list[str] = []
+        for attr in ("findings", "evidence"):
+            v = getattr(final_output, attr, None)
+            if isinstance(v, str):
+                parts.append(v)
+            elif isinstance(v, list):
+                parts.extend(str(x) for x in v)
+        claim_text = "\n".join(parts)
+        m = _ABSENCE_CLAIM.search(claim_text)
+        if not m:
+            return None
+
+        matched: list[int] = []
+        for _tool, _cid, output in _iter_call_outcomes(result):
+            if not isinstance(output, str):
+                continue
+            matched += [int(x) for x in _ROWS_MATCHING.findall(output)]
+            matched += [int(x.replace(",", "")) for x in _COUNT_RESULT.findall(output)]
+        if not matched:
+            return None
+        # A zero anywhere is the specialist's licence to assert absence.
+        if any(n == 0 for n in matched):
+            return None
+        return {
+            "claim": claim_text[max(0, m.start() - 60):m.end() + 60].strip(),
+            "max_rows_matching": max(matched),
+            "counts_seen": sorted(set(matched))[:8],
+        }
+    except Exception:  # noqa: BLE001 — a checker must never break the turn
+        return None

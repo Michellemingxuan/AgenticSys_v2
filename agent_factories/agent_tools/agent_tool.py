@@ -15,10 +15,10 @@ from tools.node_trace import _open_node, attach_extra, attach_tag
 from agent_factories.agent_tools.series_extract import _extract_data_tool_outputs
 from agent_factories.agent_tools.distiller_pass import _distill_and_persist
 from agent_factories.agent_tools.auto_chart import _auto_chart_from_tool_outputs
-from agent_factories.agent_tools.claim_audit import (
-    audit_claims, measured_over, scope_line,
+from agent_factories.agent_tools.provenance import measured_over, scope_line
+from agent_factories.agent_tools.grounding import (
+    absence_contradicted_by_rows, scan_tool_errors,
 )
-from agent_factories.agent_tools.grounding import scan_tool_errors
 from agent_factories.agent_tools.specialist_input_tool import (
     _SPECIALIST_HISTORY_KEEP_RECENT_USER_MESSAGES,
     _ELIDED_SPECIALIST_TOOL_OUTPUT,
@@ -191,6 +191,37 @@ class _SkipPersistence(Exception):
     belt-and-suspenders fence and the block keeps its indentation — the guard
     is one line at the top instead of a re-indent of forty.
     """
+
+
+_ABSENCE_REREAD_DIRECTIVE = (
+    "[RE-READ YOUR OWN TOOL RESULT] Your answer asserts that something is "
+    "ABSENT — no records / zero / none found — but every data call you made "
+    "this run came back WITH ROWS, and not one returned a count of 0. One of "
+    "those two readings is wrong, and it is not the tool's: `query_table` "
+    "reports the true count in `rows_matching_filter`, and `aggregate_column` "
+    "reports it after the `=`.\n\n"
+    "Go back to the tool output you already have and read the count off it "
+    "literally. If it is greater than zero, the thing you called absent EXISTS "
+    "— report it, with its rows, dates and amounts. If you believe it really is "
+    "absent, you must cite the specific call that returned 0; you cannot infer "
+    "absence from a result that returned rows. Do NOT re-run the same query — "
+    "the answer is already in front of you."
+)
+
+
+def _absence_retry_input(result, fallback):
+    """This run's transcript + the re-read directive. Continuing from the
+    transcript is the whole point: the correct number is already in it, so the
+    retry is a re-read rather than a fresh investigation."""
+    try:
+        prior = result.to_input_list()
+    except (AttributeError, TypeError):
+        prior = None
+    if not isinstance(prior, list) or not prior:
+        base = fallback if isinstance(fallback, list) else [
+            {"role": "user", "content": str(fallback)}]
+        return base + [{"role": "user", "content": _ABSENCE_REREAD_DIRECTIVE}]
+    return prior + [{"role": "user", "content": _ABSENCE_REREAD_DIRECTIVE}]
 
 
 def _degraded_directive(errors: list[dict]) -> str:
@@ -575,6 +606,28 @@ def agent_tool(
                     run_input = _retry_input(result, tool_errors, run_input)
                     result = None
                     continue
+                # The answer denies what a tool returned. Distinct from a failed
+                # tool: nothing broke, the specialist misread a correct result
+                # (case 11854808010 — one returned payment in, "zero records"
+                # out). Shares the same 2-attempt budget; the retry is a RE-READ
+                # of the transcript it already has, not a fresh query.
+                _absence = absence_contradicted_by_rows(
+                    result, getattr(result, "final_output", None))
+                if _absence and _attempt + 1 < _MAX_SPECIALIST_ATTEMPTS:
+                    if logger is not None:
+                        logger.log("specialist_absence_contradicted", {
+                            "specialist": name,
+                            "attempt": _attempt,
+                            **_absence,
+                        })
+                    retry_kind = "absence_reread"
+                    run_input = _absence_retry_input(result, run_input)
+                    result = None
+                    continue
+                if _absence and logger is not None:
+                    logger.log("specialist_absence_contradicted_unresolved", {
+                        "specialist": name, **_absence,
+                    })
                 break  # success (grounded, or out of retry budget)
             except MaxTurnsExceeded as exc:
                 # Retry once, collapsed to a single decisive call, before giving
@@ -704,35 +757,6 @@ def agent_tool(
                 last_exc,
             )
 
-        # QUARANTINE: the retry above was already spent and the run STILL rests
-        # on a failed tool call. The answer is returned (the orchestrator may
-        # still need the qualitative part, and dropping it entirely would look
-        # like a silent failure), but it is fenced off from every channel that
-        # would carry it into a LATER turn — see `_degraded_specialists`.
-        # PARTIAL batch failures don't quarantine. One bad spec among several
-        # still leaves the run grounded in the specs that succeeded — condemning
-        # it would suppress good findings (observed in prod: an all-blank
-        # bureau column failed one trend and flagged FICO + delinquencies with
-        # it). Those are still worth the retry above; they are not worth
-        # discarding an answer over.
-        # SHADOW-MODE claim audit. Logs only — deliberately gates nothing. It
-        # asks "do the answer's numbers trace to the tool outputs?", which has
-        # more room to false-positive than the grounding check (a legitimately
-        # DERIVED ratio won't appear verbatim). Measure the rate on a known-good
-        # question suite before letting any of it drive a retry, and never wire
-        # an auditor straight to the quarantine — this system has already
-        # over-flagged twice.
-        if logger is not None and name != "report_agent":
-            _audit = audit_claims(result, getattr(result, "final_output", None))
-            if _audit["unsupported_numbers"] or _audit["sample_size_as_count"]:
-                logger.log("specialist_claim_audit", {
-                    "specialist": name,
-                    "sub_question": redacted_in[:300],
-                    **_audit,
-                    # So analysis can separate audit noise from answers that
-                    # were already known-bad for a different reason.
-                    "already_flagged_ungrounded": bool(tool_errors),
-                })
 
         degraded = any(not e.get("partial") for e in tool_errors)
         if degraded:
