@@ -217,29 +217,44 @@ def scan_tool_errors(result) -> list[dict]:
     the tool is broken.
 
     `[{"tool", "call_id", "reason", "excerpt"}, ...]` in transcript order.
+
+    FAILS OPEN. This is the one check here with teeth — a hit quarantines the
+    run from the KB, Amem and the chart channels (`_SkipPersistence`) — and its
+    call site in `agent_tool` is not itself guarded, so an exception raised here
+    would propagate into the AgentsException handler and record the specialist
+    as a HARD FAILURE. A crash in the detector would then destroy the very
+    answer it was checking, over a malformed transcript item rather than
+    anything wrong with the work.
+
+    So a broken scan returns NO ERRORS: "the detector could not run" must mean
+    "no evidence of a problem", never "assume the worst". The same rule the
+    other checkers in this family already follow.
     """
-    errors_by_tool: dict[str, dict] = {}
+    try:
+        errors_by_tool: dict[str, dict] = {}
 
-    for tool, call_id, output in _iter_call_outcomes(result):
-        detail = classify_tool_output_detailed(tool, output)
-        if detail is None:
-            # A clean call clears only what came BEFORE it.
-            errors_by_tool.pop(tool, None)
-        else:
-            errors_by_tool[tool] = {
-                "tool": tool,
-                "call_id": call_id,
-                "reason": detail["reason"],
-                # `partial` — some specs in a batch succeeded. Callers should
-                # retry on these but NOT quarantine the run; see
-                # classify_tool_output_detailed.
-                "partial": detail["partial"],
-                "n_failed": detail["n_failed"],
-                "n_total": detail["n_total"],
-                "excerpt": output[:_EXCERPT_CHARS],
-            }
+        for tool, call_id, output in _iter_call_outcomes(result):
+            detail = classify_tool_output_detailed(tool, output)
+            if detail is None:
+                # A clean call clears only what came BEFORE it.
+                errors_by_tool.pop(tool, None)
+            else:
+                errors_by_tool[tool] = {
+                    "tool": tool,
+                    "call_id": call_id,
+                    "reason": detail["reason"],
+                    # `partial` — some specs in a batch succeeded. Callers should
+                    # retry on these but NOT quarantine the run; see
+                    # classify_tool_output_detailed.
+                    "partial": detail["partial"],
+                    "n_failed": detail["n_failed"],
+                    "n_total": detail["n_total"],
+                    "excerpt": output[:_EXCERPT_CHARS],
+                }
 
-    return list(errors_by_tool.values())
+        return list(errors_by_tool.values())
+    except Exception:  # noqa: BLE001 — a checker must never break the turn
+        return []
 
 
 # ── absence asserted against rows that came back ────────────────────────────

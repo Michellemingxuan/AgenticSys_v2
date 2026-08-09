@@ -99,3 +99,23 @@ def test_phrasings_the_specialists_actually_use():
                   "No evidence of returned payments."):
         assert absence_contradicted_by_rows(
             _Result([_ROW_RETURNED]), _out(claim)) is not None, claim
+
+
+def test_scan_tool_errors_fails_open_on_a_broken_transcript():
+    """`scan_tool_errors` is the one check with teeth — a hit quarantines the
+    run from the KB — and its call site is unguarded, so an exception here
+    would record the specialist as a HARD FAILURE and destroy the answer it was
+    checking. "Could not run" must mean "no evidence of a problem"."""
+    from agent_factories.agent_tools.grounding import scan_tool_errors
+
+    class _Broken:
+        def to_input_list(self):
+            raise RuntimeError("malformed transcript")
+
+    class _Hostile:
+        def to_input_list(self):
+            return [{"type": "function_call_output", "output": object()}]
+
+    assert scan_tool_errors(_Broken()) == []
+    assert scan_tool_errors(_Hostile()) == []
+    assert scan_tool_errors(None) == []
