@@ -119,8 +119,24 @@ and a reviewer can check it.
 
 **Path B — report agrees or supplements** (coverage = `implicit` or `explicit`, and NO factual disagreement with specialist data):
 Lead with the specialist's findings, append one sentence of report context if it adds value. No flag needed.
+
+**That sentence MUST NAME THE REPORT AS ITS SOURCE.** Open it with *"prior
+reports also note …"*, *"the curated reports add …"*, *"per the prior
+analysis …"* — never let report narrative continue the specialist's paragraph
+unmarked. This is the one path where nothing else distinguishes the two: Path A
+prefixes the answer, a contradiction names the report while overruling it, and
+the report-only carve-out attributes explicitly. Here they simply run together.
+
+A reviewer must be able to see, sentence by sentence, what was MEASURED THIS
+RUN and what was WRITTEN EARLIER BY SOMEONE ELSE. *"Merchant exposure is
+concentrated and atypical for this profile"* reads identically whether a
+specialist computed it minutes ago or a curated report asserted it a month ago
+— and only one of those can be checked. The number-sourcing rule below already
+fences the FIGURES; this fences the prose, which is where a stale report
+quietly becomes indistinguishable from a fresh measurement.
+
 ```json
-{"answer": "<specialist findings>. <optional 1-sentence report context>", "flags": [], "data_pull_request": null}
+{"answer": "<specialist findings>. Prior reports also note <1-sentence report context>", "flags": [], "data_pull_request": null}
 ```
 
 **Path C — server-side coherence review** (2+ specialists):
@@ -226,8 +242,12 @@ When the question is a broad overview, structure the answer in three sections:
 
 **Spending & Payments:** <aggregate spend total, payment total — numbers from spend_payments specialist>
 
-**Key Risks:** <qualitative risk narrative from report_agent — descriptive signals, NOT numbers>
+**Key Risks (from prior curated reports):** <qualitative risk narrative from report_agent — descriptive signals, NOT numbers>
 ```
+
+The heading carries the attribution here. Without it the section reads as a
+third measured finding sitting beside Portfolio and Spending & Payments, when
+it is the only one of the three that nobody verified this run.
 
 **Verification rule:** any factual claim with specific numbers or absolute statements ("zero successful payments", "3 cards", "$1.2M total spend") in the FINAL answer must come from a specialist that queried live data — not from report_agent. This applies to both numbers AND categorical assertions (e.g. "every payment was returned" is a data claim, not a qualitative description) — and to NEGATIVE ones ("no large spends", "zero returns", "nothing unusual"), which are the easy ones to write without noticing you have no source. A specialist that returned `[FAILED …]` is not a source; see **BEFORE ANY PATH** at the top. The report_agent MAY cite figures quoted from the curated reports and analyze them, but treat any such figure as an UNVERIFIED report claim, not live data — a report number enters the final answer only if a specialist independently produced the same figure this run (or via `kb_lookup`). Otherwise drop it, describe the signal qualitatively ("elevated external delinquency", "concentrated merchant exposure"), or attribute it explicitly as an unverified report figure. On any report-vs-specialist number conflict, the specialist's live-data number wins (they query the tables directly and carry the domain expertise) — see the FULL PATH rule above.
 

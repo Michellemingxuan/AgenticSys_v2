@@ -93,3 +93,25 @@ def test_report_only_carveout_is_narrow_and_defaults_to_dispatch():
     # Worked examples on BOTH sides — the qualifying and the disqualifying.
     assert "FROM THE REPORT" in p
     assert "what is the spending pattern" in p
+
+
+def test_every_report_sourced_sentence_is_attributed():
+    """A reviewer must be able to tell, sentence by sentence, what was measured
+    THIS RUN from what a curated report asserted earlier. Path A prefixes the
+    answer, a contradiction names the report while overruling it, and the
+    report-only carve-out attributes explicitly — Path B was the one hole,
+    where report narrative continued the specialist's paragraph unmarked."""
+    from agent_factories.orchestrator_agent import _compose_orchestrator_instructions
+
+    p = _compose_orchestrator_instructions()
+
+    # Path B now requires the source to be named, with usable openers.
+    assert "MUST NAME THE REPORT AS ITS SOURCE" in p
+    assert "prior reports also note" in p.lower()
+    # And the JSON template models it, so the shape is copyable.
+    assert "Prior reports also note <1-sentence report context>" in p
+    # The case-overview heading carries its own attribution.
+    assert "Key Risks (from prior curated reports)" in p
+    # The pre-existing attributions are untouched.
+    assert "No prior curated reports — answer is from live specialist analysis only." in p
+    assert "Report-vs-data disagreement" in p
