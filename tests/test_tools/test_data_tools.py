@@ -2651,3 +2651,30 @@ def test_only_concepts_this_case_carries_are_matched(monkeypatch):
                                           "aliases": [], "concepts": ["spend_pattern"]}])
     assert data_tools.known_concepts_in("how is oop") == []
     assert _concepts("any spend pattern issues") == ["spend_pattern"]
+
+
+def test_three_letter_acronyms_resolve_exactly(_concept_env, monkeypatch):
+    """The domain's acronyms are three letters. `tsr` was a valid query column
+    that the scope lookup could not see, while the four-letter `cdss` resolved
+    fine — the same subject, usable or not depending on the length of its name.
+
+    Exact matching is what makes the shorter bound safe: a 3-character token
+    resolves only if the catalog DECLARED it. (An earlier attempt matched short
+    tokens as prefixes; it needed ~90 stopwords and was reverted.)"""
+    monkeypatch.setattr(data_tools, "_build_search_index", lambda case_id: [
+        {"column": "tot_struct_risk_score", "table": "model_scores",
+         "aliases": ["tsr"], "concepts": ["output_score"]},
+        {"column": "credit_loss_prob", "table": "model_scores",
+         "aliases": ["cdss"], "concepts": ["output_score"]},
+        {"column": "Note", "table": "wcc", "aliases": [], "concepts": []},
+    ])
+    cols = lambda t: [m["column"] for m in data_tools.known_variable_matches(t)]
+
+    assert cols("how is tsr") == ["tot_struct_risk_score"]
+    assert cols("how is TSR trending") == ["tot_struct_risk_score"]
+    assert cols("how is cdss") == ["credit_loss_prob"]
+    # Undeclared 3-letter words must NOT resolve — the floor is safe only
+    # because the match is exact.
+    for q in ("did the customer not pay", "one of the cards", "the top merchants",
+              "sum of spend", "any large spending", "who won the super bowl"):
+        assert cols(q) == [], q

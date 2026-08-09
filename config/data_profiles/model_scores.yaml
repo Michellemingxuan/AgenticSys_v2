@@ -98,6 +98,7 @@ columns:
     - exposure_leverage
     aliases:
     - cust_expsr_avg_rem_12m_ratio_max
+    - REXAVRM2
     risk_threshold: 3.15
     risk_direction: above
   cust_lndexpsr_minloc_6m_ratio:
@@ -287,6 +288,7 @@ columns:
     concept: output_score
     aliases:
     - credit_loss_prob_max
+    - cdss
   tot_struct_risk_score:
     dtype: float
     distribution: normal
@@ -301,6 +303,7 @@ columns:
     concept: output_score
     aliases:
     - tot_struct_risk_score_max
+    - tsr
   avg_remit_minus_max:
     dtype: int
     distribution: normal

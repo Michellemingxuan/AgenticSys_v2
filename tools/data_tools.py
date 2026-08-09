@@ -1605,8 +1605,18 @@ def known_variable_matches(text: str) -> list[dict]:
     what the LLM screen cannot know — "how is intoop" was rejected as
     off-topic while `INTOOP` (`oop_interaction_max`) sat in the data.
 
-    Deliberately conservative. Only whole tokens of 4+ characters that are not
-    ordinary English words, so this can be trusted to OVERRIDE a rejection.
+    Deliberately conservative. Whole tokens of 3+ characters that are not
+    ordinary English words, matched EXACTLY against spellings the catalog
+    declares — so this can be trusted to OVERRIDE a rejection.
+
+    3 rather than 4 because the domain's acronyms are three letters: `tsr` was
+    a valid query column (`tot_struct_risk_score`) that this function could not
+    see, while the four-letter `cdss` resolved fine — the same subject, usable
+    or not depending on the length of its name. Exact matching is what makes
+    the shorter bound safe: a 3-character token resolves only if someone
+    DECLARED it as a column or alias. (An earlier attempt matched short tokens
+    as PREFIXES instead; that needed ~90 English stopwords to stop "did the
+    customer NOT pay" resolving `Note`, and was reverted.)
 
     Names VARIABLES only. A reviewer naming a CONCEPT ("how is oop") is handled
     by `known_concepts_in` — `oop` is a declared concept, `intoop` the variable
@@ -1623,12 +1633,12 @@ def known_variable_matches(text: str) -> list[dict]:
     for e in _build_search_index(case_id):
         for spelling in [e["column"], *e["aliases"]]:
             key = _variable_key(spelling)
-            if len(key) >= 4:
+            if len(key) >= 3:
                 lookup.setdefault(key, e)
 
     out: list[dict] = []
     seen: set[str] = set()
-    for token in re.findall(r"[A-Za-z][A-Za-z0-9_]{3,}", text):
+    for token in re.findall(r"[A-Za-z][A-Za-z0-9_]{2,}", text):
         if token.lower() in _GENERIC_COLUMN_WORDS:
             continue
         e = lookup.get(_variable_key(token))

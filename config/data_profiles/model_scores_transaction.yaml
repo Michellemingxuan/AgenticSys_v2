@@ -105,6 +105,8 @@ columns:
     description: Customer Exposure / (Average Remit In 2-12 Months). Values above
       3.15 are risky.
     short_description: Customer Exposure / (Average Remit In 2-12 Months)
+    aliases:
+    - REXAVRM2
     risk_threshold: 3.15
     risk_direction: above
     concept:
@@ -297,6 +299,8 @@ columns:
     description: CDSS — ML model score predicting likelihood of default in next 18
       months. Scores from 10-100 are considered risky.
     short_description: CDSS — ML model score predicting likelihood of default in next 18 months
+    aliases:
+    - cdss
     risk_threshold: 10
     risk_direction: above
     concept: output_score
@@ -304,6 +308,8 @@ columns:
     dtype: float
     description: TSR — ML model score predicting likelihood of default on internal/external
       trades in next 18 months. Scores from 20-100 are considered risky.
+    aliases:
+    - tsr
     risk_threshold: 20
     risk_direction: above
     concept: output_score
