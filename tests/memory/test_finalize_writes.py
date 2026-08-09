@@ -22,7 +22,8 @@ def _runner_stub(fake, turn_seq=10):
     r = TurnRunner.__new__(TurnRunner)          # bypass __init__
     r.turn_id = "t1"
     r.verdict = SimpleNamespace(redacted_question="Why held?")
-    sess = SimpleNamespace(case_id="c1", session_id="s1", _qa_turn_seq=turn_seq,
+    sess = SimpleNamespace(logger=SimpleNamespace(log=lambda *a, **k: None),
+        case_id="c1", session_id="s1", _qa_turn_seq=turn_seq,
                            specialist_kb={"risk": [
                                {"claim": "FICO < 620", "captured_at_turn": "t1"}]})
     r.sess = sess

@@ -1,6 +1,11 @@
 import asyncio
+from dataclasses import replace
+
+import pytest
+
 from memory.config import AmemConfig
 from memory import writer
+from memory.writer import consolidate_case, write_conversation
 from tests.memory._fake_amem import FakeAmem
 
 CFG = AmemConfig(enabled=True, store_url="x", collection_name="c", vector_size=3072,
@@ -67,3 +72,81 @@ def test_writer_swallows_errors():
             raise RuntimeError("qdrant down")
     fake = Boom()
 
+
+
+# ── swallowed is not silent ─────────────────────────────────────────────────
+#
+# Reported from the private env: "memory is not stored into Amem". Nothing in
+# the logs said why, because `_guard` caught every exception and returned None
+# without a word — so every write failing forever looked exactly like every
+# write succeeding. Never breaking a turn is right; being undiagnosable is not.
+
+class _Logger:
+    def __init__(self):
+        self.events = []
+
+    def log(self, evt, payload):
+        self.events.append((evt, payload))
+
+
+class _Boom:
+    async def arecord_conversation(self, **_kw):
+        raise RuntimeError("qdrant unreachable")
+
+    async def aupsert_case_memory(self, **_kw):
+        raise RuntimeError("qdrant unreachable")
+
+
+class _Hangs:
+    async def arecord_conversation(self, **_kw):
+        await asyncio.sleep(10)
+
+    async def aupsert_case_memory(self, **_kw):
+        await asyncio.sleep(10)
+
+
+@pytest.mark.asyncio
+async def test_a_failing_write_is_logged_with_its_cause():
+    log = _Logger()
+    cfg = AmemConfig.from_env()
+    await write_conversation(_Boom(), cfg, question="q", answer="a",
+                             case_id="C", turn_id="t", session_id="s",
+                             logger=log)
+
+    assert log.events, "a swallowed failure must still be reported"
+    evt, payload = log.events[-1]
+    assert evt == "amem_write_failed"
+    assert payload["op"] == "write_conversation"
+    assert payload["error_type"] == "RuntimeError"
+    assert "qdrant unreachable" in payload["error"]
+
+
+@pytest.mark.asyncio
+async def test_a_timeout_is_reported_as_a_timeout_not_an_error():
+    """The likeliest prod failure and the one with a different fix: a timeout
+    means raise `AMEM_WRITE_TIMEOUT_S`, an error means fix the wiring."""
+    log = _Logger()
+    cfg = replace(AmemConfig.from_env(), write_timeout_s=0.01)
+    await consolidate_case(_Hangs(), cfg, case_id="C", session_id="s", logger=log)
+
+    evt, payload = log.events[-1]
+    assert evt == "amem_write_timeout"
+    assert payload["op"] == "consolidate_case"
+    assert payload["timeout_s"] == 0.01
+
+
+@pytest.mark.asyncio
+async def test_writes_still_never_raise_and_stay_silent_when_they_succeed():
+    class _OK:
+        async def arecord_conversation(self, **_kw):
+            return "ok"
+
+    log = _Logger()
+    cfg = AmemConfig.from_env()
+    # No logger at all — must not blow up.
+    await write_conversation(_Boom(), cfg, question="q", answer="a",
+                             case_id="C", turn_id="t", session_id="s")
+    # Success path logs nothing; the JSONL stays quiet on the happy path.
+    await write_conversation(_OK(), cfg, question="q", answer="a",
+                             case_id="C", turn_id="t", session_id="s", logger=log)
+    assert log.events == []

@@ -1420,6 +1420,9 @@ class TurnRunner:
         # record holds its sub-question + answer + distilled KPs. Alongside,
         # build the orchestrator's round-1 team dispatch (which specialists
         # were called with what sub-question + concepts).
+        # Best-effort like everything else here: a session without a logger
+        # (test harnesses) must not break the write this was added to report.
+        _amem_log = getattr(sess, "logger", None)
         records = getattr(self.ctx, "_specialist_turn_records", None) or {}
         team_dispatch: list[dict] = []
         for name, rec in records.items():
@@ -1430,6 +1433,7 @@ class TurnRunner:
                 sub_question=rec.get("sub_question", ""),
                 findings=rec.get("findings", ""),
                 kps=kps, tool_calls=rec.get("tool_calls", []),
+                logger=_amem_log,
             )
             team_dispatch.append({
                 "specialist": name,
@@ -1448,6 +1452,7 @@ class TurnRunner:
             turn_id=self.turn_id,
             session_id=sess.session_id,
             team_dispatch=team_dispatch,
+            logger=_amem_log,
         )
         # Refresh the durable case summary periodically (not every turn) — an
         # Amem-side summarization is wasteful per-turn; the recent-N episodic
@@ -1455,7 +1460,8 @@ class TurnRunner:
         seq = getattr(sess, "_qa_turn_seq", 0)
         if seq and seq % _AMEM_CONSOLIDATE_EVERY_N == 0:
             await consolidate_case(amem, cfg, case_id=sess.case_id,
-                                   session_id=sess.session_id)
+                                   session_id=sess.session_id,
+                                   logger=_amem_log)
             # Per-specialist case summaries — each specialist that ran gets a
             # condensed overview of its OWN accumulated findings, but only once
             # it has run in > EPISODIC_TURNS turns (else its own episodic already
@@ -1463,7 +1469,8 @@ class TurnRunner:
             for name in records:
                 await consolidate_agent_case(
                     amem, cfg, case_id=sess.case_id, agent_id=name,
-                    session_id=sess.session_id, min_turns=EPISODIC_TURNS)
+                    session_id=sess.session_id, min_turns=EPISODIC_TURNS,
+                    logger=_amem_log)
 
     async def _finalize(self) -> None:
         sess = self.sess
