@@ -298,6 +298,50 @@ _ROWS_MATCHING = re.compile(r'"rows_matching_filter"\s*:\s*(\d+)')
 _COUNT_RESULT = re.compile(r"=\s*(?:count\s*)?(\d[\d,]*)\b")
 
 
+# `summarize_by_group` never emits a zero-count group — it lists only the values
+# PRESENT — so it can never supply the zero the rule above asks for, and the
+# check used to fail open on it. The enumeration is still decisive, just read
+# differently: the group SET is the answer.
+#
+#   case 366132845011   groups [{"group": "0", n: 357}]              1 group
+#   case 11854808010    groups [{"group":"0",n:31}, {"group":"1",n:1}]  2 groups
+#
+# Both answers said "zero returns". The first is TRUE — the dimension is
+# uniform, so every other category really is absent. The second is FALSE — the
+# enumeration shows a second category with rows in it.
+#
+# Only applied when the claim is ABOUT the grouped dimension. A group-by on
+# `Merchant Name` says nothing about returned payments, and firing on it would
+# be exactly the over-flagging this module is built to avoid.
+_WORD = re.compile(r"[a-z]+")
+
+
+def _grouped_dimension_verdict(output: str, claim_text: str):
+    """`True` (claim is contradicted) / `False` (enumeration supports it) /
+    `None` (this group-by is not about the claim)."""
+    try:
+        payload = json.loads(output)
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict) or "groups" not in payload:
+        return None
+    col = str(payload.get("group_column") or "")
+    tokens = {t for t in _WORD.findall(col.lower()) if len(t) > 3}
+    if not tokens:
+        return None
+    claim_words = set(_WORD.findall(claim_text.lower()))
+    # Singular/plural tolerance: "returns" in the claim matches "Return Flag".
+    if not any(t in claim_words or t + "s" in claim_words for t in tokens):
+        return None
+    groups = payload.get("groups")
+    if not isinstance(groups, list) or not groups:
+        return None
+    n = payload.get("n_groups_total")
+    n = n if isinstance(n, int) else len(groups)
+    # One group = the dimension is uniform = every other category IS absent.
+    return n > 1
+
+
 def absence_contradicted_by_rows(result, final_output) -> dict | None:
     """`{claim, max_rows_matching, calls}` when the answer asserts absence and
     NO data call in the run returned zero. `None` otherwise.
@@ -318,11 +362,26 @@ def absence_contradicted_by_rows(result, final_output) -> dict | None:
             return None
 
         matched: list[int] = []
+        grouped: list[bool] = []
         for _tool, _cid, output in _iter_call_outcomes(result):
             if not isinstance(output, str):
                 continue
             matched += [int(x) for x in _ROWS_MATCHING.findall(output)]
             matched += [int(x.replace(",", "")) for x in _COUNT_RESULT.findall(output)]
+            verdict = _grouped_dimension_verdict(output, claim_text)
+            if verdict is not None:
+                grouped.append(verdict)
+        # An enumeration of the claimed dimension settles it outright, in both
+        # directions — it is stronger evidence than a row count elsewhere.
+        if grouped:
+            if not any(grouped):
+                return None
+            return {
+                "claim": claim_text[max(0, m.start() - 60):m.end() + 60].strip(),
+                "max_rows_matching": max(matched) if matched else -1,
+                "counts_seen": sorted(set(matched))[:8],
+                "contradicted_by": "grouped dimension has >1 value present",
+            }
         if not matched:
             return None
         # A zero anywhere is the specialist's licence to assert absence.

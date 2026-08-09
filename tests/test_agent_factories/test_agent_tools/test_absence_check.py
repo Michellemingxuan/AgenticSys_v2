@@ -119,3 +119,62 @@ def test_scan_tool_errors_fails_open_on_a_broken_transcript():
     assert scan_tool_errors(_Broken()) == []
     assert scan_tool_errors(_Hostile()) == []
     assert scan_tool_errors(None) == []
+
+
+# ── summarize_by_group: the enumeration IS the evidence ─────────────────────
+#
+# `summarize_by_group` lists only the values PRESENT, so it never emits a
+# zero-count group and can never supply the zero the row rule asks for. It is
+# still decisive, read differently: the group SET answers the question. Two real
+# cases, both answered "zero returns", only one of them true:
+#
+#   366132845011   groups [{"0": 357}]              uniform  -> claim TRUE
+#   11854808010    groups [{"0": 31}, {"1": 1}]     2 values -> claim FALSE
+
+def _groupby(group_column, groups, n_total=None):
+    return json.dumps({
+        "table": "payments_data", "group_column": group_column,
+        "value_column": "Payment Amount", "op": "count",
+        "n_groups_total": n_total if n_total is not None else len(groups),
+        "groups": [{"group": g, "value": str(n), "n_records": n} for g, n in groups],
+    })
+
+
+_ZERO_RETURNS = "Live data shows 100% successful payment settlement and zero returns."
+
+
+def test_uniform_dimension_supports_the_absence_claim():
+    """One group = every other category really is absent."""
+    out = _groupby("Return Flag", [("0", 357)])
+    assert absence_contradicted_by_rows(_Result([out]), _out(_ZERO_RETURNS)) is None
+
+
+def test_a_second_value_in_the_dimension_contradicts_it():
+    out = _groupby("Return Flag", [("0", 31), ("1", 1)])
+    hit = absence_contradicted_by_rows(_Result([out]), _out(_ZERO_RETURNS))
+
+    assert hit is not None
+    assert hit["contradicted_by"] == "grouped dimension has >1 value present"
+
+
+def test_an_unrelated_group_by_is_not_read_as_evidence():
+    """A breakdown by merchant says nothing about returned payments. Firing on
+    it would be the over-flagging this module exists to avoid."""
+    out = _groupby("Merchant Name", [("AMAZON", 40), ("SHELL", 12), ("AT&T", 5)])
+    assert absence_contradicted_by_rows(_Result([out]), _out(_ZERO_RETURNS)) is None
+
+
+def test_the_enumeration_outranks_a_row_count_elsewhere():
+    """A uniform enumeration of the claimed dimension settles it even when some
+    other call in the run returned rows."""
+    unrelated_rows = json.dumps({"table": "spends_data", "rows_matching_filter": 88})
+    out = _groupby("Return Flag", [("0", 357)])
+    assert absence_contradicted_by_rows(
+        _Result([unrelated_rows, out]), _out(_ZERO_RETURNS)) is None
+
+
+def test_group_by_singular_plural_tolerance():
+    """The claim says "returns"; the column is "Return Flag"."""
+    out = _groupby("Return Flag", [("0", 31), ("1", 1)])
+    assert absence_contradicted_by_rows(
+        _Result([out]), _out("There were no returns for this customer.")) is not None
