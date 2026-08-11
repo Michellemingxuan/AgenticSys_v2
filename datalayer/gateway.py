@@ -16,6 +16,57 @@ from typing import Any
 
 
 
+# Invisible characters that can pad a case id and that `str.strip()` does
+# NOT remove — it only strips characters where `isspace()` is true, which
+# covers ordinary spaces, tabs and NBSP but not the zero-width family or a
+# stray BOM. Ids pasted out of Excel, a ticket, or a browser carry these.
+# Spelled as code points rather than literals on purpose: these characters
+# are invisible, so a literal string would be an unreviewable blank in the
+# diff and a stray edit could silently change the set.
+_CASE_ID_INVISIBLE = "".join(chr(c) for c in (
+    0x200B,  # zero-width space
+    0x200C,  # zero-width non-joiner
+    0x200D,  # zero-width joiner
+    0x2060,  # word joiner
+    0xFEFF,  # BOM / zero-width no-break space
+))
+
+
+def normalize_case_id(raw: Any) -> str:
+    """Canonical form of a case id. Apply at EVERY ingress.
+
+    A case id enters the system through three doors, none of which promises
+    a clean string:
+
+      1. a directory name under ``data_tables/<source>/``;
+      2. a ``case_id`` column in a long-format CSV;
+      3. the ``<case_id>`` path segment of an HTTP route.
+
+    Real exports deliver padded values — ``data_tables/real/`` currently
+    holds a directory named literally ``"11854808010 "`` — and the id is not
+    just a lookup key: it BUILDS PATHS. ``reports/<case_id>/charts/``,
+    ``logs/case-<case_id>-<run>.jsonl``. So one case arriving through two
+    doors with two spellings forks into two report directories and two log
+    files, and a chart written under one spelling 404s when requested under
+    the other. Normalizing at ingress is what keeps the id a single value.
+
+    LENGTH IS NOT NORMALIZED, deliberately. Ids vary in length (11854808010
+    is 11 digits, 366132845011 is 12) and carry no fixed width or check
+    digit to validate against, so zero-padding, truncating, or rejecting on
+    length would corrupt real ids. Only invisible padding is removed; every
+    visible character is preserved exactly, including case and punctuation.
+
+    Non-string input (an int id from a CSV parser) is coerced to ``str`` so
+    callers get one type back regardless of source.
+    """
+    if raw is None:
+        return ""
+    # `.strip()` first (whitespace incl. NBSP), then the zero-width set it
+    # leaves behind, then once more in case stripping a zero-width char
+    # exposed trailing whitespace underneath it.
+    return str(raw).strip().strip(_CASE_ID_INVISIBLE).strip()
+
+
 def _strip_row(row: dict) -> dict:
     """Trim padding from CSV cell values at the LOAD boundary.
 
@@ -96,7 +147,12 @@ class LocalDataGateway(DataGateway):
         self._current_case: str | None = None
 
     def set_case(self, case_id: str) -> None:
-        self._current_case = case_id
+        # Normalized here rather than at each call site: this is the ONLY
+        # place `_current_case` is assigned (`for_case` routes through it),
+        # so a caller holding a padded id — an old bookmark, a hand-typed
+        # folder name — still resolves to the loaded case instead of
+        # silently querying a case that does not exist.
+        self._current_case = normalize_case_id(case_id)
 
     def get_case_id(self) -> str | None:
         return self._current_case
@@ -151,7 +207,7 @@ class LocalDataGateway(DataGateway):
                 continue
 
             for i in range(n):
-                case_id = cols["case_id"][i]
+                case_id = normalize_case_id(cols["case_id"][i])
                 # Build row dict without case_id (it's implicit from the case context)
                 row = {c: cols[c][i] for c in col_names if c != "case_id"}
 
@@ -183,21 +239,38 @@ class LocalDataGateway(DataGateway):
         for case_dir in sorted(data_path.iterdir()):
             if not case_dir.is_dir():
                 continue
-            case_id = case_dir.name
-            case_data[case_id] = {}
+            # The DIRECTORY NAME is the case id — and it is the id everything
+            # downstream keys on, so it is normalized right here rather than
+            # trusted. `data_tables/real/` currently holds a folder named
+            # "11854808010 " (trailing space); without this the padded id
+            # propagated into `reports/`, log filenames and the SSE session
+            # key. `setdefault`, not `= {}`, so two spellings of one case
+            # merge instead of the later one erasing the earlier.
+            case_id = normalize_case_id(case_dir.name)
+            if not case_id:
+                continue
+            tables = case_data.setdefault(case_id, {})
 
             for csv_file in sorted(case_dir.glob("*.csv")):
                 table_name = csv_file.stem
+                if table_name in tables:
+                    # Two directories normalized to the same id and both
+                    # define this table. Concatenating would double-count
+                    # rows and overwriting would hide a real mistake in the
+                    # data directory — so keep the first and name the folder
+                    # that was skipped.
+                    print(f"[gateway] case {case_id!r}: table {table_name!r} "
+                          f"already loaded; ignoring the copy in "
+                          f"{case_dir.name!r}. Deduplicate the data folder.")
+                    continue
                 # utf-8-sig auto-strips a leading BOM, which Excel exports
                 # often add and which would otherwise corrupt the first
                 # column header (e.g. "﻿customer_name").
                 with open(csv_file, encoding="utf-8-sig") as f:
                     reader = csv.DictReader(f)
-                    case_data[case_id][table_name] = [
-                        _strip_row(row) for row in reader
-                    ]
+                    tables[table_name] = [_strip_row(row) for row in reader]
 
-            cls._rbind_payments(case_data[case_id])
+            cls._rbind_payments(tables)
 
         return cls(case_data=case_data)
 

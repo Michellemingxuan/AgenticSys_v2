@@ -3,7 +3,7 @@
 import pytest
 
 from datalayer.catalog import DataCatalog
-from datalayer.gateway import LocalDataGateway
+from datalayer.gateway import LocalDataGateway, normalize_case_id
 
 
 # ── Catalog fixtures ──────────────────────────────────────────────
@@ -208,3 +208,113 @@ def test_non_string_and_empty_cells_survive_trimming(tmp_path):
     gw.set_case("CASE-3")
     row = gw.query("t")[0]
     assert row["a"] == "" and row["b"] == "5"
+
+
+# ── Case-id normalization at ingress ──────────────────────────────
+
+
+def test_normalize_case_id_strips_invisible_padding():
+    """Whitespace AND the zero-width family, which `str.strip()` leaves.
+
+    The padding characters are built with `chr()` rather than pasted in as
+    literals: they render as nothing, so a literal would make this test's
+    intent invisible in review — and a stray edit could delete one without
+    a trace.
+    """
+    nbsp, zwsp, bom = chr(0x00A0), chr(0x200B), chr(0xFEFF)
+    assert normalize_case_id("11854808010 ") == "11854808010"
+    assert normalize_case_id("  11854808010\t\n") == "11854808010"
+    assert normalize_case_id(nbsp + "11854808010") == "11854808010"
+    assert normalize_case_id(zwsp + "11854808010" + zwsp) == "11854808010"
+    assert normalize_case_id(bom + "11854808010 ") == "11854808010"
+
+
+def test_normalize_case_id_preserves_every_visible_character():
+    """Ids differ in LENGTH and carry no fixed width or check digit, so the
+    normalizer must never pad, truncate, or reject on length — only strip
+    invisible characters. Interior characters are untouched."""
+    assert normalize_case_id("11854808010") == "11854808010"   # 11 chars
+    assert normalize_case_id("366132845011") == "366132845011"  # 12 chars
+    assert normalize_case_id("7") == "7"
+    assert normalize_case_id("CASE-abc_01") == "CASE-abc_01"
+    # An interior space is a real (if odd) part of the id — not padding.
+    assert normalize_case_id(" a b ") == "a b"
+
+
+def test_normalize_case_id_coerces_non_string_input():
+    """A CSV parser can hand back an int id; callers get one type back."""
+    assert normalize_case_id(366132845011) == "366132845011"
+    assert normalize_case_id(None) == ""
+
+
+def test_case_folder_with_trailing_space_loads_under_the_clean_id(tmp_path):
+    """Regression: `data_tables/real/` holds a folder named "11854808010 ".
+    The padded name became the case id, which then built `reports/<id>/` and
+    the log filename — forking one case across two directories."""
+    case = tmp_path / "11854808010 "
+    case.mkdir()
+    (case / "spends.csv").write_text("Amount\n100\n")
+
+    gw = LocalDataGateway.from_case_folders(str(tmp_path))
+
+    assert gw.list_case_ids() == ["11854808010"]      # no trailing space
+    # Both spellings resolve — `set_case` normalizes, so an old bookmark or
+    # a stale session key still finds the loaded case.
+    gw.set_case("11854808010 ")
+    assert gw.get_case_id() == "11854808010"
+    assert gw.query("spends") == [{"Amount": "100"}]
+    gw.set_case("11854808010")
+    assert gw.query("spends") == [{"Amount": "100"}]
+
+
+def test_two_folder_spellings_of_one_case_merge_instead_of_clobbering(tmp_path):
+    """Padded and clean spellings of the same id land in ONE case. The later
+    folder must not erase the earlier one's tables (the `= {}` bug)."""
+    padded = tmp_path / "CASE-9 "
+    padded.mkdir()
+    (padded / "spends.csv").write_text("Amount\n100\n")
+    clean = tmp_path / "CASE-9"
+    clean.mkdir()
+    (clean / "payments_success.csv").write_text("Payment Amount\n50\n")
+
+    gw = LocalDataGateway.from_case_folders(str(tmp_path))
+
+    assert gw.list_case_ids() == ["CASE-9"]
+    gw.set_case("CASE-9")
+    # Both folders' tables are present — neither wiped the other.
+    assert set(gw.list_tables()) >= {"spends"}
+    assert gw.query("spends") == [{"Amount": "100"}]
+
+
+def test_duplicate_table_across_spellings_keeps_first_and_warns(tmp_path, capsys):
+    """When both spellings define the SAME table, rows are not concatenated
+    (that would double-count) and the skipped folder is named on stdout."""
+    padded = tmp_path / "CASE-8 "
+    padded.mkdir()
+    (padded / "spends.csv").write_text("Amount\n100\n")
+    clean = tmp_path / "CASE-8"
+    clean.mkdir()
+    (clean / "spends.csv").write_text("Amount\n999\n")
+
+    gw = LocalDataGateway.from_case_folders(str(tmp_path))
+    gw.set_case("CASE-8")
+
+    rows = gw.query("spends")
+    assert len(rows) == 1                       # not concatenated
+    out = capsys.readouterr().out
+    assert "spends" in out and "CASE-8" in out  # the conflict is announced
+
+
+def test_from_generated_normalizes_case_ids():
+    """The long-format CSV door normalizes too — a padded `case_id` COLUMN
+    must not create a second case alongside the clean one."""
+    tables_raw = {
+        "spends": {
+            "case_id": ["CASE-7 ", "CASE-7", " CASE-7"],
+            "Amount": [1, 2, 3],
+        }
+    }
+    gw = LocalDataGateway.from_generated(tables_raw)
+    assert gw.list_case_ids() == ["CASE-7"]
+    gw.set_case("CASE-7")
+    assert len(gw.query("spends")) == 3

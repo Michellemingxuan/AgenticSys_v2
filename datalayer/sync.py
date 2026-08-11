@@ -28,7 +28,7 @@ from pathlib import Path
 
 from datalayer import adapter
 from datalayer.catalog import DataCatalog
-from datalayer.gateway import LocalDataGateway
+from datalayer.gateway import LocalDataGateway, normalize_case_id
 from logger.event_logger import EventLogger
 
 try:
@@ -100,7 +100,12 @@ def _load_gateway(
         for case_dir in sorted(src.iterdir()):
             if not case_dir.is_dir():
                 continue
-            cid = case_dir.name
+            # Same normalization as `from_case_folders` — this loader keys the
+            # sync report, and a padded id here would read as "case missing"
+            # against a gateway that loaded it under the clean spelling.
+            cid = normalize_case_id(case_dir.name)
+            if not cid:
+                continue
             tables = case_data.setdefault(cid, {})
             headers = headers_by_case.setdefault(cid, {})
             for f in sorted(case_dir.iterdir()):

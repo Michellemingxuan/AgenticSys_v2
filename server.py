@@ -70,7 +70,7 @@ from agent_factories.chat_agent import ChatAgent
 from agent_factories.helper_tools import build_helper_tools
 from config.pillar_loader import PillarLoader
 from datalayer.catalog import DataCatalog
-from datalayer.gateway import LocalDataGateway
+from datalayer.gateway import LocalDataGateway, normalize_case_id
 from llm.factory import FirewalledChatShim, build_session_clients
 from llm.firewall_stack import FirewallStack
 from logger.event_logger import EventLogger
@@ -577,6 +577,10 @@ def _restore_session_state(sess, case_id: str) -> None:
 
 def _get_or_create_session(case_id: str) -> CaseSession:
     """Lazily build a CaseSession for this case_id."""
+    # HTTP callers are already canonical via `_canonicalize_case_id`; this
+    # covers the rest (tests, prewarm, any internal caller) so SESSIONS can
+    # never hold two entries — and two logs, two report dirs — for one case.
+    case_id = normalize_case_id(case_id)
     with SESSIONS_LOCK:
         sess = SESSIONS.get(case_id)
         if sess is not None:
@@ -967,6 +971,24 @@ def _history_messages(qa_cache: dict) -> list[dict]:
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": ["http://localhost:59021", "http://127.0.0.1:59021"]}})
+
+
+@app.url_value_preprocessor
+def _canonicalize_case_id(endpoint, values):  # noqa: ARG001 — Flask signature
+    """Normalize the `<case_id>` path segment for EVERY route, once.
+
+    The HTTP path is one of the three doors a case id comes through (see
+    `normalize_case_id`), and it is the one most likely to carry padding:
+    the id is round-tripped through a URL, a bookmark, or a hand-edited
+    address bar. Handlers then use it BOTH as the session key and to build
+    paths — `_REPORTS_DIR / case_id / "charts"` in the rewind handlers, the
+    log filename in `_get_or_create_session`. Normalizing per handler means
+    every new route has to remember; doing it here means none of them can
+    forget, and each handler's `case_id` argument is canonical by the time
+    it runs.
+    """
+    if values and "case_id" in values:
+        values["case_id"] = normalize_case_id(values["case_id"])
 
 
 @app.get("/api/cases")

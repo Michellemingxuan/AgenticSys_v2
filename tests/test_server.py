@@ -1015,3 +1015,40 @@ async def test_planning_event_propagates_stop_async_iteration():
     deadline = _time.monotonic() + 1.0
     with pytest.raises(StopAsyncIteration):
         await conductor._next_planning_event(it, deadline, first_tool_seen=False)
+
+
+# ── Case-id canonicalization at the HTTP door ───────────────────────────────
+
+
+def test_url_preprocessor_canonicalizes_case_id_for_every_route():
+    """The `<case_id>` path segment is normalized once, for all routes, so no
+    handler has to remember. Handlers use it as BOTH the session key and a
+    path component (`reports/<case_id>/charts`), so a padded id forks one
+    case across two directories."""
+    values = {"case_id": "11854808010 ", "filename": "t-chart.png"}
+    server._canonicalize_case_id("get_chart", values)
+    assert values["case_id"] == "11854808010"
+    # Other view args are untouched.
+    assert values["filename"] == "t-chart.png"
+
+
+def test_url_preprocessor_ignores_routes_without_a_case_id():
+    """`/api/cases` and any non-case route pass through unharmed, including
+    the `values is None` shape Flask hands to static endpoints."""
+    values: dict = {}
+    server._canonicalize_case_id("get_cases", values)
+    assert values == {}
+    server._canonicalize_case_id("static", None)  # must not raise
+
+
+def test_get_or_create_session_normalizes_for_non_http_callers():
+    """Prewarm, tests and other in-process callers bypass the preprocessor,
+    so the session chokepoint normalizes too — otherwise SESSIONS holds two
+    entries (two logs, two report dirs) for one case."""
+    import pytest
+    # An unknown case raises KeyError; the point is WHICH id it reports —
+    # the normalized one, proving the strip happened before the lookup.
+    with pytest.raises(KeyError) as exc:
+        server._get_or_create_session("definitely-not-a-case ")
+    assert "definitely-not-a-case" in str(exc.value)
+    assert "definitely-not-a-case " not in str(exc.value)
