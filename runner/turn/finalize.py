@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from runner.turn.cache import _kp_backs_a_chart
 from tools.viz_renderer import kp_to_vega_spec
 
 
@@ -186,12 +187,9 @@ def _collect_turn_charts(specialist_kb: dict, turn_id: str, case_id: str) -> lis
                 continue
             if kp.get("captured_at_turn") != turn_id:
                 continue
-            img_path = kp.get("image_path")
-            viz = kp.get("viz") or {}
-            kind = viz.get("kind", "") if isinstance(viz, dict) else ""
-            is_table = kind == "table"
-            if not img_path and not is_table:
+            if not _kp_backs_a_chart(kp):
                 continue
+            img_path = kp.get("image_path")
             topic = kp.get("topic", "chart")
             entry: dict = {
                 "topic": topic,

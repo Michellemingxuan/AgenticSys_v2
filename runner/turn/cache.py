@@ -75,16 +75,51 @@ def _store_cached_qa(sess, cache_key: str | None, value: dict) -> int:
     return evicted
 
 
+def _kp_backs_a_chart(kp: dict) -> bool:
+    """True when this KP is one the Plots panel can actually render.
+
+    Two shapes qualify — the same two ``finalize._collect_turn_charts``
+    surfaces:
+      * a rendered plot — ``image_path`` set by ``render_chart``;
+      * a table KP — ``viz.kind == "table"`` (no image; the rows render as
+        an HTML table).
+
+    Shared by the collector and by ``_find_kp`` so the two cannot drift into
+    disagreeing about which KP owns a (specialist, topic) key.
+    """
+    if not isinstance(kp, dict):
+        return False
+    if kp.get("image_path"):
+        return True
+    viz = kp.get("viz")
+    return isinstance(viz, dict) and viz.get("kind") == "table"
+
+
 def _find_kp(specialist_kb: dict, specialist: str, topic: str,
              turn_id: str) -> dict | None:
-    """Return the latest KP for (specialist, topic) captured in this turn,
-    or None when not present. Used to enrich the chart SSE event with the
-    KP's claim / source_call and to regenerate its Vega-Lite spec at emit
-    time (see ``finalize._build_chart_payload``)."""
+    """Return the KP for (specialist, topic) captured in this turn, or None.
+
+    Used to enrich the chart SSE event with the KP's claim / source_call and
+    to regenerate its Vega-Lite spec at emit time (see
+    ``finalize._build_chart_payload``).
+
+    PREFERENCE, not plain latest-wins. One topic can hold SEVERAL KPs in a
+    turn: the specialist's own ``make_chart`` KP (carries ``viz``) and the
+    auto-distiller's KP for the same finding (no ``viz``, no image). The
+    distiller runs later, so a naive latest-wins scan returns the viz-less
+    one — while ``_collect_turn_charts``, which filters to chart-backing KPs,
+    keeps the chart. The payload then reached the frontend with ``kind: ""``
+    and an empty ``url``, so a perfectly good table rendered as a BROKEN
+    IMAGE (case 11854808010, turn 3dc0b6d549d8, "Returned Payments").
+
+    So: latest CHART-BACKING KP wins; fall back to the latest overall when
+    none backs a chart, which keeps every non-chart caller unchanged.
+    """
     if not isinstance(specialist_kb, dict):
         return None
     kps = specialist_kb.get(specialist) or []
     found: dict | None = None
+    found_charted: dict | None = None
     for kp in kps:
         if not isinstance(kp, dict):
             continue
@@ -93,4 +128,6 @@ def _find_kp(specialist_kb: dict, specialist: str, topic: str,
         if kp.get("topic") != topic:
             continue
         found = kp  # latest-wins (chronological iteration)
-    return found
+        if _kp_backs_a_chart(kp):
+            found_charted = kp
+    return found_charted or found

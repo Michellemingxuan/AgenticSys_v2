@@ -763,6 +763,71 @@ def test_chart_payload_carries_table_kind_and_numbers():
     assert payload.get("vega_spec") is None
 
 
+def test_chart_payload_survives_a_later_distiller_kp_on_the_same_topic():
+    """A distiller KP appended AFTER the specialist's `make_chart` KP for the
+    same topic must not strip the chart out of the payload.
+
+    Regression, case 11854808010 turn 3dc0b6d549d8: `make_chart` wrote a
+    `kind='table'` KP for "Returned Payments…", then the auto-distiller
+    appended its own KP for the same finding with NO `viz` and no image.
+    `_collect_turn_charts` filters to chart-backing KPs so it kept the
+    table, but `_find_kp` was a plain latest-wins scan and returned the
+    distiller's — so the payload went out with `kind: ""`, no `numbers`
+    and `url: ""`, and the Plots panel rendered `<img src="">`: a broken
+    image where a one-row table belonged.
+    """
+    rows = [{"payment_date": "2025-04-28", "amount": 105818.60}]
+    kb = {
+        "spend_payments": [
+            # 1. The specialist's explicit chart — the renderable KP.
+            {
+                "topic": "Returned Payments (Return Flag = 1)",
+                "captured_at_turn": "t-now",
+                "claim": "One returned payment: 2025-04-28, $105,818.60.",
+                "source_call": "query_table('payments', ...)",
+                "numbers": rows,
+                "viz": {"kind": "table", "x_field": "payment_date",
+                        "y_fields": ["amount"]},
+            },
+            # 2. The distiller's KP for the SAME topic, appended later.
+            #    No viz, no image_path — it backs no chart.
+            {
+                "topic": "Returned Payments (Return Flag = 1)",
+                "captured_at_turn": "t-now",
+                "claim": "There was one returned payment in the history.",
+                "source_call": "",
+                "numbers": [],
+            },
+        ]
+    }
+
+    charts = finalize._collect_turn_charts(kb, "t-now", "CASE-R")
+    assert len(charts) == 1
+    c = charts[0]
+    kp = cache._find_kp(kb, c["specialist"], c["topic"], "t-now")
+    payload = finalize._build_chart_payload(kp, c)
+
+    # The renderable KP wins, so the panel gets a table — not a broken <img>.
+    assert payload["kind"] == "table"
+    assert payload["numbers"] == rows
+    assert payload["x_field"] == "payment_date"
+    assert payload["y_fields"] == ["amount"]
+
+
+def test_find_kp_still_returns_latest_when_no_kp_backs_a_chart():
+    """The chart-backing preference is a tie-break, not a filter: when no
+    KP for the topic backs a chart, `_find_kp` keeps its plain latest-wins
+    behaviour so non-chart callers are unaffected."""
+    kb = {
+        "modeling": [
+            {"topic": "a", "captured_at_turn": "t", "claim": "first"},
+            {"topic": "a", "captured_at_turn": "t", "claim": "second"},
+        ]
+    }
+    found = cache._find_kp(kb, "modeling", "a", "t")
+    assert found is not None and found["claim"] == "second"
+
+
 # ── RC2: failure branches must replay completed specialists' traces ──────────
 
 
