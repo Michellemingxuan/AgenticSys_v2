@@ -10,8 +10,8 @@ CFG = AmemConfig(enabled=True, store_url="x", collection_name="c", vector_size=3
 def test_delete_case_memory_deletes_all_listed():
     fake = FakeAmem()
     fake.listed = [FakeRecord(id="a", content="x"), FakeRecord(id="b", content="y")]
-    n = delete_case_memory(fake, CFG, case_id="c1")
-    assert n == 2
+    r = delete_case_memory(fake, CFG, case_id="c1")
+    assert r.deleted == 2 and r.listed == 2 and r.ok
     assert set(fake.deleted) == {"a", "b"}
 
 
@@ -28,4 +28,7 @@ def test_delete_case_memory_survives_errors():
     class Boom(FakeAmem):
         def list_memories(self, **k):
             raise RuntimeError("down")
-    assert delete_case_memory(Boom(), CFG, case_id="c1") == 0
+    r = delete_case_memory(Boom(), CFG, case_id="c1")
+    assert r.deleted == 0
+    # A store that blew up is NOT a successful purge of an empty case.
+    assert r.ok is False and r.error == "RuntimeError"

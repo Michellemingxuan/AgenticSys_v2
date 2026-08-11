@@ -76,8 +76,8 @@ from llm.firewall_stack import FirewallStack
 from logger.event_logger import EventLogger
 from tools.node_trace import NodeTrace, TURN_SCOPE, TurnScope
 from main import _DATA_TABLES_DIR, _resolve_data_source
-from memory import (AmemConfig, build_amem_manager, build_session_brief,
-                    delete_case_memory, delete_turns)
+from memory import (AmemConfig, PurgeOutcome, build_amem_manager,
+                    build_session_brief, delete_case_memory, delete_turns)
 from models.types import FinalAnswer
 from runner.identity import SERVER_RUN_ID, compose_conversation_id, resolve_user_id
 from runner.config import (
@@ -1081,12 +1081,11 @@ def post_cancel_turn(case_id: str):
     with sess.subscribers_lock:
         sess.event_buffer.clear()  # don't replay events from the wiped turn(s)
 
+    amem_purge = PurgeOutcome(skipped=True)
     if sess.current_turn_id:
-        try:
-            delete_turns(_AMEM, _AMEM_CFG, case_id=case_id,
-                         turn_ids=[sess.current_turn_id])
-        except Exception:
-            pass
+        amem_purge = delete_turns(_AMEM, _AMEM_CFG, case_id=case_id,
+                                  turn_ids=[sess.current_turn_id],
+                                  logger=sess.logger)
 
     # Clear rendered chart files
     n_charts_cleared = 0
@@ -1106,6 +1105,7 @@ def post_cancel_turn(case_id: str):
         "qa_cache_cleared": n_cached,
         "kb_entries_cleared": n_kb_total,
         "charts_cleared": n_charts_cleared,
+        **amem_purge.as_log_fields(),
     })
     return jsonify({
         "status": "cancelled_and_rewound",
@@ -1152,10 +1152,8 @@ def post_rewind(case_id: str):
         n_kb_specialists = sum(
             1 for kps in sess.specialist_kb.values() if kps
         )
-        try:
-            delete_turns(_AMEM, _AMEM_CFG, case_id=case_id, turn_ids=remove_turn_ids)
-        except Exception:
-            pass
+        amem_purge = delete_turns(_AMEM, _AMEM_CFG, case_id=case_id,
+                                  turn_ids=remove_turn_ids, logger=sess.logger)
         if _NODE_TRACE_STORE is not None:
             try:
                 _max_seq = max((e.get("turn_seq", 0) for e in sess.qa_cache.values()
@@ -1243,10 +1241,13 @@ def post_rewind(case_id: str):
         else:
             trace_rows_cleared = _NODE_TRACE_STORE.delete_case(case_id)
     if not is_partial:
-        try:
-            delete_case_memory(_AMEM, _AMEM_CFG, case_id=case_id)
-        except Exception:
-            pass
+        amem_purge = delete_case_memory(_AMEM, _AMEM_CFG, case_id=case_id,
+                                        logger=sess.logger)
+    # The `rewind` event is THE record of what a clear actually did, so it
+    # carries the Amem outcome alongside the caches it already reported. Without
+    # these fields a purge that never ran (store unreachable) was indistinguish-
+    # able from one that emptied the case — the user saw 204, a wiped UI, and
+    # memory that was still there.
     sess.logger.log("rewind", {
         "message_id": msg_id, "case_id": case_id,
         "qa_cache_entries_cleared": n_cached,
@@ -1255,6 +1256,7 @@ def post_rewind(case_id: str):
         "trace_rows_cleared": trace_rows_cleared,
         "aborted_in_flight_turn": aborted_in_flight,
         "task_cancel_dispatched": cancelled_task,
+        **amem_purge.as_log_fields(),
     })
     return ("", 204)
 

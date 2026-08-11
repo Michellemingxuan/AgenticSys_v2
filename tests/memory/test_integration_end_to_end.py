@@ -38,7 +38,7 @@ def test_full_loop_with_fake():
 
     # rewind deletes turn t1
     fake.listed = [FakeRecord(id="c1", content="x")]
-    assert delete_turns(fake, CFG, case_id="c1", turn_ids=["t1"]) == 1
+    assert delete_turns(fake, CFG, case_id="c1", turn_ids=["t1"]).deleted == 1
 
     # brief prefers case memory
     fake.listed = [FakeRecord(id="case_1", content="Case: TSR breach", level="case")]
@@ -54,5 +54,5 @@ def test_null_manager_is_inert():
 
     asyncio.run(go())
     assert load_case_summary(null, CFG, case_id="c1") == ""     # inert read
-    assert delete_turns(null, CFG, case_id="c1", turn_ids=["t1"]) == 0
+    assert delete_turns(null, CFG, case_id="c1", turn_ids=["t1"]).skipped is True
     assert build_session_brief(null, CFG, case_id="c1").startswith("Welcome")

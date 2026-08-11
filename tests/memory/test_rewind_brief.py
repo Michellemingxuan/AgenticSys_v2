@@ -11,9 +11,9 @@ CFG = AmemConfig(enabled=True, store_url="x", collection_name="c", vector_size=3
 def test_delete_turns_deletes_each_listed_record():
     fake = FakeAmem()
     fake.listed = [FakeRecord(id="a", content="x"), FakeRecord(id="b", content="y")]
-    n = delete_turns(fake, CFG, case_id="c1", turn_ids=["t1", "t2"])
+    r = delete_turns(fake, CFG, case_id="c1", turn_ids=["t1", "t2"])
     # 2 records listed per turn call * 2 turns = 4 deletes
-    assert n == 4
+    assert r.deleted == 4 and r.ok
     assert set(fake.deleted) == {"a", "b"}
 
 
@@ -21,7 +21,8 @@ def test_delete_turns_survives_errors():
     class Boom(FakeAmem):
         def list_memories(self, **k):
             raise RuntimeError("down")
-    assert delete_turns(Boom(), CFG, case_id="c1", turn_ids=["t1"]) == 0
+    r = delete_turns(Boom(), CFG, case_id="c1", turn_ids=["t1"])
+    assert r.deleted == 0 and r.ok is False and r.error == "RuntimeError"
 
 
 def test_brief_prefers_case_memory():

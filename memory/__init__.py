@@ -13,7 +13,7 @@ from .loader import (
     merge_recent_kps,
 )
 from .reader import load_case_summary
-from .rewind import delete_case_memory, delete_turns
+from .rewind import PurgeOutcome, delete_case_memory, delete_turns
 from .scope import base_metadata, build_scope, kps_for_agent_turn, kps_for_turn
 from .writer import (
     consolidate_agent_case,
@@ -29,5 +29,6 @@ __all__ = [
     "write_specialist_memory", "load_case_kps", "load_active_kps",
     "merge_recent_kps", "kp_seq", "max_kp_seq",
     "ACTIVE_KP_THRESHOLD", "ACTIVE_KP_KEEP",
-    "load_case_summary", "delete_turns", "delete_case_memory", "build_session_brief",
+    "load_case_summary", "delete_turns", "delete_case_memory", "PurgeOutcome",
+    "build_session_brief",
 ]
