@@ -9,6 +9,31 @@ from agents import RunContextWrapper, function_tool
 from models.app_context import AppContext
 
 
+# What counts as a curated report file. Reports are `.md`; `.txt` and `.csv`
+# are tolerated text neighbours so a report saved in a plain-text variant is
+# not read as "this case has no reports". Binary exports (`.docx`, `.pdf`)
+# are deliberately absent: `fs_read_file` cannot decode them, and detecting a
+# report the agent then cannot open buys a wasted (and, on safechain,
+# failure-prone) round.
+#
+# ONE definition, three consumers — `_case_has_reports` (detection),
+# `agent_tool`'s injected file list (what report_agent is told exists), and
+# `fs_list_files` (what any agent can discover). These were three separate
+# literals and had already drifted: the injected list matched suffixes
+# case-SENSITIVELY while detection lowercased, so a `.MD` report made
+# `_case_has_reports` true while the agent was handed an empty list.
+REPORT_SUFFIXES = frozenset({".md", ".txt", ".csv"})
+
+
+def is_report_file(p: Path) -> bool:
+    """True when `p` is a curated report the agent can actually read.
+
+    Case-insensitive on the suffix — Windows and Excel round-trips produce
+    `.MD` / `.TXT`, and a report is no less a report for its capitalization.
+    """
+    return p.is_file() and p.suffix.lower() in REPORT_SUFFIXES
+
+
 # Curated case-report .md files often carry raw numeric values that are 6+
 # digits long (card limits, balances, spend / payment totals). The boundary
 # redaction layer in llm.firewall_stack masks any `\d{6,}` run, which
@@ -60,7 +85,10 @@ async def fs_list_files(ctx: RunContextWrapper[AppContext]) -> str:
     folder = ctx.context.case_folder
     if folder is None or not folder.exists():
         return "No case folder available."
-    files = [p.name for p in folder.iterdir() if p.is_file()]
+    # Report files only. The case folder also accumulates generated artifacts
+    # (a `charts/` subdir) and binary exports the reader cannot open; listing
+    # those invites the agent to spend a round on a file that can only fail.
+    files = [p.name for p in folder.iterdir() if is_report_file(p)]
     return "\n".join(sorted(files)) if files else "Folder is empty."
 
 
@@ -82,8 +110,25 @@ async def fs_read_file(
         return f"Access denied: '{filename}' is outside the case folder."
     if not target.exists() or not target.is_file():
         return f"File not found: {filename}"
+    # Not every file in a case folder is text. Real folders carry `.docx`
+    # exports (case 11854808010 ships `report_without_citations.docx`) and
+    # `read_text()` on a zip container raises UnicodeDecodeError — uncaught,
+    # that kills the specialist's whole turn over one bad filename. The
+    # listers no longer surface such files, but the model can still name one
+    # from memory or from a report's own cross-reference. `fs_grep` already
+    # skips them; say so here so the model treats it as a dead end.
+    try:
+        raw = target.read_text()
+    except UnicodeDecodeError:
+        return (
+            f"Cannot read '{filename}': it is not a text file (likely a "
+            f".docx/.pdf export). Reports are `.md` files — call "
+            f"fs_list_files to see the ones this case actually has."
+        )
+    except OSError as exc:
+        return f"Cannot read '{filename}': {type(exc).__name__}."
     # Comma-format long numeric runs so they survive boundary redaction.
-    formatted = _format_long_numerics(target.read_text())
+    formatted = _format_long_numerics(raw)
     # Default (0, 0) → whole file, unchanged.
     if start_line <= 0 and end_line <= 0:
         return formatted

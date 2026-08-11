@@ -70,6 +70,7 @@ from runner.turn.review import (
 )
 from runner.turn.sse import map_run_item
 from tools.episodic import EPISODIC_TURNS
+from tools.fs_tools import is_report_file
 from tools.node_trace import (
     NodeTrace, NodeTraceRunHooks, TURN_SCOPE, TurnScope,
     _open_node, attach_io, attach_latency, attach_tag, attach_usage,
@@ -191,12 +192,10 @@ def _cacheable_tool_calls(tool_calls: list, degraded_names) -> list[dict]:
     ]
 
 
-# The suffixes report_agent can actually open. Kept in step with the case-folder
-# lister in `agent_tools/agent_tool.py`, which shows it only these — detecting a
-# report the agent cannot then read would buy a wasted (and, on safechain,
-# failure-prone) round. A curated `.docx` or `.pdf` is therefore still invisible
-# to the whole path, which is a reader limitation, not a detection one.
-_REPORT_SUFFIXES = frozenset({".md", ".txt", ".csv"})
+# What counts as a report lives in `tools/fs_tools.REPORT_SUFFIXES` — imported,
+# not restated, so detection cannot drift from what report_agent is shown and
+# from what it can actually read. A curated `.docx` or `.pdf` stays invisible
+# to the whole path: a reader limitation, not a detection one.
 
 
 def _case_has_reports(case_id: str) -> bool:
@@ -216,8 +215,7 @@ def _case_has_reports(case_id: str) -> bool:
     folder = _REPORTS_DIR / case_id
     try:
         return folder.is_dir() and any(
-            p.is_file() and p.suffix.lower() in _REPORT_SUFFIXES
-            for p in folder.rglob("*")
+            is_report_file(p) for p in folder.rglob("*")
         )
     except OSError:
         # A transient IO error (network/Drive-backed folders) must not be read

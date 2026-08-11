@@ -11,6 +11,7 @@ from agents.exceptions import AgentsException, MaxTurnsExceeded
 
 from logger.process_timer import ProcessTimer
 from llm.firewall_stack import LLM_CALL_KIND, redact_payload, sanitize_message
+from tools.fs_tools import is_report_file
 from tools.node_trace import _open_node, attach_extra, attach_tag
 from agent_factories.agent_tools.series_extract import _extract_data_tool_outputs
 from agent_factories.agent_tools.distiller_pass import _distill_and_persist
@@ -507,9 +508,13 @@ def agent_tool(
             case_folder = getattr(app_ctx, "case_folder", None)
             if (case_folder is not None
                     and hasattr(case_folder, "exists") and case_folder.exists()):
+                # Same predicate as `_case_has_reports` and `fs_list_files` —
+                # if detection says the case HAS reports, this list must not
+                # come back empty. (It could: this used to match the suffix
+                # case-sensitively while detection lowercased, so a `.MD`
+                # report was detected but never shown.)
                 files = sorted(
-                    p.name for p in case_folder.iterdir()
-                    if p.is_file() and p.suffix in (".md", ".txt", ".csv")
+                    p.name for p in case_folder.iterdir() if is_report_file(p)
                 )
                 if files:
                     file_list = ", ".join(files)
