@@ -131,6 +131,23 @@ class DataGateway(ABC):
         """List tables available for the current case."""
         ...
 
+    def for_case(self, case_id: str) -> "DataGateway":
+        """Return a gateway permanently bound to `case_id`.
+
+        A single gateway carries ONE `_current_case`, so concurrent turns on
+        different cases cannot share it: whichever turn calls `set_case` last
+        silently re-points every in-flight query on the other case. Handing each
+        session its own bound gateway removes that race at the root.
+
+        Not abstract — an implementation without a cheap way to fork simply
+        keeps the single-instance behavior and is then unsafe to use across
+        concurrent cases.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} cannot be scoped per case; it must not be "
+            f"shared across concurrent case sessions."
+        )
+
 
 class LocalDataGateway(DataGateway):
     """In-memory gateway backed by per-case table data.
@@ -156,6 +173,21 @@ class LocalDataGateway(DataGateway):
 
     def get_case_id(self) -> str | None:
         return self._current_case
+
+    def for_case(self, case_id: str) -> "LocalDataGateway":
+        """A gateway bound to `case_id`, SHARING this one's loaded table data.
+
+        The row dicts are held by reference, not copied — `_case_data` is the
+        whole corpus and duplicating it per session would multiply memory by the
+        number of open cases. Only `_current_case` is per-instance, which is
+        precisely the state that made the single gateway unsafe to share.
+
+        Callers must treat the returned gateway's rows as read-only, which every
+        caller already does (the tools filter and project, never mutate).
+        """
+        view = LocalDataGateway(case_data=self._case_data)
+        view.set_case(case_id)
+        return view
 
     def list_case_ids(self) -> list[str]:
         return sorted(self._case_data.keys())

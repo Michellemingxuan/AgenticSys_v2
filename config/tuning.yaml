@@ -14,22 +14,94 @@ memory:
   # Recent turns shown to the orchestrator verbatim (episodic coreference).
   # The durable Amem case summary is injected as condensed "older context" only
   # once a case runs past this many turns.  [env: EPISODIC_TURNS]
-  episodic_turns: 5
+  episodic_turns: 10
 
   # How often the Amem case summary is (re)built — every N turns, not every turn.
   # The recent-episodic window covers the gap between refreshes.
   # [env: AMEM_CONSOLIDATE_EVERY_N]
-  consolidate_every_n_turns: 5
+  consolidate_every_n_turns: 10
 
   # K1 — compact trigger. specialist_kb ACCUMULATES KPs in RAM across turns;
   # once it grows past this many, we pay ONE Amem hybrid search to compact it
   # down to active_kp_keep (K2) most-relevant KPs, then it accumulates again.
   # So this is the ceiling, not a per-turn cap. e.g. 5 → compact once >5 KPs.
   # [env: AMEM_ACTIVE_KP_THRESHOLD]
-  active_kp_threshold: 100
+  active_kp_threshold: 200
 
   # K2 — compact target (should be << K1). How many most-relevant KPs to keep
   # after a compaction. The gap (K1 - K2) is the hysteresis: bigger gap → the
   # ~3s search fires less often. e.g. K1=5, K2=2 → compact 6→2, accumulate to
   # 6 again. In production ~ K1=100, K2=20.  [env: AMEM_ACTIVE_KP_KEEP]
   active_kp_keep: 20
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Timeouts (seconds). Every value is a CEILING, not a target — raising one buys
+# patience for a slow backend, it does not make anything faster.
+#
+# They nest: turn_wall_clock is the outermost fence, and the phases inside it
+# (screen → orch_plan → specialist → report_agent) must each fit within it or
+# the fence fires first and the inner limit never gets a chance to produce its
+# clearer error message. Keep the sum of a realistic path comfortably under it.
+#
+# The project's performance targets (screen rejection < 5s, single-specialist
+# answer <= 20s) are TARGETS; these are the failure thresholds around them.
+# ─────────────────────────────────────────────────────────────────────────────
+
+timeouts:
+  # Outermost per-turn fence. A turn exceeding this is cancelled outright and
+  # the user gets a "turn exceeded" error. Must exceed the slowest realistic
+  # path (screen + planning + slowest specialist + review + report).
+  # [env: TURN_WALL_CLOCK_S]
+  turn_wall_clock_s: 360
+
+  # How long a NEW question waits for the previous turn on the same case to
+  # release `turn_lock` before erroring out. Bounds the "frozen browser"
+  # symptom when a prior turn hangs.  [env: QUEUED_TURN_MAX_WAIT_S]
+  queued_turn_max_wait_s: 90
+
+  # Screen phase (redact + relevance_check). Target is < 5s; this catches a
+  # hung LLM before the user sits on a silent spinner.  [env: SCREEN_TIMEOUT_S]
+  screen_s: 30
+
+  # Round-1 team-planning watchdog, also reused as the fence around the
+  # coherence reviewer's single LLM call. Normally ~3s; on a stall the phase is
+  # aborted and retried rather than waiting out the per-call cap.
+  # [env: ORCH_PLAN_TIMEOUT_S]
+  orch_plan_s: 25
+
+  # One specialist's whole agentic run (its tool calls included).
+  # [env: SPECIALIST_TIMEOUT_S]
+  specialist_s: 240
+
+  # report_agent specifically — it reads curated files rather than querying
+  # data, so it gets a tighter budget.  [env: REPORT_AGENT_TIMEOUT_S]
+  report_agent_s: 100
+
+  # Second-pass distiller (KP extraction) per specialist. A timeout here costs
+  # BOTH next-turn KB warmth AND this turn's charts — auto-distill is the
+  # primary chart path — so it is deliberately generous.
+  # [env: DISTILLER_TIMEOUT_S]
+  distiller_s: 120
+
+  # End-of-turn drain of the fire-and-forget distiller/auto-chart tasks. The
+  # text answer is already on screen; this bounds how long charts may still
+  # land. On expiry the turn completes and the un-drained KPs exist in RAM but
+  # were never written to Amem.  [env: DISTILLER_DRAIN_TIMEOUT_S]
+  distiller_drain_s: 60
+
+  # Per-LLM-call cap on the safechain (prod) backend. Outermost of the LLM
+  # calls — every phase fence above should be tighter than this, or the phase
+  # never aborts on its own terms.  [env: SAFECHAIN_CALL_TIMEOUT_S]
+  safechain_call_s: 180
+
+  # Amem durable-memory IO. Reads sit in the turn's critical path, so the
+  # budget is tight and a miss degrades to "no memory this turn" rather than
+  # failing the turn.  [env: AMEM_READ_TIMEOUT_S / AMEM_WRITE_TIMEOUT_S]
+  amem_read_s: 1.5
+  amem_write_s: 5.0
+
+  # The batched relevance search that compacts the KP working set. Fires only
+  # at compaction (~every few turns), so it can afford to be generous.
+  # [env: AMEM_ACTIVE_LOAD_TIMEOUT_S]
+  amem_active_load_s: 6.0

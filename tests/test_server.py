@@ -159,43 +159,67 @@ def test_turn_aborted_class_is_a_distinct_exception():
 # ── Prewarm path ────────────────────────────────────────────────────────────
 
 
-def _fake_sess_for_rescope(case_id, gateway_case):
+def _fake_sess_for_scope(case_id):
     import types
-    gw = types.SimpleNamespace(
-        _case=gateway_case,
-        get_case_id=lambda: gw._case,
-        set_case=lambda c: setattr(gw, "_case", c),
-    )
+    from datalayer.gateway import LocalDataGateway
+    gw = LocalDataGateway(case_data={case_id: {"t": [{"c": case_id}]}})
+    gw.set_case(case_id)
     return types.SimpleNamespace(
-        case_id=case_id, gateway=gw,
+        case_id=case_id, gateway=gw, catalog=object(),
         logger=types.SimpleNamespace(log=lambda *a, **k: None),
     )
 
 
-def test_rescope_to_case_switches_gateway_on_case_change(monkeypatch):
-    """A turn on a case different from the gateway's current case must re-scope
-    the shared gateway (+ re-sync the catalog). This is the fix for 'all cases
-    serve the last-opened case's data / identical trend plots'."""
-    synced = []
-    monkeypatch.setattr(server, "_sync_case_catalog",
-                        lambda cid, gw, cat, log: synced.append(cid))
-    # Gateway is currently on case B; this turn is for case A → must switch.
-    sess = _fake_sess_for_rescope(case_id="CASE-A", gateway_case="CASE-B")
-    server._rescope_to_case(sess)
-    assert sess.gateway.get_case_id() == "CASE-A"   # gateway re-pointed
-    assert synced == ["CASE-A"]                       # catalog re-synced for A
+def test_case_scope_binds_this_session_gateway_for_the_turn():
+    """Replaces the old `_rescope_to_case`, which re-pointed process globals.
+    Reads inside the block must resolve to THIS session's gateway."""
+    from tools import data_tools
+
+    sess = _fake_sess_for_scope("CASE-A")
+    with server._case_scope(sess):
+        assert data_tools._gw() is sess.gateway
+        assert data_tools._gw().get_case_id() == "CASE-A"
 
 
-def test_rescope_to_case_noop_when_already_scoped(monkeypatch):
-    """Consecutive turns on the SAME case must not re-sync (the catalog reset +
-    reconcile is the costly part) — the guard makes it a no-op."""
-    synced = []
-    monkeypatch.setattr(server, "_sync_case_catalog",
-                        lambda cid, gw, cat, log: synced.append(cid))
-    sess = _fake_sess_for_rescope(case_id="CASE-A", gateway_case="CASE-A")
-    server._rescope_to_case(sess)
-    assert synced == []                                # no re-sync
-    assert sess.gateway.get_case_id() == "CASE-A"
+def test_case_scope_restores_on_exit_so_a_reused_thread_cannot_leak():
+    from tools import data_tools
+
+    before = data_tools._gw()
+    sess = _fake_sess_for_scope("CASE-A")
+    with server._case_scope(sess):
+        pass
+    assert data_tools._gw() is before
+
+
+def test_concurrent_turns_on_different_cases_do_not_re_point_each_other():
+    """The regression this whole change exists for. Two turns on different
+    cases, running at once, each in its own thread — neither may observe the
+    other's gateway. Before, both read whichever case bound the global last."""
+    import threading
+
+    from tools import data_tools
+
+    seen: dict[str, list] = {}
+    step = threading.Barrier(2, timeout=5)
+
+    def run_turn(case_id):
+        sess = _fake_sess_for_scope(case_id)
+        with server._case_scope(sess):
+            step.wait()          # both inside their scope simultaneously
+            observed = [data_tools._gw().get_case_id(),
+                        data_tools._gw().query("t")]
+            step.wait()          # hold both scopes open while the other reads
+        seen[case_id] = observed
+
+    threads = [threading.Thread(target=run_turn, args=(c,))
+               for c in ("CASE-A", "CASE-B")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    assert seen["CASE-A"] == ["CASE-A", [{"c": "CASE-A"}]]
+    assert seen["CASE-B"] == ["CASE-B", [{"c": "CASE-B"}]]
 
 
 def test_prewarm_respects_env_skip(monkeypatch):

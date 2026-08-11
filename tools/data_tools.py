@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import operator
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import date, timedelta
 from typing import Any, Callable
 
@@ -33,6 +35,64 @@ try:
     _logger  # type: ignore[used-before-def]  # noqa: F821
 except NameError:
     _logger: Any = None  # logger.event_logger.EventLogger when wired; None = silent
+
+# ── Per-turn data scope ──────────────────────────────────────────────────────
+#
+# The globals above are a PROCESS-WIDE default: one gateway carrying one
+# `_current_case`, plus one catalog whose `_profiles` are mutated per case by
+# the server's case sync. That is safe for a notebook or a single-case CLI run,
+# and unsafe the moment two cases run at once — whichever turn re-scoped last
+# wins, and the other turn silently reads the wrong case's rows and schema. It
+# does not raise; it returns plausible numbers for the wrong case.
+#
+# So a server turn binds its OWN case-scoped pair for the duration of the turn
+# (`case_scope`), and every read below goes through `_gw()` / `_cat()`.
+# ContextVars are the right carrier: each turn runs in its own thread with its
+# own event loop (`server._spawn_turn`), and asyncio tasks spawned inside the
+# turn — specialists, distillers, auto-charts — inherit the context they were
+# created in, so the binding follows the whole turn without threading a
+# parameter through 24 helpers.
+#
+# Unset (tests, notebooks, `main.py`) falls back to the module globals, so
+# `init_tools(...)` keeps working exactly as before.
+try:
+    _GATEWAY_VAR  # type: ignore[used-before-def]  # noqa: F821
+except NameError:
+    _GATEWAY_VAR: ContextVar = ContextVar("data_tools_gateway", default=None)
+try:
+    _CATALOG_VAR  # type: ignore[used-before-def]  # noqa: F821
+except NameError:
+    _CATALOG_VAR: ContextVar = ContextVar("data_tools_catalog", default=None)
+
+
+def _gw() -> DataGateway | None:
+    """The gateway for the CURRENT turn, else the process-wide default."""
+    bound = _GATEWAY_VAR.get()
+    return bound if bound is not None else _gateway
+
+
+def _cat() -> DataCatalog | None:
+    """The catalog for the CURRENT turn, else the process-wide default."""
+    bound = _CATALOG_VAR.get()
+    return bound if bound is not None else _catalog
+
+
+@contextmanager
+def case_scope(gateway: DataGateway | None, catalog: DataCatalog | None):
+    """Bind `gateway` / `catalog` for everything run inside this block.
+
+    Enter this once per turn, inside the turn's own thread — a fresh thread
+    starts with an EMPTY context, so binding from the spawning thread would not
+    reach it. Resets on exit so a reused thread cannot leak one case's scope
+    into the next.
+    """
+    gw_token = _GATEWAY_VAR.set(gateway)
+    cat_token = _CATALOG_VAR.set(catalog)
+    try:
+        yield
+    finally:
+        _GATEWAY_VAR.reset(gw_token)
+        _CATALOG_VAR.reset(cat_token)
 
 # Per-(case_id, table_name) schema cache. The output of ``get_table_schema``
 # is deterministic per case — gateway data + catalog profile + sync-applied
@@ -187,7 +247,7 @@ def _resolve_canonical_tables(real_table: str) -> list[str]:
     ``bureau_data.yaml``) only carries a subset of columns and the rest
     need to be looked up under the broader canonical (``bureau.yaml``).
     """
-    if _catalog is None:
+    if _cat() is None:
         return []
     out: list[str] = []
     seen: set[str] = set()
@@ -197,19 +257,19 @@ def _resolve_canonical_tables(real_table: str) -> list[str]:
             seen.add(name)
             out.append(name)
 
-    if real_table in _catalog._profiles:
+    if real_table in _cat()._profiles:
         _add(real_table)
 
     # Stage 2: table-level aliases.
-    for canonical, profile in _catalog._profiles.items():
+    for canonical, profile in _cat()._profiles.items():
         if real_table in (profile.get("aliases") or []):
             _add(canonical)
 
     real_norm = _normalize(real_table)
-    for canonical in _catalog._profiles:
+    for canonical in _cat()._profiles:
         if _normalize(canonical) == real_norm:
             _add(canonical)
-    for canonical in _catalog._profiles:
+    for canonical in _cat()._profiles:
         canonical_norm = _normalize(canonical)
         if canonical_norm and (canonical_norm in real_norm or real_norm in canonical_norm):
             _add(canonical)
@@ -557,8 +617,8 @@ def render_catalog_tree(
     Pass ``max_cols_per_table=10`` to truncate wide tables (model_scores has
     50+ cols).
     """
-    gw_use = gateway if gateway is not None else _gateway
-    cat_use = catalog if catalog is not None else _catalog
+    gw_use = gateway if gateway is not None else _gw()
+    cat_use = catalog if catalog is not None else _cat()
 
     if gw_use is None or cat_use is None:
         return (
@@ -704,17 +764,17 @@ def _resolve_real_table(requested: str) -> str:
 
     Falls through unchanged when nothing matches.
     """
-    if _gateway is None or not requested:
+    if _gw() is None or not requested:
         return requested
-    real_tables = _gateway.list_tables() if _gateway.get_case_id() else []
+    real_tables = _gw().list_tables() if _gw().get_case_id() else []
     if not real_tables:
         return requested
     if requested in real_tables:
         return requested
 
     # Canonical → real via catalog's declared table-level aliases.
-    if _catalog is not None:
-        aliases = _catalog.table_aliases(requested)
+    if _cat() is not None:
+        aliases = _cat().table_aliases(requested)
         for alias in aliases:
             if alias in real_tables:
                 return alias
@@ -769,9 +829,9 @@ def _resolve_real_column(
     if requested in real_keys:
         return requested
 
-    if _catalog is not None and table_name:
+    if _cat() is not None and table_name:
         canonical_table = _resolve_canonical_table(table_name) or table_name
-        resolved = _catalog.resolve_real_column(canonical_table, requested, real_keys)
+        resolved = _cat().resolve_real_column(canonical_table, requested, real_keys)
         if resolved != requested and resolved in real_keys:
             return resolved
 
@@ -1082,7 +1142,7 @@ def _log_result(
 def _list_available_tables_impl() -> str:
     """List all data tables available for the current case, each with its description."""
     _log_call("list_available_tables", {})
-    if _catalog is None:
+    if _cat() is None:
         out = "Data unavailable"
         _log_result("list_available_tables", result=out)
         return out
@@ -1091,7 +1151,7 @@ def _list_available_tables_impl() -> str:
         lines: list[str] = []
         for t in tables:
             canonical = _resolve_canonical_table(t) or t
-            desc = _catalog.get_description(canonical) if _catalog else ""
+            desc = _cat().get_description(canonical) if _cat() else ""
             label = (
                 f"{t} [canonical: {canonical}]"
                 if canonical != t and desc
@@ -1103,8 +1163,8 @@ def _list_available_tables_impl() -> str:
                 lines.append(f"- {label}")
         return "\n".join(lines)
 
-    if _gateway is not None and _gateway.get_case_id() is not None:
-        case_tables = _gateway.list_tables()
+    if _gw() is not None and _gw().get_case_id() is not None:
+        case_tables = _gw().list_tables()
         if case_tables:
             out = "Tables for the current case:\n" + _render(case_tables)
             _log_result("list_available_tables", result=out,
@@ -1115,7 +1175,7 @@ def _list_available_tables_impl() -> str:
                     extra={"table_count": 0})
         return out
 
-    tables = _catalog.list_tables()
+    tables = _cat().list_tables()
     out = _render(tables) if tables else "No tables available"
     _log_result("list_available_tables", result=out,
                 extra={"table_count": len(tables)})
@@ -1148,7 +1208,7 @@ def _get_table_schema_impl(table_name: str) -> str:
     cache never goes stale within a session. ``init_tools`` resets it.
     """
     _log_call("get_table_schema", {"table_name": table_name})
-    case_id = _gateway.get_case_id() if _gateway is not None else None
+    case_id = _gw().get_case_id() if _gw() is not None else None
     cache_key = (case_id, table_name)
     if cache_key in _schema_cache:
         out = _schema_cache[cache_key]
@@ -1163,13 +1223,13 @@ def _get_table_schema_impl(table_name: str) -> str:
                     extra={**(extra or {}), "cache_hit": False})
         return out_str
 
-    if _catalog is None:
+    if _cat() is None:
         return _store("Data unavailable")
 
-    if _gateway is not None and _gateway.get_case_id() is not None:
+    if _gw() is not None and _gw().get_case_id() is not None:
         # Resolve canonical → real table name (specialists may pass either).
         real_table = _resolve_real_table(table_name)
-        rows = _gateway.query(real_table) or []
+        rows = _gw().query(real_table) or []
         if not rows:
             return _store(
                 f"Data unavailable: table '{table_name}' not found for current case.",
@@ -1185,7 +1245,7 @@ def _get_table_schema_impl(table_name: str) -> str:
         merged_cols: dict[str, dict] = {}
         canonical_lookup: dict[str, str] = {}  # col_name → canonical name
         for ct in canonical_tables:
-            for col, spec in (_catalog._profiles.get(ct, {}).get("columns", {}) or {}).items():
+            for col, spec in (_cat()._profiles.get(ct, {}).get("columns", {}) or {}).items():
                 merged_cols.setdefault(col, spec)
                 canonical_lookup.setdefault(col, col)
 
@@ -1193,7 +1253,7 @@ def _get_table_schema_impl(table_name: str) -> str:
         # rbind of multiple sources when applicable.
         table_aliases: list[str] = []
         for ct in canonical_tables:
-            table_aliases.extend(_catalog.table_aliases(ct))
+            table_aliases.extend(_cat().table_aliases(ct))
 
         schema: dict[str, dict] = {}
         for real_col in rows[0].keys():
@@ -1244,7 +1304,7 @@ def _get_table_schema_impl(table_name: str) -> str:
                    "column_count": len(schema)},
         )
 
-    schema = _catalog.get_schema(table_name)
+    schema = _cat().get_schema(table_name)
     if schema is None:
         return _store(
             "Data unavailable",
@@ -1378,14 +1438,14 @@ def _column_threshold(real_table: str, real_col: str) -> dict | None:
     aliases and normalization the same way `_resolve_real_column` does —
     otherwise every real-data column silently has no threshold.
     """
-    if _catalog is None or not real_col:
+    if _cat() is None or not real_col:
         return None
     target = _normalize(real_col)
     for ct in _resolve_canonical_tables(real_table):
-        thresholds = _catalog.get_thresholds(ct)
+        thresholds = _cat().get_thresholds(ct)
         if not thresholds:
             continue
-        cols = (_catalog._profiles.get(ct, {}).get("columns", {}) or {})
+        cols = (_cat()._profiles.get(ct, {}).get("columns", {}) or {})
         for canonical, spec in thresholds.items():
             if canonical == real_col or _normalize(canonical) == target:
                 return spec
@@ -1418,15 +1478,15 @@ def _build_search_index(case_id) -> list[dict]:
         return _search_index_cache[case_id]
 
     entries: list[dict] = []
-    if _gateway is not None and _catalog is not None:
-        for table in _gateway.list_tables():
-            rows = _gateway.query(table) or []
+    if _gw() is not None and _cat() is not None:
+        for table in _gw().list_tables():
+            rows = _gw().query(table) or []
             if not rows:
                 continue
             merged_cols: dict[str, dict] = {}
             for ct in _resolve_canonical_tables(table):
                 for col, spec in (
-                    _catalog._profiles.get(ct, {}).get("columns", {}) or {}
+                    _cat()._profiles.get(ct, {}).get("columns", {}) or {}
                 ).items():
                     merged_cols.setdefault(col, spec)
             # Which columns are present-but-blank for THIS case. Listing an
@@ -1514,9 +1574,9 @@ def build_column_inventory(tables: list[str] | None = None) -> str:
     `data_hints`); None renders every table. Returns "" when the data layer is
     not wired, so a caller can append it unconditionally.
     """
-    if _gateway is None or _catalog is None:
+    if _gw() is None or _cat() is None:
         return ""
-    case_id = _gateway.get_case_id()
+    case_id = _gw().get_case_id()
     if case_id is None:
         return ""
 
@@ -1623,9 +1683,9 @@ def known_variable_matches(text: str) -> list[dict]:
     under it, and conflating the two was the bug that made the short form read
     as off-topic.
     """
-    if _gateway is None or _catalog is None or not text:
+    if _gw() is None or _cat() is None or not text:
         return []
-    case_id = _gateway.get_case_id()
+    case_id = _gw().get_case_id()
     if case_id is None:
         return []
 
@@ -1682,9 +1742,9 @@ def known_concepts_in(text: str) -> list[dict]:
     data holds columns tagged `oop`, a question about oop is in scope by
     construction, whatever the phrasing looks like.
     """
-    if _gateway is None or _catalog is None or not text:
+    if _gw() is None or _cat() is None or not text:
         return []
-    case_id = _gateway.get_case_id()
+    case_id = _gw().get_case_id()
     if case_id is None:
         return []
 
@@ -1818,7 +1878,7 @@ def _search_columns_impl(query: str, table_name: str = "", limit: int = 25) -> s
     above for why this exists alongside `get_table_schema`."""
     _log_call("search_columns", {"query": query, "table_name": table_name,
                                  "limit": limit})
-    if _catalog is None or _gateway is None or _gateway.get_case_id() is None:
+    if _cat() is None or _gw() is None or _gw().get_case_id() is None:
         out = "Data unavailable: data layer is not initialized for this session."
         _log_result("search_columns", result=out)
         return out
@@ -1830,7 +1890,7 @@ def _search_columns_impl(query: str, table_name: str = "", limit: int = 25) -> s
         _log_result("search_columns", result=out, extra={"n_terms": 0})
         return out
 
-    entries = _build_search_index(_gateway.get_case_id())
+    entries = _build_search_index(_gw().get_case_id())
     if table_name:
         wanted = _resolve_real_table(table_name)
         known = {e["table"] for e in entries}
@@ -2006,7 +2066,7 @@ def _query_table_impl(
                            "table_name": table_name})
         return out
 
-    if _gateway is None:
+    if _gw() is None:
         out = (
             "Data unavailable: data layer is not initialized for this session "
             "(no gateway is bound to tools.data_tools). This is an infrastructure "
@@ -2023,7 +2083,7 @@ def _query_table_impl(
     # Resolve canonical → real table name (e.g. 'crossbu_cards' →
     # 'crossbu_cards_data') so specialists can call with either name.
     real_table = _resolve_real_table(table_name)
-    rows = _gateway.query(real_table, filters=None)
+    rows = _gw().query(real_table, filters=None)
     if rows is None:
         out = f"Data unavailable: table '{table_name}' not found for current case."
         _log_result("query_table", result=out,
@@ -2431,7 +2491,7 @@ def _join_table_impl(
         "filter": (f"{filter_column} {filter_op} {filter_value}"
                    if filter_column else None),
     })
-    if _gateway is None:
+    if _gw() is None:
         out = ("Data unavailable: data layer is not initialized for this session "
                "(no gateway bound). This is an infrastructure error, not a finding.")
         _log_result("join_table", result=out, extra={"reason": "no_gateway_bound"})
@@ -2441,8 +2501,8 @@ def _join_table_impl(
     how = (how or "inner").lower()
     lt = _resolve_real_table(left_table)
     rt = _resolve_real_table(right_table)
-    lrows = _gateway.query(lt, filters=None)
-    rrows = _gateway.query(rt, filters=None)
+    lrows = _gw().query(lt, filters=None)
+    rrows = _gw().query(rt, filters=None)
     if lrows is None or rrows is None:
         missing = left_table if lrows is None else right_table
         out = f"Data unavailable: table '{missing}' not found for current case."
@@ -2713,7 +2773,7 @@ def _conditions_from_filters(filters: str) -> list[tuple[str, str, str]]:
 def _filtered_rows(table: str, filters: str) -> tuple[list[dict], str, str]:
     """`(rows, real_table, filter_description)` for one side of a sequence join."""
     real = _resolve_real_table(table)
-    rows = _gateway.query(real, filters=None)
+    rows = _gw().query(real, filters=None)
     if rows is None:
         return [], real, ""
     parts: list[str] = []
@@ -2774,7 +2834,7 @@ def _sequence_join_impl(
         "within_days": within_days, "direction": direction,
         "anchor_filters": anchor_filters, "follow_filters": follow_filters,
     })
-    if _gateway is None:
+    if _gw() is None:
         out = ("Data unavailable: data layer is not initialized for this session "
                "(no gateway bound). This is an infrastructure error, not a finding.")
         _log_result("sequence_join", result=out, extra={"reason": "no_gateway_bound"})
@@ -2791,11 +2851,11 @@ def _sequence_join_impl(
 
     a_rows, a_real, a_desc = _filtered_rows(anchor_table, anchor_filters)
     f_rows, f_real, f_desc = _filtered_rows(follow_table, follow_filters)
-    if not a_rows and _gateway.query(a_real, filters=None) is None:
+    if not a_rows and _gw().query(a_real, filters=None) is None:
         out = f"Data unavailable: table '{anchor_table}' not found for current case."
         _log_result("sequence_join", result=out, extra={"missing": anchor_table})
         return out
-    if not f_rows and _gateway.query(f_real, filters=None) is None:
+    if not f_rows and _gw().query(f_real, filters=None) is None:
         out = f"Data unavailable: table '{follow_table}' not found for current case."
         _log_result("sequence_join", result=out, extra={"missing": follow_table})
         return out
@@ -3095,7 +3155,7 @@ def _transaction_detail_impl(
         "timestamps": (timestamps[:120] if timestamps else None),
         "sort_by": sort_by, "limit": limit,
     })
-    if _gateway is None:
+    if _gw() is None:
         out = ("Data unavailable: data layer is not initialized for this session "
                "(no gateway bound). Infrastructure error, not a finding.")
         _log_result("transaction_detail", result=out, extra={"reason": "no_gateway"})
@@ -3105,7 +3165,7 @@ def _transaction_detail_impl(
     base_table = base_table or "spends"
     base_key_name = _TXN_TABLE_KEYS.get(base_table, "Timestamp")
     base_t = _resolve_real_table(base_table)
-    brows = _gateway.query(base_t, filters=None)
+    brows = _gw().query(base_t, filters=None)
     if brows is None:
         out = f"Data unavailable: base table '{base_table}' not found for current case."
         _log_result("transaction_detail", result=out, extra={"reason": "no_base"})
@@ -3154,7 +3214,7 @@ def _transaction_detail_impl(
 
     # ── index the OTHER two transaction tables by their timestamp column ──
     def _index(table_name: str, key_name: str) -> dict:
-        rows = _gateway.query(_resolve_real_table(table_name), filters=None)
+        rows = _gw().query(_resolve_real_table(table_name), filters=None)
         idx: dict = {}
         if rows:
             rc = _resolve_real_column(rows, key_name, table_name)
@@ -3362,7 +3422,7 @@ def _score_driver_values_impl(period: str = "", score: str = "",
     """Monthly score drivers WITH the value of each driver feature."""
     _log_call("score_driver_values",
               {"period": period, "score": score, "limit": limit})
-    if _gateway is None or _catalog is None:
+    if _gw() is None or _cat() is None:
         out = ("Data unavailable: data layer is not initialized for this session "
                "(no gateway bound). Infrastructure error, not a finding.")
         _log_result("score_driver_values", result=out)
@@ -3370,12 +3430,12 @@ def _score_driver_values_impl(period: str = "", score: str = "",
 
     drv_t = _resolve_real_table("score_drivers")
     mdl_t = _resolve_real_table("model_scores")
-    drows = _gateway.query(drv_t, filters=None)
+    drows = _gw().query(drv_t, filters=None)
     if not drows:
         out = (f"Data unavailable: table '{drv_t}' not found for current case.")
         _log_result("score_driver_values", result=out, extra={"found": False})
         return out
-    mrows = _gateway.query(mdl_t, filters=None) or []
+    mrows = _gw().query(mdl_t, filters=None) or []
 
     drv_key = _resolve_real_column(drows, "trans_month", drv_t)
     mdl_key = _resolve_real_column(mrows, "trans_month", mdl_t) if mrows else ""
@@ -3557,7 +3617,7 @@ def _aggregate_column_impl(
         "denominator_column": denominator_column or None,
     })
 
-    if _gateway is None:
+    if _gw() is None:
         out = (
             "Data unavailable: data layer is not initialized for this session. "
             "Infrastructure error, not a data finding."
@@ -3567,7 +3627,7 @@ def _aggregate_column_impl(
         return out
 
     real_table = _resolve_real_table(table_name)
-    rows = _gateway.query(real_table, filters=None)
+    rows = _gw().query(real_table, filters=None)
     if rows is None:
         out = f"Data unavailable: table '{table_name}' not found for current case."
         _log_result("aggregate_column", result=out,
@@ -4146,7 +4206,7 @@ def _summarize_trend_impl(
         _log_result("summarize_trend", result=out, extra={"reason": "bad_op"})
         return out
 
-    if _gateway is None:
+    if _gw() is None:
         out = (
             "Data unavailable: data layer is not initialized for this session. "
             "Infrastructure error, not a data finding."
@@ -4156,7 +4216,7 @@ def _summarize_trend_impl(
         return out
 
     real_table = _resolve_real_table(table_name)
-    rows = _gateway.query(real_table, filters=None)
+    rows = _gw().query(real_table, filters=None)
     if rows is None:
         out = f"Data unavailable: table '{table_name}' not found for current case."
         _log_result("summarize_trend", result=out,
@@ -4803,7 +4863,7 @@ def _summarize_by_group_impl(
         _log_result("summarize_by_group", result=out, extra={"reason": "bad_sort_by"})
         return out
 
-    if _gateway is None:
+    if _gw() is None:
         out = (
             "Data unavailable: data layer is not initialized for this session. "
             "Infrastructure error, not a data finding."
@@ -4813,7 +4873,7 @@ def _summarize_by_group_impl(
         return out
 
     real_table = _resolve_real_table(table_name)
-    rows = _gateway.query(real_table, filters=None)
+    rows = _gw().query(real_table, filters=None)
     if rows is None:
         out = f"Data unavailable: table '{table_name}' not found for current case."
         _log_result("summarize_by_group", result=out,

@@ -24,7 +24,9 @@ from .scope import build_scope
 # must be applied before this module is imported (server.py does this at startup).
 ACTIVE_KP_THRESHOLD = int(os.environ.get("AMEM_ACTIVE_KP_THRESHOLD", "100"))  # K1: compact trigger
 ACTIVE_KP_KEEP = int(os.environ.get("AMEM_ACTIVE_KP_KEEP", "20"))             # K2: compact target
-_ACTIVE_LOAD_TIMEOUT_S = 6.0    # generous: this batch search only fires at compaction
+# Generous: this batch search only fires at compaction, not every turn.
+# [config/tuning.yaml: timeouts.amem_active_load_s]
+_ACTIVE_LOAD_TIMEOUT_S = float(os.environ.get("AMEM_ACTIVE_LOAD_TIMEOUT_S", "6.0"))
 
 
 def kp_seq(kp: dict) -> int:

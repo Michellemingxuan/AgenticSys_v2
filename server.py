@@ -95,7 +95,7 @@ from runner.config import (
 # import at module level here — `conductor.py` no longer imports `server`
 # (dependency is one-way: server -> runner), so there is no load cycle.
 from runner.turn.conductor import _TurnAborted
-from tools.data_tools import init_tools
+from tools.data_tools import case_scope, init_tools
 
 
 # ── Configuration ───────────────────────────────────────────────────────────
@@ -283,11 +283,14 @@ else:
 _CATALOG = DataCatalog()
 # Pristine (YAML-loaded) catalog profiles, snapshotted BEFORE any case sync
 # mutates them. `_sync_case_catalog` reads _profiles back as its "canonical"
-# base, so switching cases must reset to this snapshot first — otherwise one
-# case's alias / value-vocabulary drift compounds onto the next. See
-# `_rescope_to_case`.
+# base, so every per-session catalog copy starts from THIS snapshot — otherwise
+# one case's alias / value-vocabulary drift compounds onto the next. See
+# `_get_or_create_session`.
 _CATALOG_PRISTINE_PROFILES = copy.deepcopy(_CATALOG._profiles)
 _BOOT_LOGGER = EventLogger(session_id=f"server-{uuid.uuid4().hex[:8]}")
+# Process-wide DEFAULT scope only. Every turn binds its own case-scoped gateway
+# + catalog over the top (`_case_scope`), so these globals are what non-turn
+# code (boot, notebooks, tests) sees — never what a running turn reads.
 init_tools(_GATEWAY, _CATALOG, logger=_BOOT_LOGGER)
 
 _FIREWALL = FirewallStack(
@@ -589,13 +592,24 @@ def _get_or_create_session(case_id: str) -> CaseSession:
         if case_id not in ALL_CASES:
             raise KeyError(f"unknown case_id: {case_id}")
 
-        # ONE process-global gateway shared by every session (the tools bind it
-        # module-globally). It carries a single `_current_case`, so it must be
-        # re-scoped to the right case at the START OF EACH TURN — see
-        # `_rescope_to_case`, called in `_run_turn_streamed`. Setting it here too
-        # scopes the first-open catalog sync below correctly.
-        case_gateway = _GATEWAY
-        case_gateway.set_case(case_id)
+        # This session's OWN gateway + catalog, so concurrent turns on different
+        # cases cannot re-scope each other. Previously both were process-global
+        # singletons re-pointed at the start of every turn (`_rescope_to_case`),
+        # which serialized correctness on a lock that only covered ONE case:
+        # case A mid-flight + case B starting = A's remaining queries silently
+        # reading B's rows and B's schema.
+        #
+        # The gateway view SHARES the loaded table corpus (only `_current_case`
+        # is per-instance), so this costs no data memory. The catalog must be a
+        # real copy: `_sync_case_catalog` MUTATES `_profiles` with this case's
+        # aliases and observed value vocabularies.
+        #
+        # `_profiles` is the only mutable state on a DataCatalog, so a shallow
+        # copy plus a fresh deepcopy of the pristine profiles fully isolates it
+        # (and re-reading the YAMLs per session would be far more expensive).
+        case_gateway = _GATEWAY.for_case(case_id)
+        case_catalog = copy.copy(_CATALOG)
+        case_catalog._profiles = copy.deepcopy(_CATALOG_PRISTINE_PROFILES)
 
         case_logger = EventLogger(session_id=f"case-{case_id}-{uuid.uuid4().hex[:6]}")
         case_logger.log("case_session_open", {"case_id": case_id})
@@ -603,12 +617,12 @@ def _get_or_create_session(case_id: str) -> CaseSession:
         # First-open: reconcile the canonical catalog against this case's
         # actual CSV columns so specialists' get_table_schema sees accurate
         # aliases + observed value vocabularies for THIS case. In-memory only.
-        _sync_case_catalog(case_id, case_gateway, _CATALOG, case_logger)
+        _sync_case_catalog(case_id, case_gateway, case_catalog, case_logger)
 
         sess = CaseSession(
             case_id=case_id,
             gateway=case_gateway,
-            catalog=_CATALOG,
+            catalog=case_catalog,
             clients=_CLIENTS,
             pillar_yaml=_PILLAR_YAML,
             chat_agent=ChatAgent(
@@ -656,34 +670,27 @@ def _get_or_create_session(case_id: str) -> CaseSession:
 
 # ── Async streaming worker ──────────────────────────────────────────────────
 
-def _rescope_to_case(sess: CaseSession) -> None:
-    """Point the process-global gateway + catalog at THIS session's case.
+def _case_scope(sess: CaseSession):
+    """Bind THIS session's gateway + catalog for the whole turn.
 
-    The gateway and catalog are single shared instances (the tools bind them
-    module-globally in `data_tools.init_tools`), and they are scoped to a case
-    only at session CREATION. Sessions are then cached in `SESSIONS[case_id]`,
-    so a second turn on a cached session would otherwise run against whichever
-    case was opened most recently — every case serving the last-opened case's
-    DATA (identical trend plots) and schema. Re-scope at the start of each turn,
-    but only on an actual case switch (a no-op for consecutive same-case turns).
+    Replaces the old `_rescope_to_case`, which re-pointed process-global
+    singletons at the start of every turn. That worked for turns run one after
+    another, but nothing stopped two CASES from running at once: `turn_lock` is
+    per-case, so case B's turn could re-point the globals while case A's turn
+    was mid-flight, and A's remaining queries would silently read B's rows and
+    B's schema. Not an error — plausible numbers for the wrong case.
 
-    On a switch we also RESET the catalog to its pristine YAML snapshot before
-    re-reconciling, because `_sync_case_catalog` reads _profiles back as its
-    canonical base — without the reset, the prior case's drift compounds.
-
-    NOTE: turns on ONE case are serialized by `sess.turn_lock`, but two
-    different cases' turns can still interleave on these shared globals. That
-    residual cross-case concurrency race is a separate, pre-existing limitation;
-    this fixes the reported sequential contamination.
+    Now each session owns its gateway view and catalog copy (built in
+    `_get_or_create_session`) and the binding is CONTEXT-local, so concurrent
+    turns cannot see each other's. Must be entered inside the turn's own thread:
+    a fresh thread starts with an empty context, so binding from the spawning
+    thread would not reach it (`_spawn_turn` starts the thread, this runs in it).
     """
-    if sess.gateway.get_case_id() == sess.case_id:
-        return
-    sess.gateway.set_case(sess.case_id)
-    _CATALOG._profiles = copy.deepcopy(_CATALOG_PRISTINE_PROFILES)
-    _sync_case_catalog(sess.case_id, sess.gateway, _CATALOG, sess.logger)
-    sess.logger.log("gateway_rescoped_to_case", {
-        "case_id": sess.case_id, "turn_scoped": True,
+    sess.logger.log("case_scope_bound", {
+        "case_id": sess.case_id,
+        "gateway_case": sess.gateway.get_case_id(),
     })
+    return case_scope(sess.gateway, sess.catalog)
 
 
 async def _run_turn_streamed(
@@ -709,11 +716,12 @@ async def _run_turn_streamed(
     contention; this function picks up after those have fired and uses
     ``started_at`` for duration math.
     """
-    # Re-scope shared data state to THIS case BEFORE any tool (screen included)
-    # runs — otherwise a cached session serves the last-opened case's data.
-    _rescope_to_case(sess)
+    # Bind THIS case's data scope BEFORE any tool (screen included) runs, and
+    # hold it for the whole turn so concurrent turns on other cases can't
+    # re-point what this one reads.
     from runner.turn.conductor import TurnRunner
-    await TurnRunner(sess, turn_id, question, started_at).run()
+    with _case_scope(sess):
+        await TurnRunner(sess, turn_id, question, started_at).run()
 
 
 def _spawn_turn(sess: CaseSession, turn_id: str, question: str) -> None:

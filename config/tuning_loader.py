@@ -25,6 +25,20 @@ _MAP = {
     "memory.consolidate_every_n_turns": "AMEM_CONSOLIDATE_EVERY_N",
     "memory.active_kp_threshold": "AMEM_ACTIVE_KP_THRESHOLD",
     "memory.active_kp_keep": "AMEM_ACTIVE_KP_KEEP",
+    # Timeouts (seconds). Same setdefault semantics — an inline env var wins,
+    # so `SPECIALIST_TIMEOUT_S=60 python server.py` still overrides the YAML.
+    "timeouts.turn_wall_clock_s": "TURN_WALL_CLOCK_S",
+    "timeouts.queued_turn_max_wait_s": "QUEUED_TURN_MAX_WAIT_S",
+    "timeouts.screen_s": "SCREEN_TIMEOUT_S",
+    "timeouts.orch_plan_s": "ORCH_PLAN_TIMEOUT_S",
+    "timeouts.specialist_s": "SPECIALIST_TIMEOUT_S",
+    "timeouts.report_agent_s": "REPORT_AGENT_TIMEOUT_S",
+    "timeouts.distiller_s": "DISTILLER_TIMEOUT_S",
+    "timeouts.distiller_drain_s": "DISTILLER_DRAIN_TIMEOUT_S",
+    "timeouts.safechain_call_s": "SAFECHAIN_CALL_TIMEOUT_S",
+    "timeouts.amem_read_s": "AMEM_READ_TIMEOUT_S",
+    "timeouts.amem_write_s": "AMEM_WRITE_TIMEOUT_S",
+    "timeouts.amem_active_load_s": "AMEM_ACTIVE_LOAD_TIMEOUT_S",
 }
 
 _DEFAULT_PATH = Path(__file__).resolve().parent / "tuning.yaml"

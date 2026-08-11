@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 import uuid
 from typing import Any
@@ -132,6 +133,16 @@ _NO_TOOLS_RETRY_DIRECTIVE = (
 # Appended to the orchestrator input when a case has NO curated reports yet, so
 # report_agent (normally MANDATORY) is neither expected nor enforced — a fresh
 # case with no reports must answer smoothly from live specialist data alone.
+# End-of-turn drain of the fire-and-forget distiller / auto-chart tasks. The
+# answer text is already on screen by then, so this only bounds how long charts
+# may still land — on expiry the turn completes and the un-drained KPs are in
+# RAM but were never written to Amem.
+# [config/tuning.yaml: timeouts.distiller_drain_s]
+_DISTILLER_DRAIN_TIMEOUT_S = float(
+    os.environ.get("DISTILLER_DRAIN_TIMEOUT_S", "60")
+)
+
+
 _NO_REPORTS_NOTE = (
     "[NOTE] This case has NO curated reports available yet. Do NOT call "
     "`report_agent` this turn — there is nothing to look up. Answer from the "
@@ -1634,7 +1645,7 @@ class TurnRunner:
             try:
                 await asyncio.wait_for(
                     asyncio.gather(*pending, return_exceptions=True),
-                    timeout=60.0,
+                    timeout=_DISTILLER_DRAIN_TIMEOUT_S,
                 )
             except asyncio.TimeoutError:
                 sess.logger.log("distiller_drain_timeout", {
