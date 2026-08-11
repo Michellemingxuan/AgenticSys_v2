@@ -70,6 +70,7 @@ from openai.types.chat.chat_completion_message_tool_call import (
 )
 from openai.types.completion_usage import CompletionUsage
 
+from llm.round_shaping import response_format_for_round
 from llm.firewall_stack import (
     FIREWALL_GUIDANCE,
     FirewallRejection,
@@ -588,6 +589,11 @@ def _bind_kwargs(tools: list[dict] | None, tool_choice: Any,
     if tool_choice is not None and tools:
         # tool_choice without tools is a 400 — drop it rather than fail the call.
         kwargs["tool_choice"] = tool_choice
+    # A round that MUST call a tool cannot emit the final structured answer, so
+    # the schema is dead weight — and on this transport its mere presence is
+    # what routes the call through OpenAI's auto-parse instead of `create`.
+    # See llm/round_shaping.py.
+    response_format = response_format_for_round(tool_choice, response_format)
     if response_format is not None:
         kwargs["response_format"] = response_format
     for k, v in (extra or {}).items():

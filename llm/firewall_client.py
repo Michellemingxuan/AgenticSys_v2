@@ -7,6 +7,7 @@ import json
 from time import perf_counter
 from typing import Any
 
+from llm.round_shaping import forces_tool_call
 from llm.firewall_stack import FIREWALL_GUIDANCE, FirewallRejection, FirewallStack, sanitize_message
 
 
@@ -47,6 +48,14 @@ class _FirewalledChatCompletions:
         self._firewall = firewall
 
     async def create(self, *, model, messages, **kw):
+        # A round that MUST call a tool cannot emit the final structured
+        # answer, so drop the schema — 6.8 KB of it, on the orchestrator's
+        # dispatch round, describes fields the model is told to leave null.
+        # Mirrored from the safechain path so a dev measurement means something
+        # about prod (openai/safechain parity). See llm/round_shaping.py.
+        if kw.get("response_format") is not None and forces_tool_call(
+                kw.get("tool_choice")):
+            kw = {k: v for k, v in kw.items() if k != "response_format"}
         # Imported lazily to avoid a top-level cycle once node_trace grows.
         from tools.node_trace import (
             ACTIVE_NODE, NodeTrace, _hooks_own_rounds,

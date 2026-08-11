@@ -206,9 +206,22 @@ def test_to_lc_messages_stringifies_non_string_content(lc_messages):
 def test_bind_kwargs_passes_openai_shapes_through_untouched():
     tools = [{"type": "function", "function": {"name": "f", "parameters": {}}}]
     rf = {"type": "json_schema", "json_schema": {"name": "S", "schema": {}}}
-    out = _bind_kwargs(tools, "required", rf)
+    # `auto`: a round that MAY answer, so the schema rides along verbatim.
+    out = _bind_kwargs(tools, "auto", rf)
     assert out["tools"] is tools           # verbatim — no translation
     assert out["response_format"] is rf
+    assert out["tool_choice"] == "auto"
+
+
+def test_bind_kwargs_drops_the_schema_on_a_forced_tool_call():
+    """`required` means the model must return a tool call, so it cannot emit
+    the structured answer — and on this transport the schema's mere presence
+    routes the call through auto-parse. See llm/round_shaping.py."""
+    tools = [{"type": "function", "function": {"name": "f", "parameters": {}}}]
+    rf = {"type": "json_schema", "json_schema": {"name": "S", "schema": {}}}
+    out = _bind_kwargs(tools, "required", rf)
+    assert "response_format" not in out
+    assert out["tools"] is tools           # everything else still verbatim
     assert out["tool_choice"] == "required"
 
 
@@ -508,12 +521,12 @@ async def test_invoke_binds_tools_and_response_format_to_the_model(monkeypatch):
     await client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": "u"}],
-        tools=tools, response_format=rf, tool_choice="required")
+        tools=tools, response_format=rf, tool_choice="auto")
 
     bound = captured["model"].bound_kwargs
     assert bound["tools"] is tools
     assert bound["response_format"] is rf
-    assert bound["tool_choice"] == "required"
+    assert bound["tool_choice"] == "auto"
 
 
 @pytest.mark.asyncio
