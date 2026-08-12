@@ -33,6 +33,74 @@ from agent_factories.agent_tools.series_extract import _parse_series_from_tool_o
 # drain doesn't blow up.
 _DISTILLER_TIMEOUT_S = float(os.environ.get("DISTILLER_TIMEOUT_S", "120"))
 
+
+def _salvage_truncated_kps(exc: Exception) -> list[dict]:
+    """Knowledge points recoverable from a response the model cut off.
+
+    WHY. The distiller is asked for every row of every series (H1, "no
+    abridging") and told to include a key for each period even when the value
+    is null, because a post-fill supplies the real numbers afterwards. A 30-row
+    series is ~450 tokens of skeleton, so two or three such KPs run past the
+    output budget, the JSON stops mid-array, and the SDK raises
+    ModelBehaviorError("Invalid JSON when parsing {…"). That was a TOTAL loss:
+    26 of 38 distiller failures in the logs are this, and each one dropped the
+    whole turn's knowledge rather than the one KP that got cut.
+
+    The complete objects before the cut are perfectly good. This walks the
+    `knowledge_points` array and keeps every object that closed, so truncation
+    costs the last KP instead of all of them.
+
+    Best-effort by construction: any parse trouble yields `[]` and the caller
+    falls back to the existing failure path.
+    """
+    text = str(exc)
+    marker = '"knowledge_points"'
+    start = text.find(marker)
+    if start == -1:
+        return []
+    open_bracket = text.find("[", start)
+    if open_bracket == -1:
+        return []
+
+    out: list[dict] = []
+    depth = 0
+    in_str = False
+    escaped = False
+    obj_start = -1
+    for i in range(open_bracket + 1, len(text)):
+        ch = text[i]
+        if in_str:
+            # Order matters: a backslash escapes the NEXT char, so check the
+            # escape flag before treating a quote as a terminator.
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            if depth == 0:
+                obj_start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and obj_start != -1:
+                try:
+                    kp = json.loads(text[obj_start:i + 1])
+                except (json.JSONDecodeError, ValueError):
+                    break
+                # A KP without a claim is not usable knowledge, and the KB
+                # digest renders it as a blank line.
+                if isinstance(kp, dict) and kp.get("topic") and kp.get("claim"):
+                    out.append(kp)
+                obj_start = -1
+        elif ch == "]" and depth == 0:
+            break
+    return out
+
 # How many existing topic slugs to show the distiller so it can reuse one
 # instead of forking a near-identical name. Slugs are short (~25 chars), so 40
 # costs ~1KB of prompt — cheap next to the 8-18KB SpecialistOutput payload.
@@ -291,17 +359,27 @@ async def _distill_and_persist(
             int((time.perf_counter() - t0) * 1000),
         )
     except Exception as exc:  # noqa: BLE001 - distillation is best-effort
+        # A truncated response is the DOMINANT distiller failure (26 of 38 in
+        # the logs), and it used to cost the whole turn's knowledge. Salvage the
+        # complete knowledge points out of the cut-off JSON before giving up —
+        # losing the last KP is a far smaller loss than losing all of them.
+        salvaged = _salvage_truncated_kps(exc)
         if logger is not None:
             logger.log("distiller_failed", {
                 "specialist": name,
                 "error_type": type(exc).__name__,
                 "error_message": str(exc)[:500],
+                "salvaged_kps": len(salvaged),
             })
-        timer.summary(outcome="failed", error_type=type(exc).__name__)
-        return 0
-
-    out = getattr(result, "final_output", None)
-    new_kps = getattr(out, "knowledge_points", None) or []
+        if not salvaged:
+            timer.summary(outcome="failed", error_type=type(exc).__name__)
+            return 0
+        timer.record("distiller_runner", int((time.perf_counter() - t0) * 1000))
+        result = None
+        new_kps = salvaged
+    else:
+        out = getattr(result, "final_output", None)
+        new_kps = getattr(out, "knowledge_points", None) or []
     if not isinstance(new_kps, list):
         timer.summary(outcome="no_kps", n_added=0)
         return 0

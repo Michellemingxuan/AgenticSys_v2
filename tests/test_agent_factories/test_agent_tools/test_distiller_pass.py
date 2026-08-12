@@ -74,3 +74,58 @@ def test_distill_and_persist_skips_report_agent():
     # The skip is observable in the JSONL so perf regressions are auditable.
     assert any(e == "distiller_skipped" and p.get("specialist") == "report_agent"
                for e, p in logged_events)
+
+
+# ── a truncated distiller response must cost one KP, not all of them ────────
+
+
+def test_salvage_recovers_the_complete_kps_before_the_cut():
+    """The dominant distiller failure (26 of 38 logged): the skill asks for
+    every row of every series AND a key per period even where the value is
+    null, so a few KPs run past the output budget and the JSON stops
+    mid-array. `Invalid JSON when parsing {…` used to drop the whole turn's
+    knowledge; the objects that closed are perfectly good."""
+    from agent_factories.agent_tools.distiller_pass import _salvage_truncated_kps
+
+    msg = ('Invalid JSON when parsing {"knowledge_points":['
+           '{"topic":"fico_trajectory","claim":"FICO stable 745-821.",'
+           '"numbers":[{"period":"2023-07","value":null}]},'
+           '{"topic":"ln_score","claim":"LN score fell to 612.","numbers":[]},'
+           '{"topic":"delinq","claim":"Cut off mid')
+    kps = _salvage_truncated_kps(Exception(msg))
+
+    assert [k["topic"] for k in kps] == ["fico_trajectory", "ln_score"]
+    assert kps[0]["numbers"][0]["period"] == "2023-07"
+
+
+def test_salvage_ignores_a_kp_missing_its_claim():
+    """A KP can close syntactically and still be unusable — the KB digest
+    renders a claimless point as a blank line."""
+    from agent_factories.agent_tools.distiller_pass import _salvage_truncated_kps
+
+    msg = ('Invalid JSON when parsing {"knowledge_points":['
+           '{"topic":"only_a_topic"},'
+           '{"topic":"good","claim":"Real claim."},')
+    assert [k["topic"] for k in _salvage_truncated_kps(Exception(msg))] == ["good"]
+
+
+def test_salvage_is_not_confused_by_braces_inside_strings():
+    """A claim quoting JSON-ish text must not close an object early."""
+    from agent_factories.agent_tools.distiller_pass import _salvage_truncated_kps
+
+    msg = ('Invalid JSON when parsing {"knowledge_points":['
+           '{"topic":"t1","claim":"Payload was {\\"a\\": 1} and it failed."},'
+           '{"topic":"t2","claim":"Second.","numbers":[]},'
+           '{"topic":"t3","claim":"trunc')
+    assert [k["topic"] for k in _salvage_truncated_kps(Exception(msg))] == ["t1", "t2"]
+
+
+def test_salvage_returns_empty_when_there_is_nothing_to_recover():
+    """Timeouts, rate limits and a cut that lands before the first complete KP
+    all fall through to the existing failure path."""
+    from agent_factories.agent_tools.distiller_pass import _salvage_truncated_kps
+
+    assert _salvage_truncated_kps(TimeoutError("timed out")) == []
+    assert _salvage_truncated_kps(Exception("Invalid JSON when parsing {")) == []
+    assert _salvage_truncated_kps(Exception(
+        'Invalid JSON when parsing {"knowledge_points":[{"topic":"cut')) == []

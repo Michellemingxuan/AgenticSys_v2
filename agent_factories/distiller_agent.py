@@ -19,6 +19,7 @@ inline:
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from agents import Agent, AgentOutputSchema, ModelSettings
@@ -52,5 +53,13 @@ def build_distiller_agent(model) -> Agent:
         tools=[],
         output_type=AgentOutputSchema(DistillerOutput, strict_json_schema=False),
         model=model,
-        model_settings=ModelSettings(max_tokens=1200),
+        # The skill asks for EVERY row of every series (H1, "no abridging") and
+        # for a key per period even where the value is null, since a post-fill
+        # supplies the numbers. A 30-month series is ~450 tokens of skeleton, so
+        # two or three KPs ran past 1200 and the JSON stopped mid-array —
+        # 26 of 38 logged distiller failures were exactly that truncation.
+        # Budget must fit what the skill demands; `_salvage_truncated_kps`
+        # covers the tail that still overflows.
+        model_settings=ModelSettings(max_tokens=int(
+            os.environ.get("DISTILLER_MAX_TOKENS", "2400"))),
     )
