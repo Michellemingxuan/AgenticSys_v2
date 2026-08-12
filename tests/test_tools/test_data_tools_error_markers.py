@@ -15,7 +15,18 @@ from agent_factories.agent_tools.grounding import classify_tool_output
 _SRC = pathlib.Path(__file__).resolve().parents[2] / "tools" / "data_tools.py"
 
 # Marker substrings that identify a string literal as an error message.
-_ERROR_MARKERS = ("Data unavailable", "no parseable", "did NOT run")
+#
+# "COLUMN NOT FOUND" was missing here, so the literal `classify_tool_output`
+# maps to `column_not_found` — the one that decides whether a specialist
+# retries a misspelled column or abandons a real variable — was never checked
+# by the drift guard at all. Adding it is not a no-op: it is the whole
+# mistake-vs-data-gap split.
+#
+# "DATA GAP:" is deliberately NOT a marker. It denotes the tool WORKING and
+# classifies to None by design; this guard asserts that error literals stay
+# classified as errors, so listing it would invert its meaning.
+_ERROR_MARKERS = ("Data unavailable", "no parseable", "did NOT run",
+                  "COLUMN NOT FOUND")
 
 # Map the private impl function that owns a literal to the public tool name the
 # specialist sees. classify_tool_output keys the get_table_schema carve-out on
@@ -47,6 +58,20 @@ _SHARED_HELPERS = {
     "_unparseable_specs_directive": [
         "batch_query_table", "batch_aggregate", "batch_summarize_trend",
     ],
+    # `_table_not_found` is the single home of the "table not found for current
+    # case" literal. It used to be inlined in each impl, so a walk over `_*_impl`
+    # functions found it nine times over; folding it into one helper made it
+    # invisible here and QUIETLY DROPPED SEVEN PARAMETRIZATIONS — the collected
+    # count fell 1137 -> 1130 while the suite still reported all green. Register
+    # every tool it serves so the coverage moves with it.
+    "_table_not_found": [
+        "get_table_schema", "query_table", "join_table", "transaction_detail",
+        "aggregate_column", "summarize_trend", "summarize_by_group",
+        "sequence_join", "score_driver_values",
+    ],
+    # Same story: the COLUMN NOT FOUND literal now lives in one helper shared
+    # by aggregate_column (scalar, share and ratio paths) and summarize_trend.
+    "_column_not_found": ["aggregate_column", "summarize_trend"],
 }
 
 
@@ -100,10 +125,21 @@ def _collect():
             if tool is None:
                 continue
             tools = [tool]
-        for node in _iter_nodes_no_joinedstr_descent(fn):
-            text = _render(node)
-            if text and any(m in text for m in _ERROR_MARKERS):
-                found.extend((t, text) for t in tools)
+        # Skip the DOCSTRING. It is not a string the tool ever emits, and a
+        # helper whose docstring explains the marker it owns ("`COLUMN NOT
+        # FOUND` when the name is findable…") would otherwise be collected as
+        # a literal and fail for never being classified — the prose is about
+        # the message, not the message.
+        body = fn.body
+        if (body and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)):
+            body = body[1:]
+        for stmt in body:
+            for node in _iter_nodes_no_joinedstr_descent(stmt):
+                text = _render(node)
+                if text and any(m in text for m in _ERROR_MARKERS):
+                    found.extend((t, text) for t in tools)
     return found
 
 

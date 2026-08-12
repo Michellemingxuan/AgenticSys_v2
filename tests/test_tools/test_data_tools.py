@@ -1658,21 +1658,28 @@ def test_search_columns_finds_a_variable_by_its_adl_code():
     assert "oop_interaction" in out
 
 
-def test_a_name_that_is_not_a_column_says_NOT_FOUND_not_data_gap():
-    """The dangerous confusion: an unresolved name used to fall into the DATA
-    GAP branch, which says "do NOT retry" — abandoning a real variable over a
-    spelling miss. A missing column is a correctable mistake."""
+def test_a_name_nothing_resembles_is_a_data_gap_not_a_retry():
+    """Superseded rule. A name that resolves to nothing used to be reported as
+    a correctable mistake so a SPELLING MISS never abandoned a real variable —
+    but `NOSUCHVAR` is not a spelling miss: no column in this case resembles
+    it, so searching cannot find it and no retry can succeed. Calling that a
+    mistake sent the specialist round a loop with no exit.
+
+    The split is now by findability, not by category: a near-miss of a column
+    that EXISTS stays a mistake (see the SBFE_Scoree tests), and a name with no
+    candidate at all is the shape of the data. Crucially the message no longer
+    claims the column is EMPTY — the old data-gap wording's real sin."""
     from agent_factories.agent_tools.grounding import classify_tool_output
 
     _real_case_tools()
     out = data_tools._summarize_trend_impl(
         table_name="model_scores", value_column="NOSUCHVAR",
         time_column="trans_month", op="max")
-    assert "COLUMN NOT FOUND" in out
-    assert "DATA GAP" not in out
-    assert "search_columns" in out
-    # And it must be FLAGGED for retry, unlike a genuine data gap.
-    assert classify_tool_output("summarize_trend", out) == "column_not_found"
+    assert "DATA GAP" in out
+    assert "EMPTY" not in out          # it is absent, not blank
+    assert "no retry can succeed" in out
+    # Benign: the tool worked, so this must not quarantine the run.
+    assert classify_tool_output("summarize_trend", out) is None
 
 
 @pytest.mark.parametrize("table,min_checked", [
@@ -1725,14 +1732,18 @@ def test_exposure_alias_resolves_at_BOTH_grains():
             ["one_expsr_usd_currency_amt"]) == "one_expsr_usd_currency_amt"
 
 
-def test_an_absent_column_is_reported_even_for_a_valid_alias():
-    """`CUMNTHS2` is a real alias whose column is not in this case's export —
-    that must read as COLUMN NOT FOUND (correctable), never as a data gap."""
+def test_a_valid_alias_absent_from_this_export_is_a_data_gap():
+    """`CUMNTHS2` is a real alias whose column is not in this case's export.
+    Being declared in the catalog does not make it retrievable HERE — nothing
+    in this case's data resembles it, so it is a genuine gap in the export,
+    not a name to keep hunting for. (It must still not be called EMPTY: the
+    column is absent, not blank.)"""
     _real_case_tools()
     out = data_tools._summarize_trend_impl(
         table_name="model_scores", value_column="CUMNTHS2",
         time_column="trans_month", op="max")
-    assert "COLUMN NOT FOUND" in out and "DATA GAP" not in out
+    assert "DATA GAP" in out
+    assert "EMPTY" not in out
 
 
 # ── breach EPISODES, not a flat period list ─────────────────────────────────
@@ -1921,13 +1932,21 @@ def test_zero_denominator_is_reported_not_a_crash():
     assert "undefined" in out and "sums to 0" in out
 
 
-def test_derived_ops_report_an_unknown_column_as_NOT_FOUND():
+def test_derived_ops_report_an_unknown_column_as_a_data_gap():
+    """`nope` resembles nothing in `spends`, so share/ratio report a gap rather
+    than a name to chase — same rule as the scalar ops. The denominator case
+    must say WHICH side was missing, or the specialist re-checks the numerator."""
     _spend_gw()
-    for kwargs in ({"column": "nope", "op": "share", "filter_column": "m",
-                    "filter_value": "A"},
-                   {"column": "amt", "op": "ratio", "denominator_column": "nope"}):
-        out = data_tools._aggregate_column_impl(table_name="spends", **kwargs)
-        assert "COLUMN NOT FOUND" in out and "search_columns" in out
+    out = data_tools._aggregate_column_impl(
+        table_name="spends", column="nope", op="share",
+        filter_column="m", filter_value="A")
+    assert "DATA GAP" in out and "no retry can succeed" in out
+
+    out = data_tools._aggregate_column_impl(
+        table_name="spends", column="amt", op="ratio",
+        denominator_column="nope")
+    assert "DATA GAP" in out
+    assert "denominator" in out
 
 
 def test_existing_ops_are_unchanged():
@@ -2554,13 +2573,20 @@ def test_aggregate_empty_column_is_a_data_gap_not_a_name_problem(monkeypatch, op
 
 
 @pytest.mark.parametrize("op", ["mean", "max", "sum"])
-def test_aggregate_absent_column_is_a_mistake_not_a_data_gap(monkeypatch, op):
+def test_a_one_character_typo_resolves_and_answers(monkeypatch, op):
+    """`SBFE_Scoree` is one character off a column sitting in these very rows.
+    Reporting COLUMN NOT FOUND made the specialist notice, re-plan and re-issue
+    to reach a name the resolver could already see — so the resolver now TRIES
+    it, and the caller gets the true answer for that column (here: it is
+    blank, so an honest EMPTY data gap rather than a name error).
+
+    The resolution is logged (`column_name_autocorrected`) and the real column
+    name appears in the output, so nothing is silently misattributed."""
     out = _agg(monkeypatch, column="SBFE_Scoree", op=op)
 
-    assert "COLUMN NOT FOUND" in out
-    assert "search_columns" in out
-    assert "Do NOT report this as a data gap" in out
-    assert "DATA GAP:" not in out
+    assert "SBFE Score" in out          # resolved to the real column
+    assert "EMPTY for this case" in out  # and answered honestly
+    assert "COLUMN NOT FOUND" not in out
 
 
 def test_count_on_an_all_blank_column_says_it_counted_rows(monkeypatch):
@@ -2678,3 +2704,326 @@ def test_three_letter_acronyms_resolve_exactly(_concept_env, monkeypatch):
     for q in ("did the customer not pay", "one of the cards", "the top merchants",
               "sum of spend", "any large spending", "who won the super bowl"):
         assert cols(q) == [], q
+
+
+# ── a table the SKILL names but the CASE lacks ──────────────────────────────
+#
+# Case 11854808010 ships no transaction-level CSV, while `modeling`'s skill body
+# names `model_scores_transaction` a dozen times. The inventory merely OMITTED
+# it, which reads to a model as "not shown here" rather than "absent": the
+# specialist fired six `summarize_by_group` calls at it, got six "table not
+# found", spent its whole retry attempt firing the same six again, and published
+# "No access to transaction-level modeling data … precludes analysis of linked
+# or recurrent high-risk events" — a true statement that reads like a broken
+# system rather than a case whose data stops at month grain.
+
+_MODELING_HINTS = ["model_scores", "score_drivers",
+                   "model_scores_transaction", "score_drivers_transaction"]
+_CASE_WITHOUT_TRANSACTION_TABLES = "11854808010"
+
+
+def _case_tools(case_id):
+    gw = LocalDataGateway.from_case_folders("data_tables/real")
+    gw.set_case(case_id)
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+
+
+def test_inventory_names_the_skill_tables_this_case_does_not_have():
+    _case_tools(_CASE_WITHOUT_TRANSACTION_TABLES)
+    inv = data_tools.build_column_inventory(_MODELING_HINTS)
+    assert "NOT IN THIS CASE:" in inv
+    assert "model_scores_transaction" in inv
+    assert "score_drivers_transaction" in inv
+
+
+def test_inventory_tells_the_specialist_not_to_retry_an_absent_table():
+    """Silence produced six calls then six retries. The line has to say the
+    absence is permanent AND that it is not a system fault to report."""
+    _case_tools(_CASE_WITHOUT_TRANSACTION_TABLES)
+    inv = data_tools.build_column_inventory(_MODELING_HINTS)
+    section = inv.split("NOT IN THIS CASE:")[1]
+    assert "do not retry" in section.lower()
+    assert "shape of this case's data" in section.lower()
+
+
+def test_inventory_has_no_absent_section_when_the_case_has_everything():
+    """The line must not appear as boilerplate — only when something is
+    genuinely missing, or it stops carrying information."""
+    _case_tools("366132845011")          # has both transaction tables
+    inv = data_tools.build_column_inventory(_MODELING_HINTS)
+    assert "NOT IN THIS CASE" not in inv
+
+
+def test_inventory_shows_the_canonical_name_beside_the_real_one():
+    """The skill says `model_scores_transaction`; the CSV is
+    `modelling_data_transaction`. Showing only the real name left the
+    specialist unable to confirm the table it was told to use is the one
+    present here."""
+    _case_tools("366132845011")
+    inv = data_tools.build_column_inventory(_MODELING_HINTS)
+    assert "modelling_data_transaction (= model_scores_transaction)" in inv
+    assert "modelling_data (= model_scores)" in inv
+
+
+def test_absent_table_error_names_what_the_case_does_have():
+    """A bare 'not found' is a dead end the model reads as transient. Listing
+    the real tables turns each failure into a redirect."""
+    _case_tools(_CASE_WITHOUT_TRANSACTION_TABLES)
+    out = data_tools._summarize_by_group_impl(
+        table_name="model_scores_transaction", value_column="tot_struct_risk_score",
+        group_column="trans_dt", op="count")
+    # A catalog table this case lacks is the SHAPE of the case's data, so it
+    # reports as a gap (and stays benign to grounding) while still naming what
+    # IS here. The raw "not found" text is retained so anything matching on it
+    # keeps working.
+    assert "DATA GAP" in out
+    assert "not found for current case" in out
+    assert "modelling_data" in out
+    assert "no retry" in out.lower()
+
+
+# ── mistake vs data gap: findability decides ────────────────────────────────
+
+
+def test_a_table_nothing_resembles_is_a_data_gap():
+    """"income" exists in no catalog and no case. Reported as a retryable
+    failure it scored an honest answer as a broken run; there is no name to
+    correct and no rephrasing that finds it."""
+    from agent_factories.agent_tools.grounding import classify_tool_output
+    _case_tools(_CASE_WITHOUT_TRANSACTION_TABLES)
+
+    out = data_tools._table_not_found("income")
+    assert "DATA GAP" in out
+    assert "no retry" in out.lower()
+    assert classify_tool_output("query_table", out) is None   # benign
+
+
+def test_a_near_miss_table_name_stays_a_correctable_mistake():
+    """A typo is not a gap — the specialist should re-issue, and the message
+    names the table it probably meant."""
+    from agent_factories.agent_tools.grounding import classify_tool_output
+    _case_tools(_CASE_WITHOUT_TRANSACTION_TABLES)
+
+    out = data_tools._table_not_found("modelling_dat")
+    assert "DATA GAP" not in out
+    assert "modelling_data" in out
+    assert classify_tool_output("query_table", out) == "table_not_found"
+
+
+def test_a_column_typo_resolves_instead_of_erroring():
+    """A unique near-miss is corrected in the resolver, so the not-found path
+    is never reached for it."""
+    _case_tools(_CASE_WITHOUT_TRANSACTION_TABLES)
+    rows = data_tools._gw().query("modelling_data") or []
+
+    assert data_tools._resolve_real_column(
+        rows, "oop_interactio", "modelling_data") == "oop_interaction_max"
+
+
+def test_an_ambiguous_near_miss_refuses_and_lists_the_candidates():
+    """Auto-correction stops where it stops being safe. With two columns an
+    equally good match, binding to one would silently answer about a different
+    variable — so the resolver declines and the message names both."""
+    rows = [{"score_a": 1, "score_b": 2}]
+
+    assert data_tools._resolve_real_column(rows, "score_", "T") == "score_"
+    out = data_tools._column_not_found("score_", "T", row_keys=rows[0])
+    assert "COLUMN NOT FOUND" in out
+    assert "score_a" in out and "score_b" in out
+
+
+def test_a_column_nothing_resembles_is_a_data_gap():
+    from agent_factories.agent_tools.grounding import classify_tool_output
+    _case_tools(_CASE_WITHOUT_TRANSACTION_TABLES)
+    rows = data_tools._gw().query("modelling_data") or []
+
+    out = data_tools._column_not_found("crypto_wallet_balance", "modelling_data",
+                                       row_keys=rows[0] if rows else None)
+    assert "DATA GAP" in out
+    assert "no retry can succeed" in out
+    assert classify_tool_output("aggregate_column", out) is None
+
+
+def test_autocorrect_will_not_swallow_a_concept_word():
+    """`oop` is a CONCEPT, not a truncated column name. Plain containment would
+    bind it to `oop_interaction_max` — the first column that happens to contain
+    it — and answer a question the reviewer never asked. The length ratio is
+    what separates a typo (13/14) from an expansion (3/19)."""
+    _case_tools(_CASE_WITHOUT_TRANSACTION_TABLES)
+    rows = data_tools._gw().query("modelling_data") or []
+
+    assert data_tools._resolve_real_column(rows, "oop", "modelling_data") == "oop"
+
+
+def test_autocorrect_resolves_a_near_miss_table_name():
+    _case_tools(_CASE_WITHOUT_TRANSACTION_TABLES)
+    assert data_tools._resolve_real_table("modelling_dat") == "modelling_data"
+    # …and leaves a name nothing resembles alone, so it still reports a gap.
+    assert data_tools._resolve_real_table("income") == "income"
+
+
+def test_canonical_transaction_table_resolves_through_its_alias():
+    """`model_scores_transaction` is the name every skill body uses; the CSV is
+    `modelling_data_transaction`. The catalog alias must carry it across on a
+    case that HAS the table — and must not invent it on one that does not."""
+    _case_tools("366132845011")
+    assert (data_tools._resolve_real_table("model_scores_transaction")
+            == "modelling_data_transaction")
+    assert (data_tools._resolve_real_table("score_drivers_transaction")
+            == "score_drivers_data_transaction")
+
+    _case_tools(_CASE_WITHOUT_TRANSACTION_TABLES)
+    assert (data_tools._resolve_real_table("model_scores_transaction")
+            == "model_scores_transaction")     # unresolved -> reported as a gap
+
+
+# ── what "resemble" means, exactly ──────────────────────────────────────────
+
+
+@pytest.mark.parametrize("typo,expected", [
+    ("modelling_dat",   "modelling_data"),   # dropped character
+    ("modelling_dataa", "modelling_data"),   # extra character
+    ("modelling_dtaa",  "modelling_data"),   # TRANSPOSED
+    ("modelling_dara",  "modelling_data"),   # SUBSTITUTED
+    ("modeling_data",   "modelling_data"),   # one 'l'
+    ("Modelling_Data",  "modelling_data"),   # case only
+    ("modellingdata",   "modelling_data"),   # punctuation only
+])
+def test_near_match_accepts_every_single_character_slip(typo, expected):
+    """Containment alone caught insertions and deletions but broke on a middle
+    character changing, so `modeling_data` missed `modelling_data` — a slip this
+    system actively invites, since the SPECIALIST is `modeling` and the table
+    `modelling`. One edit of Damerau-Levenshtein closes it."""
+    assert data_tools._unique_near_match(typo, ["modelling_data", "spends_data"]) == expected
+
+
+@pytest.mark.parametrize("miss", ["income", "oop", "payments", "crypto_balance"])
+def test_near_match_rejects_names_that_are_not_slips(miss):
+    """A gap must stay a gap. `oop` is a CONCEPT, not a truncation, and the
+    min-length + ratio guards keep it from being swallowed."""
+    assert data_tools._unique_near_match(
+        miss, ["modelling_data", "oop_interaction_max"]) is None
+
+
+def test_near_match_refuses_when_two_candidates_are_equally_close():
+    """The guard that makes one-edit matching safe: siblings one edit apart
+    would otherwise bind to whichever came first."""
+    assert data_tools._unique_near_match("score_c", ["score_a", "score_b"]) is None
+
+
+def test_edit_distance_counts_a_transposition_as_one_edit():
+    assert data_tools._edit_distance_within("abcd", "abdc", 1)      # swap
+    assert data_tools._edit_distance_within("abcd", "abd", 1)       # delete
+    assert not data_tools._edit_distance_within("abcd", "axyd", 1)  # two subs
+    assert not data_tools._edit_distance_within("abcd", "abcdef", 1)
+
+
+def test_a_concept_word_suggests_the_column_without_binding_to_it():
+    """`oop` vs `oop_interaction_max` — the boundary between the two tiers.
+
+    BINDING is strict: `oop` is 3 characters (below the floor) and 18% of the
+    column name (below the 70% ratio), so it is not auto-resolved. Silently
+    answering "max(oop_interaction_max)" for a question about the OOP concept
+    would attribute a specific variable's number to a broader idea.
+
+    SUGGESTING is loose, and that is what keeps `oop` from becoming a false
+    data gap: the message names `oop_interaction_max`, so this is a correctable
+    MISTAKE, not "this case has no such measure".
+
+    `oop_interaction` DOES bind — 82% of the column name, an unambiguous
+    truncation of one real column.
+    """
+    _case_tools(_CASE_WITHOUT_TRANSACTION_TABLES)
+
+    concept = data_tools._aggregate_column_impl(
+        table_name="model_scores", column="oop", op="max")
+    assert "COLUMN NOT FOUND" in concept
+    assert "DATA GAP" not in concept              # not a gap — it IS findable
+    assert "oop_interaction_max" in concept       # and here it is
+
+    truncation = data_tools._aggregate_column_impl(
+        table_name="model_scores", column="oop_interaction", op="max")
+    assert "max(oop_interaction_max)" in truncation
+    assert "COLUMN NOT FOUND" not in truncation
+
+
+# ── "no parseable values" was blaming the parser for three different things ──
+
+
+def test_an_empty_date_window_is_not_reported_as_a_parse_failure():
+    """EVERY `no parseable` message in the logs carries "0 row(s) had
+    unrecognized <col> format" — the parser never failed once. The rows simply
+    fell outside the requested window, and the message read as a broken parser
+    or unusable data. Naming the real span turns a hunt into one call."""
+    _case_tools(_CASE_WITHOUT_TRANSACTION_TABLES)
+    out = data_tools._summarize_trend_impl(
+        table_name="bureau", value_column="FICO Score", time_column="month",
+        period="month", op="max",
+        start_date="2030-01-01", end_date="2030-12-31")
+
+    assert "not a parsing problem" in out
+    assert "no parseable" not in out
+    assert "2023-07-01..2025-07-01" in out        # the span it DOES cover
+
+
+def test_the_three_empty_trend_causes_stay_distinct():
+    """Window / empty-column / absent-column each need a different action, and
+    collapsing any two sends the specialist after the wrong fix."""
+    _case_tools(_CASE_WITHOUT_TRANSACTION_TABLES)
+    trend = data_tools._summarize_trend_impl
+
+    window = trend(table_name="bureau", value_column="FICO Score",
+                   time_column="month", period="month", op="max",
+                   start_date="2030-01-01", end_date="2030-12-31")
+    empty = trend(table_name="bureau", value_column="CSS Score",
+                  time_column="month", period="month", op="max")
+    absent = trend(table_name="bureau", value_column="nonesuch_measure",
+                   time_column="month", period="month", op="max")
+
+    assert "starts AFTER the last row" in window and "DATA GAP" not in window
+    assert "EMPTY for this case" in empty and "DATA GAP" in empty
+    assert "DATA GAP" in absent and "EMPTY" not in absent
+
+
+@pytest.mark.parametrize("start,end,marker", [
+    ("2026-02-01", "2026-08-12", "starts AFTER the last row"),
+    ("2019-01-01", "2019-12-31", "ends BEFORE the first row"),
+    ("2024-01-05", "2024-01-20", "sparse"),
+])
+def test_an_empty_window_says_where_it_sits(start, end, marker):
+    """An empty window has two readings — the reviewer asked about a period
+    this case does not cover (a finding), or the specialist picked the window
+    itself (a mistake). The counts cannot tell them apart; WHERE the window
+    sits can. A window after the last row is the signature of a relative
+    default computed from today against an export that stops earlier."""
+    _case_tools(_CASE_WITHOUT_TRANSACTION_TABLES)
+    out = data_tools._summarize_trend_impl(
+        table_name="bureau", value_column="FICO Score", time_column="month",
+        period="month", op="max", start_date=start, end_date=end)
+
+    assert marker in out
+    # And it must state the rule for choosing, not just offer both options.
+    assert "if the REVIEWER named this period" in out
+    assert "If YOU picked the window" in out
+
+
+def test_a_gap_inside_the_covered_span_is_reported_as_a_finding():
+    """Distinct from a coverage limit: the case has data either side, so the
+    missing periods are a fact about the case worth reporting — not a window
+    to widen until something appears."""
+    from datalayer.gateway import LocalDataGateway
+    rows = ([{"month": f"2024-{m:02d}-01", "v": 10 + m} for m in (1, 2, 3)]
+            + [{"month": f"2024-{m:02d}-01", "v": 10 + m} for m in (9, 10, 11)])
+    gw = LocalDataGateway(case_data={"C": {"t": rows}})
+    gw.set_case("C")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+
+    out = data_tools._summarize_trend_impl(
+        table_name="t", value_column="v", time_column="month",
+        period="month", op="max",
+        start_date="2024-05-01", end_date="2024-07-31")
+
+    assert "sparse" in out
+    assert "AFTER the last row" not in out and "BEFORE the first row" not in out
+    # Same decision rule as every other empty window: who chose it decides.
+    assert "if the REVIEWER named this period" in out

@@ -747,6 +747,208 @@ def render_catalog_tree(
     return "\n".join(lines)
 
 
+def _table_not_found(table_name: str) -> str:
+    """The one message every tool returns for a table this case lacks.
+
+    Names what IS here. The bare "not found for current case" was a dead end:
+    it did not say the absence was permanent, so a specialist read it as a
+    transient failure and re-issued the same call — case 11854808010's
+    `modeling` fired six `summarize_by_group` calls at `model_scores_transaction`,
+    got six of these, then spent its entire retry attempt firing the same six
+    again. Listing the real tables turns each failure into a redirect.
+    """
+    base = f"Data unavailable: table '{table_name}' not found for current case."
+    try:
+        have = sorted(_gw().list_tables()) if _gw() is not None else []
+    except Exception:  # noqa: BLE001 — an error message must not raise
+        have = []
+    if not have:
+        return base
+
+    # MISTAKE vs DATA GAP. If the requested name is a near-miss of a table the
+    # case HAS, the specialist mistyped and a retry with the right name works —
+    # that stays a flagged, retryable error. If nothing here resembles it, the
+    # table is genuinely outside this case's data ("income", or a
+    # transaction-level table on a case that only goes to month grain) and no
+    # retry can ever succeed. That is a DATA GAP: the `DATA GAP:` marker makes
+    # `grounding.classify_tool_output` read it as the tool WORKING, so an
+    # honest "this case has no such table" stops being scored as a broken run.
+    near = [t for t in have if _normalize(t) == _normalize(table_name)]
+    if not near:
+        n = _normalize(table_name)
+        near = [t for t in have
+                if n and (n in _normalize(t) or _normalize(t) in n)]
+    if near:
+        return (f"{base} Did you mean {', '.join(repr(t) for t in near)}? "
+                f"This case has: {', '.join(have)}. Re-issue with the correct "
+                f"name.")
+    return (f"DATA GAP: table {table_name!r} is not part of this case's data. "
+            f"This case has only: {', '.join(have)}. Nothing resembling "
+            f"{table_name!r} exists here, so no retry and no rephrasing will "
+            f"find it — the tool worked. Record it in `data_gaps` and answer "
+            f"from the tables listed. ({base})")
+
+
+# A near-match must be a NEAR one. Containment alone would bind `oop` to
+# `oop_interaction_max` — a concept word swallowed by the first column that
+# happens to contain it. Requiring the shorter string to be most of the longer
+# keeps genuine typos (one character added, dropped or mistyped: 12/13, 9/10)
+# and rejects expansions (3/17).
+_NEAR_MATCH_MIN_RATIO = 0.7
+_NEAR_MATCH_MIN_CHARS = 4
+
+
+def _edit_distance_within(a: str, b: str, limit: int = 1) -> bool:
+    """True when `a` and `b` are at most `limit` edits apart.
+
+    Damerau-Levenshtein: insertion, deletion, SUBSTITUTION and TRANSPOSITION.
+    Containment alone misses the latter two — it breaks the moment a character
+    in the MIDDLE differs — so `modeling_data` did not match `modelling_data`
+    even though the specialist is named `modeling` and the table `modelling`,
+    which is exactly the slip this system invites.
+
+    Bails out early on a length gap wider than the limit, so the O(n*m) table
+    is only built for genuinely close pairs.
+    """
+    if abs(len(a) - len(b)) > limit:
+        return False
+    if a == b:
+        return True
+    prev2: list[int] = []
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i] + [0] * len(b)
+        for j, cb in enumerate(b, 1):
+            cur[j] = min(prev[j] + 1,          # deletion
+                         cur[j - 1] + 1,       # insertion
+                         prev[j - 1] + (ca != cb))   # substitution
+            if (i > 1 and j > 1 and ca == b[j - 2] and a[i - 2] == cb):
+                cur[j] = min(cur[j], prev2[j - 2] + 1)   # transposition
+        if min(cur) > limit:
+            return False
+        prev2, prev = prev, cur
+    return prev[len(b)] <= limit
+
+
+def _unique_near_match(requested: str, candidates) -> str | None:
+    """The one candidate `requested` is a near-miss of, or None.
+
+    "Near-miss" is two tests, either of which qualifies:
+
+      * CONTAINMENT — one normalized name contains the other, and the shorter
+        is at least `_NEAR_MATCH_MIN_RATIO` of the longer. Catches truncations
+        and extensions of several characters (`model_scores_trans`).
+      * ONE EDIT — Damerau-Levenshtein distance <= 1. Catches the substitutions
+        and transpositions containment cannot see (`modeling_data`,
+        `modelling_dtaa`), without opening the door that a larger budget would.
+
+    None on 0 matches (genuinely absent) AND on 2+ (ambiguous) — binding to
+    one of several siblings would silently query a different variable than the
+    caller asked for, which is worse than an honest miss. The ambiguity guard
+    is what makes the edit-distance test safe: `score_a` / `score_b` are both
+    one edit away, so the resolver declines instead of picking.
+    """
+    target = _normalize(requested)
+    if not target or len(target) < _NEAR_MATCH_MIN_CHARS:
+        return None
+    hits = []
+    for cand in candidates or []:
+        if not isinstance(cand, str):
+            continue
+        c = _normalize(cand)
+        if not c or len(c) < _NEAR_MATCH_MIN_CHARS:
+            continue
+        contained = (c == target or c in target or target in c) and (
+            min(len(c), len(target)) / max(len(c), len(target))
+            >= _NEAR_MATCH_MIN_RATIO)
+        if contained or _edit_distance_within(c, target, 1):
+            hits.append(cand)
+    return hits[0] if len(hits) == 1 else None
+
+
+def _near_column_names(column: str, row_keys, limit: int = 5) -> list[str]:
+    """Columns PRESENT in the rows at hand that `column` plausibly meant.
+
+    Checked before the search index because the rows are ground truth for the
+    call being made, and because the index is keyed on the live gateway — a
+    caller working on rows it supplied directly (or a monkeypatched fixture)
+    has no index entry at all. `SBFE_Scoree` must find `SBFE Score` here, or a
+    one-character typo gets reported as a missing measure.
+    """
+    try:
+        target = _normalize(column)
+        if not target:
+            return []
+        hits = []
+        for key in row_keys or []:
+            if not isinstance(key, str):
+                continue
+            k = _normalize(key)
+            if not k:
+                continue
+            if k == target or k in target or target in k:
+                hits.append(key)
+        return hits[:limit]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _column_search_candidates(column: str, real_table: str = "",
+                              limit: int = 5) -> list[str]:
+    """Columns this case HAS that a search for `column` would surface.
+
+    The bridge between "you mistyped it" and "this case does not have it".
+    `COLUMN NOT FOUND` always told the specialist to run `search_columns` and
+    re-issue — sound advice when something IS findable, but when the concept is
+    simply absent from the case it sends the specialist round a loop that
+    cannot terminate, and the honest answer ("this case has no such measure")
+    never gets recorded as a data gap.
+
+    Returns [] when nothing scores, which the callers read as a real gap.
+    Never raises — a diagnostic must not break the call it is diagnosing.
+    """
+    try:
+        if _gw() is None or _cat() is None or _gw().get_case_id() is None:
+            return []
+        entries = _build_search_index(_gw().get_case_id())
+        if real_table:
+            entries = [e for e in entries if e["table"] == real_table]
+        terms = [t for t in _NON_ALNUM.sub(" ", column.lower()).split() if t]
+        query_norm = _normalize(column)
+        scored = [(s, e) for e in entries
+                  if (s := _score_entry(e, terms, query_norm)) > 0]
+        scored.sort(key=lambda se: -se[0])
+        return [e["column"] for _s, e in scored[:limit]]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _column_not_found(column: str, real_table: str, *, prefix: str = "",
+                      row_keys=None) -> str:
+    """`COLUMN NOT FOUND` when the name is findable, `DATA GAP` when it is not.
+
+    Same MISTAKE-vs-SHAPE split as `_table_not_found`. A retryable miss keeps
+    the flagged wording and now NAMES the candidates, so the fix is one call
+    instead of a search round-trip. A column nothing in this case resembles is
+    a data gap: the `DATA GAP:` marker makes grounding treat it as the tool
+    working, and the text tells the specialist to record it rather than hunt.
+    """
+    candidates = (_near_column_names(column, row_keys)
+                  or _column_search_candidates(column, real_table))
+    if candidates:
+        return (f"{prefix}COLUMN NOT FOUND: {column!r} is not a column of "
+                f"{real_table!r} for this case — nothing was measured. "
+                f"Closest columns that DO exist: {', '.join(candidates)}. "
+                f"Re-issue with one of those (ADL/CAS aliases resolve), or "
+                f"call get_table_schema({real_table!r}) for the full list. "
+                f"Do NOT report this as a data gap.")
+    return (f"{prefix}DATA GAP: {column!r} is not a column of {real_table!r} "
+            f"for this case, and nothing in this case's data resembles it — "
+            f"searching will not find it and no retry can succeed. The tool "
+            f"worked; this case simply does not carry that measure. Record it "
+            f"in `data_gaps` and move on.")
+
+
 def _resolve_real_table(requested: str) -> str:
     """Resolve a requested table name to whatever the gateway actually carries.
 
@@ -800,6 +1002,17 @@ def _resolve_real_table(requested: str) -> str:
     for real in real_tables:
         if _normalize(real) == target:
             return real
+
+    # 6. Unique near-miss — TRY IT rather than report it. A one-character slip
+    # ("modelling_dat") used to come back as an error the specialist had to
+    # notice, re-plan and re-issue, costing a round for a name the resolver
+    # could already see. Only when exactly one table is close: two candidates
+    # means silently querying the wrong one, which is worse than the miss.
+    near = _unique_near_match(requested, real_tables)
+    if near is not None:
+        _log_call("table_name_autocorrected",
+                  {"requested": requested, "resolved_to": near})
+        return near
     return requested
 
 
@@ -841,10 +1054,22 @@ def _resolve_real_column(
     matches = [k for k in real_keys if _normalize(k) == target]
     if len(matches) == 1:
         return matches[0]
-    # 0 matches → genuinely missing. 2+ → ambiguous (e.g. score_1 / score_2
-    # both normalize to "score"); refuse rather than silently bind to the
-    # wrong sibling column. Return the literal so the caller gets an honest
-    # zero / missing-column result instead of wrong rows.
+    if len(matches) > 1:
+        # Ambiguous (e.g. score_1 / score_2 both normalize to "score"); refuse
+        # rather than silently bind to the wrong sibling column. Return the
+        # literal so the caller gets an honest missing-column result.
+        return requested
+
+    # Unique near-miss — TRY IT. `SBFE_Scoree` is one character off a column
+    # sitting in these very rows; making the specialist notice the error and
+    # re-issue spends a round to arrive at the name the resolver already had.
+    # Still refuses on 2+ candidates, for the same reason as above.
+    near = _unique_near_match(requested, real_keys)
+    if near is not None:
+        _log_call("column_name_autocorrected",
+                  {"requested": requested, "resolved_to": near,
+                   "table": table_name})
+        return near
     return requested
 
 
@@ -1232,7 +1457,7 @@ def _get_table_schema_impl(table_name: str) -> str:
         rows = _gw().query(real_table) or []
         if not rows:
             return _store(
-                f"Data unavailable: table '{table_name}' not found for current case.",
+                _table_not_found(table_name),
                 extra={"table_name": table_name, "found": False},
             )
         if real_table != table_name:
@@ -1581,11 +1806,17 @@ def build_column_inventory(tables: list[str] | None = None) -> str:
         return ""
 
     wanted: set[str] | None = None
+    # canonical name (what the skill body says) -> real name (what the CSV is
+    # called). Kept so the inventory can print BOTH, and so tables the skill
+    # declares but this case lacks can be named explicitly below.
+    canon_to_real: dict[str, str] = {}
     if tables:
         wanted = set()
         for t in tables:
             wanted.add(t)
-            wanted.add(_resolve_real_table(t))
+            real = _resolve_real_table(t)
+            wanted.add(real)
+            canon_to_real[t] = real
 
     key = (case_id, tuple(sorted(wanted)) if wanted else None)
     if key in _inventory_cache:
@@ -1597,7 +1828,20 @@ def build_column_inventory(tables: list[str] | None = None) -> str:
             continue
         by_table.setdefault(e["table"], []).append(e)
 
-    if not by_table:
+    # Tables the SKILL declares that this case does not carry. Naming them is
+    # the whole point: the skill body talks about `model_scores_transaction`
+    # a dozen times, and an inventory that merely OMITS it reads to the model
+    # as "not shown here" rather than "absent". Observed on case 11854808010,
+    # which has no transaction-level CSV: `modeling` fired six
+    # `summarize_by_group` calls at that table, got six "table not found",
+    # burned its whole retry attempt repeating them, and then published
+    # "No access to transaction-level modeling data … precludes analysis of
+    # linked or recurrent high-risk events" as a data gap — which reads like a
+    # broken system rather than a case whose data simply stops at month grain.
+    absent = sorted(c for c, r in canon_to_real.items()
+                    if c not in by_table and r not in by_table)
+
+    if not by_table and not absent:
         _inventory_cache[key] = ""
         return ""
 
@@ -1615,10 +1859,31 @@ def build_column_inventory(tables: list[str] | None = None) -> str:
         "(units, wire format, row grain), and `search_columns` only when you "
         "need to find a column by meaning rather than by name.",
     ]
+    if absent:
+        lines += [
+            "",
+            "NOT IN THIS CASE: " + ", ".join(absent),
+            "  These tables exist in the catalog and are named in your skill, "
+            "but this case's data does NOT include them. Querying them returns "
+            "'table not found' every time — do not try, and do not retry after "
+            "a failure. Their absence is the SHAPE OF THIS CASE'S DATA, not a "
+            "system fault: answer from the tables that ARE listed below, and "
+            "say plainly which grain you could not reach if it limits the "
+            "answer. Do not report it as lost access or a retrieval failure.",
+        ]
+
+    # Real CSV name first (that is what `get_table_schema` echoes), with the
+    # canonical name alongside when they differ — the skill body says
+    # `model_scores_transaction` while the file is `modelling_data_transaction`,
+    # and an inventory showing only one of the two left the specialist unable to
+    # confirm that the table it was told to use is the one present here.
+    real_to_canon = {r: c for c, r in canon_to_real.items() if c != r}
     for table in sorted(by_table):
         cols = sorted(by_table[table], key=lambda e: e["column"])
+        canon = real_to_canon.get(table)
+        label = f"{table} (= {canon})" if canon else table
         lines.append("")
-        lines.append(f"{table} ({len(cols)} columns)")
+        lines.append(f"{label} ({len(cols)} columns)")
         for e in cols:
             bits = [e["column"]]
             if e["concepts"]:
@@ -2085,7 +2350,7 @@ def _query_table_impl(
     real_table = _resolve_real_table(table_name)
     rows = _gw().query(real_table, filters=None)
     if rows is None:
-        out = f"Data unavailable: table '{table_name}' not found for current case."
+        out = _table_not_found(table_name)
         _log_result("query_table", result=out,
                     extra={"table_name": table_name, "found": False})
         return out
@@ -2505,7 +2770,7 @@ def _join_table_impl(
     rrows = _gw().query(rt, filters=None)
     if lrows is None or rrows is None:
         missing = left_table if lrows is None else right_table
-        out = f"Data unavailable: table '{missing}' not found for current case."
+        out = _table_not_found(missing)
         _log_result("join_table", result=out, extra={"missing": missing})
         return out
 
@@ -2852,11 +3117,11 @@ def _sequence_join_impl(
     a_rows, a_real, a_desc = _filtered_rows(anchor_table, anchor_filters)
     f_rows, f_real, f_desc = _filtered_rows(follow_table, follow_filters)
     if not a_rows and _gw().query(a_real, filters=None) is None:
-        out = f"Data unavailable: table '{anchor_table}' not found for current case."
+        out = _table_not_found(anchor_table)
         _log_result("sequence_join", result=out, extra={"missing": anchor_table})
         return out
     if not f_rows and _gw().query(f_real, filters=None) is None:
-        out = f"Data unavailable: table '{follow_table}' not found for current case."
+        out = _table_not_found(follow_table)
         _log_result("sequence_join", result=out, extra={"missing": follow_table})
         return out
 
@@ -3167,7 +3432,7 @@ def _transaction_detail_impl(
     base_t = _resolve_real_table(base_table)
     brows = _gw().query(base_t, filters=None)
     if brows is None:
-        out = f"Data unavailable: base table '{base_table}' not found for current case."
+        out = _table_not_found(base_table)
         _log_result("transaction_detail", result=out, extra={"reason": "no_base"})
         return out
 
@@ -3432,7 +3697,7 @@ def _score_driver_values_impl(period: str = "", score: str = "",
     mdl_t = _resolve_real_table("model_scores")
     drows = _gw().query(drv_t, filters=None)
     if not drows:
-        out = (f"Data unavailable: table '{drv_t}' not found for current case.")
+        out = (_table_not_found(drv_t))
         _log_result("score_driver_values", result=out, extra={"found": False})
         return out
     mrows = _gw().query(mdl_t, filters=None) or []
@@ -3629,7 +3894,7 @@ def _aggregate_column_impl(
     real_table = _resolve_real_table(table_name)
     rows = _gw().query(real_table, filters=None)
     if rows is None:
-        out = f"Data unavailable: table '{table_name}' not found for current case."
+        out = _table_not_found(table_name)
         _log_result("aggregate_column", result=out,
                     extra={"table_name": table_name, "found": False})
         return out
@@ -3686,9 +3951,8 @@ def _aggregate_column_impl(
     if op in ("share", "ratio"):
         real_col = _resolve_real_column(all_rows, column, real_table)
         if all_rows and real_col not in all_rows[0]:
-            out = (f"COLUMN NOT FOUND: '{column}' is not a column of "
-                   f"'{real_table}' for this case. Call "
-                   f"search_columns('{column}') or get_table_schema.")
+            out = _column_not_found(column, real_table,
+                                    row_keys=all_rows[0] if all_rows else None)
             _log_result("aggregate_column", result=out,
                         extra={"reason": "column_not_found", "op": op})
             return out
@@ -3752,9 +4016,9 @@ def _aggregate_column_impl(
             return out
         real_den = _resolve_real_column(all_rows, denominator_column, real_table)
         if all_rows and real_den not in all_rows[0]:
-            out = (f"COLUMN NOT FOUND: denominator '{denominator_column}' is "
-                   f"not a column of '{real_table}' for this case. Call "
-                   f"search_columns('{denominator_column}').")
+            out = _column_not_found(denominator_column, real_table,
+                                    prefix="denominator: ",
+                                    row_keys=all_rows[0] if all_rows else None)
             _log_result("aggregate_column", result=out,
                         extra={"reason": "column_not_found", "op": op})
             return out
@@ -3848,13 +4112,8 @@ def _aggregate_column_impl(
         # name: both returned the identical "No numeric or date values …
         # Check column name + dtype." Same string, opposite meanings.
         if all_rows and real_col not in all_rows[0]:
-            out = (
-                f"COLUMN NOT FOUND: {real_col!r} is not a column of "
-                f"{real_table!r} for this case — nothing was measured. Call "
-                f"search_columns({column!r}) to find the right name (ADL/CAS "
-                f"aliases resolve), or get_table_schema({real_table!r}) to list "
-                f"what IS here, then re-issue. Do NOT report this as a data gap."
-            )
+            out = _column_not_found(column, real_table,
+                                    row_keys=all_rows[0] if all_rows else None)
             _log_result("aggregate_column", result=out,
                         extra={"op": op, "reason": "column_not_found",
                                "column": column, "resolved_to": real_col})
@@ -4218,7 +4477,7 @@ def _summarize_trend_impl(
     real_table = _resolve_real_table(table_name)
     rows = _gw().query(real_table, filters=None)
     if rows is None:
-        out = f"Data unavailable: table '{table_name}' not found for current case."
+        out = _table_not_found(table_name)
         _log_result("summarize_trend", result=out,
                     extra={"table_name": table_name, "found": False})
         return out
@@ -4265,6 +4524,8 @@ def _summarize_trend_impl(
     # format to teach the parser.
     unparseable_samples: list[str] = []
     n_unparseable = 0
+    dated_min: tuple[int, int, int] | None = None
+    dated_max: tuple[int, int, int] | None = None
     for r in rows:
         t = r.get(real_time)
         dk = _date_key(t)
@@ -4276,6 +4537,12 @@ def _summarize_trend_impl(
                     unparseable_samples.append(sample)
             continue
         n_dated += 1
+        # Track the real span so an empty WINDOW can report what the case
+        # actually covers instead of blaming the parser (see the branch below).
+        if dated_min is None or dk < dated_min:
+            dated_min = dk
+        if dated_max is None or dk > dated_max:
+            dated_max = dk
         if start_key is not None and dk < start_key:
             continue
         if end_key is not None and dk > end_key:
@@ -4311,15 +4578,11 @@ def _summarize_trend_impl(
         # simple name miss (`intoop` for `INTOOP`) would make it abandon a
         # variable that exists. This is a mistake to correct, not a gap to report.
         if rows and real_value not in rows[0]:
-            out = (
-                f"trend({op}({value_column}) by {period} on {time_column})"
-                f"{filter_descr} = (COLUMN NOT FOUND: '{value_column}' is not a "
-                f"column of '{real_table}' for this case — nothing was measured. "
-                f"Call search_columns('{value_column}') to find the right name "
-                f"(ADL/CAS aliases resolve), or get_table_schema('{real_table}') "
-                f"to list what IS here, then re-issue. Do NOT report this as a "
-                f"data gap.)"
-            )
+            out = _column_not_found(
+                value_column, real_table,
+                prefix=f"trend({op}({value_column}) by {period} on "
+                       f"{time_column}){filter_descr} = ",
+                row_keys=rows[0] if rows else None)
             _log_result("summarize_trend", result=out,
                         extra={"reason": "column_not_found",
                                "value_column": value_column,
@@ -4340,6 +4603,66 @@ def _summarize_trend_impl(
                                "value_column": value_column,
                                "n_in_range": n_in_range,
                                "n_value_skipped": n_value_skipped})
+            return out
+
+        # DATES FINE, WINDOW EMPTY. The third cause, and the one the logs
+        # actually show: every `no parseable` message on record carries
+        # "0 row(s) had unrecognized <col> format" — the parser never failed.
+        # The rows simply fall outside the requested window. Reported as "no
+        # parseable values" that reads as a broken parser or unusable data,
+        # when the fix is a different window and the answer ("this case's data
+        # starts in <month>") is itself the finding. Naming the real span is
+        # what turns it into one call instead of a hunt.
+        if n_dated and not n_in_range:
+            def _fmt(k):
+                return f"{k[0]:04d}-{k[1]:02d}-{k[2]:02d}" if k else "?"
+            span = f"{_fmt(dated_min)}..{_fmt(dated_max)}"
+            # WHICH KIND of empty window? The specialist cannot answer the
+            # reviewer without this: "there is no data for 2030" is a FINDING,
+            # while "I asked for the wrong months" is a mistake to correct, and
+            # the two look identical from a bare "no rows". The data settles it
+            # — compare the requested window against the covered span.
+            outside_before = (end_key is not None and dated_min is not None
+                              and end_key < dated_min)
+            outside_after = (start_key is not None and dated_max is not None
+                             and start_key > dated_max)
+            if outside_after:
+                where = (f"Your window starts AFTER the last row "
+                         f"({_fmt(dated_max)})")
+                reason = "window_after_coverage"
+            elif outside_before:
+                where = (f"Your window ends BEFORE the first row "
+                         f"({_fmt(dated_min)})")
+                reason = "window_before_coverage"
+            else:
+                where = (f"Your window is sparse — it sits INSIDE the covered "
+                         f"span but no row lands in it, so those periods are "
+                         f"missing from a case that has data either side")
+                reason = "window_sparse"
+            out = (
+                f"trend({op}({value_column}) by {period} on {time_column})"
+                f"{filter_descr} = (NO ROWS IN {start_date}..{end_date} — not a "
+                f"parsing problem: all {n_dated:,} {time_column} values parsed "
+                f"fine and span {span}. {where}. "
+                # The counts cannot say whether this is a finding or a slip;
+                # WHO CHOSE THE WINDOW can, and only the specialist knows that.
+                # So state the rule rather than offering two options and
+                # leaving the pick to chance. A window past the last row is
+                # very often a relative default ("last 6 months") computed from
+                # today against an export that stops earlier — a slip, not a
+                # fact about the case.
+                f"WHICH THIS IS DEPENDS ON WHO CHOSE THE WINDOW: if the "
+                f"REVIEWER named this period, THAT IS THE ANSWER — report that "
+                f"this case holds no {real_table} data there, and do not "
+                f"retry. If YOU picked the window — a relative default like "
+                f"'the last 6 months' computed from today against an export "
+                f"that stops earlier — re-issue inside {span}.)"
+            )
+            _log_result("summarize_trend", result=out,
+                        extra={"reason": reason,
+                               "n_dated": n_dated,
+                               "requested": f"{start_date}..{end_date}",
+                               "actual_span": span})
             return out
 
         # Surface the actual unrecognized values to the LLM (truncated) so a
@@ -4875,7 +5198,7 @@ def _summarize_by_group_impl(
     real_table = _resolve_real_table(table_name)
     rows = _gw().query(real_table, filters=None)
     if rows is None:
-        out = f"Data unavailable: table '{table_name}' not found for current case."
+        out = _table_not_found(table_name)
         _log_result("summarize_by_group", result=out,
                     extra={"table_name": table_name, "found": False})
         return out
