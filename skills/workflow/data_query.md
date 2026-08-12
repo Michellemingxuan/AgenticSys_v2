@@ -345,6 +345,36 @@ Use `base_table="spends"` (the default) when you select by a SPEND attribute
   is about atypical SPENDING, select on the spend side (amount, merchant,
   concentration) and read the scores as context.
 
+### A MONTHLY score is never a transaction's score
+
+`model_scores` is ONE ROW PER MONTH and its score columns are aggregates
+(`tot_struct_risk_score_max` = that month's maximum). `model_scores_transaction`
+is one row per transaction. **Not every case has the transaction table** — check
+your inventory; when it is absent, per-transaction scores DO NOT EXIST for this
+case, and no combination of monthly rows reconstructs them.
+
+So, when the answer names individual transactions:
+
+- **Never put a monthly figure in a per-transaction row.** A table whose rows
+  are transactions and whose column is a monthly max asserts that the
+  transaction scored that number. It did not; the month did, on some other
+  transaction.
+- **Never carry a window aggregate across months.** If you do cite the month's
+  value as context, it must be THAT transaction'S OWN month, labelled as the
+  month's figure — not the maximum over the window you were discussing.
+- **When the transaction table is absent, say so.** *"This case carries
+  model scores at monthly grain only, so no per-transaction risk score exists"*
+  is the honest sentence, and it belongs in `data_gaps`. Substituting the
+  monthly number is worse than reporting the limit, because it reads as a
+  measurement.
+
+Observed failure (case 11854808010, *"summarize the abnormal transactions"*): a
+$20,500 spend on **2025-04-24** was tabled with **"TSR Score (monthly max) =
+26.4 (May'25)"**. That case has no transaction-level table at all, and 26.4 is
+the maximum over the Feb–May window — May's figure, not April's. The
+transaction's own month reads 21.6, and the transaction itself has no score.
+Two errors compounded: the wrong GRAIN, and within that grain the wrong MONTH.
+
 ## Order-and-proximity questions → `sequence_join`, in ONE call
 
 *"Any large spend right after a small payment?"*, *"returned payments soon after a limit increase"*, *"score breaches following a spend spike"* — these are about ORDER and CLOSENESS IN TIME across two tables with no shared key, so `join_table` (equal keys) cannot express them.
