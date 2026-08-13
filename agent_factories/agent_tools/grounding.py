@@ -322,11 +322,56 @@ _SCOPED_REMAINDER = re.compile(
 _EXCUSE_WINDOW = 40
 
 
+# "no evidence of ..." is the ONE branch of `_ABSENCE_CLAIM` that does not
+# require a countable noun — every other branch ends on record/row/transaction/
+# payment/return/... so it is checkable by construction. What follows this one
+# decides whether it is:
+#
+#   "No evidence of returned PAYMENTS"          countable -> keep checking
+#   "No evidence of intentional structuring"    a JUDGEMENT -> nothing to count
+#
+# A judgement is an interpretation of a pattern. There is no `structuring`
+# column, so rows coming back cannot contradict it — the check has no basis to
+# challenge the claim, and firing costs a re-read that can never resolve.
+#
+# `case` is deliberately absent from this list even though `_ABSENCE_NOUNS`
+# carries it: here it almost always means the credit case ("no evidence of X in
+# this case"), not a countable row, and including it would make nearly every
+# judgement look checkable.
+_COUNTABLE_OBJECT = re.compile(
+    r"\b(record|row|transaction|payment|return|entr|instance|match)",
+    re.IGNORECASE,
+)
+_EVIDENCE_OF = re.compile(r"\bno\s+evidence\s+of\b", re.IGNORECASE)
+
+
+def _is_judgement_claim(text: str, start: int, end: int) -> bool:
+    """True for "no evidence of <abstraction>" — an interpretation, not a count.
+
+    The match must be the BARE phrase. `_ABSENCE_CLAIM`'s countable branch is
+    tried first and wins when a noun is within three words, so "No evidence of
+    returned PAYMENTS" arrives here already consuming `payments` — leaving a
+    tail of "in the data" that looks abstract. Requiring a full match on just
+    "no evidence of" means anything the countable branch caught is countable by
+    construction, and only the bare phrasing reaches the tail test.
+
+    The object is then read to the end of the CLAUSE, not a fixed window: a
+    later sentence mentioning transactions must not make this one look
+    checkable.
+    """
+    if not _EVIDENCE_OF.fullmatch(text[start:end]):
+        return False
+    tail = re.split(r"[.;\n]", text[end:end + 80], maxsplit=1)[0]
+    return not _COUNTABLE_OBJECT.search(tail)
+
+
 def _absence_is_excused(text: str, start: int, end: int) -> bool:
-    """True when THIS match is a completeness or scoped-remainder phrasing."""
+    """True when THIS match cannot be contradicted by rows — a completeness or
+    scoped-remainder phrasing, or a judgement with nothing countable behind."""
     window = text[max(0, start - _EXCUSE_WINDOW):end + _EXCUSE_WINDOW]
     return bool(_COMPLETENESS_SUBJECT.search(window)
-                or _SCOPED_REMAINDER.search(window))
+                or _SCOPED_REMAINDER.search(window)
+                or _is_judgement_claim(text, start, end))
 
 
 # `rows_matching_filter` is the true count; `rows_returned` is a display sample.

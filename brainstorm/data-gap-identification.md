@@ -129,8 +129,8 @@ returned.
   the transcript it already has, plus "read the count off it literally". It
   does not re-query; the number is already in front of it.
 
-  Two phrasings MATCH the pattern without asserting an absence, and each cost
-  a wasted re-read in prod:
+  Three phrasings MATCH the pattern without asserting an absence, and each
+  cost a wasted re-read in prod:
 
   - **completeness** — *"24/24 periods have data; no gaps in the record"*. What
     is absent is the ABSENCE. Rows CONFIRM the claim, so the contradiction test
@@ -138,6 +138,14 @@ returned.
   - **scoped remainder** — *"One failed payment is present. No evidence of
     ADDITIONAL failures"*. The qualifier presupposes the instance the same
     sentence just reported, so rows are expected.
+  - **judgement** — *"No evidence of intentional structuring"*. `no evidence
+    of` is the one branch of the pattern that does not require a countable
+    noun; the others end on record/row/transaction/payment and are checkable by
+    construction. There is no `structuring` column, so rows cannot contradict
+    an interpretation. Scoped to the OBJECT, not the phrasing: name something
+    countable after it — *"no evidence of returned payments"* — and it stays
+    checked, with the object read to the end of its CLAUSE so a later sentence
+    cannot make an earlier judgement look countable.
   Each match is judged in its OWN local window rather than suppressing the
   whole answer, so one genuine denial among excused ones still fires.
 
@@ -177,11 +185,10 @@ alias resolves it as it always did.
   excused above, so the rate needs re-measuring rather than carrying forward.
   When the re-read fails the answer ships anyway: the check detects, it does
   not block.
-- **A judgement is still treated as a countable claim.** *"No evidence of
-  intentional structuring"* has no `structuring` column behind it — rows cannot
-  contradict an interpretation — yet it matches `no evidence of` and costs a
-  re-read. Left alone deliberately: it would be a third excuse category, and
-  that list is where over-suppression starts hiding the real case-118 bug.
+- **The excuse list is the risk surface.** Three categories now suppress the
+  check, and each one is a place a real case-118 failure could hide. Every
+  addition has been paired with tests asserting an unqualified denial over live
+  rows still fires; that pairing is the only thing keeping the list honest.
 - **Absence is inferred from this case's export**, never from a statement about
   what the case ought to contain. A table missing because an upstream feed
   failed looks identical to one the case never had.

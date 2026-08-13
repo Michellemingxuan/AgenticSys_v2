@@ -426,3 +426,54 @@ def test_a_uniform_dimension_supports_the_claim(groups, why):
     from agent_factories.agent_tools.grounding import _grouped_dimension_verdict
     assert _grouped_dimension_verdict(
         _grp("Return Flag", groups), _CITED_ZERO_CLAIM) is False, why
+
+
+# ── a judgement has nothing countable behind it ─────────────────────────────
+
+
+@pytest.mark.parametrize("claim", [
+    "No evidence of intentional structuring or anomalous cycles.",
+    "No evidence of coordinated behaviour across accounts.",
+])
+def test_a_judgement_claim_is_not_contradicted_by_rows(claim):
+    """Observed in prod. `no evidence of` is the ONE branch of the pattern that
+    does not require a countable noun — every other branch ends on
+    record/row/transaction/payment/... and is checkable by construction.
+
+    "Intentional structuring" is an interpretation of a pattern; there is no
+    `structuring` column, so rows coming back cannot contradict it. The check
+    had no basis to challenge the claim and the re-read it forced could never
+    resolve."""
+    from agent_factories.agent_tools.grounding import absence_contradicted_by_rows
+    assert absence_contradicted_by_rows(_RowsResult(), _out(claim)) is None
+
+
+@pytest.mark.parametrize("claim", [
+    "No evidence of returned payments in the data.",
+    "No evidence of abnormal transactions during the window.",
+    "No evidence of any unusual or repeatedly structured payments.",
+])
+def test_evidence_of_a_countable_thing_is_still_checked(claim):
+    """The suppression is scoped to the OBJECT, not the phrasing. Name
+    something countable after "no evidence of" — however far along, so the
+    tail is read as well as the match — and it stays checkable.
+
+    The last case is the one that needs the tail read: the countable branch of
+    the pattern only reaches three words, so `payments` sits outside it."""
+    from agent_factories.agent_tools.grounding import absence_contradicted_by_rows
+    assert absence_contradicted_by_rows(_RowsResult(), _out(claim)) is not None
+
+
+def test_the_judgement_object_is_read_only_to_the_end_of_its_clause():
+    """A later sentence mentioning transactions must not make an earlier
+    judgement look checkable."""
+    from agent_factories.agent_tools.grounding import absence_contradicted_by_rows
+    claim = "No evidence of structuring. Transactions were reviewed."
+    assert absence_contradicted_by_rows(_RowsResult(), _out(claim)) is None
+
+
+def test_a_judgement_does_not_excuse_a_real_denial_beside_it():
+    """Same rule as the other excuses: judged per match, not per answer."""
+    from agent_factories.agent_tools.grounding import absence_contradicted_by_rows
+    claim = "No evidence of structuring. No returned payments were found."
+    assert absence_contradicted_by_rows(_RowsResult(), _out(claim)) is not None
