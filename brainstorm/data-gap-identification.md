@@ -1,6 +1,6 @@
 # Data-gap identification
 
-_Revised 2026-08-11. Supersedes the 2026-08-07 edition._
+_Revised 2026-08-14. Supersedes the 2026-08-07 edition._
 
 One symptom — **"no numbers came back"** — has four different causes. Telling
 them apart is the whole problem. Confusing any two produces a wrong answer, and
@@ -22,20 +22,20 @@ each confusion is wrong in its own direction.
 
 ```
 a table or column was asked for, and nothing came back
-│
-├─ 1. Does the name RESOLVE?                        [strict test]
-│     exact → catalog alias → naming convention → normalized → unique near-miss
-│     └─ yes ......................................... RESOLVED  (proceed)
-│
-├─ 2. Does anything in this case RESEMBLE it?       [loose test]
-│     └─ yes ......................................... MISTAKE   (name the candidates)
-│
-├─ 3. Nothing resembles it .......................... GAP       (absent)
-│
-└─ 4. It resolved and exists — what came back?
-      ├─ values ...................................... ANSWER
-      ├─ rows matched, every value blank ............. GAP       (empty)
-      └─ no rows matched the filter .................. REAL NEGATIVE
+ |
+ +- 1. Does the name RESOLVE?                        [strict test]
+ |     exact -> catalog alias -> convention -> normalized -> unique near-miss
+ |     +- yes ........................................ RESOLVED  (proceed)
+ |
+ +- 2. Does anything in this case RESEMBLE it?       [loose test]
+ |     +- yes ........................................ MISTAKE   (name candidates)
+ |
+ +- 3. Nothing resembles it ......................... GAP       (absent)
+ |
+ +- 4. It resolved and exists -- what came back?
+       +- values ..................................... ANSWER
+       +- rows matched, every value blank ............ GAP       (empty)
+       +- no rows matched the filter ................. REAL NEGATIVE
 ```
 
 Steps 1 and 2 ask about resemblance with **different strictness**, and the gap
@@ -111,9 +111,9 @@ receives an inventory of the case's real columns, which now also states:
 
 ```
 NOT IN THIS CASE: model_scores_transaction, score_drivers_transaction
-  …this case's data does NOT include them… do not try, and do not retry
-  after a failure. Their absence is the SHAPE OF THIS CASE'S DATA, not a
-  system fault…
+  ...this case's data does NOT include them... do not try, and do not
+  retry after a failure. Their absence is the SHAPE OF THIS CASE'S DATA,
+  not a system fault...
 ```
 
 Silence is not a signal. The inventory used to simply omit absent tables, which
@@ -128,6 +128,26 @@ returned.
   records" while no call in the run returned 0. Triggers an `absence_reread`:
   the transcript it already has, plus "read the count off it literally". It
   does not re-query; the number is already in front of it.
+
+  Two phrasings MATCH the pattern without asserting an absence, and each cost
+  a wasted re-read in prod:
+
+  - **completeness** — *"24/24 periods have data; no gaps in the record"*. What
+    is absent is the ABSENCE. Rows CONFIRM the claim, so the contradiction test
+    has its polarity inverted: the specialist was right and paid for it.
+  - **scoped remainder** — *"One failed payment is present. No evidence of
+    ADDITIONAL failures"*. The qualifier presupposes the instance the same
+    sentence just reported, so rows are expected.
+  Each match is judged in its OWN local window rather than suppressing the
+  whole answer, so one genuine denial among excused ones still fires.
+
+  And the group-by branch now reads WHICH categories came back, not how many.
+  It used to return `n_groups_total > 1`, so a breakdown by `Payment Bank
+  Account` contradicted *"No PAYMENT returns are present"* — the two share the
+  word "payment", and six bank accounts looked like proof that returns exist.
+  The relevance gate is now the DENIED NOUN, read off the end of the phrase
+  where the noun sits (*"no payment returns"* denies `return`, not `payment`),
+  and a group holding zero rows no longer counts as a present category.
 - **The synthesis gate** — before any answer path, a null must be classified
   ABSENT / UNTESTED / EMPTY / REAL NEGATIVE. A null that contradicts a curated
   report is not publishable.
@@ -152,9 +172,16 @@ alias resolves it as it always did.
 
 ## Limits
 
-- **`absence_reread` catches more than it fixes** — 9 fired, 3 corrected. When
-  the re-read fails the answer ships anyway; the check detects, it does not
-  block.
+- **`absence_reread` catches more than it fixes** — 9 fired, 3 corrected on the
+  logs before 2026-08-14. Several of those 9 were the false positives now
+  excused above, so the rate needs re-measuring rather than carrying forward.
+  When the re-read fails the answer ships anyway: the check detects, it does
+  not block.
+- **A judgement is still treated as a countable claim.** *"No evidence of
+  intentional structuring"* has no `structuring` column behind it — rows cannot
+  contradict an interpretation — yet it matches `no evidence of` and costs a
+  re-read. Left alone deliberately: it would be a third excuse category, and
+  that list is where over-suppression starts hiding the real case-118 bug.
 - **Absence is inferred from this case's export**, never from a statement about
   what the case ought to contain. A table missing because an upstream feed
   failed looks identical to one the case never had.
