@@ -159,6 +159,28 @@ _SAFECHAIN_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 
 
 
+def _tag_active_node(tag: str, **extra: Any) -> None:
+    """Mark the in-scope node_trace row so AgenticEval can see the stall.
+
+    The JSONL log is for a human reading one session; the trace DB is what the
+    eval harness reads (it injects NODE_TRACE_DB per target and scores from
+    it). A stall recorded only in the log is invisible to every scored run, so
+    both channels carry it.
+
+    The active node here is the round the call belongs to — e.g.
+    `specialist.modeling.round_1` — which is exactly the granularity eval needs
+    to attribute a stall to an agent. Never raises: telemetry must not be able
+    to break the call it is describing.
+    """
+    try:
+        from tools.node_trace import attach_extra, attach_tag
+        attach_tag(tag)
+        if extra:
+            attach_extra(**extra)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _estimate_tokens(text: str, model: str) -> int:
     """tiktoken estimate with a robust fallback. Safechain doesn't return
     usage objects, so this is the only token signal we have on that path."""
@@ -476,9 +498,13 @@ class _SafeChainChatCompletions:
                     )
                 except asyncio.TimeoutError:
                     # Not a failure yet — one attempt looked wedged, so drop it
-                    # and re-issue. Logged so the stall RATE is visible: if this
-                    # fires often and the retry below also times out, the stall
-                    # is server-side and no client retry will help.
+                    # and re-issue. Recorded in TWO places on purpose: the JSONL
+                    # log for a human reading one session, and the node trace so
+                    # AgenticEval can find it. Eval reads the trace DB, never the
+                    # JSONL, so a stall that only reached the log would be
+                    # invisible to every scored run.
+                    _tag_active_node("stall_retry",
+                                     stall_retry_after_s=first_s)
                     try:
                         self._parent._firewall.logger.log(
                             "safechain_call_stalled",
@@ -502,6 +528,9 @@ class _SafeChainChatCompletions:
                 # has to go back above the 126-131s stall plateau so a stalled
                 # call can at least ride it out.
                 if first_s > 0:
+                    _tag_active_node("stall_retry_failed",
+                                     stall_retry_after_s=first_s,
+                                     retry_budget_s=_SAFECHAIN_CALL_TIMEOUT_S)
                     try:
                         self._parent._firewall.logger.log(
                             "safechain_retry_stalled",

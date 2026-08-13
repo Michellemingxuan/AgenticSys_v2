@@ -1059,3 +1059,83 @@ async def test_a_retry_that_escapes_logs_only_the_first_stall(monkeypatch):
 
     assert "safechain_call_stalled" in seen
     assert "safechain_retry_stalled" not in seen
+
+
+# ── the stall must be visible to AgenticEval, not just to the JSONL log ─────
+#
+# Eval injects NODE_TRACE_DB per target and scores from the trace DB; it never
+# reads the session JSONL. A stall recorded only in the log is invisible to
+# every scored run, so both channels carry it.
+
+
+async def _run_traced(monkeypatch, tmp_path, factory, *, stall_fence, budget):
+    """Drive one create() inside a real NodeTrace and return the stored row."""
+    import sqlite3
+    from tools.node_trace import NodeTrace, NodeTraceStore
+
+    store = NodeTraceStore(str(tmp_path / "t.db"))
+    _install_fake_safechain(monkeypatch, amodel_factory=factory)
+    monkeypatch.setattr("llm.safechain_client._SAFECHAIN_STALL_RETRY_S", stall_fence)
+    monkeypatch.setattr("llm.safechain_client._SAFECHAIN_CALL_TIMEOUT_S", budget)
+
+    fw = FirewallStack(EventLogger(session_id="t", log_dir=str(tmp_path)),
+                       max_retries=0, concurrency_cap=2)
+    client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
+    async with NodeTrace(store, chat_id="c", case_id="c", turn_id="t",
+                         node="specialist.modeling", depth=0):
+        try:
+            await client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "system", "content": "s"},
+                          {"role": "user", "content": "u"}])
+        except TimeoutError:
+            pass
+    conn = sqlite3.connect(str(tmp_path / "t.db"))
+    return conn.execute(
+        "SELECT node, tags, extra_json FROM node_trace "
+        "WHERE tags IS NOT NULL AND tags != '' ORDER BY id").fetchall()
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_call_is_tagged_on_the_node_trace(monkeypatch, tmp_path):
+    """`stall_retry` on the round the call belongs to — the granularity eval
+    needs to attribute a stall to a specific agent."""
+    factory, _ = _stalling_then_ok(stall_s=5.0)
+    rows = await _run_traced(monkeypatch, tmp_path, factory,
+                             stall_fence=0.05, budget=2.0)
+    tagged = [r for r in rows if "stall_retry" in (r[1] or "")]
+    assert tagged, f"no stall tag reached the trace: {rows}"
+    node, tags, extra = tagged[0]
+    assert node.endswith("round_1"), f"tagged the wrong node: {node}"
+    assert "stall_retry_failed" not in tags, "the retry escaped; must not flag failure"
+    assert "stall_retry_after_s" in (extra or "")
+
+
+@pytest.mark.asyncio
+async def test_a_retry_that_also_stalls_is_tagged_distinctly(monkeypatch, tmp_path):
+    """The two outcomes must be separable in the trace, or eval cannot tell a
+    recovered stall from a lost one — which is the whole question the 60s
+    budget is betting on."""
+    def _factory():
+        async def _never(_in):
+            await asyncio.sleep(5.0)
+            return _AIMessage("never")
+        return _FakeModel(lambda _in: _never(_in))
+
+    rows = await _run_traced(monkeypatch, tmp_path, _factory,
+                             stall_fence=0.05, budget=0.1)
+    tags = " ".join(r[1] or "" for r in rows)
+    extra = " ".join(r[2] or "" for r in rows)
+    assert "stall_retry" in tags and "stall_retry_failed" in tags
+    assert "retry_budget_s" in extra
+
+
+@pytest.mark.asyncio
+async def test_a_healthy_call_carries_no_stall_tag(monkeypatch, tmp_path):
+    """Otherwise every scored run looks degraded."""
+    def _factory():
+        return _FakeModel(lambda _in: asyncio.sleep(0, result=_AIMessage("fast")))
+
+    rows = await _run_traced(monkeypatch, tmp_path, _factory,
+                             stall_fence=1.0, budget=2.0)
+    assert not any("stall_retry" in (r[1] or "") for r in rows), rows

@@ -95,10 +95,24 @@ a healthy call — p99 7.5s in dev, 2.1-5.6s in prod, so 60s leaves ~8x margin.
 | retry stalls too | ~130s | fails at 100s, logged |
 | call is healthy | unchanged | unchanged, issued once |
 
-**The bet is falsifiable.** `safechain_retry_stalled` fires only when a
-RE-ISSUED request also timed out. Zero occurrences means the budget can drop
-further; anything non-trivial means the wedge survives re-issue and the budget
-must go back above the plateau.
+**The bet is falsifiable**, and recorded in two places because they have
+different readers. The session JSONL carries `safechain_call_stalled` and
+`safechain_retry_stalled` for a human reading one run. The node trace carries
+the same thing as tags, because AgenticEval scores from the trace DB and never
+reads the JSONL — a stall visible only in the log would be invisible to every
+scored run:
+
+```
+  node        specialist.modeling.round_1
+  tags        ["stall_retry"]            call abandoned and re-issued
+              ["stall_retry_failed"]     the re-issue ALSO timed out
+  extra_json  {"stall_retry_after_s": 40, "retry_budget_s": 60}
+```
+
+Tagged on the ROUND, so a stall attributes to a specific agent. Zero
+`stall_retry_failed` means the budget can drop further; anything non-trivial
+means the wedge survives re-issue and the budget must go back above the
+plateau.
 
 **Why 40s and not tighter.** Per-call latency is p99 7.5s over 88 dev calls and
 2.1-5.6s in prod, so 40 is ~5x the observed worst case: it cannot abandon a
