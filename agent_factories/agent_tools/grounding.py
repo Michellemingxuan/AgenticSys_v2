@@ -292,6 +292,43 @@ _ABSENCE_CLAIM = re.compile(
     re.IGNORECASE,
 )
 
+# TWO PHRASINGS MATCH THE PATTERN WITHOUT ASSERTING AN ABSENCE, and both cost a
+# wasted re-read in prod (`spend_payments` ran twice on several turns for this).
+#
+#   COMPLETENESS — "24/24 periods have data; no gaps in the record". What is
+#   absent is the ABSENCE. Rows CONFIRM the claim, so the contradiction test has
+#   its polarity inverted here: the specialist was right and paid for it.
+#
+#   SCOPED REMAINDER — "One failed payment is present. No evidence of ADDITIONAL
+#   payment failures". The qualifier presupposes the instance the same sentence
+#   just reported, so rows are expected, not contradictory.
+#
+# Deliberately NOT a whole-answer suppression: an answer can carry several
+# absence phrasings, and one genuine denial among excused ones must still fire.
+# So each match is judged in its own local window (see `_absence_is_excused`).
+_COMPLETENESS_SUBJECT = re.compile(
+    r"\b(gap|gaps|missing|omission|omissions|break|breaks|hole|holes|"
+    r"blank|blanks|discontinuit|absence|absences|lapse|lapses)\b",
+    re.IGNORECASE,
+)
+_SCOPED_REMAINDER = re.compile(
+    r"\b(additional|further|other|more|another|beyond|second|repeat|repeated|"
+    r"serial|subsequent|remaining|else)\b",
+    re.IGNORECASE,
+)
+# How far around a match to look for the qualifier that excuses it. Wide enough
+# for "No evidence of additional payment failures", tight enough that a genuine
+# denial later in the same paragraph is not excused by an earlier one.
+_EXCUSE_WINDOW = 40
+
+
+def _absence_is_excused(text: str, start: int, end: int) -> bool:
+    """True when THIS match is a completeness or scoped-remainder phrasing."""
+    window = text[max(0, start - _EXCUSE_WINDOW):end + _EXCUSE_WINDOW]
+    return bool(_COMPLETENESS_SUBJECT.search(window)
+                or _SCOPED_REMAINDER.search(window))
+
+
 # `rows_matching_filter` is the true count; `rows_returned` is a display sample.
 _ROWS_MATCHING = re.compile(r'"rows_matching_filter"\s*:\s*(\d+)')
 # Countable results that legitimately establish an absence.
@@ -316,7 +353,33 @@ _COUNT_RESULT = re.compile(r"=\s*(?:count\s*)?(\d[\d,]*)\b")
 _WORD = re.compile(r"[a-z]+")
 
 
-def _grouped_dimension_verdict(output: str, claim_text: str):
+# `summarize_by_group` appends a remainder row when it truncates to a top-N
+# ("7 more groups"). It is an aggregate of what was dropped, not a category, so
+# it must not count towards "more than one value is present".
+_TAIL_GROUP = re.compile(r"^\s*(?:…|\.\.\.|\d[\d,]*\s+more\b)", re.IGNORECASE)
+
+
+# The nouns `_ABSENCE_CLAIM`'s countable branches end on. The denied noun is
+# whichever of these the matched phrase closes with — "no payment returns"
+# denies `return`, not `payment`.
+_ABSENCE_NOUNS = ("record", "row", "transaction", "payment", "return",
+                  "entr", "instance", "case", "match")
+
+
+def _denied_noun(absence_phrase: str) -> str | None:
+    """The noun an absence phrase negates, or None for the noun-less phrasings
+    ("none were found", "no evidence of ..."). Read from the END of the match
+    because the earlier words are modifiers: in "no payment returns" it is the
+    returns that are denied, and `payment` merely qualifies them."""
+    for w in reversed(_WORD.findall(absence_phrase.lower())):
+        for noun in _ABSENCE_NOUNS:
+            if w.startswith(noun):
+                return noun
+    return None
+
+
+def _grouped_dimension_verdict(output: str, claim_text: str,
+                               absence_phrase: str = ""):
     """`True` (claim is contradicted) / `False` (enumeration supports it) /
     `None` (this group-by is not about the claim)."""
     try:
@@ -329,17 +392,48 @@ def _grouped_dimension_verdict(output: str, claim_text: str):
     tokens = {t for t in _WORD.findall(col.lower()) if len(t) > 3}
     if not tokens:
         return None
-    claim_words = set(_WORD.findall(claim_text.lower()))
-    # Singular/plural tolerance: "returns" in the claim matches "Return Flag".
-    if not any(t in claim_words or t + "s" in claim_words for t in tokens):
-        return None
+    # IS THIS GROUP-BY ABOUT THE THING BEING DENIED? Matching any shared word
+    # was far too loose: "No PAYMENT returns are present" and a breakdown by
+    # `Payment Bank Account` share "payment", so a split across six bank
+    # accounts was read as proof that returns exist. That is the prod false
+    # positive — `counts_seen: []`, contradicted purely by a group-by that was
+    # never about returns.
+    #
+    # The gate is the DENIED NOUN — the noun the absence phrase actually
+    # negates, which `_ABSENCE_CLAIM` always ends on. "no payment returns" and
+    # "zero returns" both deny `return`, so `Return Flag` qualifies and
+    # `Payment Bank Account` does not. When the phrasing carries no noun
+    # ("no evidence of …"), fall back to the old shared-word test rather than
+    # going silent.
+    denied = _denied_noun(absence_phrase) if absence_phrase else None
+    if denied is not None:
+        if not any(t.startswith(denied) or denied.startswith(t) for t in tokens):
+            return None
+    else:
+        claim_words = set(_WORD.findall(claim_text.lower()))
+        # Singular/plural tolerance: "returns" in the claim matches "Return Flag".
+        if not any(t in claim_words or t + "s" in claim_words for t in tokens):
+            return None
     groups = payload.get("groups")
     if not isinstance(groups, list) or not groups:
         return None
-    n = payload.get("n_groups_total")
-    n = n if isinstance(n, int) else len(groups)
-    # One group = the dimension is uniform = every other category IS absent.
-    return n > 1
+
+    # Only groups that actually hold rows count as evidence of presence, and
+    # the synthetic tail entry (`{"…": "N more groups truncated"}` / a
+    # "N more" label) is a remainder, not a category.
+    labels = [str(g.get("group")) for g in groups
+              if isinstance(g, dict) and g.get("group") is not None
+              and "…" not in g
+              and not _TAIL_GROUP.match(str(g.get("group")))
+              and not (isinstance(g.get("n_records"), int) and g["n_records"] <= 0)]
+
+    # Nothing, or one category = the dimension is uniform = every other
+    # category IS absent. That supports the claim.
+    if len(labels) <= 1:
+        return False
+
+    # More than one CATEGORY WITH ROWS = the denied one is among them.
+    return True
 
 
 def absence_contradicted_by_rows(result, final_output) -> dict | None:
@@ -357,8 +451,12 @@ def absence_contradicted_by_rows(result, final_output) -> dict | None:
             elif isinstance(v, list):
                 parts.extend(str(x) for x in v)
         claim_text = "\n".join(parts)
-        m = _ABSENCE_CLAIM.search(claim_text)
-        if not m:
+        # Every match, not the first: an answer can pair an excused phrasing
+        # with a genuine denial, and the genuine one must still be checked.
+        m = next((hit for hit in _ABSENCE_CLAIM.finditer(claim_text)
+                  if not _absence_is_excused(claim_text, hit.start(), hit.end())),
+                 None)
+        if m is None:
             return None
 
         matched: list[int] = []
@@ -368,7 +466,8 @@ def absence_contradicted_by_rows(result, final_output) -> dict | None:
                 continue
             matched += [int(x) for x in _ROWS_MATCHING.findall(output)]
             matched += [int(x.replace(",", "")) for x in _COUNT_RESULT.findall(output)]
-            verdict = _grouped_dimension_verdict(output, claim_text)
+            verdict = _grouped_dimension_verdict(
+                output, claim_text, absence_phrase=m.group(0))
             if verdict is not None:
                 grouped.append(verdict)
         # An enumeration of the claimed dimension settles it outright, in both

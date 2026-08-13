@@ -285,3 +285,144 @@ def test_scan_carries_partial_through_to_the_caller():
     err = scan_tool_errors(r)[0]
     assert err["partial"] is True
     assert (err["n_failed"], err["n_total"]) == (1, 2)
+
+
+# ── absence detection must not fire on completeness or scoped claims ─────────
+
+
+class _RowsResult:
+    """A run whose every data call came back WITH rows."""
+    def to_input_list(self):
+        return [{"type": "function_call", "call_id": "1", "name": "query_table"},
+                {"type": "function_call_output", "call_id": "1",
+                 "output": '{"rows_matching_filter": 24}'}]
+
+
+def _out(findings):
+    import types
+    return types.SimpleNamespace(findings=findings, evidence=[])
+
+
+def test_a_completeness_claim_is_not_an_absence_claim():
+    """Observed false positive. `no gaps in the record` matched the pattern
+    `no <3 words> record`, but what is absent is the ABSENCE — the record is
+    complete, and the 24 rows CONFIRM it rather than contradict it. The
+    specialist was right, and paid for a re-read."""
+    from agent_factories.agent_tools.grounding import absence_contradicted_by_rows
+    claim = ("24/24 periods have score driver data; no gaps in the record "
+             "(score_drivers_data).")
+    assert absence_contradicted_by_rows(_RowsResult(), _out(claim)) is None
+
+
+def test_a_scoped_remainder_claim_is_not_an_absence_claim():
+    """Observed false positive. `No evidence of additional payment failures`
+    matched `no <3 words> payment`, but "additional" presupposes the one the
+    same sentence just reported — rows are expected, not contradictory."""
+    from agent_factories.agent_tools.grounding import absence_contradicted_by_rows
+    claim = ("One failed payment ($105,818.60, insufficient funds on 2025-04-28) "
+             "is present. No evidence of additional payment failures or serial "
+             "non-settlement is present.")
+    assert absence_contradicted_by_rows(_RowsResult(), _out(claim)) is None
+
+
+@pytest.mark.parametrize("claim", [
+    "No returned payments were found in the data.",
+    "There were zero transactions matching the criteria.",
+    "The case does not contain any abnormal spend records.",
+])
+def test_a_genuine_false_absence_is_still_caught(claim):
+    """The suppression must be narrow. An unqualified denial, with every call
+    returning rows, is exactly what this check exists for (case 118)."""
+    from agent_factories.agent_tools.grounding import absence_contradicted_by_rows
+    assert absence_contradicted_by_rows(_RowsResult(), _out(claim)) is not None
+
+
+def test_one_genuine_absence_among_excused_ones_still_fires():
+    """An answer can carry several absence phrasings. All-excused means nothing
+    to check; ONE real denial is enough to trigger the re-read."""
+    from agent_factories.agent_tools.grounding import absence_contradicted_by_rows
+    claim = ("No gaps in the record. No evidence of additional failures. "
+             "No returned payments were found.")
+    assert absence_contradicted_by_rows(_RowsResult(), _out(claim)) is not None
+
+
+# ── the grouped-dimension verdict must read WHICH groups, not how many ───────
+
+
+def _grp(col, groups):
+    """`summarize_by_group`'s real payload shape: (label, n_records) pairs."""
+    import json
+    return json.dumps({"group_column": col, "n_groups_total": len(groups),
+                       "groups": [{"group": g, "value": str(n), "n_records": n}
+                                  for g, n in groups]})
+
+
+class _Run:
+    """A run whose calls returned the given raw tool outputs."""
+    def __init__(self, *outputs):
+        self._o = outputs
+
+    def to_input_list(self):
+        items = []
+        for i, o in enumerate(self._o):
+            items += [{"type": "function_call", "call_id": str(i),
+                       "name": "summarize_by_group"},
+                      {"type": "function_call_output", "call_id": str(i),
+                       "output": o}]
+        return items
+
+
+_CITED_ZERO_CLAIM = (
+    "Payment returns are truly absent: Return Flag eq 1 yields zero matching "
+    "rows (rows_matching_filter: 0). All payments are successful.")
+
+
+def test_a_group_by_on_a_merely_word_sharing_column_is_not_evidence():
+    """THE prod false positive. The relevance gate matched any shared word, so
+    "No PAYMENT returns are present" and a breakdown by `Payment Bank Account`
+    overlapped on "payment" — and a split across six bank accounts was read as
+    proof that returns exist. Nothing about bank accounts speaks to returns.
+
+    Its signature in the log is `counts_seen: []`: contradicted purely by a
+    group-by, with no filter count involved anywhere."""
+    from agent_factories.agent_tools.grounding import absence_contradicted_by_rows
+    run = _Run(_grp("Payment Bank Account",
+                    [("ACCT-1", 120), ("ACCT-2", 90), ("ACCT-3", 60),
+                     ("ACCT-4", 40), ("ACCT-5", 30), ("ACCT-6", 17)]))
+    claim = "(c) No payment returns are present (100% of payment volume is successful)"
+    assert absence_contradicted_by_rows(run, _out(claim)) is None
+
+
+def test_the_denied_noun_is_read_from_the_end_of_the_phrase():
+    """"no payment returns" denies RETURNS; `payment` is a modifier. Reading
+    the noun off the end is what separates `Return Flag` from
+    `Payment Bank Account` for the same claim."""
+    from agent_factories.agent_tools.grounding import _denied_noun
+    assert _denied_noun("No payment returns") == "return"
+    assert _denied_noun("zero returns") == "return"
+    assert _denied_noun("No returned payments") == "payment"
+    # noun-less phrasings fall back to the older shared-word test
+    assert _denied_noun("no evidence of") is None
+    assert _denied_noun("none were found") is None
+
+
+def test_the_denied_category_being_empty_supports_the_claim():
+    """`Return Flag` with `1` present but holding no rows is the dimension
+    agreeing with the specialist, not contradicting it."""
+    from agent_factories.agent_tools.grounding import absence_contradicted_by_rows
+    run = _Run(_grp("Return Flag", [("0", 357), ("1", 0)]))
+    assert absence_contradicted_by_rows(
+        run, _out("Live data shows zero returns.")) is None
+
+
+@pytest.mark.parametrize("groups,why", [
+    ([("0", 357)], "one category = uniform"),
+    ([("0", 357), ("1", 0)], "an empty group is not a present category"),
+    ([("0", 357), ("7 more groups", 9)], "the truncation remainder is not a category"),
+])
+def test_a_uniform_dimension_supports_the_claim(groups, why):
+    """`False` means the enumeration BACKS the absence — every other category
+    really is missing."""
+    from agent_factories.agent_tools.grounding import _grouped_dimension_verdict
+    assert _grouped_dimension_verdict(
+        _grp("Return Flag", groups), _CITED_ZERO_CLAIM) is False, why
