@@ -71,16 +71,30 @@ timeouts:
   orch_plan_s: 25
 
   # One specialist's whole agentic run (its tool calls included).
+  #
+  # NOT lowered alongside the call budget, and the reason is unrelated to
+  # stalls: dev runs on OpenAI with no stalls at all, and specialists there
+  # legitimately reach 232.7s (modeling) and 214.0s (spend_payments) of real
+  # multi-round work. This fence is bounded by HOW MUCH AN AGENT DOES, so
+  # cutting it to fit the call budget would kill specialists that are working.
   # [env: SPECIALIST_TIMEOUT_S]
   specialist_s: 240
 
-  # report_agent specifically — it reads curated files rather than querying
-  # data, so it gets a tighter budget.  [env: REPORT_AGENT_TIMEOUT_S]
-  report_agent_s: 100
+  # report_agent specifically. Holds its legitimate work (96.9s max over 477
+  # dev runs) plus one stalled-then-escaped call (~45s). It does NOT need to
+  # hold a ridden-out stall any more — that is the bet in `safechain_call_s`.
+  # [env: REPORT_AGENT_TIMEOUT_S]
+  report_agent_s: 150
 
   # Second-pass distiller (KP extraction) per specialist. A timeout here costs
   # BOTH next-turn KB warmth AND this turn's charts — auto-distill is the
   # primary chart path — so it is deliberately generous.
+  # DELIBERATELY smaller than one worst-case call (40 + 140 = 180). The
+  # distiller is fire-and-forget and what really bounds it is
+  # `distiller_drain_s` below, so raising this would change nothing: a retry
+  # that ESCAPES the stall finishes in ~45s and fits the drain, and one that
+  # rides it out cannot fit in 60s at any setting. Losing that turn's KPs is
+  # the designed degradation — the answer is already on screen.
   # [env: DISTILLER_TIMEOUT_S]
   distiller_s: 120
 
@@ -90,10 +104,37 @@ timeouts:
   # were never written to Amem.  [env: DISTILLER_DRAIN_TIMEOUT_S]
   distiller_drain_s: 60
 
-  # Per-LLM-call cap on the safechain (prod) backend. Outermost of the LLM
-  # calls — every phase fence above should be tighter than this, or the phase
-  # never aborts on its own terms.  [env: SAFECHAIN_CALL_TIMEOUT_S]
-  safechain_call_s: 180
+  # Per-LLM-call cap on the safechain (prod) backend — the budget for ONE
+  # attempt, and paired with `safechain_stall_retry_s` below.
+  #
+  # 60 BETS THAT THE RETRY ESCAPES. The evidence for that is concurrent
+  # divergence: `distiller.bureau` returned in 5.8s while `distiller.modeling`
+  # hung 120s in the same pool at the same moment, so the wedge belongs to the
+  # REQUEST, not to a bad window — a fresh one should not inherit it. Given
+  # that, this only has to cover a healthy call: p99 is 7.5s over 88 dev calls
+  # and 2.1-5.6s in prod, so 60 leaves ~8x margin.
+  #
+  # THE BET IS FALSIFIABLE, and `safechain_retry_stalled` in the log is how.
+  # It fires only when the SECOND attempt also times out — i.e. when a retry
+  # did NOT escape. If that count stays at zero, this can drop further. If it
+  # is non-trivial, the wedge survives re-issue and the budget must go back
+  # above the 126-131s plateau so a stalled call can at least ride it out.
+  #
+  # NOTE an earlier comment here claimed every phase fence should be TIGHTER
+  # than this. That is right for SINGLE-CALL phases (screen, orch_plan), and
+  # backwards for multi-round agents: a specialist making four calls must be
+  # LOOSER than one call's cap or it can never complete more than one slow
+  # call.  [env: SAFECHAIN_CALL_TIMEOUT_S]
+  safechain_call_s: 60
+
+  # First-attempt fence on a safechain call. A call still running at 40s is not
+  # slow, it is WEDGED — measured per-call latency is p99 7.5s (88 dev calls)
+  # and 2.1-5.6s in prod, so this is ~5x the observed worst case and cannot
+  # abandon a healthy call. On expiry the attempt is dropped and ONE fresh
+  # request is issued with the full `safechain_call_s` budget above, which can
+  # ride the stall out if it recurs. 0 disables, restoring a single attempt.
+  # [env: SAFECHAIN_STALL_RETRY_S]
+  safechain_stall_retry_s: 40
 
   # Amem durable-memory IO. Reads sit in the turn's critical path, so the
   # budget is tight and a miss degrades to "no memory this turn" rather than

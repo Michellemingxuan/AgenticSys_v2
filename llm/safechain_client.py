@@ -73,6 +73,7 @@ from openai.types.completion_usage import CompletionUsage
 from llm.round_shaping import response_format_for_round
 from llm.firewall_stack import (
     FIREWALL_GUIDANCE,
+    LLM_CALL_KIND,
     FirewallRejection,
     FirewallStack,
     sanitize_message,
@@ -110,6 +111,41 @@ except ImportError:
 # that orphaned-thread pileup was the original "stuck at team construction"
 # mechanism. See .claude/memory/safechain_async_and_thread_occupation.md.)
 _SAFECHAIN_CALL_TIMEOUT_S = float(os.environ.get("SAFECHAIN_CALL_TIMEOUT_S", "180"))
+
+# STALL-AND-RETRY. Measured in the private env: safechain calls do not run
+# slow, they STALL. In one turn `distiller.bureau` returned in 5.8s while
+# `distiller.modeling` — concurrent, same pool, same model — hung; and every
+# stall that was allowed to finish landed in a narrow band:
+#
+#     orchestrator.round_2  125.98s ok      spend_payments  129.50s ok
+#     spend_payments        129.83s ok      crossbu         130.67s ok
+#
+# while every failure died at its own phase fence, not at a natural duration
+# (report_agent 100.01s twice, distiller.modeling 120.01s twice,
+# the reviewer 25.00s). Normal calls in those same turns took 2-13s.
+#
+# So a call still running at ~40s is not working, it is wedged, and the bet is
+# that the wedge belongs to that in-flight REQUEST rather than to the work —
+# a fresh request has a fresh chance. Abandoning an attempt is safe here:
+# `ainvoke` is genuinely cancellable on this build (verified in prod), so a
+# cancelled attempt aborts rather than orphaning a thread.
+#
+# THE SECOND ATTEMPT MUST BE ABLE TO OUTLAST A STALL, which is what fixes the
+# budget at 140 rather than something smaller. Escalating:
+#
+#     retry escapes the stall  ->  ~45s   (vs ~130s today)
+#     retry stalls too         ->  ~170s  (40 + the stall riding out: an answer)
+#     both stall past 140s     ->  TimeoutError at 180s elapsed
+#
+# THE FENCE IS 40s, NOT TIGHTER. Measured per-call latency is p99 7.5s and max
+# 7.5s across 88 dev calls, and 2.1-5.6s in prod, so 40 is ~5x the observed
+# worst case: it cannot abandon a healthy call, and it only governs how long a
+# STALL burns before the retry. And the budget is 140s, NOT 80: stalls that
+# resolve do so at 126-131s, so an 80s cap could never finish one — two short
+# attempts would fail twice where one 140s attempt succeeds.
+#
+# Set SAFECHAIN_STALL_RETRY_S=0 to disable and fall back to one attempt.
+_SAFECHAIN_STALL_RETRY_S = float(os.environ.get("SAFECHAIN_STALL_RETRY_S", "40"))
 
 # Retained thread pool. No longer used for the LLM call itself (that is now
 # `ainvoke`), but kept so the loop's default executor can optionally be pinned
@@ -421,10 +457,62 @@ class _SafeChainChatCompletions:
                 [MessagesPlaceholder("messages")]) | bound)
 
         async def _run(active_model: Any) -> Any:
-            return await asyncio.wait_for(
-                _chain(active_model).ainvoke({"messages": lc_messages}),
-                timeout=_SAFECHAIN_CALL_TIMEOUT_S,
-            )
+            """One logical call, with a short first attempt (see
+            `_SAFECHAIN_STALL_RETRY_S`). Streaming is untouched: it is
+            consumed chunk-by-chunk elsewhere, and restarting a half-drained
+            generator is a different problem from re-issuing a request."""
+            # Clamp: the first attempt can never outlast the whole per-call
+            # budget. Without this, lowering SAFECHAIN_CALL_TIMEOUT_S below the
+            # stall fence is silently ignored — attempt 1 keeps waiting past the
+            # limit the operator just set, which is the opposite of what they
+            # asked for, and exactly what breaks when running the
+            # `SAFECHAIN_CALL_TIMEOUT_S=30` diagnostic.
+            first_s = min(_SAFECHAIN_STALL_RETRY_S, _SAFECHAIN_CALL_TIMEOUT_S)
+            if first_s > 0:
+                try:
+                    return await asyncio.wait_for(
+                        _chain(active_model).ainvoke({"messages": lc_messages}),
+                        timeout=first_s,
+                    )
+                except asyncio.TimeoutError:
+                    # Not a failure yet — one attempt looked wedged, so drop it
+                    # and re-issue. Logged so the stall RATE is visible: if this
+                    # fires often and the retry below also times out, the stall
+                    # is server-side and no client retry will help.
+                    try:
+                        self._parent._firewall.logger.log(
+                            "safechain_call_stalled",
+                            {"stalled_after_s": first_s,
+                             "kind": LLM_CALL_KIND.get(),
+                             "backend": "safechain"},
+                        )
+                    except Exception:  # noqa: BLE001 — telemetry is not the call
+                        pass
+            try:
+                return await asyncio.wait_for(
+                    _chain(active_model).ainvoke({"messages": lc_messages}),
+                    timeout=_SAFECHAIN_CALL_TIMEOUT_S,
+                )
+            except asyncio.TimeoutError:
+                # THE DATUM THAT DECIDES THE BUDGET. This fires only when a
+                # RE-ISSUED request also timed out — i.e. the retry did not
+                # escape the wedge. The budget is currently sized on the bet
+                # that it does (see `safechain_call_s` in tuning.yaml); if this
+                # count is non-trivial in prod, the bet is wrong and the budget
+                # has to go back above the 126-131s stall plateau so a stalled
+                # call can at least ride it out.
+                if first_s > 0:
+                    try:
+                        self._parent._firewall.logger.log(
+                            "safechain_retry_stalled",
+                            {"first_attempt_s": first_s,
+                             "retry_budget_s": _SAFECHAIN_CALL_TIMEOUT_S,
+                             "kind": LLM_CALL_KIND.get(),
+                             "backend": "safechain"},
+                        )
+                    except Exception:  # noqa: BLE001 — telemetry is not the call
+                        pass
+                raise
 
         async def _run_stream(active_model: Any):
             return _chain(active_model).astream({"messages": lc_messages})

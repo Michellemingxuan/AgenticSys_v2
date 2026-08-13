@@ -830,3 +830,232 @@ async def test_create_still_ignores_unknown_sdk_extras(monkeypatch):
     bound = captured["model"].bound_kwargs or {}
     assert "some_future_sdk_kwarg" not in bound
     assert bound["max_tokens"] == 1234
+
+
+# ── stall-and-retry ─────────────────────────────────────────────────────────
+#
+# Measured in the private env: safechain calls do not run slow, they STALL.
+# Normal calls took 2-13s while, in the same turns, individual calls hung and
+# every one that was allowed to finish landed at 126-131s — orchestrator.round_2
+# 125.98s, spend_payments 129.50s and 129.83s, crossbu 130.67s. Failures died at
+# their own phase fence instead (report_agent 100.01s, distiller 120.01s, the
+# reviewer 25.00s), because a timed-out call was never re-issued: only a 401
+# retried. These tests mock that shape, since safechain cannot run in dev.
+
+
+def _stalling_then_ok(stall_s: float, reply: str = "ok"):
+    """A model that hangs on its FIRST call and answers normally after."""
+    calls = {"n": 0}
+
+    def _factory():
+        async def _run(_in):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                await asyncio.sleep(stall_s)
+            return _AIMessage(reply)
+        return _FakeModel(lambda _in: _run(_in))
+    return _factory, calls
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_call_is_reissued_instead_of_waited_out(monkeypatch):
+    """The point of the whole change: escape the stall rather than sit in it."""
+    factory, calls = _stalling_then_ok(stall_s=5.0)
+    _install_fake_safechain(monkeypatch, amodel_factory=factory)
+    monkeypatch.setattr("llm.safechain_client._SAFECHAIN_STALL_RETRY_S", 0.05)
+    monkeypatch.setattr("llm.safechain_client._SAFECHAIN_CALL_TIMEOUT_S", 2.0)
+
+    fw = FirewallStack(EventLogger(session_id="t"), max_retries=0, concurrency_cap=2)
+    client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
+    loop = asyncio.get_running_loop()
+    t0 = loop.time()
+    out = await client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}])
+
+    assert out.choices[0].message.content == "ok"
+    assert calls["n"] == 2, "the stalled attempt was not re-issued"
+    # Escaped in ~the short fence, not the 5s stall.
+    assert loop.time() - t0 < 1.0
+
+
+@pytest.mark.asyncio
+async def test_the_retry_keeps_the_full_budget_so_a_slow_success_stays_a_success(monkeypatch):
+    """The design detail that makes this strictly better rather than a trade.
+
+    Two SHORT attempts would fail at ~50s the calls that today succeed at
+    ~130s — turning a slow answer into no answer. The second attempt therefore
+    gets the full per-call budget and rides the stall out.
+    """
+    stalls = {"n": 0}
+
+    def _factory():
+        async def _always_slow(_in):
+            stalls["n"] += 1
+            await asyncio.sleep(0.3)          # both attempts stall
+            return _AIMessage("late but real")
+        return _FakeModel(lambda _in: _always_slow(_in))
+
+    _install_fake_safechain(monkeypatch, amodel_factory=_factory)
+    monkeypatch.setattr("llm.safechain_client._SAFECHAIN_STALL_RETRY_S", 0.05)
+    monkeypatch.setattr("llm.safechain_client._SAFECHAIN_CALL_TIMEOUT_S", 2.0)
+
+    fw = FirewallStack(EventLogger(session_id="t"), max_retries=0, concurrency_cap=2)
+    client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
+    out = await client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}])
+
+    assert out.choices[0].message.content == "late but real"
+    assert stalls["n"] == 2, "expected exactly one retry, then ride it out"
+
+
+@pytest.mark.asyncio
+async def test_exactly_one_extra_attempt_and_the_budget_still_bounds_it(monkeypatch):
+    """Bounded on purpose. Specialists already retry at the AGENT level, so an
+    unbounded call-level loop would multiply into their phase fence."""
+    calls = {"n": 0}
+
+    def _factory():
+        async def _never(_in):
+            calls["n"] += 1
+            await asyncio.sleep(5.0)
+            return _AIMessage("never")
+        return _FakeModel(lambda _in: _never(_in))
+
+    _install_fake_safechain(monkeypatch, amodel_factory=_factory)
+    monkeypatch.setattr("llm.safechain_client._SAFECHAIN_STALL_RETRY_S", 0.05)
+    monkeypatch.setattr("llm.safechain_client._SAFECHAIN_CALL_TIMEOUT_S", 0.1)
+
+    fw = FirewallStack(EventLogger(session_id="t"), max_retries=0, concurrency_cap=2)
+    client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
+    with pytest.raises(TimeoutError):
+        await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}])
+    assert calls["n"] == 2, "must not loop — one extra attempt only"
+
+
+@pytest.mark.asyncio
+async def test_a_healthy_call_is_issued_once(monkeypatch):
+    """No cost on the common path: 2-13s calls must not be duplicated."""
+    calls = {"n": 0}
+
+    def _factory():
+        async def _fast(_in):
+            calls["n"] += 1
+            return _AIMessage("fast")
+        return _FakeModel(lambda _in: _fast(_in))
+
+    _install_fake_safechain(monkeypatch, amodel_factory=_factory)
+    monkeypatch.setattr("llm.safechain_client._SAFECHAIN_STALL_RETRY_S", 0.5)
+    fw = FirewallStack(EventLogger(session_id="t"), max_retries=0, concurrency_cap=2)
+    client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
+    await client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}])
+    assert calls["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_setting_the_knob_to_zero_restores_the_single_attempt(monkeypatch):
+    """An escape hatch that needs no code change if the stall turns out to be
+    server-side queueing, where a retry only burns another queue ticket."""
+    factory, calls = _stalling_then_ok(stall_s=0.2)
+    _install_fake_safechain(monkeypatch, amodel_factory=factory)
+    monkeypatch.setattr("llm.safechain_client._SAFECHAIN_STALL_RETRY_S", 0.0)
+    monkeypatch.setattr("llm.safechain_client._SAFECHAIN_CALL_TIMEOUT_S", 2.0)
+
+    fw = FirewallStack(EventLogger(session_id="t"), max_retries=0, concurrency_cap=2)
+    client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
+    await client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}])
+    assert calls["n"] == 1, "no retry should happen when disabled"
+
+
+@pytest.mark.asyncio
+async def test_the_first_attempt_never_outlasts_the_whole_budget(monkeypatch):
+    """Lowering SAFECHAIN_CALL_TIMEOUT_S must actually lower it. Unclamped, the
+    25s stall fence silently overrode a tighter setting — attempt 1 kept waiting
+    past the limit the operator had just set, which is precisely what the
+    `SAFECHAIN_CALL_TIMEOUT_S=30` diagnostic would have run into."""
+    calls = {"n": 0}
+
+    def _factory():
+        async def _slow(_in):
+            calls["n"] += 1
+            await asyncio.sleep(0.5)
+            return _AIMessage("late")
+        return _FakeModel(lambda _in: _slow(_in))
+
+    _install_fake_safechain(monkeypatch, amodel_factory=_factory)
+    # budget BELOW the stall fence, which keeps its 25s default
+    monkeypatch.setattr("llm.safechain_client._SAFECHAIN_CALL_TIMEOUT_S", 0.05)
+
+    fw = FirewallStack(EventLogger(session_id="t"), max_retries=0, concurrency_cap=2)
+    client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
+    loop = asyncio.get_running_loop()
+    t0 = loop.time()
+    with pytest.raises(TimeoutError):
+        await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}])
+    assert loop.time() - t0 < 0.4, "waited past the budget it was given"
+
+
+@pytest.mark.asyncio
+async def test_a_retry_that_also_stalls_is_logged_as_such(monkeypatch):
+    """The budget is sized on a BET — that a re-issued request escapes the
+    wedge. `safechain_retry_stalled` is the only evidence that can falsify it,
+    because it fires exactly when a retry did NOT escape. Without it the bet is
+    unfalsifiable in prod and the budget can never be tuned with confidence."""
+    seen = []
+
+    class _Rec(EventLogger):
+        def log(self, event, payload=None):
+            seen.append(event)
+
+    def _factory():
+        async def _never(_in):
+            await asyncio.sleep(5.0)
+            return _AIMessage("never")
+        return _FakeModel(lambda _in: _never(_in))
+
+    _install_fake_safechain(monkeypatch, amodel_factory=_factory)
+    monkeypatch.setattr("llm.safechain_client._SAFECHAIN_STALL_RETRY_S", 0.05)
+    monkeypatch.setattr("llm.safechain_client._SAFECHAIN_CALL_TIMEOUT_S", 0.1)
+
+    fw = FirewallStack(_Rec(session_id="t"), max_retries=0, concurrency_cap=2)
+    client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
+    with pytest.raises(TimeoutError):
+        await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}])
+
+    assert "safechain_call_stalled" in seen, "first stall not recorded"
+    assert "safechain_retry_stalled" in seen, "the falsifying datum is missing"
+
+
+@pytest.mark.asyncio
+async def test_a_retry_that_escapes_logs_only_the_first_stall(monkeypatch):
+    """The happy path must stay distinguishable from the bet failing."""
+    seen = []
+
+    class _Rec(EventLogger):
+        def log(self, event, payload=None):
+            seen.append(event)
+
+    factory, _calls = _stalling_then_ok(stall_s=5.0)
+    _install_fake_safechain(monkeypatch, amodel_factory=factory)
+    monkeypatch.setattr("llm.safechain_client._SAFECHAIN_STALL_RETRY_S", 0.05)
+    monkeypatch.setattr("llm.safechain_client._SAFECHAIN_CALL_TIMEOUT_S", 2.0)
+
+    fw = FirewallStack(_Rec(session_id="t"), max_retries=0, concurrency_cap=2)
+    client = SafeChainAsyncOpenAI(model_name="gpt-4o", firewall=fw)
+    await client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}])
+
+    assert "safechain_call_stalled" in seen
+    assert "safechain_retry_stalled" not in seen

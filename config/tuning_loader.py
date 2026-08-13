@@ -36,6 +36,7 @@ _MAP = {
     "timeouts.distiller_s": "DISTILLER_TIMEOUT_S",
     "timeouts.distiller_drain_s": "DISTILLER_DRAIN_TIMEOUT_S",
     "timeouts.safechain_call_s": "SAFECHAIN_CALL_TIMEOUT_S",
+    "timeouts.safechain_stall_retry_s": "SAFECHAIN_STALL_RETRY_S",
     "timeouts.amem_read_s": "AMEM_READ_TIMEOUT_S",
     "timeouts.amem_write_s": "AMEM_WRITE_TIMEOUT_S",
     "timeouts.amem_active_load_s": "AMEM_ACTIVE_LOAD_TIMEOUT_S",

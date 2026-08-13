@@ -112,3 +112,52 @@ def test_active_kp_threshold_reads_env(monkeypatch):
     monkeypatch.delenv("AMEM_ACTIVE_KP_THRESHOLD", raising=False)
     importlib.reload(loader)
     assert loader.ACTIVE_KP_THRESHOLD == 100
+
+
+def test_a_stalled_call_fits_inside_every_agent_that_must_survive_one():
+    """The arithmetic that ties the call layer to the phase layer.
+
+    One safechain call costs at most `safechain_stall_retry_s + safechain_call_s`
+    (the short first attempt, then a fresh one with the full budget). An agent
+    whose fence is BELOW that can never complete a stalled call — which is
+    exactly how report_agent died at 100.01s twice in the private env.
+
+    `distiller_s` is excluded on purpose: it is fire-and-forget and bounded by
+    `distiller_drain_s`, so a stalled distiller is dropped by design.
+    """
+    import yaml as _yaml
+    from pathlib import Path
+
+    t = _yaml.safe_load(Path("config/tuning.yaml").read_text())["timeouts"]
+    worst_call = t["safechain_stall_retry_s"] + t["safechain_call_s"]
+    for agent in ("specialist_s", "report_agent_s"):
+        assert t[agent] > worst_call, (
+            f"{agent}={t[agent]} cannot hold one stalled call ({worst_call}s)")
+
+
+def test_the_retry_budget_covers_a_healthy_call_with_wide_margin():
+    """SUPERSEDES an earlier bound of >=135s, which required the retry to be
+    able to RIDE OUT the 126-131s stall plateau. That was dropped deliberately
+    on 2026-08-14 in favour of betting that a re-issued request ESCAPES the
+    wedge — supported by concurrent divergence (`distiller.bureau` 5.8s while
+    `distiller.modeling` hung 120s, same pool, same moment).
+
+    Under that bet the budget only has to cover a healthy call: p99 is 7.5s in
+    dev, 2.1-5.6s in prod. The bet is falsified by `safechain_retry_stalled` in
+    the log; if that fires in prod, restore the >=135 bound."""
+    import yaml as _yaml
+    from pathlib import Path
+
+    t = _yaml.safe_load(Path("config/tuning.yaml").read_text())["timeouts"]
+    assert t["safechain_call_s"] >= 30, "no margin over a healthy call"
+
+
+def test_the_stall_fence_clears_normal_call_latency_by_a_wide_margin():
+    """p99 per-call latency is 7.5s in dev and 2.1-5.6s in prod. The fence must
+    stay far above that or it starts abandoning healthy calls and paying twice."""
+    import yaml as _yaml
+    from pathlib import Path
+
+    t = _yaml.safe_load(Path("config/tuning.yaml").read_text())["timeouts"]
+    assert t["safechain_stall_retry_s"] >= 25
+    assert t["safechain_stall_retry_s"] < t["safechain_call_s"]
