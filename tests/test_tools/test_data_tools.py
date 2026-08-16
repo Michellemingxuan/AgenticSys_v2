@@ -3027,3 +3027,66 @@ def test_a_gap_inside_the_covered_span_is_reported_as_a_finding():
     assert "AFTER the last row" not in out and "BEFORE the first row" not in out
     # Same decision rule as every other empty window: who chose it decides.
     assert "if the REVIEWER named this period" in out
+
+
+# ── sorting a date column must be chronological, not alphabetical ────────────
+#
+# `sort_by=<date col>, sort_desc=True, limit=1` is the natural way to ask for
+# the newest row. Sorted as TEXT, "September" beats every October, November and
+# December — and every later year — because it is alphabetically last among the
+# month names. Asked "what is the latest FICO score", the specialist answered
+# 703 (Sep 2024) on a case whose bureau series runs to June'2025.
+
+
+@pytest.mark.parametrize("case,newest_month,newest_fico", [
+    ("366132845011", "June'2025", "764"),
+    ("11854808010", "July'2025", "783"),
+])
+def test_newest_row_by_date_sort_is_the_newest_row(case, newest_month, newest_fico):
+    gw = LocalDataGateway.from_case_folders("data_tables/real")
+    gw.set_case(case)
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    d = json.loads(data_tools._query_table_impl(
+        table_name="bureau_data", columns="month,FICO Score",
+        sort_by="month", sort_desc=True, limit=1,
+    ))
+    assert d["rows"] == [{"month": newest_month, "FICO Score": newest_fico}]
+    # The specialist reading the top row needs to know WHY it is on top.
+    assert d["sort"] == "month desc (chronological)"
+
+
+def test_oldest_row_by_date_sort_is_the_oldest_row():
+    _real_case_tools()
+    d = json.loads(data_tools._query_table_impl(
+        table_name="bureau_data", columns="month", sort_by="month", limit=1,
+    ))
+    assert d["rows"] == [{"month": "July'2023"}]
+
+
+def test_date_sort_handles_a_format_where_text_order_inverts_it():
+    """`strategy.Date` is `M/D/YY H:MM`: as text 5/28/24 sorts above 2/15/25,
+    so the OLDER row would be returned as the newest."""
+    _real_case_tools()
+    d = json.loads(data_tools._query_table_impl(
+        table_name="strategy", sort_by="Date", sort_desc=True, limit=1,
+    ))
+    assert d["rows"][0]["Date"] == "2/15/25 14:22"
+
+
+def test_numeric_columns_still_sort_numerically():
+    """`_date_key` reads a bare 4-digit int as a year and a 5-digit one as an
+    Excel serial, so the number tier has to be tried first — otherwise a FICO
+    score of 764 would sort as the year 764."""
+    _real_case_tools()
+    d = json.loads(data_tools._query_table_impl(
+        table_name="bureau_data", columns="FICO Score",
+        sort_by="FICO Score", sort_desc=True, limit=1,
+    ))
+    assert d["rows"] == [{"FICO Score": "777"}]
+    assert d["sort"] == "FICO Score desc"      # not marked chronological
+
+
+def test_sort_key_orders_numbers_before_dates_before_text():
+    keys = [data_tools._row_sort_key(v)
+            for v in (12.5, "July'2025", "not a date")]
+    assert keys == sorted(keys)

@@ -507,6 +507,33 @@ def _date_key(value: Any) -> tuple[int, int, int] | None:
 _STRICT_NUMBER_RE = re.compile(r"^-?(?:0|[1-9]\d*)(?:\.\d+)?$|^-?0\.\d+$")
 
 
+def _row_sort_key(v: Any) -> tuple:
+    """Ordering key for `sort_by`: numbers, then DATES CHRONOLOGICALLY, then text.
+
+    The date tier is the whole point. Sorting `bureau_data.month` as text puts
+    `September'2024` on top of a descending sort — "September" is alphabetically
+    last among the month names, ahead of every October, November and December,
+    and ahead of any later year. `sort_by='month', sort_desc=True, limit=1` is
+    the natural way to ask for the newest row, and on this case it answered
+    "the latest FICO score is 703 (Sep 2024)" when the series runs to June'2025.
+    Every non-ISO format has this defect — `MM/DD/YYYY` puts 03/2025 before
+    12/2024, `M/D/YY` puts 5/28/24 after 2/15/25 — so it is not specific to the
+    apostrophe format the real bureau data happens to use.
+
+    Numbers are tested FIRST, which is what keeps `_date_key`'s bare-integer
+    branches (4-digit year, 5-digit Excel serial) from claiming ordinary
+    numeric columns.
+    """
+    try:
+        return (0, (float(v),), "")
+    except (TypeError, ValueError):
+        pass
+    dk = _date_key(v)
+    if dk is not None:
+        return (1, dk, "")
+    return (2, (), str(v))
+
+
 def _is_strict_number(v: Any) -> bool:
     if isinstance(v, bool):
         return False
@@ -2410,16 +2437,13 @@ def _query_table_impl(
     sort_descriptor: str | None = None
     if sort_by and rows:
         rc_sort = _resolve_real_column(rows, sort_by, table_name)
-
-        def _sort_key(r):
-            v = r.get(rc_sort)
-            try:
-                return (0, float(v))
-            except (TypeError, ValueError):
-                return (1, str(v))
-
-        rows = sorted(rows, key=_sort_key, reverse=bool(sort_desc))
+        rows = sorted(rows, key=lambda r: _row_sort_key(r.get(rc_sort)),
+                      reverse=bool(sort_desc))
         sort_descriptor = f"{rc_sort} {'desc' if sort_desc else 'asc'}"
+        # Say so in the output: a specialist taking the top row as "the newest"
+        # needs to know the ordering was by DATE and not by spelling.
+        if rows and _date_key(rows[0].get(rc_sort)) is not None:
+            sort_descriptor += " (chronological)"
     limit_applied: int | None = None
     if limit and limit > 0 and len(rows) > limit:
         rows = rows[:limit]
@@ -3465,15 +3489,8 @@ def _transaction_detail_impl(
 
     if sort_by and brows:
         rc_sort = _resolve_real_column(brows, sort_by, base_t)
-
-        def _sort_key(r):
-            v = r.get(rc_sort)
-            try:
-                return (0, float(v))
-            except (TypeError, ValueError):
-                return (1, str(v))
-
-        brows = sorted(brows, key=_sort_key, reverse=bool(sort_desc))
+        brows = sorted(brows, key=lambda r: _row_sort_key(r.get(rc_sort)),
+                       reverse=bool(sort_desc))
     if limit and limit > 0 and len(brows) > limit:
         brows = brows[:limit]
 
