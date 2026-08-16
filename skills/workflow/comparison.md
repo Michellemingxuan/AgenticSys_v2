@@ -43,7 +43,7 @@ For every PAIR of domain specialists in the team this turn:
 
 ## Re-answer mechanism (when `corrected_specialist` is set)
 
-When you populate `corrected_specialist` + `corrected_value` on a `resolved` entry, the orchestrator's post-general-specialist round reads those fields and re-invokes the named specialist with the correction folded into a new sub-question (e.g., *"Re-answer your earlier question. General specialist verified the default date is 2024-12 (canonical aggregate on `crossbu_cards.month` filtered to `account_status==90 DPB`). Your earlier finding cited 2025-01, which is incorrect. Revise your `findings` against this canonical date."*). The re-invoked specialist produces an updated `SpecialistOutput`, which the orchestrator uses for the FinalAnswer.
+When you populate `corrected_specialist` + `corrected_value` on a `resolved` entry, the orchestrator's post-general-specialist round reads those fields and re-invokes the named specialist with the correction folded into a new sub-question (e.g., *"Re-answer your earlier question. General specialist verified the first past-due month is 2024-12 (canonical aggregate: `aggregate_column('crossbu_cards', '<month col>', op='min', filter_column='account_status', filter_value='<the status in question>')`). Your earlier finding cited 2025-01, which is incorrect. Revise your `findings` against this canonical date."*). The re-invoked specialist produces an updated `SpecialistOutput`, which the orchestrator uses for the FinalAnswer.
 
 Populate these fields ONLY when:
 - You ran a verification aggregate AND it matched one specialist (not both, not neither).

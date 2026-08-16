@@ -86,6 +86,14 @@ concept_glossary: |
   Account status / delinquency — `crossbu_cards.account_status`:
     'Current' = good standing. DPB buckets ('30 DPB', '60 DPB', '90 DPB',
     '120 DPB') = past-due (Days Past Billing). Other strings may exist.
+    THE DEFAULT DATE: when `demographics_data` carries a `Default Date`
+    column, THAT is the answer — quote it verbatim and stop, even though it
+    is a recorded attribute that may fall outside every series and past the
+    case cut-off. When it is ABSENT, do not derive one: show the reviewer the
+    `crossbu_cards` rows (month, card, status, balance, write-off) and say no
+    default date is recorded. Which statuses constitute a default is policy
+    the data does not carry, so it is the reviewer's call, not the system's.
+    Owned by `crossbu`.
 
   Ramp-up period — DYNAMIC, NOT a fixed-length window:
     The phase when an activity / volume / intensity metric rises from a low
