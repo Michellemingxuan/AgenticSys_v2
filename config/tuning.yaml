@@ -64,6 +64,14 @@ timeouts:
   # hung LLM before the user sits on a silent spinner.  [env: SCREEN_TIMEOUT_S]
   screen_s: 30
 
+  # Stall fence inside the screen budget: abandon a wedged attempt at 10s and
+  # re-issue once, sharing the 30s above rather than adding to it. The phase's
+  # own target is <5s, so a healthy screen never trips it. `safechain_call_s` /
+  # `safechain_stall_retry_s` cannot cover this phase — 40s is larger than the
+  # whole 30s budget, so the phase fence fires first. 0 disables the retry.
+  # [env: SCREEN_STALL_RETRY_S]
+  screen_stall_retry_s: 10
+
   # Round-1 team-planning watchdog, also reused as the fence around the
   # coherence reviewer's single LLM call. Normally ~3s; on a stall the phase is
   # aborted and retried rather than waiting out the per-call cap.

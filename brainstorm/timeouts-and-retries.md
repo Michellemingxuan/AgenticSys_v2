@@ -1,10 +1,15 @@
 # Timeouts and retries
 
-_2026-08-14. Numbers are the shipped `config/tuning.yaml`._
+_2026-08-16. Numbers are the shipped `config/tuning.yaml`._
 
 Four independent layers can each abandon work, and each has its own retry. They
 nest, and their retries **multiply** — which is the part that is easy to get
 wrong when tuning any single number.
+
+Two layers now treat a slow call as *suspect* rather than as work in progress:
+the CALL layer (safechain only, 40s) and the SCREEN phase (both backends, 10s).
+The second exists because the first cannot reach it — see "Why screen needs its
+own fence".
 
 (Diagrams are plain ASCII on purpose: box-drawing glyphs are outside Courier's
 WinAnsi encoding and render substituted or blank in the PDF.)
@@ -18,12 +23,13 @@ WinAnsi encoding and render substituted or blank in the PDF.)
 | not a timeout of their own.                       no retry: the turn ends  |
 |                                                                            |
 | +- PHASE ------------------------- one fence per kind of agent ----------+ |
-| |  screen        30s      orch_plan / reviewer   25s                     | |
-| |  specialist   240s      report_agent          150s                     | |
-| |  distiller    120s      distiller_drain        60s                     | |
+| |  screen        30s  (stall fence 10s, INSIDE the 30 -- see below)      | |
+| |  orch_plan / reviewer   25s        specialist          240s            | |
+| |  distiller    120s      distiller_drain  60s   report_agent  150s      | |
 | |                                                                        | |
 | |  Expiry = that agent failed. The turn continues, degraded.             | |
-| |  orch_plan is the only one that retries (round-1 watchdog).            | |
+| |  Two retry here: orch_plan (the round-1 watchdog), and screen, which   | |
+| |  abandons a wedged attempt at 10s and re-issues within its own 30s.    | |
 | |                                                                        | |
 | | +- AGENT --------------------- _MAX_SPECIALIST_ATTEMPTS = 2 --------+  | |
 | | | Re-runs the whole agentic loop when the ANSWER is wrong:          |  | |
@@ -33,9 +39,9 @@ WinAnsi encoding and render substituted or blank in the PDF.)
 | | |                                                                   |  | |
 | | | +- CALL ------------ one HTTP request to the model ----------+    |  | |
 | | | |  stall fence  40s  ->  abandon, re-issue ONCE              |    |  | |
-| | | |  full budget  60s  ->  TimeoutError + safechain_retry_    |    |  | |
-| | | |                        stalled (the falsifying datum)     |    |  | |
-| | | |  HTTP 401          ->  refresh token, retry IN PLACE      |    |  | |
+| | | |  full budget  60s  ->  TimeoutError + safechain_retry_     |    |  | |
+| | | |                        stalled (the falsifying datum)      |    |  | |
+| | | |  HTTP 401          ->  refresh token, retry IN PLACE       |    |  | |
 | | | |  403 / 400         ->  FirewallRejection, escalates to the |    |  | |
 | | | |                        guidance loop below                 |    |  | |
 | | | +------------------------------------------------------------+    |  | |
@@ -57,8 +63,8 @@ WinAnsi encoding and render substituted or blank in the PDF.)
 
 ## The call layer, in detail
 
-The layer added on 2026-08-13, and the only one that treats a slow call as
-*suspect* rather than as work in progress.
+Added 2026-08-13, for safechain only. The screen phase carries the same idea
+at a different layer (see below); everything about the reasoning is shared.
 
 ```
   issue request
@@ -137,7 +143,7 @@ in a narrow band:
 while every failure died at **its own phase fence**, not at a natural duration:
 
 ```
-  report_agent          100.01s   <- report_agent_s was 100, now 200
+  report_agent          100.01s   <- report_agent_s was 100, now 150
   distiller.modeling    120.01s   <- distiller_s = 120
   general_specialist     25.00s   <- orch_plan_s = 25, round_1 ran 0.00s
 ```
@@ -145,6 +151,81 @@ while every failure died at **its own phase fence**, not at a natural duration:
 So the fence a phase happens to carry decided whether it survived, while normal
 calls in those same turns took 2-13s. Widening fences only converts a failure
 into a 130s wait; escaping the stall is what recovers the time.
+
+## Why screen needs its own fence
+
+Added 2026-08-16, after "stuck at question check" recurred. The call-layer
+retry above **cannot reach this phase**: its stall fence is 40s and the whole
+screen budget is 30s, so the phase fence always fires first and the reviewer
+gets "question check took too long" having had exactly one attempt.
+
+```
+  the ordering, before
+       0s        10        20        30              40
+       |---------|---------|---------|---------------|
+       screen phase budget ......... X               |
+                                     ^               |
+                        phase dies here              |
+                                     call-layer stall fence would
+                                     have fired HERE -- unreachable
+
+  after: the fence moves INSIDE the phase
+       0s        10                                  30
+       |---------|-----------------------------------|
+       attempt 1 X  abandon + re-issue with what is left
+                 ^
+            10s stall fence
+```
+
+Three properties, each chosen to avoid re-tuning anything else:
+
+- **The two attempts SHARE the 30s** — the retry gets `30 - elapsed`, so the
+  worst case is unchanged and the existing `screen_timeout` handler still fires
+  on the same `TimeoutError`.
+- **It sits at the PHASE, not the call**, so it works on both backends. The
+  call-layer retry is safechain-only; a stall in dev would never have been
+  covered by it.
+- **10s is ~2x the phase's own <5s target**, so a healthy screen never trips
+  it. `SCREEN_STALL_RETRY_S=0` disables it. The first attempt is clamped to
+  `min(fence, budget)` — the same bug that had to be fixed in the call layer.
+
+Same tag vocabulary as the call layer, deliberately, so AgenticEval greps one
+set of names: `stall_retry` / `stall_retry_failed` on the `screen` node, plus
+`screen_stalled` / `screen_retry_stalled` in the JSONL.
+
+It **retries a stall, it does not fix one.** The re-issue sends the same prompt,
+so a wedge caused by prompt size will reproduce; `stall_retry_failed` is what
+distinguishes that from a transient backend hiccup, and
+`PRIOR_QUESTIONS_FOR_SCREEN` (12) is the knob for the former.
+
+## What a retry costs
+
+An abandoned attempt is not free, and where the cost lands depends on where the
+wedge is — which is the same unresolved question the call-layer bet rests on.
+
+| wedge is... | attempt 1 tokens | what the retry adds |
+|---|---|---|
+| at the provider (inference started) | **billed** — cancelling closes your side, it does not un-run the work | a second full prompt |
+| before the provider (pool, TLS, socket) | nothing sent, nothing billed | a second full prompt |
+
+So worst case is ~2x input and up to 2x output; best case is 1x. For screen the
+exposure is small (question + <=12 prior questions + the relevance skill), and
+for a specialist round it is whatever that round's context is.
+
+**The trace under-reports this.** `attach_usage` records the prompt excerpt
+*before* the request but the token COUNTS only *after* the response returns
+(`firewall_client.py:101` vs `:140`). A cancelled call never reaches the second
+call, so an abandoned attempt contributes **zero tokens to node_trace** while
+potentially costing real money. AgenticEval scores from the trace, so its token
+totals are a floor, not a total, on any run where stalls occurred.
+
+Nothing is rebuilt for the retry except the coroutine and the HTTP request. The
+agent, the shim, `_CLIENTS.firewalled_client`, the httpx pool and (on safechain)
+the cached LangChain model are all reused — deliberately, since rebuilding a
+client would add DNS, TLS and token acquisition to a path already in trouble.
+The consequence: **the retry is fresh at the request level, not below it.** If
+the wedge lives in the connection or the pool rather than the request, a retry
+can inherit it.
 
 ## The multiplication trap
 
@@ -163,6 +244,13 @@ against the fence above it.
   it can never complete more than one slow call. The rule is now split by phase
   kind, and `specialist_s`/`report_agent_s` are sized to hold one worst-case
   call (40 + 140 = 180) plus the agent's own rounds.
+- **RESOLVED — a phase tighter than the call fence gets no retry at all.** The
+  flip side of the above, and it cost real failures before anyone noticed:
+  `screen` at 30s sits under the 40s call-layer stall fence, so that retry was
+  unreachable code for this phase. Fixed by giving the phase its own 10s fence
+  rather than by loosening the phase. `orch_plan` (25s) has the same shape and
+  is covered by its round-1 watchdog; **any new single-call phase under 40s
+  needs one or the other**, and nothing tests for that.
 - **The reviewer shares `ORCH_PLAN_TIMEOUT_S` with the round-1 watchdog**, and
   they want opposite things: planning wants a tight 25s so a stall aborts and
   retries fast; the reviewer wants to outlast a stall. One knob cannot serve

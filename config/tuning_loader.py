@@ -30,6 +30,7 @@ _MAP = {
     "timeouts.turn_wall_clock_s": "TURN_WALL_CLOCK_S",
     "timeouts.queued_turn_max_wait_s": "QUEUED_TURN_MAX_WAIT_S",
     "timeouts.screen_s": "SCREEN_TIMEOUT_S",
+    "timeouts.screen_stall_retry_s": "SCREEN_STALL_RETRY_S",
     "timeouts.orch_plan_s": "ORCH_PLAN_TIMEOUT_S",
     "timeouts.specialist_s": "SPECIALIST_TIMEOUT_S",
     "timeouts.report_agent_s": "REPORT_AGENT_TIMEOUT_S",

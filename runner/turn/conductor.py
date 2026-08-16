@@ -56,6 +56,7 @@ from runner.config import (
     _ORCH_PLAN_TIMEOUT_S,
     _PRIOR_QUESTIONS_FOR_SCREEN,
     _REPORTS_DIR,
+    _SCREEN_STALL_RETRY_S,
     _SCREEN_TIMEOUT_S,
 )
 from runner.identity import SERVER_RUN_ID
@@ -74,16 +75,91 @@ from tools.episodic import EPISODIC_TURNS
 from tools.fs_tools import is_report_file
 from tools.node_trace import (
     NodeTrace, NodeTraceRunHooks, TURN_SCOPE, TurnScope,
-    _open_node, attach_io, attach_latency, attach_tag, attach_usage,
+    _open_node, attach_extra, attach_io, attach_latency, attach_tag,
+    attach_usage,
 )
 
-# NOTE: `PILLAR`, `_SCREEN_TIMEOUT_S`, `_ORCH_PLAN_TIMEOUT_S`, `_REPORTS_DIR`,
+# NOTE: `PILLAR`, `_SCREEN_TIMEOUT_S`, `_SCREEN_STALL_RETRY_S`,
+# `_ORCH_PLAN_TIMEOUT_S`, `_REPORTS_DIR`,
 # and `_NODE_TRACE_STORE` (imported from `runner.config` above) are plain
 # module-level values, bound here by value at import time.
 # `monkeypatch.setattr(server, "_SCREEN_TIMEOUT_S", ...)` (etc.) rebinds the
 # name on the `server` module only — it does NOT reach the copies already
 # bound into this module's namespace, so such patches will not affect the
 # turn body below. Patch `runner.turn.conductor.<NAME>` directly instead.
+
+
+async def _screen_with_stall_retry(sess, question: str,
+                                   prior_questions: list[str]):
+    """Run the screen phase, abandoning a STALLED attempt instead of waiting
+    it out. Raises `asyncio.TimeoutError` if the whole phase budget is spent.
+
+    Same bet as the safechain per-call fence (`_SAFECHAIN_STALL_RETRY_S`): a
+    call still running long past the normal distribution is not working, it is
+    wedged, and a fresh request has a fresh chance. Applied here because the
+    per-call fence CANNOT help this phase — it is 40s against a 30s phase
+    budget, so the phase fence always fires first and the reviewer just gets
+    "question check took too long" with no second attempt.
+
+    Sized against the phase's own target of <5s: 10s is well past a healthy
+    screen, so a normal call never trips it. The two attempts SHARE the phase
+    budget — the retry gets whatever is left of `_SCREEN_TIMEOUT_S` — so the
+    worst case is unchanged and no caller has to be re-tuned.
+
+    Re-running is safe: screening is a read-only classification, the coroutine
+    is rebuilt from scratch, and the redact step self-skips for questions with
+    no identifiers in them.
+    """
+    fence = min(_SCREEN_STALL_RETRY_S, _SCREEN_TIMEOUT_S)
+    t0 = time.perf_counter()
+    if fence > 0:
+        try:
+            return await asyncio.wait_for(
+                sess.chat_agent.screen(question, prior_questions=prior_questions),
+                timeout=fence,
+            )
+        except asyncio.TimeoutError:
+            # Both channels: the JSONL for a human reading one session, the
+            # trace tag for AgenticEval, which scores from the trace DB and
+            # would otherwise never see that a stall happened at all.
+            _tag_screen_node("stall_retry", screen_stalled_after_s=fence)
+            sess.logger.log("screen_stalled", {
+                "stalled_after_s": fence,
+                "phase_budget_s": _SCREEN_TIMEOUT_S,
+                "note": "abandoned the wedged screen call; re-issuing once",
+            })
+
+    remaining = _SCREEN_TIMEOUT_S - (time.perf_counter() - t0)
+    if remaining <= 0:
+        raise asyncio.TimeoutError()
+    try:
+        return await asyncio.wait_for(
+            sess.chat_agent.screen(question, prior_questions=prior_questions),
+            timeout=remaining,
+        )
+    except asyncio.TimeoutError:
+        if fence > 0:
+            # THE FALSIFYING SIGNAL. If this is rare the wedge belongs to the
+            # individual request and the retry earns its place; if it is common
+            # the stall is server-side and re-issuing only wastes the budget.
+            _tag_screen_node("stall_retry_failed",
+                             screen_retry_budget_s=round(remaining, 2))
+            sess.logger.log("screen_retry_stalled", {
+                "retry_budget_s": round(remaining, 2),
+                "phase_budget_s": _SCREEN_TIMEOUT_S,
+            })
+        raise
+
+
+def _tag_screen_node(tag: str, **extra) -> None:
+    """Mark the open `screen` node. Never raises — telemetry must not be able
+    to break the phase it describes."""
+    try:
+        attach_tag(tag)
+        if extra:
+            attach_extra(**extra)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 class _TurnAborted(Exception):
@@ -391,9 +467,8 @@ class TurnRunner:
             # chat_agent creates child nodes (chat.redact, chat.relevance_check)
             # inside; this parent groups them under one "screen" row.
             async with _open_node(_NODE_TRACE_STORE, "screen", depth=0):
-                verdict = await asyncio.wait_for(
-                    sess.chat_agent.screen(self.question, prior_questions=prior_questions),
-                    timeout=_SCREEN_TIMEOUT_S,
+                verdict = await _screen_with_stall_retry(
+                    sess, self.question, prior_questions,
                 )
         except asyncio.TimeoutError:
             sess.logger.log("screen_timeout", {

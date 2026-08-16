@@ -33,6 +33,15 @@ _ORCH_PLAN_TIMEOUT_S = float(os.environ.get("ORCH_PLAN_TIMEOUT_S", "25"))
 # to restart the server or clear history multiple times."
 _SCREEN_TIMEOUT_S = float(os.environ.get("SCREEN_TIMEOUT_S", "30"))
 
+# Stall fence INSIDE the screen budget: abandon a wedged attempt this far in
+# and re-issue once, sharing the 30s rather than adding to it. The phase
+# targets <5s, so 10s is well clear of a healthy screen. The per-call
+# safechain fence (40s) cannot cover this phase — it is larger than the whole
+# phase budget, so the phase fence always fires first and the reviewer gets a
+# failure with no second attempt. Set to 0 to disable and take one attempt at
+# the full budget.
+_SCREEN_STALL_RETRY_S = float(os.environ.get("SCREEN_STALL_RETRY_S", "10"))
+
 # Cap the prior-questions list sent into the relevance_check skill.
 # Without this, the prompt for the screen LLM grows as the qa_cache
 # fills (up to 64 entries), and on the safechain backend a larger
