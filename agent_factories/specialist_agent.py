@@ -59,13 +59,26 @@ def _compose_instructions(skill: DomainSkill, pillar: dict) -> str:
     # Pillar context
     pillar_parts = []
     if pillar:
-        if "cut_off_date" in pillar:
-            cutoff = pillar["cut_off_date"]
-            pillar_parts.append(
-                f"DATA CUT-OFF DATE: {cutoff}. "
-                f"Interpret ALL time-window language relative to this date, "
-                f"NEVER today's calendar."
-            )
+        # NO CONFIGURED CUT-OFF DATE. There used to be a pillar-wide
+        # `cut_off_date` constant here, injected as "interpret ALL time-window
+        # language relative to this date". One constant cannot be right for
+        # every case or every table — on case 11854808010 bureau reaches
+        # July'2025, modelling June'2025 and wcc 2025-12-05 — and stated as the
+        # authority it got quoted as an observation, answering "the most recent
+        # month" for columns that never reached it. It also went stale silently,
+        # since nothing in the data could contradict it.
+        #
+        # The cut-off is now DERIVED PER CASE from the data and shipped in the
+        # round-1 inventory: § DATA COVERAGE carries every column's measured
+        # span plus a single CASE CUT-OFF for anchoring relative windows. This
+        # line is only the guard that survives the removal — it needs no date.
+        pillar_parts.append(
+            "TIME: today's calendar date is NOT in this case's data. Anchor "
+            "every relative window (\"the last 6 months\", \"recently\") to "
+            "the CASE CUT-OFF in § DATA COVERAGE below, and answer \"most "
+            "recent\" / \"latest\" from the last row of the column being "
+            "asked about. Never invent or assume a cut-off date."
+        )
         if "concept_glossary" in pillar and pillar["concept_glossary"]:
             pillar_parts.append(str(pillar["concept_glossary"]).strip())
         if "focus" in pillar:

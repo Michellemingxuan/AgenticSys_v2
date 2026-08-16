@@ -2,8 +2,15 @@ pillar: credit_risk
 display_name: "Credit & Risk (Commercial / SBS)"
 focus: "Delinquency risk, bureau scores, cross-BU exposure, internal model scores and score drivers, spend patterns, WCC flags, capacity & affordability"
 
-# Data collection cut-off — "recent" is relative to this date
-cut_off_date: "2025-07-01"
+# NO `cut_off_date` HERE — DELIBERATELY. It is derived per case from the data
+# by `tools.data_tools.case_cut_off` and shipped to specialists inside
+# § DATA COVERAGE, alongside the measured span of every date column.
+#
+# A pillar-wide constant was wrong in both directions: every case is exported
+# separately, and within one case the tables stop at different points (on
+# 11854808010 bureau reaches July'2025, modelling June'2025, wcc 2025-12-05).
+# Nothing in the data could contradict it, so it also went stale unnoticed.
+# Setting one here again would reintroduce both failures.
 
 # Pillar-wide vocabulary. Injected into orchestrator + every specialist.
 # Treats values as REFERENCE only — always verify via `get_table_schema`

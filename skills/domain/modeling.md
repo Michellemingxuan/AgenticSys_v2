@@ -216,4 +216,4 @@ Other OOP variants may surface as **score drivers** (e.g. `cust_debt_incom_oop` 
 
 ## Performance
 
-Always pass `columns=` to `query_table` — `model_scores` is 50+ cols. Always include `trans_month`. Anchor "recent/last N months" to `cut_off_date`.
+Always pass `columns=` to `query_table` — `model_scores` is 50+ cols. Always include `trans_month`. Anchor "recent/last N months" to the CASE CUT-OFF in § DATA COVERAGE (derived from this case's data), never to today.

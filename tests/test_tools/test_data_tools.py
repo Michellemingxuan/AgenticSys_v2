@@ -3029,6 +3029,135 @@ def test_a_gap_inside_the_covered_span_is_reported_as_a_finding():
     assert "if the REVIEWER named this period" in out
 
 
+# ── the cut-off is a property of the DATA ────────────────────────────────────
+#
+# The pillar ships ONE `cut_off_date` for every case and every table, while the
+# real edge differs per case AND per table. Quoting the constant as "the most
+# recent month" answered about a period the column never reached.
+
+
+def test_coverage_reports_each_date_column_separately():
+    _real_case_tools()                      # case 366132845011
+    cov = data_tools.case_date_coverage()
+    # Monthly bureau stops a month BEFORE the transaction-level tables, and
+    # both stop before the configured pillar cut-off of 2025-07-01.
+    assert cov["bureau_data"]["month"]["last"] == "June'2025"
+    assert cov["modelling_data_transaction"]["trans_dt"]["last"] == "2025-06-30"
+    assert cov["payments_data"]["Payment Date"]["last"] == "2025-07-01"
+
+
+def test_coverage_spans_disagree_between_cases():
+    """Same column, same pillar, different export — which is the whole reason a
+    single configured date cannot stand in for the data."""
+    gw = LocalDataGateway.from_case_folders("data_tables/real")
+    cat = DataCatalog(profile_dir="config/data_profiles")
+    data_tools.init_tools(gw, cat)
+    seen = {}
+    for case in ("11854808010", "366132845011"):
+        gw.set_case(case)
+        data_tools.clear_schema_cache()
+        seen[case] = data_tools.case_date_coverage()["bureau_data"]["month"]["last"]
+    assert seen["11854808010"] == "July'2025"
+    assert seen["366132845011"] == "June'2025"
+
+
+def test_coverage_ignores_numeric_columns_that_merely_parse():
+    """`_date_key` reads a bare 5-digit int as an Excel serial and a 4-digit one
+    as a year, so a float column whose NAME contains 'time' would otherwise be
+    published as a date range."""
+    _real_case_tools()
+    cov = data_tools.case_date_coverage()
+    assert "time_wtd_return_index_max" not in cov.get("modelling_data", {})
+    assert "times_30_dpd_max" not in cov.get("modelling_data", {})
+
+
+def test_inventory_carries_the_measured_coverage():
+    _real_case_tools()
+    inv = data_tools.build_column_inventory(["payments"])
+    assert "§ DATA COVERAGE IN THIS CASE" in inv
+    assert "2025-07-01" in inv
+    # The instruction that makes it usable: read it, don't use a fixed date.
+    assert "most recent" in inv
+
+
+# ── a partial period at the edge is not a decline ────────────────────────────
+#
+# `spends_data.Date` stops on 2025-07-01, so the July bucket holds ONE day of
+# 31: 9 transactions / $3,414 against June's 120 / $91,872. Read as a series
+# point that is a 96% collapse.
+
+
+def _real_trend(case, table, value, time_col, op="sum"):
+    gw = LocalDataGateway.from_case_folders("data_tables/real")
+    gw.set_case(case)
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    return json.loads(data_tools._summarize_trend_impl(
+        table_name=table, value_column=value, time_column=time_col,
+        period="month", op=op,
+    ))["summary"]
+
+
+def test_partial_last_bucket_is_flagged_with_its_evidence():
+    s = _real_trend("11854808010", "spends_data", "Amount", "Date")
+    flag = s["last_bucket_partial"]
+    assert flag["period"] == "2025-07"
+    assert "9 record(s) against a median of" in flag["evidence"][0]
+    assert "1 of 31 days" in flag["evidence"][1]
+    assert "not a decline" not in flag["warning"].lower()  # says it stronger
+    assert "PARTIAL PERIOD" in flag["warning"]
+
+
+def test_partial_last_bucket_hands_over_the_last_complete_one():
+    s = _real_trend("11854808010", "spends_data", "Amount", "Date")
+    assert s["last"]["period"] == "2025-07"          # still reported, untouched
+    assert s["last_complete"]["period"] == "2025-06"
+    assert s["last_complete"]["n_records"] == 120
+
+
+def test_slope_and_pct_change_skip_the_stub():
+    """First→stub reads as a collapse on any series that ends mid-period."""
+    s = _real_trend("11854808010", "spends_data", "Amount", "Date")
+    assert s["slope_and_pct_change_computed_through"] == "2025-06"
+    # Through June the case is roughly flat, not down 96%.
+    assert float(s["pct_change_first_to_last"].rstrip("%")) > -50
+
+
+def test_a_monthly_snapshot_at_the_edge_is_not_partial():
+    """`bureau_data` carries one row per month, so July'2025's FICO is a
+    COMPLETE observation — flagging it would suppress the right answer to
+    "what is the most recent FICO score"."""
+    s = _real_trend("11854808010", "bureau_data", "FICO Score", "month", op="max")
+    assert "last_bucket_partial" not in s
+    assert s["last"]["period"] == "2025-07"
+    assert s["last"]["value"] == "783"
+
+
+def test_a_sparse_series_is_not_mistaken_for_a_cut_off():
+    """One payment a month IS the pattern on this case — a final bucket holding
+    one record matches the median and must not read as truncated."""
+    s = _real_trend("11854808010", "payments_data",
+                    "Payment Amount", "Payment Date")
+    assert s["last"]["n_records"] == 1
+    assert "last_bucket_partial" not in s
+
+
+@pytest.mark.parametrize("key,period,expect_days", [
+    ((2025, 7), "month", 31),
+    ((2024, 2), "month", 29),        # leap February
+    ((2025, 12), "month", 31),       # year rollover
+    ((2025, 1), "quarter", 90),
+    ((2025, 4), "quarter", 92),      # Q4 rolls the year
+    ((2024,), "year", 366),
+    ((2025, 27), "week", 7),
+    ((2025, 7, 3), "day", 1),
+])
+def test_period_bounds_cover_whole_periods(key, period, expect_days):
+    """`last_bucket_partial` compares data reach against these bounds, so an
+    off-by-one here would call whole periods partial (or hide real stubs)."""
+    start, end = data_tools._period_bounds(key, period)
+    assert data_tools._days_between(start, end) == expect_days
+
+
 # ── sorting a date column must be chronological, not alphabetical ────────────
 #
 # `sort_by=<date col>, sort_desc=True, limit=1` is the natural way to ask for
@@ -3090,3 +3219,66 @@ def test_sort_key_orders_numbers_before_dates_before_text():
     keys = [data_tools._row_sort_key(v)
             for v in (12.5, "July'2025", "not a date")]
     assert keys == sorted(keys)
+
+
+# ── one shared window anchor, derived per case ───────────────────────────────
+#
+# Every column's own span answers point questions, but a relative window has to
+# be the SAME window across specialists or the orchestrator synthesizes findings
+# about different periods: "the last 6 months" is Feb-Jul 2025 anchored to
+# `spends_data` and Jul-Dec 2025 anchored to `wcc`, on one case.
+
+
+@pytest.mark.parametrize("case,expect", [
+    ("11854808010", "2025-07-01"),
+    ("366132845011", "2025-06-01"),
+])
+def test_cut_off_is_derived_per_case(case, expect):
+    gw = LocalDataGateway.from_case_folders("data_tables/real")
+    gw.set_case(case)
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    assert data_tools.case_cut_off()["date"] == expect
+
+
+def test_cut_off_resists_tables_that_are_not_time_series():
+    """The min and the max are both held by non-series tables — `strategy` has
+    two rows and stops in February, `wcc` is an event log — so a naive min would
+    anchor the team four months early and a max would anchor it past every
+    transactional table. The median has to sit between them."""
+    _real_case_tools()                       # case 366132845011
+    cut = data_tools.case_cut_off()
+    per = cut["per_table"]
+    assert per["strategy"] == "2025-02-15"          # earliest, an outlier
+    assert per["spends_data"] == "2025-07-01"       # latest
+    assert per["strategy"] < cut["date"] < per["spends_data"]
+
+
+def test_inventory_publishes_the_cut_off_and_scopes_what_it_is_for():
+    _real_case_tools()
+    inv = data_tools.build_column_inventory(["spends", "payments"])
+    assert "CASE CUT-OFF:" in inv
+    # The distinction the whole change rests on.
+    assert "ONLY to anchor a RELATIVE WINDOW" in inv
+    assert "Do NOT use it to answer \"most recent\"" in inv
+
+
+def test_cut_off_is_none_when_the_case_has_no_dates():
+    """`case_cut_off` must not fabricate an anchor for a dateless case."""
+    gw = LocalDataGateway(case_data={"C": {"t": [{"score": 1}]}})
+    gw.set_case("C")
+    data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
+    assert data_tools.case_cut_off() is None
+
+
+def test_every_specialist_on_a_case_gets_the_same_cut_off():
+    """The anchor exists so specialists measure the SAME window. Derived from
+    each one's own tables it would differ per specialist, which is precisely
+    the divergence it is meant to remove."""
+    _real_case_tools()
+    anchors = set()
+    for hints in (["bureau"], ["spends", "payments"], ["model_scores"]):
+        data_tools.clear_schema_cache()
+        inv = data_tools.build_column_inventory(hints)
+        line = next(ln for ln in inv.splitlines() if "CASE CUT-OFF:" in ln)
+        anchors.add(line.split("CASE CUT-OFF:")[1].split("(")[0].strip())
+    assert anchors == {"2025-06-01"}

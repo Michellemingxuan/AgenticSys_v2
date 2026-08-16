@@ -1,3 +1,5 @@
+import re
+
 from agents import Agent
 from agent_factories.specialist_agent import build_specialist_agent
 from models.types import DomainSkill, SpecialistOutput
@@ -11,7 +13,7 @@ def test_build_specialist_agent_returns_agent():
         interpretation_guide="Use FICO < 580 as risky.",
         risk_signals=["delinquency", "high DTI"],
     )
-    pillar = {"focus": "credit", "cut_off_date": "2025-12-01"}
+    pillar = {"focus": "credit"}
     agent = build_specialist_agent(skill, pillar, model=None)
 
     assert isinstance(agent, Agent)
@@ -23,7 +25,18 @@ def test_build_specialist_agent_returns_agent():
     mock_ctx = MagicMock()
     prompt = agent.instructions(mock_ctx, agent)
     assert "You analyze credit risk." in prompt
-    assert "2025-12-01" in prompt
+    # No configured cut-off date is injected any more — one pillar-wide
+    # constant cannot be right for every case or every table, and stated as an
+    # authority it got quoted as an observation. What survives is the guard,
+    # which carries no date; the real cut-off is derived per case and arrives
+    # with the round-1 inventory (§ DATA COVERAGE).
+    assert "today's calendar date is NOT in this case's data" in prompt
+    assert "CASE CUT-OFF in § DATA COVERAGE" in prompt
+    # Scoped to § PILLAR CONTEXT — the skill bodies legitimately carry example
+    # dates in filter snippets; what must stay dateless is the injected block.
+    pillar_block = prompt.split("§ PILLAR CONTEXT", 1)[1].split("§ WORKFLOW", 1)[0]
+    assert not re.search(r"\b20\d\d-\d\d-\d\d\b", pillar_block), \
+        "a hard-coded cut-off date reappeared in the pillar context block"
     # 14 data tools + make_chart + get_chart_guidance + kb_list_topics + kb_lookup
     assert len(agent.tools) == 18
     assert {t.name for t in agent.tools} == {

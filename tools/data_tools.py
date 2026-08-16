@@ -122,6 +122,11 @@ try:
 except NameError:
     _inventory_cache: dict[tuple, str] = {}
 
+try:
+    _coverage_cache  # type: ignore[used-before-def]  # noqa: F821
+except NameError:
+    _coverage_cache: dict[tuple, dict] = {}
+
 _MAX_CHARS = 3000
 # A trend `series` is load-bearing — auto_chart parses it to render the plotted
 # chart — so it gets a larger budget than generic row dumps, and when it is
@@ -1341,6 +1346,7 @@ def init_tools(gateway: DataGateway, catalog: DataCatalog, logger: Any = None) -
     _schema_cache.clear()
     _search_index_cache.clear()
     _inventory_cache.clear()
+    _coverage_cache.clear()
 
 
 def clear_schema_cache() -> None:
@@ -1352,6 +1358,7 @@ def clear_schema_cache() -> None:
     _schema_cache.clear()
     _search_index_cache.clear()
     _inventory_cache.clear()
+    _coverage_cache.clear()
 
 
 def set_logger(logger: Any) -> None:
@@ -1819,6 +1826,141 @@ def _genuine_aliases(entry: dict) -> list[str]:
             if not _is_derivable_alias(a, entry["column"])]
 
 
+# A column whose NAME claims to carry time. Deliberately bounded to whole
+# words: `times_30_dpd_max` must not read as a date column because it starts
+# with "time", and `time_wtd_return_index_max` (a float 0.0-7.2) is caught by
+# the value check below rather than by the name.
+_DATE_COLUMN_NAME = re.compile(
+    r"(?:^|[^a-z])(date|month|dt|day|period|timestamp|time|quarter|week)(?:$|[^a-z])",
+    re.I,
+)
+# How many values to probe before deciding a column is dates.
+_COVERAGE_PROBE = 40
+
+
+def _looks_like_dates(values: list[str]) -> bool:
+    """Whether these values are dates rather than numbers that happen to parse.
+
+    `_date_key` accepts a bare 5-digit integer as an Excel serial and a bare
+    4-digit one as a year, so a numeric column can pass parsing alone. Anything
+    purely numeric therefore has to land in a plausible date range to count.
+    """
+    parsed = [v for v in values if _date_key(v) is not None]
+    if not values or len(parsed) < len(values) * 0.8:
+        return False
+    for v in parsed:
+        s = str(v).strip()
+        try:
+            n = float(s)
+        except (TypeError, ValueError):
+            return True          # has separators or a month name — real date
+        # Numeric: only an Excel serial or a compact `YYYYMMDD` is a date.
+        if not (20000 <= n <= 60000 or 19000101 <= n <= 21001231):
+            return False
+    return True
+
+
+def case_date_coverage(tables: list[str] | None = None) -> dict[str, dict[str, dict]]:
+    """`{table: {column: {first, last, n}}}` — the span each date column covers.
+
+    THE CUT-OFF IS A PROPERTY OF THE DATA, NOT A CONSTANT. Cases are exported
+    at different times and their tables stop at different points: on case
+    11854808010 bureau runs to July'2025, modelling to June'2025, payments to
+    2025-06-28 and wcc to 2025-12-05. A single configured `cut_off_date` is
+    right for at most one of those, and pointing "most recent" at it produces
+    an answer about a month the column never reached.
+    """
+    if _gw() is None or _cat() is None:
+        return {}
+    case_id = _gw().get_case_id()
+    if case_id is None:
+        return {}
+    key = (case_id, tuple(sorted(tables)) if tables else None)
+    if key in _coverage_cache:
+        return _coverage_cache[key]
+
+    wanted: set[str] | None = None
+    if tables:
+        wanted = set()
+        for t in tables:
+            wanted.add(t)
+            wanted.add(_resolve_real_table(t))
+
+    out: dict[str, dict[str, dict]] = {}
+    for table in sorted({e["table"] for e in _build_search_index(case_id)}):
+        if wanted is not None and table not in wanted:
+            continue
+        rows = _gw().query(table) or []
+        if not rows:
+            continue
+        for col in rows[0].keys():
+            if not _DATE_COLUMN_NAME.search(col):
+                continue
+            present = [r[col] for r in rows if r.get(col) not in (None, "")]
+            if not present or not _looks_like_dates(present[:_COVERAGE_PROBE]):
+                continue
+            keyed = [(_date_key(v), v) for v in present]
+            keyed = [(k, v) for k, v in keyed if k is not None]
+            if not keyed:
+                continue
+            lo, hi = min(keyed), max(keyed)
+            out.setdefault(table, {})[col] = {
+                "first": lo[1], "last": hi[1], "n": len(keyed),
+            }
+    _coverage_cache[key] = out
+    return out
+
+
+def case_cut_off(tables: list[str] | None = None) -> dict | None:
+    """Where THIS case's data stops, as one date the whole team can share.
+
+    `{"date": "2025-07-01", "basis": "...", "per_table": {...}}`, or None when
+    nothing in the case carries dates.
+
+    WHY ONE SHARED DATE AT ALL, when § DATA COVERAGE already gives every column
+    its own span: a window has to be the SAME window across specialists or the
+    orchestrator synthesizes findings about different periods. On case
+    11854808010 "the last 6 months" is Feb-Jul 2025 anchored to `spends_data`
+    and Jul-Dec 2025 anchored to `wcc` — two correct answers about periods that
+    barely overlap. Point questions do NOT use this; they read the column's own
+    last value.
+
+    THE MEDIAN, NOT THE MIN OR THE MAX. Both extremes are held by tables that
+    are not time series: `strategy` has two rows and stops in February,
+    `demographics` holds a single 2025-12 date, `wcc` is an event log that on
+    one case runs five months past every transactional table and on another
+    stops four months early. A min anchors the whole team to the sparsest
+    event; a max anchors it to a window with no spend in it. The median lands
+    where the case's continuous data actually ends without needing a
+    hand-maintained list of which tables count.
+    """
+    coverage = case_date_coverage(tables)
+    if not coverage:
+        return None
+    # One date per TABLE (its furthest-reaching column), so a table with three
+    # date columns does not outvote a table with one.
+    per_table: dict[str, tuple] = {}
+    for table, cols in coverage.items():
+        keys = [_date_key(s["last"]) for s in cols.values()]
+        keys = [k for k in keys if k is not None]
+        if keys:
+            per_table[table] = max(keys)
+    if not per_table:
+        return None
+    ordered = sorted(per_table.values())
+    # Lower median — with an even count, prefer the earlier of the two middles
+    # so the anchor stays inside what most tables cover.
+    anchor = ordered[(len(ordered) - 1) // 2]
+    return {
+        "date": _fmt_day(anchor),
+        "basis": (
+            f"median of {len(per_table)} table(s), spanning "
+            f"{_fmt_day(ordered[0])}..{_fmt_day(ordered[-1])}"
+        ),
+        "per_table": {t: _fmt_day(k) for t, k in sorted(per_table.items())},
+    }
+
+
 def build_column_inventory(tables: list[str] | None = None) -> str:
     """The columns this case actually holds, one terse line each.
 
@@ -1924,6 +2066,63 @@ def build_column_inventory(tables: list[str] | None = None) -> str:
             head = " ".join(bits)
             short = e["short"][:_INVENTORY_MAX_SHORT]
             lines.append(f"  {head} — {short}" if short else f"  {head}")
+
+    # ── DATA COVERAGE ──────────────────────────────────────────────────────
+    #
+    # Where each table's dates actually stop, read off THIS case. The pillar's
+    # `cut_off_date` is one constant shared by every case and every table; this
+    # is the real edge, and the two disagree routinely. Placed after the column
+    # list so "most recent" has a referent before the specialist plans a call.
+    # Scoped to the tables this inventory actually listed — an unscoped scan
+    # would advertise coverage for tables the specialist was not shown.
+    coverage = case_date_coverage(sorted(by_table)) if by_table else {}
+    if coverage:
+        lines += [
+            "",
+            "§ DATA COVERAGE IN THIS CASE",
+            "",
+            "The span each date column actually covers. THIS is what \"most "
+            "recent\" / \"latest\" / \"the cut-off\" mean for this case — read "
+            "the value off the column you are querying, not off a fixed date "
+            "and not off today's calendar. Tables stop at DIFFERENT points, so "
+            "the newest row in one is not the newest in another. Asking for a "
+            "window past a column's last value returns nothing, and that is "
+            "coverage, not a data gap.",
+        ]
+        # UNSCOPED ON PURPOSE — over every table in the case, not just the ones
+        # this specialist was handed. A cut-off derived from each specialist's
+        # own subset would hand `bureau` and `spend_payments` different anchors,
+        # which is the divergence this whole field exists to prevent.
+        cut_off = case_cut_off()
+        if cut_off:
+            lines += [
+                "",
+                f"  CASE CUT-OFF: {cut_off['date']} "
+                f"({cut_off['basis']}, across every table in this case — the "
+                f"same value every specialist on this case receives).",
+                "  Use this ONLY to anchor a RELATIVE WINDOW — \"the last 6 "
+                "months\", \"recently\", \"the past year\" — so that every "
+                "specialist measures the same period and the answers can be "
+                "compared. Today's calendar date is NOT in this data; never "
+                "compute a window from it.",
+                "  Do NOT use it to answer \"most recent\" / \"latest\": that "
+                "is a POINT question, and its answer is the last row of the "
+                "column being asked about, listed below.",
+            ]
+        for table in sorted(coverage):
+            for col, span in sorted(coverage[table].items()):
+                lines.append(
+                    f"  {table}.{col}: {span['first']} .. {span['last']} "
+                    f"({span['n']:,} dated rows)"
+                )
+        lines += [
+            "",
+            "  A period at the very edge may be PARTIAL — the export can stop "
+            "mid-month, leaving a few days' worth of rows that sum to a "
+            "fraction of a normal period. `summarize_trend` flags this as "
+            "`last_bucket_partial` when it happens. A partial period is not a "
+            "decline; never report it as one.",
+        ]
 
     out = "\n".join(lines)
     _inventory_cache[key] = out
@@ -4371,6 +4570,64 @@ def _bucket_label(key: tuple, period: str) -> str:
     return str(key)
 
 
+# A last bucket holding under this share of the median bucket's records is
+# treated as a stub. Loose on purpose: real month-to-month volume swings by
+# 2-3x on these cases (spend ran 99 / 120 / 480 / 682 transactions in
+# consecutive months), while a genuine cut-off leaves a tenth or less — 9
+# against a median of 268, 22 against 366. A tighter ratio would start calling
+# quiet months incomplete.
+_PARTIAL_BUCKET_RECORD_RATIO = 0.25
+
+
+def _fmt_day(key: tuple) -> str:
+    """`(2025, 7, 1)` → `2025-07-01`."""
+    return f"{key[0]:04d}-{key[1]:02d}-{key[2]:02d}"
+
+
+def _period_bounds(key: tuple, period: str) -> tuple[tuple, tuple] | None:
+    """First and last calendar day of the period a bucket key names.
+
+    Returns ``((y, m, d), (y, m, d))`` or None for a period whose bounds are
+    not enumerable. Used to ask whether the last bucket's data actually REACHES
+    the end of its own period — the difference between "spend collapsed in
+    July" and "the export stops on July 1st".
+    """
+    from datetime import date, timedelta
+    try:
+        if period == "day":
+            return (key[0], key[1], key[2]), (key[0], key[1], key[2])
+        if period == "week":
+            # key is (iso_year, iso_week); ISO weeks run Monday..Sunday.
+            mon = date.fromisocalendar(key[0], key[1], 1)
+            sun = mon + timedelta(days=6)
+            return (mon.year, mon.month, mon.day), (sun.year, sun.month, sun.day)
+        if period == "month":
+            y, m = key[0], key[1]
+            nxt = date(y + (m == 12), (m % 12) + 1, 1)
+            end = nxt - timedelta(days=1)
+            return (y, m, 1), (end.year, end.month, end.day)
+        if period == "quarter":
+            y, q = key[0], key[1]
+            m0 = (q - 1) * 3 + 1
+            nxt = date(y + (q == 4), ((m0 + 2) % 12) + 1, 1)
+            end = nxt - timedelta(days=1)
+            return (y, m0, 1), (end.year, end.month, end.day)
+        if period == "year":
+            return (key[0], 1, 1), (key[0], 12, 31)
+    except (ValueError, IndexError, TypeError):
+        return None
+    return None
+
+
+def _days_between(a: tuple, b: tuple) -> int | None:
+    """Inclusive day count from `a` to `b`, or None if either is unusable."""
+    from datetime import date
+    try:
+        return (date(*b) - date(*a)).days + 1
+    except (ValueError, TypeError):
+        return None
+
+
 def _enumerate_periods(start_key: tuple, end_key: tuple, period: str) -> list[tuple]:
     """Enumerate all expected bucket keys between two endpoints (inclusive).
 
@@ -4531,6 +4788,15 @@ def _summarize_trend_impl(
 
     # Bucket rows by period.
     buckets: dict[tuple, list[float]] = {}
+    # Earliest/latest DAY seen inside each bucket. The last bucket's reach into
+    # its own period is what says whether the period is complete: an export cut
+    # on 2025-07-01 puts 1 day of July in the July bucket, and its `sum` is a
+    # thirty-first of a month presented next to whole ones.
+    bucket_span: dict[tuple, tuple[tuple, tuple]] = {}
+    # Whether the TIME COLUMN carries day resolution at all. A month-grain
+    # column (`July'2025`) parses to day 1 of every month, so "1 of 31 days"
+    # would be an artifact of the format rather than a fact about coverage.
+    day_grain = False
     n_dated = 0
     n_value_skipped = 0
     n_in_range = 0
@@ -4579,6 +4845,10 @@ def _summarize_trend_impl(
                 continue
         bk = _bucket_key(dk, period)
         buckets.setdefault(bk, []).append(v)
+        if dk[2] != 1:
+            day_grain = True
+        lo, hi = bucket_span.get(bk, (dk, dk))
+        bucket_span[bk] = (min(lo, dk), max(hi, dk))
 
     if not buckets:
         # Two very different causes, and conflating them sent specialists in
@@ -4739,9 +5009,74 @@ def _summarize_trend_impl(
     peak = series[max_idx]
     trough = series[min_idx]
 
+    # ── PARTIAL LAST BUCKET ────────────────────────────────────────────────
+    #
+    # An export cut mid-period leaves a stub at the right edge, and an ADDITIVE
+    # measure over a stub is not small, it is INCOMPLETE. Measured on case
+    # 11854808010: spend runs 120 transactions / $91,872 in 2025-06 and then 9
+    # / $3,414 in 2025-07 — a 96% "collapse" that is really `spends_data.Date`
+    # stopping on 2025-07-01, one day of thirty-one. The configured
+    # `cut_off_date` pointed at exactly that stub.
+    #
+    # SPARSITY IS THE TRIGGER, COVERAGE ONLY EXPLAINS. Reaching the end of a
+    # period is not the same as covering it: a complete March whose last
+    # transaction fell on the 28th covers 28 of 31 days, and a table with one
+    # payment a month covers one. Both are whole periods. What a cut-off
+    # actually leaves behind is a RECORD COUNT far under the series norm — 9
+    # against a median of 268, 22 against 366, 1 against 17 — and that reads
+    # the same on a day-grain column and a month-grain one. So the count fires
+    # the flag; the day span, when the column has one, says how far the data
+    # got.
+    #
+    # SNAPSHOT MEASURES ARE DELIBERATELY EXEMPT. `bureau_data` carries one row
+    # per month, so `max(FICO)` for July'2025 is a COMPLETE observation and
+    # flagging it would suppress the correct answer to "the most recent FICO
+    # score". Only sums and counts are diluted by a short period.
+    additive_op = op in ("sum", "count")
+    last_key = keys_sorted[-1]
+    partial_last: dict | None = None
+    if additive_op and n_buckets >= 3:
+        prior_counts = sorted(s["n_records"] for s in series[:-1])
+        median_n = prior_counts[len(prior_counts) // 2]
+        last_n = last["n_records"]
+        reasons: list[str] = []
+        if median_n and last_n < median_n * _PARTIAL_BUCKET_RECORD_RATIO:
+            reasons.append(
+                f"{last_n:,} record(s) against a median of {median_n:,} "
+                f"in the other buckets"
+            )
+            bounds = _period_bounds(last_key, period) if day_grain else None
+            if bounds is not None:
+                p_start, p_end = bounds
+                reached = bucket_span.get(last_key, (p_start, p_start))[1]
+                covered = _days_between(p_start, reached)
+                total_days = _days_between(p_start, p_end)
+                if covered and total_days and covered < total_days:
+                    reasons.append(
+                        f"data reaches only {_fmt_day(reached)} — "
+                        f"{covered} of {total_days} days in the period"
+                    )
+        if reasons:
+            partial_last = {
+                "period": last["period"],
+                "evidence": reasons,
+                "warning": (
+                    f"PARTIAL PERIOD — this case's data stops inside "
+                    f"{last['period']}, so {op}({value_column}) for it counts "
+                    f"only part of the period and is NOT comparable with the "
+                    f"whole periods before it. Do NOT read it as a decline, a "
+                    f"collapse, or a recovery. Report the trend through "
+                    f"{series[-2]['period']}, and if the reviewer asked about "
+                    f"{last['period']} say what the data actually covers."
+                ),
+            }
+
     # Slope (per-bucket change). Useful as a directional signal for the LLM.
-    indexed = [(i, v) for i, v in enumerate(raw_values)]
-    slope_v = _slope(indexed)
+    # Computed over COMPLETE buckets when the last one is a stub — otherwise a
+    # thirty-first of a month drags the direction of the whole series.
+    scored = raw_values[:-1] if partial_last else raw_values
+    indexed = [(i, v) for i, v in enumerate(scored)]
+    slope_v = _slope(indexed) if len(scored) >= 2 else None
 
     # Volatility — coefficient of variation (std / |mean|).
     if mean_v != 0 and n_buckets >= 2:
@@ -4751,9 +5086,11 @@ def _summarize_trend_impl(
     else:
         cv = None
 
-    # Pct change first → last.
+    # Pct change first → last. Measured to the last COMPLETE bucket when the
+    # final one is a stub: first-to-stub reads as a collapse every time.
+    pct_end = series[-2] if partial_last else last
     if first["raw_value"] != 0:
-        pct_change = (last["raw_value"] - first["raw_value"]) / abs(first["raw_value"])
+        pct_change = (pct_end["raw_value"] - first["raw_value"]) / abs(first["raw_value"])
     else:
         pct_change = None
 
@@ -4800,6 +5137,15 @@ def _summarize_trend_impl(
         ),
         "missing_periods": missing,  # empty for day/week or when fully covered
     }
+
+    # Only present when the right edge is a stub — absence means the series
+    # ends on a whole period, which is the ordinary case and needs no caveat.
+    if partial_last:
+        summary["last_bucket_partial"] = partial_last
+        summary["last_complete"] = _landmark(series[-2])
+        # Name the exclusion where the numbers are, not only in the warning:
+        # a specialist that quotes the slope should see what it was measured on.
+        summary["slope_and_pct_change_computed_through"] = series[-2]["period"]
 
     # Threshold crossings. Without this, "did TSR spike recently / cross the
     # threshold?" is unanswerable from the summary: `peak` is the GLOBAL peak

@@ -42,10 +42,14 @@ class PillarLoader:
     def get_specialist_config(self, pillar_name: str, domain: str) -> dict | None:
         """Return the specialist config dict for a given domain within a pillar.
 
-        Automatically injects pillar-level fields (cut_off_date, etc.) into
-        the specialist config so they are available in the specialist prompt.
-
         Returns None if the pillar or domain does not exist.
+
+        This used to copy pillar-level fields down into the specialist config,
+        which existed solely to carry `cut_off_date`. That constant is gone —
+        the cut-off is derived per case by `tools.data_tools.case_cut_off` and
+        delivered with the round-1 inventory, because one date per pillar was
+        wrong for every case but one and could not be contradicted by the data.
+        Re-adding `cut_off_date` to a pillar YAML will therefore do nothing.
         """
         pillar = self.load(pillar_name)
         if pillar is None:
@@ -54,10 +58,4 @@ class PillarLoader:
         spec_config = specialists.get(domain)
         if spec_config is None:
             return None
-
-        # Inject pillar-level fields that specialists need
-        result = dict(spec_config)
-        for key in ("cut_off_date",):
-            if key in pillar and key not in result:
-                result[key] = pillar[key]
-        return result
+        return dict(spec_config)
