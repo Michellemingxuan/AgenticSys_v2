@@ -438,10 +438,15 @@ Charts render automatically from tool outputs — no `make_chart` call needed.
   transactions or 3 — which changes the finding — and a small count is often
   the tell for a partial boundary month rather than a real collapse.
 - **Dates → match the column's own format.** Check via `get_table_schema`. Quote verbatim from results. Never echo filter bounds (dates ending `-01`/`-31` are red flags).
-- **Unwindowed questions → no date filter.** Windowed → anchor to the CASE CUT-OFF in § DATA COVERAGE, never today. Derived windows ("ramp-up") → ONE `summarize_trend` on `credit_loss_prob`/`tot_struct_risk_score` to find the inflection.
-- **Two different date questions, two different answers.** § DATA COVERAGE (round-1 inventory) carries both, measured from this case's data — there is no configured cut-off date anywhere, and inventing one is a fabrication.
-  - **"most recent" / "latest" / "the newest X" is a POINT question** → the last row of **X's own column**: `summary.last`, or `sort_by=<date col>, sort_desc=True, limit=1`. Tables stop at different points — on case 11854808010 bureau runs to July'2025, modelling to June'2025, wcc to 2025-12-05 — so the newest row in one is not the newest in another. Never answer this from the case cut-off.
-  - **"the last 6 months" / "recently" / "the past year" is a WINDOW question** → anchor to the single **CASE CUT-OFF**, so every specialist measures the same period and the orchestrator can compare the answers. Anchoring to your own table's last value instead produces a window nobody else used.
+- **Unwindowed questions → no date filter.** Windowed → anchor per the three-source order below, never to today. Derived windows ("ramp-up") → ONE `summarize_trend` on `credit_loss_prob`/`tot_struct_risk_score` to find the inflection.
+- **Where "recent" comes from — three sources, in this order.** § DATA COVERAGE (round-1 inventory) carries the measured spans and the anchor; there is no configured cut-off date anywhere and inventing one is a fabrication.
+  1. **A window already established** — the reviewer named one, or a prior turn / another specialist pinned one (`kb_lookup`, the episodic context). Use it and say so. An anchor you derive that contradicts the window under discussion is the wrong answer to the right question.
+  2. **The question names a metric or table → use THAT table's own dates.** Not the case anchor.
+     - *Point* ("the latest FICO", "the newest payment") → the last row of that column: `summary.last`, or `sort_by=<date col>, sort_desc=True, limit=1`.
+     - *Window* ("how many transactions last month", "spend over the last 6 months") → count back from that table's **last period WITH DATA**. "Last month" means the most recent month the table holds, even when the export cut it short: on case 366132845011 `spends` runs to 2025-07-01, so "last month" is **July — 22 transactions**, and the coverage caveat rides along with it. Answering **June (478)** instead is a different question with a better-looking number; answering from the case anchor is a third month again (May, 682). **Report the period asked for, then say what it covers.**
+     - **A short period is disclosed, never swapped.** `query_table` / `aggregate_column` attach a `coverage_note` when the window lands in a part-covered period, and `summarize_trend` sets `summary.last_bucket_partial`. Carry it into the answer — *"22 transactions in July, but the export stops on 2025-07-01, so July holds one day of 31; June, the last whole month, had 478."* The last COMPLETE period is for **comparisons** — what "up" or "down" is measured against — not a substitute for the period the reviewer named.
+  3. **Only when the question is general** — "recent behaviour", "what stands out lately", anything spanning domains with no one table to key on — → the single **CASE CUT-OFF**. That is what it is for: one shared period so specialists can be compared. Say which window you used.
+  Tables stop at different points — on case 11854808010 bureau runs to July'2025, modelling to June'2025, wcc to 2025-12-05 — so the newest row in one is not the newest in another.
 - **Sorting by a date column is chronological** — `query_table` orders dates by calendar, not spelling, and echoes `sort` as `"<col> desc (chronological)"` when it did. If that marker is missing on a date sort, the column did not parse as dates: check the format with `get_table_schema` rather than trusting the top row.
 - **A partial period is not a decline.** An export cut mid-month leaves a stub — a few days of rows summing to a fraction of a whole period. `summarize_trend` flags it as `summary.last_bucket_partial` (with the record count and the days covered), gives you `summary.last_complete`, and computes slope / pct-change through the last WHOLE bucket. When that flag is present: narrate the trend to `last_complete`, never call the stub a collapse or a recovery, and if the reviewer asked about that period, say what the data actually covers ("July holds one day, 2025-07-01"). It is only raised for sums and counts — a monthly SNAPSHOT (FICO, a model score) at the edge is a complete observation, and is exactly what "most recent" should return.
 - **"recent spike" / "reacting recently" / "crossed the threshold" → use `summary.threshold.latest_episode`.** It is a `start`..`end` WINDOW — the most recent CONTIGUOUS run above the limit — and that window is what you filter transactions by. Do NOT use `peak_all_time` (the global maximum, usually an old month), and do NOT take the span of all breaches: a score that breached in 2024, recovered, then breached again in 2025-04 has TWO episodes, and "recently" means the last one, not 2024→2025. `n_episodes` tells you whether there is more than one. A recent episode alongside a negative `slope` and an old `peak_all_time` is a real signal, not a contradiction. Quote the window, its peak, and the limit ("TSR crossed 20 in 2025-04–05, peaking 27.4").
@@ -465,6 +470,18 @@ transaction table (one row per transaction). Choose by question type:
   specific transactions. For spend/payment there is no monthly table —
   `spends` and `payments` are transaction-level, so bucket them by month
   with `summarize_trend` for trend framing.
+- **Counting transactions with no model question attached → `spends`.** "How
+  many transactions", "how many last month", "transactions at merchant X" need
+  no score, so they belong to the plain spend table, not
+  `model_scores_transaction` / `score_drivers_transaction`. `spends` is also
+  the more current view — on one real case it runs a full day past where the
+  transaction-level model tables stop, so counting from the model side
+  silently drops the newest data. Check both spans in § DATA COVERAGE if it
+  matters. Reach for the transaction-level MODEL tables only when the answer
+  needs the score or its drivers at the moment of purchase. (The two do not
+  hold the same rows: the model side also carries auths and declines that
+  never settled, so it has MORE rows over a SHORTER span. If a count must
+  include unsettled attempts, say which table you used and why.)
 
 ### Score drivers — always quote the VALUE, not just the name
 
