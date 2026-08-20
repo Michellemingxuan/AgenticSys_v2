@@ -1233,6 +1233,14 @@ class TurnRunner:
                 # trace (alternate_paths_must_replay_full_sse).
                 _replay_completed_specialists(sess, turn_id, self.tool_calls)
 
+                # Same reason as the replay above: this branch returns before
+                # `_finalize`, so any chart a specialist already plotted is
+                # never emitted and its `chart_pending` placeholder is never
+                # retracted — the reviewer gets an error message beside a Plots
+                # panel that loads forever.
+                self._emit_charts_and_retract_pending(
+                    turn_id, reason="turn_ended_before_charts_were_built")
+
                 ts = int(time.time() * 1000)
                 sess.emit("final", {
                     "turn_id": turn_id, "answer": answer_text, "flags": flags,
@@ -1556,6 +1564,67 @@ class TurnRunner:
                     session_id=sess.session_id, min_turns=EPISODIC_TURNS,
                     logger=_amem_log)
 
+    def _emit_charts_and_retract_pending(self, turn_id: str, *,
+                                         reason: str) -> list[dict]:
+        """Emit this turn's charts, then retract every placeholder left over.
+
+        `chart_pending` fires per specialist DURING the turn; `chart` is emitted
+        only once the KB is drained. Any pending pair with no chart behind it is
+        a card that spins forever, and the frontend cannot detect that on its
+        own — nothing else in the stream says the placeholder is dead.
+
+        TWO PATHS NEED THIS, WHICH IS WHY IT IS A METHOD. `_finalize` reaches it
+        after a normal turn, where leftovers mean `_collect_turn_charts` deduped
+        two specialists' identical figures. The orchestrator-error branch
+        returns BEFORE `_finalize`, so a turn whose specialists had already
+        plotted used to leave every placeholder hanging — the reviewer saw an
+        error and a Plots panel still loading. `reason` is what tells those two
+        cases apart in the stream.
+
+        Never raises: this runs on a path that has already emitted `final`, and
+        a bookkeeping failure must not raise a second terminal event.
+        """
+        sess = self.sess
+        chart_payloads: list[dict] = []
+        try:
+            turn_charts = _collect_turn_charts(
+                sess.specialist_kb, turn_id, sess.case_id)
+            for c in turn_charts or []:
+                kp = _find_kp(sess.specialist_kb, c["specialist"],
+                              c["topic"], turn_id)
+                chart_payloads.append(_build_chart_payload(kp, c))
+            for p in chart_payloads:
+                sess.emit("chart", {**p, "turn_id": turn_id})
+            if chart_payloads:
+                sess.logger.log("turn_charts_emitted", {
+                    "turn_id": turn_id,
+                    "n_charts": len(chart_payloads),
+                    "topics": [p["topic"] for p in chart_payloads],
+                })
+        except Exception:  # noqa: BLE001 — never load-bearing
+            pass
+
+        try:
+            pending = getattr(self.ctx, "_charts_pending", None) or set()
+            emitted = {(p["specialist"], p["topic"]) for p in chart_payloads}
+            orphaned = sorted(pending - emitted)
+            for spec, topic in orphaned:
+                sess.emit("chart_cancelled", {
+                    "turn_id": turn_id, "specialist": spec, "topic": topic,
+                    "reason": reason,
+                })
+            if orphaned:
+                sess.logger.log("chart_pending_retracted", {
+                    "turn_id": turn_id,
+                    "n_retracted": len(orphaned),
+                    "reason": reason,
+                    "retracted": [{"specialist": s, "topic": t}
+                                  for s, t in orphaned],
+                })
+        except Exception:  # noqa: BLE001
+            pass
+        return chart_payloads
+
     async def _finalize(self) -> None:
         sess = self.sess
         turn_id = self.turn_id
@@ -1736,49 +1805,9 @@ class TurnRunner:
 
         # Collect and emit charts from the KB (now populated by the drain).
         timer_t0 = time.perf_counter()
-        turn_charts = _collect_turn_charts(sess.specialist_kb, turn_id, sess.case_id)
-        chart_payloads: list[dict] = []
-        if turn_charts:
-            for c in turn_charts:
-                kp = _find_kp(sess.specialist_kb, c["specialist"], c["topic"], turn_id)
-                chart_payloads.append(_build_chart_payload(kp, c))
-            for p in chart_payloads:
-                sess.emit("chart", {**p, "turn_id": turn_id})
-            sess.logger.log("turn_charts_emitted", {
-                "turn_id": turn_id,
-                "n_charts": len(chart_payloads),
-                "topics": [p["topic"] for p in chart_payloads],
-            })
-
-        # Retract placeholders that will never be filled. `chart_pending` fires
-        # per specialist DURING the turn, but `chart` is emitted here, AFTER
-        # `_collect_turn_charts` dedups identical figures across specialists.
-        # Every dropped chart therefore leaves a placeholder waiting on a
-        # `chart` event that never comes — it hangs as a second,
-        # permanently-loading card beside the real one, which is exactly what
-        # "two specialists drew the same plot" looks like on screen. The
-        # frontend cannot detect this on its own: nothing in the stream says
-        # the pending chart was superseded. Emitting the difference is the only
-        # place that knows. Additive and backward-compatible — a client that
-        # ignores `chart_cancelled` behaves exactly as it does today.
-        try:
-            pending = getattr(self.ctx, "_charts_pending", None) or set()
-            emitted = {(p["specialist"], p["topic"]) for p in chart_payloads}
-            orphaned = sorted(pending - emitted)
-            for spec, topic in orphaned:
-                sess.emit("chart_cancelled", {
-                    "turn_id": turn_id, "specialist": spec, "topic": topic,
-                    "reason": "superseded_by_identical_chart",
-                })
-            if orphaned:
-                sess.logger.log("chart_pending_retracted", {
-                    "turn_id": turn_id,
-                    "n_retracted": len(orphaned),
-                    "retracted": [{"specialist": s, "topic": t}
-                                  for s, t in orphaned],
-                })
-        except Exception:  # noqa: BLE001 — trace/UI bookkeeping is never load-bearing
-            pass
+        chart_payloads = self._emit_charts_and_retract_pending(
+            turn_id, reason="superseded_by_identical_chart",
+        )
         self.turn_timer.record(
             "chart_collect_emit",
             int((time.perf_counter() - timer_t0) * 1000),
