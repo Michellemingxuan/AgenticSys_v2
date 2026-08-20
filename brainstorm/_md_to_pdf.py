@@ -26,8 +26,8 @@ from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import (HRFlowable, ListFlowable, ListItem,
-                                PageBreak, Paragraph, Preformatted,
+from reportlab.platypus import (HRFlowable, KeepTogether, ListFlowable,
+                                ListItem, PageBreak, Paragraph, Preformatted,
                                 SimpleDocTemplate, Spacer, Table, TableStyle)
 
 _BASE = getSampleStyleSheet()
@@ -99,6 +99,18 @@ def _table(rows: list[list[str]]):
     return t
 
 
+# Usable frame height: A4 minus the top/bottom margins set in `render` below.
+_FRAME_H = A4[1] - 2 * 17 * mm
+_HEADINGS = {"h1", "h2", "h3"}
+
+
+def _code_height(lines: list[str]) -> float:
+    """Rendered height of a fenced block, for the fits-on-a-page test."""
+    c = S["code"]
+    return (len(lines) * c.leading + 2 * c.borderPadding
+            + c.spaceBefore + c.spaceAfter)
+
+
 def build(md: str) -> list:
     flow: list = []
     lines = md.splitlines()
@@ -113,7 +125,23 @@ def build(md: str) -> list:
                 buf.append(lines[i])
                 i += 1
             i += 1
-            flow.append(Preformatted("\n".join(buf), S["code"]))
+            block = Preformatted("\n".join(buf), S["code"])
+            # A split ASCII diagram is unreadable — the box borders no longer
+            # close and half the nesting is on the previous page. Keep the
+            # block whole, and keep the heading that introduces it attached,
+            # so a diagram moves to the next page rather than straddling one.
+            #
+            # Only when it CAN fit: KeepTogether on an over-tall block pushes
+            # it to a fresh page and then splits it anyway, wasting a page for
+            # nothing. Blocks taller than the frame are left to flow.
+            if _code_height(buf) <= _FRAME_H:
+                if flow and getattr(getattr(flow[-1], "style", None),
+                                    "name", "") in _HEADINGS:
+                    flow.append(KeepTogether([flow.pop(), block]))
+                else:
+                    flow.append(KeepTogether([block]))
+            else:
+                flow.append(block)
             continue
 
         if ln.startswith("|") and i + 1 < len(lines) and set(

@@ -1,12 +1,12 @@
 # Timeouts and retries
 
-_2026-08-16. Numbers are the shipped `config/tuning.yaml`._
+_2026-08-16, revised 2026-08-20. Numbers are the shipped `config/tuning.yaml`; concurrency is the shipped `server.py`._
 
 Four independent layers can each abandon work, and each has its own retry. They
 nest, and their retries **multiply** — which is the part that is easy to get
 wrong when tuning any single number.
 
-**Three places now treat a slow call as *suspect* rather than as work in
+**Three places now treat a slow call as _suspect_ rather than as work in
 progress**, and they are the same mechanism at different heights: abandon the
 attempt, re-issue once, never loop.
 
@@ -49,10 +49,14 @@ WinAnsi encoding and render substituted or blank in the PDF.)
 | |  and let the CALL layer below do the retrying instead.                 | |
 | |                                                                        | |
 | | +- AGENT --------------------- _MAX_SPECIALIST_ATTEMPTS = 2 --------+  | |
-| | | Re-runs the whole agentic loop when the ANSWER is wrong:          |  | |
+| | | Re-runs the whole agentic loop. FOUR triggers share the 2:        |  | |
 | | |   ungrounded_retry   built on a failed tool call                  |  | |
 | | |   absence_reread     denies what the tools returned               |  | |
 | | |   max_turns_retry    blew its turn budget                         |  | |
+| | |   retry              AgentsException / truncated JSON -- the      |  | |
+| | |                      ORIGINAL reason this budget exists           |  | |
+| | | Whichever fires first CONSUMES the budget: a run that spends      |  | |
+| | | attempt 0 on a parse failure has no grounding retry left.         |  | |
 | | |                                                                   |  | |
 | | | +- CALL ------------ one HTTP request to the model ----------+    |  | |
 | | | |  stall fence  40s  ->  abandon, re-issue ONCE              |    |  | |
@@ -75,7 +79,10 @@ WinAnsi encoding and render substituted or blank in the PDF.)
   +---------------------------------------------------------------------+
 
   Also in the path, but not a fence: the firewall semaphores
-  (specialist 8, orchestrator 4).
+  (specialist 12, orchestrator 2 -- server.py passes both explicitly;
+  the 8/4 in firewall_stack.py are DEFAULTS that never apply here).
+  Orchestrator is the scarcer resource, and it is process-wide, so
+  concurrent CASES queue on those 2 slots before anything else.
 ```
 
 ## The call layer, in detail
