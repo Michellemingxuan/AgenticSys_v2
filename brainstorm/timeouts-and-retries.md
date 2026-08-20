@@ -6,10 +6,25 @@ Four independent layers can each abandon work, and each has its own retry. They
 nest, and their retries **multiply** — which is the part that is easy to get
 wrong when tuning any single number.
 
-Two layers now treat a slow call as *suspect* rather than as work in progress:
-the CALL layer (safechain only, 40s) and the SCREEN phase (both backends, 10s).
-The second exists because the first cannot reach it — see "Why screen needs its
-own fence".
+**Three places now treat a slow call as *suspect* rather than as work in
+progress**, and they are the same mechanism at different heights: abandon the
+attempt, re-issue once, never loop.
+
+```
+  layer            fence   then                        backends   section
+  --------------   -----   -------------------------   --------   -------------
+  CALL             40s     re-issue on a 60s budget    safechain  "The call
+                                                                   layer"
+  SCREEN phase     10s     re-issue on what is left    both       "Why screen
+                           of the phase's 30s                      needs its
+                                                                   own fence"
+  ROUND-1 watchdog 25s     replan -- and the deadline  both       "The round-1
+                           is DISARMED on the last                 watchdog"
+                           attempt
+```
+
+The lower two exist because the CALL layer cannot reach them: its fence is 40s
+and both phases are budgeted under that, so the phase fence always fires first.
 
 (Diagrams are plain ASCII on purpose: box-drawing glyphs are outside Courier's
 WinAnsi encoding and render substituted or blank in the PDF.)
@@ -23,13 +38,15 @@ WinAnsi encoding and render substituted or blank in the PDF.)
 | not a timeout of their own.                       no retry: the turn ends  |
 |                                                                            |
 | +- PHASE ------------------------- one fence per kind of agent ----------+ |
-| |  screen        30s  (stall fence 10s, INSIDE the 30 -- see below)      | |
-| |  orch_plan / reviewer   25s        specialist          240s            | |
+| |  screen        30s (stall fence 10s, INSIDE the 30)                    | |
+| |  orch_plan     25s (the round-1 watchdog -- it REPLANS)                | |
+| |  reviewer     120s      specialist          240s                       | |
 | |  distiller    120s      distiller_drain  60s   report_agent  150s      | |
 | |                                                                        | |
 | |  Expiry = that agent failed. The turn continues, degraded.             | |
-| |  Two retry here: orch_plan (the round-1 watchdog), and screen, which   | |
-| |  abandons a wedged attempt at 10s and re-issues within its own 30s.    | |
+| |  Two retry here: orch_plan (replan) and screen (re-issue). `reviewer`  | |
+| |  does NOT -- which is why its fence is wide enough to outlast a stall  | |
+| |  and let the CALL layer below do the retrying instead.                 | |
 | |                                                                        | |
 | | +- AGENT --------------------- _MAX_SPECIALIST_ATTEMPTS = 2 --------+  | |
 | | | Re-runs the whole agentic loop when the ANSWER is wrong:          |  | |
@@ -198,6 +215,72 @@ so a wedge caused by prompt size will reproduce; `stall_retry_failed` is what
 distinguishes that from a transient backend hiccup, and
 `PRIOR_QUESTIONS_FOR_SCREEN` (12) is the knob for the former.
 
+## The round-1 watchdog
+
+The oldest of the three, and the one that is easy to mistake for an ordinary
+phase fence. `orch_plan_s = 25` does NOT bound the planning call — it bounds
+**time-to-first-tool-call**, and expiry means "this planning attempt is wedged,
+throw it away and plan again".
+
+```
+  orchestrator round 1 starts streaming
+       |
+       +-- a tool call arrives before 25s -----------> PLANNING DONE
+       |
+       +-- 25s with no tool call
+              |  log orchestrator_plan_timeout
+              |  emit orchestrator_retry (reason: planning_timeout)
+              v
+           abandon the stream, _orch_attempt += 1, rerun from the top
+              |
+              +-- THE FINAL ATTEMPT RUNS WITH THE DEADLINE DISARMED
+                    (_plan_deadline = None when _orch_attempt + 1
+                     == _MAX_ORCH_ATTEMPTS)
+```
+
+**The disarm is what makes 25s safe.** A tight fence on a single attempt would
+hard-fail any environment that is merely slow; here the tight fence only ever
+costs one wasted attempt, and the retry runs unbounded. That is the opposite
+trade from the reviewer below, which gets one attempt and must therefore be
+given room rather than speed.
+
+Two other retries share this loop and are worth not confusing with it:
+`ModelBehaviorError` (the FinalAnswer did not parse) and the dispatch-skip retry
+(the orchestrator answered without dispatching a specialist), both capped by
+`_MAX_ORCH_ATTEMPTS = 2`. All three exit to the same
+`orchestrator_error` / `orchestrator_error_fallback` handler.
+
+## Why the reviewer needed its own knob
+
+`ORCH_PLAN_TIMEOUT_S` used to fence two things that want opposite treatment.
+
+```
+                        on expiry                        so it wants
+  --------------------  -----------------------------    ------------------
+  round-1 watchdog      replan; deadline disarmed on     25s TIGHT
+                        the last attempt                 (it retries)
+  coherence reviewer    caught by a blanket except,      room to OUTLAST
+                        review_failed, returns None      a stall
+                        -- NO retry, the gate is just    (it does not retry)
+                        dropped for the turn
+```
+
+At 25s the reviewer was also below the 40s call-layer stall fence, so that
+retry was unreachable for it — the phase fence always won. That is the private-
+env failure where `general_specialist` died at exactly **25.00s** while
+`round_1` had run 0.00s.
+
+Split into `reviewer_s = 120`, sized to hold one worst-case call (40s stall
+fence + 60s retry budget = 100) plus the reviewer's own work. Dev is unaffected:
+**122 `review_done` events across the shipped logs, zero `review_failed`** — the
+reviewer never approached 25s there, which is why this only ever showed up in
+prod.
+
+> Measuring this is easy to get wrong: `general_specialist` is ALSO dispatchable
+> as an ordinary specialist under the 240s fence, so a naive duration query
+> pools the two and reports a reviewer p95 of ~26s that does not exist. Filter
+> on the `review` tag, or count `review_done` / `review_failed`.
+
 ## What a retry costs
 
 An abandoned attempt is not free, and where the cost lands depends on where the
@@ -248,14 +331,23 @@ against the fence above it.
   flip side of the above, and it cost real failures before anyone noticed:
   `screen` at 30s sits under the 40s call-layer stall fence, so that retry was
   unreachable code for this phase. Fixed by giving the phase its own 10s fence
-  rather than by loosening the phase. `orch_plan` (25s) has the same shape and
-  is covered by its round-1 watchdog; **any new single-call phase under 40s
-  needs one or the other**, and nothing tests for that.
-- **The reviewer shares `ORCH_PLAN_TIMEOUT_S` with the round-1 watchdog**, and
-  they want opposite things: planning wants a tight 25s so a stall aborts and
-  retries fast; the reviewer wants to outlast a stall. One knob cannot serve
-  both — the reviewer is the agent that failed at exactly 25.00s.
-- **The documented "slowest realistic path" does not fit the turn fence.**
-  `30 + 25 + 240 + 25 + 150 = 470s` against `turn_wall_clock_s = 360`. The
+  rather than by loosening the phase.
+
+  **The rule: any single-call phase budgeted under 40s must carry either its
+  own stall fence or a watchdog, or it gets ONE attempt and no retry at all.**
+  Nothing tests for this. Three phases sit in that range today and all three are
+  now covered — `screen` (own fence), `orch_plan` (watchdog), and `reviewer`,
+  which was NOT covered until it was moved out of that range entirely.
+- **RESOLVED — the reviewer shared `ORCH_PLAN_TIMEOUT_S` with the round-1
+  watchdog** and the two want opposite things. Split to `reviewer_s = 120`; see
+  "Why the reviewer needed its own knob". The claim in the previous edition of
+  this document — that `orch_plan` was "covered by its round-1 watchdog" — was
+  true of the watchdog and false of the reviewer sharing its knob, which is
+  precisely how the gap survived being written down.
+- **The documented "slowest realistic path" does not fit the turn fence, and
+  widening the reviewer made it worse.** `30 + 25 + 240 + 120 + 150 = 565s`
+  against `turn_wall_clock_s = 360` (was 470 when the reviewer was 25). Every
+  term is a worst case that rarely co-occurs, and the turn fence does catch the
+  sum in practice — but the arithmetic is now further from the budget, and the
   guard test checks each phase against the fence individually, so nothing
   catches the sum.
