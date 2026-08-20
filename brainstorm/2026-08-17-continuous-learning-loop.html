@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Interactive Journey — Continuous Learning Loop</title>
+<style>
+  :root {
+    --navy:       #00175A;
+    --navy-soft:  #1B3060;
+    --blue:       #006FCF;
+    --blue-pale:  #E7F0FA;
+    --blue-tint:  #F4F8FD;
+    --gray-text:  #4A5568;
+    --gray-mid:   #6B7A90;
+    --gray-line:  #E2E8F0;
+    --gray-bg:    #F4F6F9;
+    --sans: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #DDE2E9; }
+  body { font-family: var(--sans); color: var(--navy); padding: 36px 0 48px; }
+
+  /* ─── slide frame: 16:9 at 1280×720 ─── */
+  .slide {
+    width: 1280px; height: 720px;
+    margin: 0 auto 40px;
+    background: #FFFFFF;
+    border-top: 5px solid var(--navy);
+    box-shadow: 0 3px 18px rgba(0,0,0,0.14);
+    padding: 30px 44px 26px;
+    position: relative;
+    display: flex; flex-direction: column;
+  }
+  .slide-caption {
+    width: 1280px; margin: 0 auto 8px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.14em;
+    text-transform: uppercase; color: #7A8794;
+  }
+
+  /* ─── slide title ─── */
+  .title {
+    font-size: 32px; font-weight: 700; color: var(--navy);
+    letter-spacing: -0.2px; margin: 0 0 12px;
+  }
+  .title .thin { font-weight: 400; color: var(--navy-soft); }
+  .rule { height: 1px; background: #C7CFDA; margin-bottom: 24px; }
+
+  /* ─── column section labels ─── */
+  .sec-label {
+    font-size: 11.5px; font-weight: 700; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--blue);
+    margin-bottom: 7px;
+  }
+  .sec-bar { width: 26px; height: 3px; background: var(--blue); margin-bottom: 16px; }
+  .sec-label.new { color: #0B8A5F; }
+  .sec-bar.new  { background: #0B8A5F; }
+
+  /* ─── the three columns ─── */
+  .cols { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 30px; flex: 1; }
+  .col { display: flex; flex-direction: column; }
+
+  /* ─── cards (left blue bar, matching deck) ─── */
+  .card {
+    background: #FFFFFF;
+    border: 1px solid var(--gray-line);
+    border-left: 5px solid var(--blue);
+    border-radius: 2px;
+    padding: 15px 18px 16px;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.05);
+    margin-bottom: 15px;
+  }
+  .card.added {
+    border-left-color: #0B8A5F;
+    background: #F5FBF8;
+    border-color: #CFE7DC;
+  }
+  .card h3 {
+    margin: 0 0 10px; font-size: 18px; font-weight: 700;
+    color: var(--navy); letter-spacing: -0.1px;
+  }
+  .card.added h3 { color: #0A5C42; }
+
+  ul { list-style: none; margin: 0; padding: 0; }
+  li {
+    font-size: 13.5px; line-height: 1.42; color: var(--gray-text);
+    padding-left: 15px; position: relative; margin-bottom: 7px;
+  }
+  li:last-child { margin-bottom: 0; }
+  li::before {
+    content: ''; position: absolute; left: 0; top: 7px;
+    width: 5px; height: 5px; background: var(--gray-mid);
+  }
+  li.sub { padding-left: 28px; font-size: 12.5px; margin-top: -3px; }
+  li.sub::before {
+    content: '–'; background: none; left: 15px; top: 0;
+    width: auto; height: auto; color: var(--gray-mid); font-size: 13px;
+  }
+  li b { color: var(--navy); font-weight: 700; }
+  .card.added li b { color: #0A5C42; }
+  li.new-bullet { color: #0A5C42; }
+  li.new-bullet::before { background: #0B8A5F; }
+
+  /* ─── the loop band across the bottom ─── */
+  .loop {
+    margin-top: 6px; position: relative;
+    border-top: 1px solid var(--gray-line);
+    padding-top: 12px;
+  }
+  .loop-svg { display: block; width: 100%; height: 74px; }
+  .loop-legend {
+    position: absolute; left: 0; right: 0; bottom: 0; text-align: center;
+    font-size: 11.5px; color: #6B7A90; letter-spacing: 0.02em;
+  }
+
+  /* ─── slide 2: the argument ─── */
+  .flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; margin-bottom: 4px; }
+  .node {
+    background: var(--blue-tint); border: 1px solid #CFE0F2;
+    border-top: 3px solid var(--blue);
+    border-radius: 2px; padding: 16px 16px 15px; margin-right: 42px;
+    position: relative;
+  }
+  .flow > div:last-child .node { margin-right: 0; }
+  .node .n {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em;
+    color: var(--blue); text-transform: uppercase; margin-bottom: 7px;
+  }
+  .node h4 { margin: 0 0 6px; font-size: 17px; font-weight: 700; color: var(--navy); }
+  .node p { margin: 0; font-size: 12.5px; line-height: 1.4; color: var(--gray-text); }
+  .node::after {
+    content: ''; position: absolute; right: -34px; top: 50%;
+    width: 26px; height: 2px; background: #A9BFD8;
+  }
+  .node::before {
+    content: ''; position: absolute; right: -34px; top: 50%;
+    margin-top: -4.5px; margin-right: -1px;
+    border-left: 9px solid #A9BFD8;
+    border-top: 4.5px solid transparent; border-bottom: 4.5px solid transparent;
+  }
+  .flow > div:last-child .node::after,
+  .flow > div:last-child .node::before { display: none; }
+
+  .flow-loop { display: block; width: 100%; height: 58px; margin-top: 2px; }
+
+  .gates {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 26px;
+    margin: 22px 0 0;
+  }
+  .gate {
+    border-left: 5px solid var(--navy); background: #FFFFFF;
+    border-top: 1px solid var(--gray-line); border-right: 1px solid var(--gray-line);
+    border-bottom: 1px solid var(--gray-line);
+    border-radius: 2px; padding: 22px 24px;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.05);
+  }
+
+  /* ─── “in practice” strip ─── */
+  .practice { margin-top: 24px; margin-bottom: 20px; }
+  .practice .hd {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--blue); margin-bottom: 12px;
+  }
+  .practice .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 26px; }
+  .practice .item {
+    background: var(--gray-bg); border-radius: 2px;
+    padding: 13px 16px; font-size: 13px; line-height: 1.42; color: var(--gray-text);
+  }
+  .practice .item b { color: var(--navy); font-weight: 700; }
+  .gate .num {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.14em;
+    color: var(--blue); margin-bottom: 8px;
+  }
+  .gate h4 { margin: 0 0 8px; font-size: 17px; font-weight: 700; color: var(--navy); }
+  .gate p { margin: 0; font-size: 13px; line-height: 1.45; color: var(--gray-text); }
+  .gate p em { font-style: normal; color: var(--navy); font-weight: 700; }
+
+  .kicker {
+    margin-top: auto; background: var(--navy); color: #FFFFFF;
+    padding: 20px 26px; border-radius: 2px;
+    font-size: 17px; line-height: 1.45;
+  }
+  .kicker b { color: #7FB8EE; font-weight: 700; }
+
+  /* ─── notes block below the slides ─── */
+  .notes {
+    width: 1280px; margin: 0 auto; background: #FFFFFF;
+    border-left: 5px solid var(--navy); border-radius: 2px;
+    padding: 24px 30px 26px; box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+  }
+  .notes h2 {
+    margin: 0 0 14px; font-size: 15px; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--blue);
+  }
+  .notes h3 { margin: 18px 0 7px; font-size: 14px; color: var(--navy); }
+  .notes p, .notes li { font-size: 13.5px; line-height: 1.55; color: var(--gray-text); }
+  .notes ul { margin-left: 2px; }
+  .notes code {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px; background: var(--gray-bg); padding: 1px 5px; border-radius: 2px;
+    color: var(--navy);
+  }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════ SLIDE 1 ══════════════════ -->
+<div class="slide-caption">Slide 1 — the existing slide, with the loop added (green = new)</div>
+<div class="slide">
+  <div class="title">Interactive Journey <span class="thin">|</span> Enhancement</div>
+  <div class="rule"></div>
+
+  <div class="cols">
+    <!-- ── column 1 ── -->
+    <div class="col">
+      <div class="sec-label">Better answers</div>
+      <div class="sec-bar"></div>
+
+      <div class="card">
+        <h3>Context enhancement</h3>
+        <ul>
+          <li>Transaction-level data — “any abnormal transactions”</li>
+          <li>Knowledge insertion — e.g., OOP, merchant CDSS</li>
+          <li class="new-bullet"><b>Fed by memory:</b> patterns proven across cases re-enter here</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>Team construction</h3>
+        <ul>
+          <li>Parallel vs. sequential — “any spending spikes? what are the drivers?”</li>
+          <li>Minimalist (answer-driven) vs. maximalist (discovery-driven)</li>
+          <li>General specialist review</li>
+          <li class="new-bullet"><b>Maximalist is the discovery engine</b> — over-collects so learning has material</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- ── column 2 ── -->
+    <div class="col">
+      <div class="sec-label">Better execution</div>
+      <div class="sec-bar"></div>
+
+      <div class="card">
+        <h3>System</h3>
+        <ul>
+          <li>Monitor and audit</li>
+          <li class="sub">Reasoning trace: scoped and measured over (deterministically)</li>
+          <li class="sub">Monitor dashboard</li>
+          <li>Supports invisible server refresh</li>
+          <li>Batch tool calls (≠ batch LLM calls)</li>
+          <li>Stall-and-retry</li>
+          <li class="sub">agent-level + LLM call-level</li>
+          <li>Self-recovery</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- ── column 3 ── -->
+    <div class="col">
+      <div class="sec-label">Continuous learning</div>
+      <div class="sec-bar"></div>
+
+      <div class="card">
+        <h3>Memory</h3>
+        <ul>
+          <li>In-case knowledge distillation: Distiller</li>
+          <li>Cross-case knowledge storage and management: AMem</li>
+        </ul>
+      </div>
+
+      <div class="card added">
+        <h3>Opportunity discovery</h3>
+        <ul>
+          <li>Findings <b>beyond the question asked</b> — adjacent risk, unexpected drivers</li>
+          <li>Recurrence across cases → <b>candidate pattern</b>, promoted to a knowledge card</li>
+          <li>Proposes the <b>next question</b>, not just this answer</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── the loop band ── -->
+  <div class="loop">
+    <svg class="loop-svg" viewBox="0 0 1192 74" preserveAspectRatio="none">
+      <defs>
+        <marker id="ah" markerWidth="9" markerHeight="9" refX="7.5" refY="4.5" orient="auto">
+          <path d="M0,0 L9,4.5 L0,9 z" fill="#0B8A5F"/>
+        </marker>
+      </defs>
+      <!-- return arc: column 3 → column 1 -->
+      <path d="M 1050 10 C 1050 34, 1000 40, 940 40 L 252 40 C 192 40, 142 34, 142 12"
+            fill="none" stroke="#0B8A5F" stroke-width="2.2" marker-end="url(#ah)"/>
+      <!-- label sits in a gap punched through the arc -->
+      <rect x="452" y="29" width="288" height="22" fill="#FFFFFF"/>
+      <text x="596" y="45" text-anchor="middle"
+            font-family="'Helvetica Neue', Arial, sans-serif" font-size="13"
+            font-weight="700" fill="#0A5C42">
+        the next case starts smarter
+      </text>
+    </svg>
+    <div class="loop-legend">
+      Better answers → richer traces → distilled knowledge → better context on the next case
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════ SLIDE 2 ══════════════════ -->
+<div class="slide-caption">Slide 2 — optional follow-on: why the loop actually closes</div>
+<div class="slide">
+  <div class="title">Interactive Journey <span class="thin">|</span> Why better answers compound</div>
+  <div class="rule"></div>
+
+  <div class="flow">
+    <div><div class="node">
+      <div class="n">Step 01</div>
+      <h4>Better answer</h4>
+      <p>Grounded, broad, reviewed — a finding that holds up.</p>
+    </div></div>
+    <div><div class="node">
+      <div class="n">Step 02</div>
+      <h4>Richer trace</h4>
+      <p>Scoped, measured reasoning the Distiller can actually read.</p>
+    </div></div>
+    <div><div class="node">
+      <div class="n">Step 03</div>
+      <h4>Distilled knowledge</h4>
+      <p>AMem stores what recurs across cases, not what was merely said.</p>
+    </div></div>
+    <div><div class="node">
+      <div class="n">Step 04</div>
+      <h4>Better context</h4>
+      <p>Re-injected as knowledge on the next case — Step 01 starts ahead.</p>
+    </div></div>
+  </div>
+
+  <!-- the loop closes: Step 04 feeds Step 01 -->
+  <svg class="flow-loop" viewBox="0 0 1192 58" preserveAspectRatio="none">
+    <defs>
+      <marker id="ah2" markerWidth="9" markerHeight="9" refX="7.5" refY="4.5" orient="auto">
+        <path d="M0,0 L9,4.5 L0,9 z" fill="#006FCF"/>
+      </marker>
+    </defs>
+    <path d="M 1043 4 C 1043 28, 1000 34, 940 34 L 252 34 C 192 34, 149 28, 149 6"
+          fill="none" stroke="#006FCF" stroke-width="2.2" marker-end="url(#ah2)"/>
+    <rect x="470" y="23" width="252" height="22" fill="#FFFFFF"/>
+    <text x="596" y="39" text-anchor="middle"
+          font-family="'Helvetica Neue', Arial, sans-serif" font-size="13"
+          font-weight="700" fill="#00175A">
+      each pass raises the floor
+    </text>
+  </svg>
+
+  <div class="gates">
+    <div class="gate">
+      <div class="num">01</div>
+      <h4>Quality gates what is worth storing</h4>
+      <p>The Distiller can only distill what the answer established. A thin or ungrounded answer becomes <em>memory-shaped noise</em> — and noise compounds across cases faster than signal does.</p>
+    </div>
+    <div class="gate">
+      <div class="num">02</div>
+      <h4>Breadth gates what gets seen at all</h4>
+      <p>Maximalist, discovery-driven teams return the adjacent signal nobody asked for. That surplus <em>is</em> the opportunity pipeline — a minimalist answer leaves nothing to rediscover later.</p>
+    </div>
+    <div class="gate">
+      <div class="num">03</div>
+      <h4>Review gates what is safe to reuse</h4>
+      <p>General specialist review is what makes a stored finding safe to re-inject on the next case. <em>Unreviewed memory is a liability</em>, not an asset.</p>
+    </div>
+  </div>
+
+  <div class="practice">
+    <div class="hd">In practice</div>
+    <div class="row">
+      <div class="item">A merchant pattern seen across N cases stops being re-derived and becomes a <b>CDSS knowledge card</b>.</div>
+      <div class="item">A spike nobody asked about becomes <b>next week’s review question</b> instead of dying in a transcript.</div>
+      <div class="item">A recurring data gap becomes a <b>catalog fix</b>, not a per-case workaround.</div>
+    </div>
+  </div>
+
+  <div class="kicker">
+    Better answers are not the end state — they are the <b>raw material for learning</b>.
+    Every improvement in Columns 1 and 2 raises the ceiling on Column 3, and Column 3 pays it back as context.
+  </div>
+</div>
+
+<!-- ══════════════════ SPEAKER NOTES ══════════════════ -->
+<div class="notes">
+  <h2>What changed, and what to say</h2>
+
+  <h3>The structural fix</h3>
+  <p>The original slide reads as three parallel workstreams. The added return arrow makes it a
+  <b>loop</b>: Continuous Learning is not a third bucket, it is the mechanism by which Column 1 improves
+  without anyone touching it. That single arrow is the whole argument.</p>
+
+  <h3>Three additions on Slide 1 (shown in green)</h3>
+  <ul>
+    <li>New card <b>“Opportunity discovery”</b> under CONTINUOUS LEARNING — fills the column’s empty space and names the payoff.</li>
+    <li>New bullet under <b>Team construction</b> — links maximalist mode to discovery, so the connection is visible on the left too.</li>
+    <li>New bullet under <b>Context enhancement</b> — the arrival point of the return arrow, so the loop lands somewhere concrete.</li>
+  </ul>
+
+  <h3>Optional: retitle the third band</h3>
+  <p>If you want the point to hit harder, change <code>CONTINUOUS LEARNING</code> to <code>COMPOUNDING</code>.
+  It reframes the column from an activity into a result.</p>
+
+  <h3>If you only have one slide</h3>
+  <p>Use Slide 1 alone. Slide 2 is for the version of the talk where someone pushes back with
+  “isn’t this just logging?” — the three gates are the answer to that question.</p>
+
+  <h3>To capture for the deck</h3>
+  <p>Open in a browser at 100% zoom and screenshot each <code>.slide</code> block (1280×720, 16:9 —
+  drops straight into PowerPoint at full-bleed). The green highlighting marks what is new; recolor the
+  added card to the standard blue once the additions are agreed.</p>
+</div>
+
+</body>
+</html>

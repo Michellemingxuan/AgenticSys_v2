@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team Construction — slide</title>
+<style>
+  :root {
+    --navy:      #00175A;
+    --blue:      #006FCF;
+    --green:     #0B8A5F;
+    --gray-text: #4A5568;
+    --gray-mid:  #6B7A90;
+    --gray-line: #E2E8F0;
+    --gray-bg:   #F4F6F9;
+    --sans: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #DDE2E9; }
+  body { font-family: var(--sans); color: var(--navy); padding: 36px 0 48px; }
+
+  .slide-caption {
+    width: 1280px; margin: 0 auto 8px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.14em;
+    text-transform: uppercase; color: #7A8794;
+  }
+  .slide {
+    width: 1280px; height: 720px; margin: 0 auto 40px;
+    background: #FFFFFF; border-top: 5px solid var(--navy);
+    box-shadow: 0 3px 18px rgba(0,0,0,0.14);
+    padding: 28px 44px 24px;
+    display: flex; flex-direction: column;
+  }
+
+  .title { font-size: 32px; font-weight: 700; letter-spacing: -0.2px; margin: 0 0 10px; }
+  .title .thin { font-weight: 400; color: #1B3060; }
+  .rule { height: 1px; background: #C7CFDA; margin-bottom: 16px; }
+
+  /* ─── three stacked bands ─── */
+  .band {
+    display: grid;
+    grid-template-columns: 208px 1fr 330px;
+    gap: 26px;
+    align-items: center;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--gray-line);
+  }
+  .band:last-of-type { border-bottom: none; }
+
+  .num {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.16em;
+    color: var(--blue); margin-bottom: 5px;
+  }
+  .band h3 { margin: 0 0 7px; font-size: 20px; font-weight: 700; letter-spacing: -0.1px; }
+  .band .principle { margin: 0; font-size: 12.5px; line-height: 1.4; color: var(--gray-text); }
+  .band .principle b { color: var(--navy); }
+
+  svg { display: block; width: 100%; }
+  svg text { font-family: var(--sans); }
+
+  /* ─── example cards ─── */
+  .eg {
+    background: var(--gray-bg); border-left: 4px solid var(--blue);
+    border-radius: 2px; padding: 11px 14px;
+  }
+  .eg .hd {
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--blue); margin-bottom: 6px;
+  }
+  .eg .q {
+    font-size: 12.5px; font-weight: 700; color: var(--navy);
+    line-height: 1.35; margin-bottom: 6px;
+  }
+  .eg p { margin: 0; font-size: 11.8px; line-height: 1.42; color: var(--gray-text); }
+  .eg p + p { margin-top: 5px; }
+  .eg b { color: var(--navy); font-weight: 700; }
+  .eg .bad { color: #A03530; font-weight: 700; }
+
+  .footnote {
+    margin-top: 12px; font-size: 11.5px; color: var(--gray-mid); text-align: center;
+  }
+  .footnote b { color: var(--navy); }
+</style>
+</head>
+<body>
+
+<div class="slide-caption">Interactive Journey — enhanced team construction</div>
+<div class="slide">
+  <div class="title">Team Construction <span class="thin">|</span> three decisions per turn</div>
+  <div class="rule"></div>
+
+  <!-- ══════════ BAND 01 — dispatch shape ══════════ -->
+  <div class="band">
+    <div>
+      <div class="num">01</div>
+      <h3>Dispatch shape</h3>
+      <p class="principle"><b>Parallel by default.</b> Add a round only when one answer must exist before the next question can be asked.</p>
+    </div>
+
+    <svg viewBox="0 0 606 132" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <marker id="a1" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+          <path d="M0,0 L7,3.5 L0,7 z" fill="#6B7A90"/>
+        </marker>
+      </defs>
+
+      <!-- ── PARALLEL ── -->
+      <text x="0" y="9" font-size="10" font-weight="700" fill="#006FCF" letter-spacing="0.08em">PARALLEL — DEFAULT</text>
+      <rect x="0" y="46" width="40" height="22" fill="#00175A"/>
+      <text x="20" y="60.5" font-size="8" font-weight="700" fill="#FFFFFF" text-anchor="middle">ORCH</text>
+      <path d="M40,57 L58,36" fill="none" stroke="#6B7A90" stroke-width="1.2" marker-end="url(#a1)"/>
+      <path d="M40,57 L58,57" fill="none" stroke="#6B7A90" stroke-width="1.2" marker-end="url(#a1)"/>
+      <path d="M40,57 L58,78" fill="none" stroke="#6B7A90" stroke-width="1.2" marker-end="url(#a1)"/>
+      <rect x="66" y="26" width="124" height="17" fill="#F4F8FD" stroke="#CFE0F2"/>
+      <text x="73" y="38" font-size="8.5" fill="#00175A">spend_payments</text>
+      <rect x="66" y="48" width="124" height="17" fill="#F4F8FD" stroke="#CFE0F2"/>
+      <text x="73" y="60" font-size="8.5" fill="#00175A">modeling</text>
+      <rect x="66" y="70" width="124" height="17" fill="#F4F8FD" stroke="#CFE0F2"/>
+      <text x="73" y="82" font-size="8.5" fill="#00175A">crossbu</text>
+      <text x="0" y="104" font-size="9.5" fill="#6B7A90">independent sub-questions</text>
+      <text x="0" y="117" font-size="9.5" font-weight="700" fill="#00175A">one round</text>
+
+      <!-- ── COLLAPSE ── -->
+      <text x="208" y="9" font-size="10" font-weight="700" fill="#006FCF" letter-spacing="0.08em">COLLAPSE</text>
+      <rect x="208" y="46" width="40" height="22" fill="#00175A"/>
+      <text x="228" y="60.5" font-size="8" font-weight="700" fill="#FFFFFF" text-anchor="middle">ORCH</text>
+      <path d="M248,57 L268,57" fill="none" stroke="#6B7A90" stroke-width="1.2" marker-end="url(#a1)"/>
+      <rect x="276" y="40" width="122" height="34" fill="#F4F8FD" stroke="#CFE0F2"/>
+      <text x="337" y="54" font-size="8.5" font-weight="700" fill="#00175A" text-anchor="middle">modeling</text>
+      <text x="337" y="66" font-size="8" fill="#6B7A90" text-anchor="middle">finds the window itself</text>
+      <path d="M296,40 C296,22 378,22 378,38" fill="none" stroke="#006FCF" stroke-width="1.2" marker-end="url(#a1)"/>
+      <text x="208" y="104" font-size="9.5" fill="#6B7A90">one specialist self-anchors</text>
+      <text x="208" y="117" font-size="9.5" font-weight="700" fill="#00175A">one round, no handoff</text>
+
+      <!-- ── SEQUENTIAL ── -->
+      <text x="416" y="9" font-size="10" font-weight="700" fill="#006FCF" letter-spacing="0.08em">SEQUENTIAL</text>
+      <rect x="416" y="46" width="80" height="22" fill="#F4F8FD" stroke="#CFE0F2"/>
+      <text x="456" y="60.5" font-size="8.5" fill="#00175A" text-anchor="middle">spend_payments</text>
+      <path d="M496,57 L520,57" fill="none" stroke="#006FCF" stroke-width="1.4" marker-end="url(#a1)"/>
+      <text x="508" y="49" font-size="8" font-weight="700" fill="#006FCF" text-anchor="middle">2025-05</text>
+      <rect x="526" y="46" width="80" height="22" fill="#F4F8FD" stroke="#CFE0F2"/>
+      <text x="566" y="60.5" font-size="8.5" fill="#00175A" text-anchor="middle">modeling</text>
+      <text x="416" y="104" font-size="9.5" fill="#6B7A90">anchor threaded into the next</text>
+      <text x="416" y="117" font-size="9.5" font-weight="700" fill="#00175A">two rounds</text>
+    </svg>
+
+    <div class="eg">
+      <div class="hd">Example</div>
+      <div class="q">“any spending spikes? what are the drivers?”</div>
+      <p>Causal — the spike window must exist before drivers can be read against it.</p>
+      <p><span class="bad">Naive parallel:</span> spend returns a spike in <b>2025-05</b>, modeling returns drivers from <b>2024-09</b>. Two halves that don’t connect.</p>
+    </div>
+  </div>
+
+  <!-- ══════════ BAND 02 — team size ══════════ -->
+  <div class="band">
+    <div>
+      <div class="num">02</div>
+      <h3>Team size</h3>
+      <p class="principle"><b>Minimal fetches. Maximal finds.</b> Open, senior-level questions deliberately invert the minimum-set rule.</p>
+    </div>
+
+    <svg viewBox="0 0 606 132" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <marker id="a2" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+          <path d="M0,0 L7,3.5 L0,7 z" fill="#6B7A90"/>
+        </marker>
+      </defs>
+
+      <!-- ── MINIMAL ── -->
+      <text x="0" y="9" font-size="10" font-weight="700" fill="#006FCF" letter-spacing="0.08em">MINIMAL — ANSWER-DRIVEN</text>
+      <rect x="0" y="50" width="40" height="22" fill="#00175A"/>
+      <text x="20" y="64.5" font-size="8" font-weight="700" fill="#FFFFFF" text-anchor="middle">ORCH</text>
+      <path d="M40,61 L62,61" fill="none" stroke="#6B7A90" stroke-width="1.2" marker-end="url(#a2)"/>
+      <rect x="70" y="50" width="150" height="22" fill="#F4F8FD" stroke="#CFE0F2"/>
+      <text x="78" y="64.5" font-size="8.5" fill="#00175A">bureau</text>
+      <text x="228" y="64.5" font-size="8.5" fill="#6B7A90">fetch a number</text>
+      <text x="0" y="104" font-size="9.5" fill="#6B7A90">every pick carries weight —</text>
+      <text x="0" y="117" font-size="9.5" font-weight="700" fill="#00175A">no “in case relevant”</text>
+
+      <!-- ── MAXIMAL ── -->
+      <text x="300" y="9" font-size="10" font-weight="700" fill="#006FCF" letter-spacing="0.08em">MAXIMAL — DISCOVERY-DRIVEN</text>
+      <rect x="300" y="28" width="40" height="48" fill="#00175A"/>
+      <text x="320" y="55" font-size="8" font-weight="700" fill="#FFFFFF" text-anchor="middle">ORCH</text>
+      <path d="M340,52 L358,23" fill="none" stroke="#6B7A90" stroke-width="1.1" marker-end="url(#a2)"/>
+      <path d="M340,52 L358,44" fill="none" stroke="#6B7A90" stroke-width="1.1" marker-end="url(#a2)"/>
+      <path d="M340,52 L358,65" fill="none" stroke="#6B7A90" stroke-width="1.1" marker-end="url(#a2)"/>
+      <path d="M340,52 L358,86" fill="none" stroke="#6B7A90" stroke-width="1.1" marker-end="url(#a2)"/>
+      <rect x="364" y="14" width="242" height="17" fill="#F4F8FD" stroke="#CFE0F2"/>
+      <text x="370" y="26" font-size="8.5" font-weight="700" fill="#00175A">modeling</text>
+      <text x="440" y="26" font-size="8.5" fill="#6B7A90">a score that lagged the deterioration</text>
+      <rect x="364" y="35" width="242" height="17" fill="#F4F8FD" stroke="#CFE0F2"/>
+      <text x="370" y="47" font-size="8.5" font-weight="700" fill="#00175A">spend_payments</text>
+      <text x="454" y="47" font-size="8.5" fill="#6B7A90">behaviour that moved first</text>
+      <rect x="364" y="56" width="242" height="17" fill="#F4F8FD" stroke="#CFE0F2"/>
+      <text x="370" y="68" font-size="8.5" font-weight="700" fill="#00175A">bureau</text>
+      <text x="440" y="68" font-size="8.5" fill="#6B7A90">did external call it earlier?</text>
+      <rect x="364" y="77" width="242" height="17" fill="#F4F8FD" stroke="#CFE0F2"/>
+      <text x="370" y="89" font-size="8.5" font-weight="700" fill="#00175A">crossbu</text>
+      <text x="440" y="89" font-size="8.5" fill="#6B7A90">exposure the scoring can’t see</text>
+      <text x="300" y="104" font-size="9.5" fill="#6B7A90">4+ in parallel, one round —</text>
+      <text x="300" y="117" font-size="9.5" font-weight="700" fill="#00175A">orthogonal directions, not duplicate votes</text>
+    </svg>
+
+    <div class="eg">
+      <div class="hd">Example</div>
+      <div class="q">“what’s the FICO?” → 1 specialist</div>
+      <p>Named metric, owning column, one fetch.</p>
+      <div class="q" style="margin-top:7px">“any model opportunities?” → 4+</div>
+      <p>Names no metric and no table. Its value is in what the team <b>finds</b>, so each specialist gets a different hypothesis to test — and <b>a checked non-finding is a result</b>.</p>
+    </div>
+  </div>
+
+  <!-- ══════════ BAND 03 — coherence review ══════════ -->
+  <div class="band">
+    <div>
+      <div class="num">03</div>
+      <h3>General specialist review</h3>
+      <p class="principle"><b>Server-enforced, not model-chosen.</b> On every ≥2-specialist turn, the team is checked for coherence before the answer ships.</p>
+    </div>
+
+    <svg viewBox="0 0 606 132" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <marker id="a3" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+          <path d="M0,0 L7,3.5 L0,7 z" fill="#6B7A90"/>
+        </marker>
+        <marker id="a3b" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+          <path d="M0,0 L7,3.5 L0,7 z" fill="#006FCF"/>
+        </marker>
+      </defs>
+
+      <text x="0" y="9" font-size="10" font-weight="700" fill="#006FCF" letter-spacing="0.08em">FIRES ON ≥ 2 SPECIALISTS</text>
+
+      <rect x="0" y="30" width="104" height="18" fill="#F4F8FD" stroke="#CFE0F2"/>
+      <text x="8" y="42.5" font-size="8.5" fill="#00175A">spend_payments</text>
+      <rect x="0" y="54" width="104" height="18" fill="#F4F8FD" stroke="#CFE0F2"/>
+      <text x="8" y="66.5" font-size="8.5" fill="#00175A">modeling</text>
+      <path d="M104,39 L130,47" fill="none" stroke="#6B7A90" stroke-width="1.2" marker-end="url(#a3)"/>
+      <path d="M104,63 L130,55" fill="none" stroke="#6B7A90" stroke-width="1.2" marker-end="url(#a3)"/>
+
+      <rect x="138" y="30" width="112" height="42" fill="#00175A"/>
+      <text x="194" y="47" font-size="8.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">general_specialist</text>
+      <text x="194" y="60" font-size="7.5" fill="#9CC4E8" text-anchor="middle">verify-only tools</text>
+
+      <path d="M250,51 L276,51" fill="none" stroke="#6B7A90" stroke-width="1.2" marker-end="url(#a3)"/>
+
+      <rect x="284" y="16" width="218" height="70" fill="#FFFFFF" stroke="#006FCF"/>
+      <text x="294" y="30" font-size="8" font-weight="700" fill="#006FCF" letter-spacing="0.1em">DIRECTIVE</text>
+      <rect x="294" y="38" width="5" height="5" fill="#0B8A5F"/>
+      <text x="305" y="43" font-size="8.5" fill="#0A5C42">coherent — ship it</text>
+      <rect x="294" y="55" width="5" height="5" fill="#006FCF"/>
+      <text x="305" y="60" font-size="8.5" font-weight="700" fill="#00175A">needs_redispatch — re-run ONE, anchored</text>
+      <rect x="294" y="72" width="5" height="5" fill="#6B7A90"/>
+      <text x="305" y="77" font-size="8.5" fill="#4A5568">qualified_release — ship with a flag</text>
+
+      <path d="M502,51 L526,51" fill="none" stroke="#006FCF" stroke-width="1.4" marker-end="url(#a3b)"/>
+      <rect x="534" y="40" width="72" height="22" fill="#F4F8FD" stroke="#CFE0F2"/>
+      <text x="570" y="54.5" font-size="8.5" font-weight="700" fill="#00175A" text-anchor="middle">synthesize</text>
+
+      <text x="0" y="107" font-size="9.5" fill="#6B7A90">it re-measures, it never dispatches — the directive is advisory and the orchestrator acts on it</text>
+      <text x="0" y="121" font-size="9.5" font-weight="700" fill="#00175A">capped at 2 rounds · any reviewer failure degrades to the answer we already had</text>
+    </svg>
+
+    <div class="eg">
+      <div class="hd">Example</div>
+      <div class="q">The 2025-05 vs 2024-09 mismatch, caught</div>
+      <p>Review sees both payloads, spots the windows don’t line up, and re-runs <b>modeling alone</b> anchored to <b>2025-05</b> — not a whole re-plan.</p>
+      <p>Its phase-1 knowledge points are dropped first, so the corrected run doesn’t leave <b>two contradictory anchors</b> in memory.</p>
+    </div>
+  </div>
+
+  <div class="footnote">
+    One question, three decisions: <b>what shape</b>, <b>how many</b>, and <b>who checks the result</b>.
+  </div>
+</div>
+
+</body>
+</html>
