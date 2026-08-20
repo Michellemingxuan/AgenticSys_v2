@@ -1861,7 +1861,7 @@ def _looks_like_dates(values: list[str]) -> bool:
 
 
 def case_date_coverage(tables: list[str] | None = None) -> dict[str, dict[str, dict]]:
-    """`{table: {column: {first, last, n}}}` — the span each date column covers.
+    """`{table: {column: {first, last, n, grain, covered_to}}}` per date column.
 
     THE CUT-OFF IS A PROPERTY OF THE DATA, NOT A CONSTANT. Cases are exported
     at different times and their tables stop at different points: on case
@@ -1869,6 +1869,14 @@ def case_date_coverage(tables: list[str] | None = None) -> dict[str, dict[str, d
     2025-06-28 and wcc to 2025-12-05. A single configured `cut_off_date` is
     right for at most one of those, and pointing "most recent" at it produces
     an answer about a month the column never reached.
+
+    `last` is the raw value, verbatim, because that is what a filter has to be
+    given. `covered_to` is how far the column actually REACHES, which is not
+    the same thing at month grain: `_date_key` flattens `June'2025` to
+    (2025, 6, 1), but the row covers all of June, and reading it as "reaches
+    June 1st" understates the table by a month. Three such columns dragged case
+    366132845011's anchor to 2025-06-01 — behind its own transaction table,
+    which holds every day to 2025-06-30.
     """
     if _gw() is None or _cat() is None:
         return {}
@@ -1904,8 +1912,17 @@ def case_date_coverage(tables: list[str] | None = None) -> dict[str, dict[str, d
             if not keyed:
                 continue
             lo, hi = min(keyed), max(keyed)
+            # A column whose every value lands on the 1st carries no day
+            # resolution — it is a month label, and it covers its whole month.
+            grain = "day" if any(k[2] != 1 for k, _ in keyed) else "month"
+            covered_to = hi[0]
+            if grain == "month":
+                bounds = _period_bounds((hi[0][0], hi[0][1]), "month")
+                if bounds:
+                    covered_to = bounds[1]
             out.setdefault(table, {})[col] = {
                 "first": lo[1], "last": hi[1], "n": len(keyed),
+                "grain": grain, "covered_to": covered_to,
             }
     _coverage_cache[key] = out
     return out
@@ -1939,12 +1956,18 @@ def case_cut_off(tables: list[str] | None = None) -> dict | None:
         return None
     # One date per TABLE (its furthest-reaching column), so a table with three
     # date columns does not outvote a table with one.
+    #
+    # A DATED COLUMN OUTRANKS A ROLLUP LABEL inside a table. `spends_data`
+    # carries `Date` (real days, to 2025-07-01) alongside a `Month` label
+    # (July'2025). Rounding the label out to 2025-07-31 would claim three weeks
+    # the table does not hold, so where a table has day resolution, that is the
+    # column that speaks for it.
     per_table: dict[str, tuple] = {}
     for table, cols in coverage.items():
-        keys = [_date_key(s["last"]) for s in cols.values()]
-        keys = [k for k in keys if k is not None]
-        if keys:
-            per_table[table] = max(keys)
+        dated = [s["covered_to"] for s in cols.values() if s["grain"] == "day"]
+        reach = dated or [s["covered_to"] for s in cols.values()]
+        if reach:
+            per_table[table] = max(reach)
     if not per_table:
         return None
     ordered = sorted(per_table.values())

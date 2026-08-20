@@ -3231,7 +3231,7 @@ def test_sort_key_orders_numbers_before_dates_before_text():
 
 @pytest.mark.parametrize("case,expect", [
     ("11854808010", "2025-07-01"),
-    ("366132845011", "2025-06-01"),
+    ("366132845011", "2025-06-30"),
 ])
 def test_cut_off_is_derived_per_case(case, expect):
     gw = LocalDataGateway.from_case_folders("data_tables/real")
@@ -3250,7 +3250,7 @@ def test_cut_off_resists_tables_that_are_not_time_series():
     per = cut["per_table"]
     assert per["strategy"] == "2025-02-15"          # earliest, an outlier
     assert per["spends_data"] == "2025-07-01"       # latest
-    assert per["strategy"] < cut["date"] < per["spends_data"]
+    assert per["strategy"] < cut["date"] <= per["spends_data"]
 
 
 def test_inventory_publishes_the_cut_off_and_scopes_what_it_is_for():
@@ -3281,4 +3281,32 @@ def test_every_specialist_on_a_case_gets_the_same_cut_off():
         inv = data_tools.build_column_inventory(hints)
         line = next(ln for ln in inv.splitlines() if "CASE CUT-OFF:" in ln)
         anchors.add(line.split("CASE CUT-OFF:")[1].split("(")[0].strip())
-    assert anchors == {"2025-06-01"}
+    assert anchors == {"2025-06-30"}
+
+
+def test_a_monthly_column_covers_its_whole_month():
+    """`_date_key` flattens `June'2025` to (2025, 6, 1), but a monthly row
+    COVERS June. Read as "reaches June 1st" it understates the table by a
+    month — three such columns pulled case 366132845011's cut-off from
+    2025-06-30 down to 2025-06-01, behind its own transaction table."""
+    _real_case_tools()
+    cov = data_tools.case_date_coverage()
+    bureau = cov["bureau_data"]["month"]
+    assert bureau["last"] == "June'2025"
+    assert bureau["grain"] == "month"
+    assert bureau["covered_to"] == (2025, 6, 30)
+    txn = cov["modelling_data_transaction"]["trans_dt"]
+    assert txn["grain"] == "day"
+    assert txn["covered_to"] == (2025, 6, 30)
+
+
+def test_a_rollup_label_does_not_outrank_its_own_dated_column():
+    """`spends_data` carries `Date` (to 2025-07-01) AND a `Month` label
+    (July'2025). Rounding the label out to 2025-07-31 would claim three weeks
+    the table does not hold, so the dated column wins inside a table."""
+    _real_case_tools()
+    cov = data_tools.case_date_coverage(["spends"])["spends_data"]
+    assert cov["Month"]["covered_to"] == (2025, 7, 31)      # the label alone
+    assert cov["Date"]["covered_to"] == (2025, 7, 1)
+    cut = data_tools.case_cut_off()
+    assert cut["per_table"]["spends_data"] == "2025-07-01"  # dated column used
