@@ -3310,3 +3310,69 @@ def test_a_rollup_label_does_not_outrank_its_own_dated_column():
     assert cov["Date"]["covered_to"] == (2025, 7, 1)
     cut = data_tools.case_cut_off()
     assert cut["per_table"]["spends_data"] == "2025-07-01"  # dated column used
+
+
+# ── a count over a part-covered period is incomplete, not low ────────────────
+#
+# `summarize_trend` can see neighbouring buckets, so it flags the stub as
+# `last_bucket_partial`. A COUNT has no neighbours: `rows_matching_filter` for
+# July on case 366132845011 is 22 against June's 478, and nothing in the output
+# said the export stopped on the 1st.
+
+
+def _july(**kw):
+    _real_case_tools()                       # 366132845011, spends to 2025-07-01
+    return json.loads(data_tools._query_table_impl(**kw))
+
+
+def test_a_count_in_the_part_covered_month_is_flagged():
+    d = _july(table_name="spends_data", columns="Date",
+              filters='[{"column":"Date","op":"between",'
+                      '"value":"2025-07-01,2025-07-31"}]')
+    assert d["rows_matching_filter"] == 22
+    note = d["coverage_note"]
+    assert "stops on 2025-07-01" in note
+    assert "1 of 31 days" in note
+    assert "INCOMPLETE, not low" in note
+
+
+def test_the_flag_follows_a_month_LABEL_too():
+    """`spends_data.Month` says July; only the dated column knows July has one
+    day. Keying off the filtered column alone would miss this."""
+    d = _july(table_name="spends_data", columns="Month",
+              filters='[{"column":"Month","op":"eq","value":"July\'2025"}]')
+    assert d["rows_matching_filter"] == 22
+    assert "1 of 31 days" in d["coverage_note"]
+
+
+def test_a_whole_month_is_not_flagged():
+    d = _july(table_name="spends_data", columns="Date",
+              filters='[{"column":"Date","op":"between",'
+                      '"value":"2025-06-01,2025-06-30"}]')
+    assert d["rows_matching_filter"] == 478
+    assert "coverage_note" not in d
+
+
+def test_an_unfiltered_query_is_not_flagged():
+    d = _july(table_name="spends_data", columns="Date")
+    assert "coverage_note" not in d
+
+
+@pytest.mark.parametrize("op,expect_flag", [("count", True), ("sum", True)])
+def test_aggregate_column_carries_the_note(op, expect_flag):
+    _real_case_tools()
+    out = data_tools._aggregate_column_impl(
+        table_name="spends_data", column="Amount", op=op,
+        filter_column="Month", filter_value="July'2025",
+    )
+    assert ("COVERAGE:" in out) is expect_flag
+
+
+def test_a_window_after_the_data_does_not_claim_partial_coverage():
+    """A window wholly past the export is an empty result, not a stub — the
+    empty-window branch already explains that one."""
+    d = _july(table_name="spends_data", columns="Date",
+              filters='[{"column":"Date","op":"between",'
+                      '"value":"2025-09-01,2025-09-30"}]')
+    assert d["rows_matching_filter"] == 0
+    assert "coverage_note" not in d

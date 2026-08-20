@@ -1928,6 +1928,77 @@ def case_date_coverage(tables: list[str] | None = None) -> dict[str, dict[str, d
     return out
 
 
+def _filter_window(value: Any, op: str) -> tuple[tuple | None, tuple | None]:
+    """`(lo, hi)` date keys a filter admits, either side open when unbounded."""
+    op = (op or "eq").lower()
+    if op == "between":
+        parts = [p.strip() for p in str(value).split(",")]
+        if len(parts) == 2:
+            return _date_key(parts[0]), _date_key(parts[1])
+        return None, None
+    k = _date_key(value)
+    if k is None:
+        return None, None
+    if op in ("gte", "gt"):
+        return k, None
+    if op in ("lte", "lt"):
+        return None, k
+    if op == "eq":
+        return k, k
+    return None, None
+
+
+def _window_coverage_note(real_table: str,
+                          conditions: list[tuple[str, str, str]]) -> str:
+    """Warn when a filtered count lands in a period the table only part-covers.
+
+    `summarize_trend` flags this as `last_bucket_partial` because it can see
+    the neighbouring buckets. A COUNT has no neighbours — `rows_matching_filter`
+    for July on case 366132845011 is 22 against June's 478, and nothing in the
+    output says the export stopped on the 1st. A bare 22 reads as a collapse in
+    transaction volume.
+
+    Keyed off the table's DAY-GRAIN reach rather than the filtered column, so a
+    filter on a month LABEL (`Month eq July'2025`) is covered too — the label
+    says July, the dated column says July has one day.
+    """
+    if not conditions:
+        return ""
+    try:
+        cov = case_date_coverage([real_table]).get(real_table) or {}
+    except Exception:  # noqa: BLE001
+        return ""
+    reaches = [s["covered_to"] for s in cov.values() if s.get("grain") == "day"]
+    if not reaches:
+        return ""                      # no day resolution: cannot tell
+    reach = max(reaches)
+    bounds = _period_bounds((reach[0], reach[1]), "month")
+    if not bounds or reach >= bounds[1]:
+        return ""                      # the final month is whole
+    m_start, m_end = bounds
+    for col, value, op in conditions:
+        if col not in cov:
+            continue
+        lo, hi = _filter_window(value, op)
+        if lo is None and hi is None:
+            continue
+        if lo is not None and lo > m_end:
+            continue                   # window starts after the final month
+        if hi is not None and hi < m_start:
+            continue                   # window ends before it
+        covered = _days_between(m_start, reach)
+        total = _days_between(m_start, m_end)
+        label = _bucket_label((reach[0], reach[1]), "month")
+        return (
+            f"COVERAGE: this case's {real_table} stops on {_fmt_day(reach)}, so "
+            f"{label} holds only {covered} of {total} days. A count or sum over "
+            f"a part-covered period is INCOMPLETE, not low — do not report it as "
+            f"a decline. Use the last WHOLE period for comparisons, and if the "
+            f"reviewer asked about {label} say what the data actually covers."
+        )
+    return ""
+
+
 def case_cut_off(tables: list[str] | None = None) -> dict | None:
     """Where THIS case's data stops, as one date the whole team can share.
 
@@ -2651,6 +2722,7 @@ def _query_table_impl(
         )
     filter_descriptor: str | None = " AND ".join(filter_parts) if filter_parts else None
     rows_matching_filter = len(rows)
+    coverage_note = _window_coverage_note(table_name, resolved_conditions)
 
     # Sort + top-N limit (optional) — lets "top 20 by tsr in May-2025" resolve
     # in ONE call instead of dumping 1000+ truncated rows the model can't rank.
@@ -2807,6 +2879,7 @@ def _query_table_impl(
         "columns_requested": requested_cols,
         "total_rows_in_table": total_rows_in_table,
         "rows_matching_filter": rows_matching_filter,
+        **({"coverage_note": coverage_note} if coverage_note else {}),
         **({"zero_match_diagnostic": zero_diag} if zero_diag else {}),
         "rows_returned": rows_returned,
         "truncated": truncated,
@@ -4141,6 +4214,7 @@ def _aggregate_column_impl(
     total_rows = len(rows)
     all_rows = rows          # pre-filter; `share`'s denominator is the WHOLE table
     filter_descr = ""
+    coverage_note = ""
     if filter_column and filter_value:
         resolved = _resolve_real_column(rows, filter_column, real_table)
         rows = _apply_filter(rows, resolved, str(filter_value), filter_op)
@@ -4150,6 +4224,12 @@ def _aggregate_column_impl(
             else f" filtered by {resolved} (resolved from '{filter_column}') "
                  f"{filter_op} {filter_value!r}"
         )
+        # A count over a part-covered period is incomplete, not low. `count`
+        # and `sum` have no neighbouring buckets to reveal that, so say it.
+        coverage_note = _window_coverage_note(
+            real_table, [(resolved, str(filter_value), filter_op)])
+        if coverage_note:
+            coverage_note = f" [{coverage_note}]"
 
     n_matching = len(rows)
 
@@ -4158,7 +4238,7 @@ def _aggregate_column_impl(
         result_str = _format_aggregate(n_matching, column, op)
         out = (
             f"count{filter_descr} = {result_str} "
-            f"(out of {total_rows:,} total rows in {real_table})"
+            f"(out of {total_rows:,} total rows in {real_table}){coverage_note}"
         )
         # count is a ROW count, and on an all-blank column that reads as a data
         # volume it is not: `count('SBFE Score')` returned 26 on a case whose
@@ -4390,7 +4470,7 @@ def _aggregate_column_impl(
     formatted = _format_aggregate(result, column, op)
     nonnull = len(values)
     out = (
-        f"{op}({real_col}){filter_descr} = {formatted} "
+        f"{op}({real_col}){filter_descr} = {formatted}{coverage_note} "
         f"(over {nonnull:,} non-null value(s) in {n_matching:,} matching row(s); "
         f"{total_rows:,} total in {real_table})"
     )
