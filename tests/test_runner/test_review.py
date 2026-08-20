@@ -145,3 +145,29 @@ async def test_apply_review_directive_shows_reviewer_even_on_failure(monkeypatch
 
 def test_review_trace_payload_none_is_review_failed():
     assert _review_trace_payload(None, None)["verdict"] == "review_failed"
+
+
+# ── the reviewer has its own fence, not the planner's ────────────────────────
+#
+# It used to borrow ORCH_PLAN_TIMEOUT_S. The two want opposite things: the
+# round-1 watchdog is tight BECAUSE it retries and disarms on the last attempt,
+# while the reviewer has no retry at all — expiry drops the coherence gate.
+# Worse, at 25s it sat under the 40s per-call stall fence, so the call-layer
+# retry could never fire for it.
+
+
+def test_the_reviewer_does_not_borrow_the_planning_fence():
+    from runner.turn import review as review_mod
+    assert not hasattr(review_mod, "_ORCH_PLAN_TIMEOUT_S"), \
+        "the reviewer is back on the planner's knob"
+    assert review_mod._REVIEWER_TIMEOUT_S > 40, (
+        "the reviewer fence must sit ABOVE the per-call stall fence, or the "
+        "call-layer retry is unreachable and a stalled reviewer just dies"
+    )
+
+
+def test_the_reviewer_fence_holds_one_worst_case_call():
+    """40s stall fence + 60s retry budget = 100s for a stalled-then-retried
+    call. Below that, a reviewer that stalls once can never come back."""
+    from runner.turn import review as review_mod
+    assert review_mod._REVIEWER_TIMEOUT_S >= 100

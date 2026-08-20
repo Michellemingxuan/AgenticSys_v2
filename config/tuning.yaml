@@ -72,11 +72,21 @@ timeouts:
   # [env: SCREEN_STALL_RETRY_S]
   screen_stall_retry_s: 10
 
-  # Round-1 team-planning watchdog, also reused as the fence around the
-  # coherence reviewer's single LLM call. Normally ~3s; on a stall the phase is
-  # aborted and retried rather than waiting out the per-call cap.
+  # Round-1 team-planning watchdog ONLY. Normally ~3s; on a stall the phase is
+  # aborted and RETRIED rather than waiting out the per-call cap, and the
+  # deadline is disarmed on the final attempt so a merely-slow env still
+  # completes. Tight is correct here BECAUSE it retries.
   # [env: ORCH_PLAN_TIMEOUT_S]
   orch_plan_s: 25
+
+  # The coherence reviewer's single LLM call. It used to borrow orch_plan_s,
+  # which wants the opposite thing: the reviewer has NO retry, so expiry drops
+  # the coherence gate for the turn. At 25s it also sat UNDER the 40s per-call
+  # stall fence, making the call-layer retry unreachable — that is what killed
+  # `general_specialist` at exactly 25.00s in the private env. 120 holds one
+  # worst-case call (40 stall + 60 retry = 100) plus the reviewer's own work.
+  # [env: REVIEWER_TIMEOUT_S]
+  reviewer_s: 120
 
   # One specialist's whole agentic run (its tool calls included).
   #

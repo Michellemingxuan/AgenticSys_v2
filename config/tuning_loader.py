@@ -32,6 +32,7 @@ _MAP = {
     "timeouts.screen_s": "SCREEN_TIMEOUT_S",
     "timeouts.screen_stall_retry_s": "SCREEN_STALL_RETRY_S",
     "timeouts.orch_plan_s": "ORCH_PLAN_TIMEOUT_S",
+    "timeouts.reviewer_s": "REVIEWER_TIMEOUT_S",
     "timeouts.specialist_s": "SPECIALIST_TIMEOUT_S",
     "timeouts.report_agent_s": "REPORT_AGENT_TIMEOUT_S",
     "timeouts.distiller_s": "DISTILLER_TIMEOUT_S",

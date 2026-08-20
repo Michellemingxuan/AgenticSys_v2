@@ -31,11 +31,27 @@ from tools.node_trace import (
 
 from llm.firewall_stack import redact_payload
 
-# Round-1 (team-planning) watchdog, reused here as the single-LLM-call fence
-# around the reviewer's ``Runner.run``. Defined independently of server.py's
-# copy (server.py:123) to avoid a server <-> review import cycle; both read
-# the same env var so the two stay in sync.
-_ORCH_PLAN_TIMEOUT_S = float(os.environ.get("ORCH_PLAN_TIMEOUT_S", "25"))
+# The reviewer's own fence. It used to borrow `ORCH_PLAN_TIMEOUT_S` (25s), and
+# the two consumers want OPPOSITE things:
+#
+#   the round-1 watchdog  wants 25s TIGHT, because expiry there means "abandon
+#                         this planning call and re-issue" -- it has a retry
+#                         and disarms the deadline on the final attempt.
+#   the reviewer          has NO retry. Expiry means the coherence gate is
+#                         silently dropped for the turn, so it wants to
+#                         OUTLAST a stall, not cut one short.
+#
+# At 25s it also sat under the per-call stall fence (40s), which made the
+# call-layer retry unreachable: the phase fence always fired first. That is
+# what killed `general_specialist` at exactly 25.00s in the private env while
+# round_1 had run 0.00s.
+#
+# 120s holds one worst-case call -- 40s stall fence + 60s retry budget = 100 --
+# with margin for the reviewer's own work. Dev is unaffected: 122 reviewer runs
+# across the shipped logs, zero `review_failed`.
+#
+# Defined here rather than imported to avoid a server <-> review import cycle.
+_REVIEWER_TIMEOUT_S = float(os.environ.get("REVIEWER_TIMEOUT_S", "120"))
 
 # Aux tools that are NOT domain specialists (they never count toward the
 # multi-specialist gate or the review's specialist_outputs).
@@ -79,7 +95,7 @@ async def _run_review(sess, ctx, question: str, specialist_outputs: dict):
 
     This is the guaranteed, un-skippable coherence gate on multi-specialist
     turns. It is wrapped in ``asyncio.wait_for`` on an existing timeout budget
-    (``_ORCH_PLAN_TIMEOUT_S`` — a single-LLM-call fence) and swallows every
+    (``_REVIEWER_TIMEOUT_S`` — a single-LLM-call fence) and swallows every
     exception (timeout included), logging ``review_failed``. The turn must
     NEVER block on the reviewer: a None return degrades gracefully to
     synthesis from whatever specialist outputs already exist (design §8).
@@ -111,7 +127,7 @@ async def _run_review(sess, ctx, question: str, specialist_outputs: dict):
             )
             result = await asyncio.wait_for(
                 Runner.run(reviewer, review_input, context=ctx, hooks=hooks),
-                timeout=_ORCH_PLAN_TIMEOUT_S,
+                timeout=_REVIEWER_TIMEOUT_S,
             )
         report = getattr(result, "final_output", None)
         try:
