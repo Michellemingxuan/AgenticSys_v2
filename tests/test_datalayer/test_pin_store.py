@@ -1,0 +1,173 @@
+"""Pin / opportunity persistence."""
+import importlib
+
+import pytest
+
+
+@pytest.fixture()
+def store(tmp_path, monkeypatch):
+    monkeypatch.setenv("PIN_DB", str(tmp_path / "pins.db"))
+    import datalayer.pin_store as ps
+    importlib.reload(ps)   # re-read PIN_DB at import time
+    return ps
+
+
+def test_pin_and_list_round_trip(store):
+    store.add_pin("c1", kind="insight", text="Spend spiked 2.6x",
+                  turn_id="t2", turn_index=2, source="spending & payment specialist")
+
+    pins = store.list_pins("c1")
+
+    assert len(pins) == 1
+    assert pins[0]["text"] == "Spend spiked 2.6x"
+    assert pins[0]["turn_index"] == 2
+    assert pins[0]["section_key"] is None
+
+
+def test_pins_are_scoped_to_their_case(store):
+    store.add_pin("c1", kind="insight", text="a")
+    store.add_pin("c2", kind="insight", text="b")
+
+    assert [p["text"] for p in store.list_pins("c1")] == ["a"]
+    assert [p["text"] for p in store.list_pins("c2")] == ["b"]
+
+
+def test_pinning_the_same_figure_twice_is_idempotent(store):
+    """"Pin Figures" pins every figure on the turn at once, so a second
+    click must not double the cards."""
+    first = store.add_pin("c1", kind="figure", turn_id="t3",
+                          specialist="modeling", topic="tsr", chart_url="/c/tsr.png")
+    again = store.add_pin("c1", kind="figure", turn_id="t3",
+                          specialist="modeling", topic="tsr", chart_url="/c/tsr.png")
+
+    assert first["pin_id"] == again["pin_id"]
+    assert len(store.list_pins("c1")) == 1
+
+
+def test_two_insights_from_one_turn_are_two_pins(store):
+    """Unlike figures, insights have no natural key — two different
+    sentences from the same turn are two real pins."""
+    store.add_pin("c1", kind="insight", text="first", turn_id="t2")
+    store.add_pin("c1", kind="insight", text="second", turn_id="t2")
+
+    assert len(store.list_pins("c1")) == 2
+
+
+def test_same_topic_on_a_different_turn_is_a_separate_pin(store):
+    store.add_pin("c1", kind="figure", turn_id="t3", specialist="m", topic="tsr")
+    store.add_pin("c1", kind="figure", turn_id="t4", specialist="m", topic="tsr")
+
+    assert len(store.list_pins("c1")) == 2
+
+
+def test_unknown_kind_is_rejected(store):
+    with pytest.raises(ValueError, match="unknown pin kind"):
+        store.add_pin("c1", kind="notion", text="x")
+
+
+def test_delete_removes_only_the_named_pin(store):
+    keep = store.add_pin("c1", kind="insight", text="keep")
+    drop = store.add_pin("c1", kind="insight", text="drop")
+
+    assert store.delete_pin("c1", drop["pin_id"]) is True
+    assert [p["pin_id"] for p in store.list_pins("c1")] == [keep["pin_id"]]
+
+
+def test_delete_will_not_reach_across_cases(store):
+    pin = store.add_pin("c1", kind="insight", text="x")
+
+    assert store.delete_pin("c2", pin["pin_id"]) is False
+    assert len(store.list_pins("c1")) == 1
+
+
+def test_insert_into_section_and_group(store):
+    a = store.add_pin("c1", kind="figure", turn_id="t3", specialist="m", topic="tsr")
+    store.add_pin("c1", kind="figure", turn_id="t3", specialist="m", topic="bureau")
+
+    store.set_pin_section("c1", a["pin_id"], "modeling")
+    grouped = store.pins_by_section("c1")
+
+    assert list(grouped) == ["modeling"]
+    assert grouped["modeling"][0]["pin_id"] == a["pin_id"]
+
+
+def test_removing_from_a_section_ungroups_it(store):
+    pin = store.add_pin("c1", kind="figure", turn_id="t3", specialist="m", topic="tsr")
+    store.set_pin_section("c1", pin["pin_id"], "modeling")
+
+    store.set_pin_section("c1", pin["pin_id"], None)
+
+    assert store.pins_by_section("c1") == {}
+
+
+def test_opportunity_round_trip_keeps_its_pin_provenance(store):
+    p1 = store.add_pin("c1", kind="insight", text="one")
+    p2 = store.add_pin("c1", kind="insight", text="two")
+
+    opp = store.add_opportunity("c1", title="Review RLI decline handling",
+                                body="check the sequencing",
+                                pin_ids=[p1["pin_id"], p2["pin_id"]])
+
+    listed = store.list_opportunities("c1")
+    assert len(listed) == 1
+    assert listed[0]["title"] == "Review RLI decline handling"
+    assert listed[0]["pin_ids"] == [p1["pin_id"], p2["pin_id"]]
+    assert opp["opp_id"] == listed[0]["opp_id"]
+
+
+def test_delete_opportunity(store):
+    opp = store.add_opportunity("c1", title="x")
+    assert store.delete_opportunity("c1", opp["opp_id"]) is True
+    assert store.list_opportunities("c1") == []
+
+
+def test_vega_spec_round_trips_as_json(store):
+    """The spec is the durable copy of a figure — it carries its data inline,
+    so it outlives the chart PNG that rewind deletes."""
+    spec = {"mark": "line", "data": {"values": [{"x": 1, "y": 2}]}}
+    store.add_pin("c1", kind="figure", turn_id="t1", specialist="m",
+                  topic="tsr", vega_spec=spec)
+
+    pin = store.list_pins("c1")[0]
+
+    assert pin["vega_spec"] == spec
+
+
+def test_pin_without_a_spec_reports_none(store):
+    store.add_pin("c1", kind="figure", turn_id="t1", specialist="m", topic="tsr")
+    assert store.list_pins("c1")[0]["vega_spec"] is None
+
+
+def test_vega_spec_column_is_added_to_an_existing_database(tmp_path, monkeypatch):
+    """`CREATE TABLE IF NOT EXISTS` is a no-op on an existing table, so a
+    database created before `vega_spec` existed must be migrated, not just
+    re-declared."""
+    import importlib
+    import sqlite3
+
+    db = tmp_path / "legacy.db"
+    # A pins table as it looked before the column existed.
+    con = sqlite3.connect(db)
+    con.executescript(
+        "CREATE TABLE pins (pin_id TEXT PRIMARY KEY, case_id TEXT NOT NULL,"
+        " kind TEXT NOT NULL, text TEXT NOT NULL DEFAULT '', turn_id TEXT,"
+        " turn_index INTEGER, source TEXT NOT NULL DEFAULT '', specialist TEXT,"
+        " topic TEXT, chart_url TEXT, section_key TEXT, created_at REAL NOT NULL);"
+        "INSERT INTO pins VALUES ('old1','c1','insight','legacy',NULL,NULL,'',"
+        "NULL,NULL,NULL,NULL,0.0);"
+    )
+    con.commit()
+    con.close()
+
+    monkeypatch.setenv("PIN_DB", str(db))
+    import datalayer.pin_store as ps
+    importlib.reload(ps)
+
+    pins = ps.list_pins("c1")
+
+    assert [p["text"] for p in pins] == ["legacy"]
+    assert pins[0]["vega_spec"] is None
+    # And new writes can use the column.
+    ps.add_pin("c1", kind="figure", turn_id="t", specialist="m", topic="x",
+               vega_spec={"mark": "bar"})
+    assert any(p["vega_spec"] == {"mark": "bar"} for p in ps.list_pins("c1"))
