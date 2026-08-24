@@ -350,6 +350,30 @@ def _prewarm_clients() -> None:
     _BOOT_LOGGER.log("llm_prewarm_start", {"backend": backend})
     t0 = time.time()
 
+    # Resolve the tiktoken encoder here, off the hot path. It downloads its
+    # BPE file on first use, so where that host is unreachable the lookup
+    # blocks until the socket times out. It used to happen inside the first
+    # traced LLM round — twice per round, from a coroutine, pinning the event
+    # loop and making a ~2s turn take ~30s. Now an environment without egress
+    # pays one timeout at boot and reports it, rather than paying it forever.
+    _tok_t0 = time.time()
+    from tools.node_trace.pricing import prewarm_encoder
+    _tok_ok = prewarm_encoder(MODEL)
+    _tok_ms = int((time.time() - _tok_t0) * 1000)
+    _BOOT_LOGGER.log("tokenizer_prewarm", {
+        "model": MODEL, "available": _tok_ok, "duration_ms": _tok_ms,
+    })
+    if not _tok_ok:
+        print(f"[server] tiktoken unavailable after {_tok_ms}ms — token counts "
+              f"will be estimated from text length. This affects trace/cost "
+              f"telemetry only, not answers. On an air-gapped host set "
+              f"TIKTOKEN_LOAD_TIMEOUT_S=0 to skip this probe; to restore exact "
+              f"counts, populate TIKTOKEN_CACHE_DIR "
+              f"(see tools/tiktoken_cache_fetch.py).")
+    elif _tok_ms > 2000:
+        print(f"[server] tiktoken encoder took {_tok_ms}ms to load "
+              f"(downloaded?) — consider setting TIKTOKEN_CACHE_DIR.")
+
     async def _warmup_call() -> None:
         # Minimal prompt that exercises: token acquisition + HTTP pool
         # warmup + safechain LCEL model load (for safechain) or

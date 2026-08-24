@@ -183,18 +183,17 @@ def _tag_active_node(tag: str, **extra: Any) -> None:
 
 def _estimate_tokens(text: str, model: str) -> int:
     """tiktoken estimate with a robust fallback. Safechain doesn't return
-    usage objects, so this is the only token signal we have on that path."""
-    if not text:
-        return 0
-    try:
-        import tiktoken
-        try:
-            enc = tiktoken.encoding_for_model(model)
-        except KeyError:
-            enc = tiktoken.get_encoding("cl100k_base")
-        return len(enc.encode(text))
-    except Exception:
-        return max(1, len(text) // 4)
+    usage objects, so this is the only token signal we have on that path.
+
+    Delegates to `tools.node_trace.pricing.estimate_tokens`, which caches the
+    encoder AND its unavailability. This used to call tiktoken directly on
+    every round: tiktoken fetches its BPE file over the network on first use,
+    and where that host is unreachable each call blocked until the socket
+    timed out — twice per round, from inside a coroutine, pinning the event
+    loop. See the note in `pricing.py`.
+    """
+    from tools.node_trace.pricing import estimate_tokens
+    return estimate_tokens(text, model)
 
 
 class SafeChainAsyncOpenAI:
