@@ -34,6 +34,169 @@ def is_report_file(p: Path) -> bool:
     return p.is_file() and p.suffix.lower() in REPORT_SUFFIXES
 
 
+# Display roster for the curated report sections — the reviewer-facing
+# ordering and labels behind the Case Report panel's section chips.
+#
+# Keyed by DOMAIN PREFIX, not by full filename: the canonical layout names
+# files `<domain>_exp_0.md`, but the suffix is not load-bearing and already
+# varies (`strategy_0.md` carries no `_exp`). Matching on the prefix means a
+# re-export that bumps `_exp_0` -> `_exp_1` keeps its section instead of
+# silently falling through to the unknown-file tail.
+#
+# Order is the reviewer's narrative order (summary -> evidence -> action),
+# NOT alphabetical, and it mirrors the routing table in
+# `skills/workflow/report_needle.md` so the agent and the UI name the same
+# files the same way. Sections listed here but absent on disk are reported
+# as unavailable rather than omitted — a missing Bureau report is a fact the
+# reviewer should see, not a gap in the tab strip.
+REPORT_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("executive_summary", "Exec Summary"),
+    ("default_journey", "Default Journey"),
+    ("bureau", "Bureau"),
+    ("payment_spend", "Payment & Spend"),
+    ("modeling", "Modeling"),
+    ("driver", "Drivers"),
+    ("crossbu", "Cross-BU"),
+    ("interestingness", "Interestingness"),
+    ("strategy", "Strategy"),
+    ("wcc_notes", "Notes"),
+)
+
+
+def _matches_section(stem: str, prefix: str) -> bool:
+    """True when report file `stem` belongs to section `prefix`."""
+    return stem == prefix or stem.startswith(prefix + "_")
+
+
+# Several curated reports title their sections with an ASCII banner instead
+# of a markdown heading:
+#
+#     ====================================================
+#     Bureau Credit Scores
+#     ====================================================
+#
+# Left alone this renders badly and, worse, MISLEADINGLY: markdown reads the
+# trailing rule as a setext underline, so the title becomes an <h1> while the
+# LEADING rule survives as a stray paragraph of equals signs glued to it
+# ("============ Bureau Credit Scores"). The banner is a heading in intent,
+# so we make it one in fact.
+#
+# `=` only, never `-`: a `---` run is a legitimate markdown thematic break and
+# `executive_summary_exp_0.md` uses it as a section separator. Rewriting those
+# would destroy real formatting.
+_ASCII_BANNER_RE = re.compile(
+    r"^[ \t]*={3,}[ \t]*\n"                 # opening rule
+    r"^[ \t]*(?P<title>\S[^\n]*?)[ \t]*\n"  # the title itself
+    r"^[ \t]*={3,}[ \t]*$",                  # closing rule
+    re.MULTILINE,
+)
+
+
+def _promote_ascii_headings(text: str) -> str:
+    """Rewrite `====` / title / `====` banners as `## title`.
+
+    Level 2 to match the reports that DO use markdown headings
+    (`executive_summary_exp_0.md`, `wcc_notes_exp_0.md` both open at `##`),
+    so one report's sections sit at the same level as another's.
+    """
+    return _ASCII_BANNER_RE.sub(lambda m: f"## {m.group('title')}", text)
+
+
+def read_report_text(path: Path) -> str | None:
+    """Read a curated report as display-ready text, or None if unreadable.
+
+    Deliberately the SAME read path `fs_read_file` gives the report agent,
+    comma-formatting included: the agent quotes `$201,800` after
+    `_format_long_numerics`, so a UI that served the raw bytes would print
+    `201800` for the very same limit reduction and read as a discrepancy
+    between the report and the assistant. One reader, one rendering.
+    """
+    try:
+        return _format_long_numerics(path.read_text())
+    except (OSError, UnicodeDecodeError):
+        # Binary exports (`.docx`) live in real case folders. `is_report_file`
+        # already excludes them; this is the belt-and-braces for a `.md` that
+        # is not actually UTF-8 text.
+        return None
+
+
+# Most curated reports mark list items with a typographic bullet rather than
+# a markdown one:
+#
+#     • Spend records: 3865 spend records are present, ...
+#     • Payment records: 186 successful payment records are present, ...
+#
+# Markdown does not recognise U+2022, so it reads a run of these as ONE
+# paragraph joined by soft line breaks — the reader gets a wall of prose with
+# stray bullet characters sprinkled through it instead of a list. 172 of them
+# across 8 of the 10 sections, so this is the normal case, not an edge one.
+#
+# `executive_summary_exp_0.md` already uses real markdown `-` (including
+# nested at indent 2) and must pass through untouched, which is why this only
+# ever rewrites U+2022 and friends.
+_BULLET_RE = re.compile(r"^(?P<indent>[ \t]*)[\u2022\u25e6\u2023\u2043]\s+", re.MULTILINE)
+
+
+def _normalize_bullets(text: str) -> str:
+    """Rewrite typographic bullet markers as markdown list markers.
+
+    Indentation is preserved so any nesting the source implies survives.
+    """
+    return _BULLET_RE.sub(lambda m: f"{m.group('indent')}- ", text)
+
+
+def _display_markdown(path: Path) -> str | None:
+    """`read_report_text` plus the display-only fixes a renderer needs.
+
+    Split from `read_report_text` deliberately: that function is the agent's
+    exact read path and must stay that way, while this one may reshape
+    presentation. Both keep the same NUMBERS — only the markup differs.
+    """
+    raw = read_report_text(path)
+    if raw is None:
+        return None
+    return _normalize_bullets(_promote_ascii_headings(raw))
+
+
+def list_report_sections(folder: Path) -> list[dict]:
+    """Curated report sections for `folder`, in reviewer-facing order.
+
+    Returns one dict per section — `key`, `label`, `filename`, `markdown` —
+    with `markdown` None when the section has no file on disk (or the file
+    could not be decoded). Any report file that matches no known section is
+    appended after the known ones under a title-cased label, so an unfamiliar
+    case layout degrades to "extra tabs" rather than to hidden content.
+    """
+    if not folder.is_dir():
+        return []
+    files = sorted((p for p in folder.iterdir() if is_report_file(p)),
+                   key=lambda p: p.name)
+    claimed: set[str] = set()
+    sections: list[dict] = []
+
+    for key, label in REPORT_SECTIONS:
+        match = next((p for p in files if _matches_section(p.stem, key)), None)
+        if match is not None:
+            claimed.add(match.name)
+        sections.append({
+            "key": key,
+            "label": label,
+            "filename": match.name if match else None,
+            "markdown": _display_markdown(match) if match else None,
+        })
+
+    for p in files:
+        if p.name in claimed:
+            continue
+        sections.append({
+            "key": p.stem,
+            "label": p.stem.replace("_", " ").strip().title(),
+            "filename": p.name,
+            "markdown": _display_markdown(p),
+        })
+    return sections
+
+
 # Curated case-report .md files often carry raw numeric values that are 6+
 # digits long (card limits, balances, spend / payment totals). The boundary
 # redaction layer in llm.firewall_stack masks any `\d{6,}` run, which
