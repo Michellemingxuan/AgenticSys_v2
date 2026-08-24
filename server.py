@@ -26,6 +26,7 @@ import json
 import math
 import os
 import queue
+import shutil
 import threading
 import time
 import uuid
@@ -96,6 +97,8 @@ from runner.config import (
 # (dependency is one-way: server -> runner), so there is no load cycle.
 from runner.turn.conductor import _TurnAborted
 from tools.data_tools import case_scope, init_tools
+from tools.fs_tools import list_report_sections
+from datalayer import pin_store
 
 
 # ── Configuration ───────────────────────────────────────────────────────────
@@ -1004,6 +1007,63 @@ def get_cases():
     return jsonify(_split_cases(ALL_CASES))
 
 
+@app.get("/api/pillars")
+def get_pillars():
+    """Available pillars, and which one this server is running.
+
+    `active` is fixed at boot: `PILLAR` selects one config, which is then
+    baked into `_PILLAR_YAML`, the chat agent's `pillar_config`, and every
+    session's conversation identity. Switching at runtime would have to be a
+    per-session change, so the UI shows the others as unavailable rather than
+    offering a control that silently does nothing.
+    """
+    loader = PillarLoader()
+    out = []
+    for name in loader.list_pillars():
+        cfg = loader.load(name) or {}
+        out.append({
+            "id": name,
+            "display_name": cfg.get("display_name") or name,
+            "focus": cfg.get("focus") or "",
+        })
+    return jsonify({"active": PILLAR, "pillars": out})
+
+
+@app.get("/api/cases/overview")
+def get_cases_overview():
+    """Every case with the two dates a reviewer picks by.
+
+    `report_updated_at` is the newest mtime across the case's curated report
+    files; `last_qa_at` is when a question was last asked of it. Cases with
+    neither have simply never been opened, and are listed anyway — the point
+    of this page is to show what is waiting as much as what is done.
+    """
+    activity = (_NODE_TRACE_STORE.case_activity()
+                if _NODE_TRACE_STORE is not None else {})
+    rows = []
+    for case_id in ALL_CASES:
+        cid = str(case_id)
+        folder = _REPORTS_DIR / cid
+        sections = list_report_sections(folder) if folder.is_dir() else []
+        stamps = [(folder / sec["filename"]).stat().st_mtime
+                  for sec in sections if sec["filename"]]
+        act = activity.get(cid, {})
+        rows.append({
+            "case_id": cid,
+            "report_updated_at": (
+                time.strftime("%Y-%m-%d", time.localtime(max(stamps))) if stamps else None),
+            "report_sections": sum(1 for sec in sections if sec["markdown"]),
+            "last_qa_at": act.get("last_qa_at"),
+            "turns": act.get("turns", 0),
+            "pins": len(pin_store.list_pins(cid)),
+        })
+    # Most recently reviewed first; never-opened cases sink to the bottom
+    # rather than being hidden, since those are the ones needing attention.
+    rows.sort(key=lambda r: (r["last_qa_at"] or "", r["report_updated_at"] or ""),
+              reverse=True)
+    return jsonify({"cases": rows})
+
+
 @app.post("/api/cases/<case_id>/turn")
 def post_turn(case_id: str):
     return _start_turn(case_id)
@@ -1258,6 +1318,282 @@ def post_rewind(case_id: str):
         "task_cancel_dispatched": cancelled_task,
         **amem_purge.as_log_fields(),
     })
+    return ("", 204)
+
+
+@app.get("/api/cases/<case_id>/report")
+def get_report(case_id: str):
+    """Serve the curated case report — the same `reports/<case_id>/*.md`
+    files the report agent reads — for the UI's Case Report panel.
+
+    Returns every known section in reviewer-facing order, each with its
+    markdown inline. Inline rather than one request per section because the
+    whole report is ~75KB for a real case: a single response costs less than
+    ten round trips and spares the panel a loading state on every tab click.
+
+    Sections with no file on disk come back with `markdown: null` and are
+    rendered as unavailable — a case missing its Bureau report should say so
+    rather than quietly show nine tabs.
+
+    Reads through `tools.fs_tools` on purpose. That module's `is_report_file`
+    is the single definition of "a report file", and its docstring records
+    what happened last time the definition was copied instead of imported
+    (a `.MD` report that detection saw and the file list did not). This
+    endpoint is the fourth consumer, not a fourth literal.
+    """
+    folder = (_REPORTS_DIR / case_id).resolve()
+    try:
+        folder.relative_to(_REPORTS_DIR.resolve())
+    except ValueError:
+        abort(404)
+    if not folder.is_dir():
+        return jsonify({"error": f"no report folder for case {case_id}"}), 404
+
+    sections = list_report_sections(folder)
+    # Newest mtime across the section files actually present. Deliberately
+    # NOT called "generated": the reports carry no generation stamp of their
+    # own, and mtime is a poor proxy for one — a Drive/rsync copy rewrites it,
+    # so these files currently date to when they synced, not to when the
+    # report was produced. The UI labels it "Updated" for that reason. Give
+    # the reports a real stamp and this should read it instead.
+    #
+    # Taken per-file rather than from the folder: the folder's mtime moves
+    # whenever `charts/` is written during a turn, which would date the
+    # report to the last question asked.
+    stamps = [(folder / sec["filename"]).stat().st_mtime
+              for sec in sections if sec["filename"]]
+    updated_at = (
+        time.strftime("%Y-%m-%d", time.localtime(max(stamps))) if stamps else None
+    )
+    # Merge in any figures the reviewer inserted into a section. Attached as
+    # a `figures` list rather than spliced into the markdown: the markdown is
+    # the report agent's source text, and rewriting it would change what the
+    # agent reads on the next turn. The panel renders these below the prose.
+    by_section = pin_store.pins_by_section(case_id)
+    for sec in sections:
+        sec["figures"] = by_section.get(sec["key"], [])
+
+    return jsonify({
+        "case_id": case_id,
+        "updated_at": updated_at,
+        "sections": sections,
+    })
+
+
+def _snapshot_pinned_chart(case_id: str, chart_url: str | None) -> str | None:
+    """Copy a turn's chart into the case's durable `pins/` dir.
+
+    A pin is a review DELIVERABLE; the chart it points at is a per-turn
+    artifact that `rewind` deletes. Pinning a figure and then rewinding its
+    turn therefore left the pin alive with a 404 behind it — the report
+    rendered the browser's broken-image glyph, which reads as a corrupted
+    report rather than as retracted evidence.
+
+    Snapshotting at pin time makes the pin self-contained. Keyed by the source
+    FILENAME rather than the pin id, so two pins on the same chart share one
+    copy and re-pinning is idempotent.
+
+    Returns the durable URL, or the original one unchanged when there is
+    nothing to copy (already a snapshot, or the source is already gone) —
+    never raises, because failing to snapshot must not fail the pin.
+    """
+    if not chart_url:
+        return chart_url
+    marker = f"/api/cases/{case_id}/charts/"
+    if marker not in chart_url:
+        return chart_url          # already durable, or not ours to copy
+    filename = chart_url.rsplit("/", 1)[-1]
+    if not filename or "/" in filename or ".." in filename:
+        return chart_url
+    src = (_REPORTS_DIR / case_id / "charts" / filename).resolve()
+    dst_dir = (_REPORTS_DIR / case_id / "pins").resolve()
+    try:
+        src.relative_to((_REPORTS_DIR / case_id / "charts").resolve())
+    except ValueError:
+        return chart_url
+    if not src.is_file():
+        return chart_url          # nothing to snapshot; the guard in the UI copes
+    try:
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        dst = dst_dir / filename
+        if not dst.exists():
+            shutil.copy2(src, dst)
+    except OSError as exc:
+        print(f"[server] pin snapshot failed for {filename}: {exc}")
+        return chart_url
+    return f"/api/cases/{case_id}/pinned-figures/{filename}"
+
+
+@app.get("/api/cases/<case_id>/pinned-figures/<path:filename>")
+def get_pinned_figure(case_id: str, filename: str):
+    """Serve a snapshotted pin figure from `reports/<case_id>/pins/`.
+
+    Separate from `/charts/` on purpose: these outlive the turn that drew
+    them, which is the whole point of the snapshot.
+    """
+    if ".." in filename or filename.startswith("/") or "\\" in filename:
+        abort(404)
+    pins_dir = (_REPORTS_DIR / case_id / "pins").resolve()
+    if not pins_dir.exists():
+        abort(404)
+    mimetype = "image/svg+xml" if filename.endswith(".svg") else "image/png"
+    return send_from_directory(pins_dir, filename, mimetype=mimetype)
+
+
+@app.get("/api/cases/<case_id>/pins")
+def get_pins(case_id: str):
+    """Every pin on this case — insights and figures, oldest first."""
+    return jsonify({"pins": pin_store.list_pins(case_id)})
+
+
+@app.post("/api/cases/<case_id>/pins")
+def post_pin(case_id: str):
+    """Pin an insight or a figure.
+
+    Figure pins are idempotent on (turn, specialist, topic) in the store, so
+    the design's "Pin Figures" button — which pins a whole turn's figures at
+    once — can be clicked twice without duplicating cards.
+    """
+    body = request.get_json(silent=True) or {}
+    kind = (body.get("kind") or "").strip()
+    try:
+        pin = pin_store.add_pin(
+            case_id,
+            kind=kind,
+            text=(body.get("text") or "").strip(),
+            turn_id=body.get("turn_id"),
+            turn_index=body.get("turn_index"),
+            source=(body.get("source") or "").strip(),
+            specialist=body.get("specialist"),
+            topic=body.get("topic"),
+            # Snapshot so the pin survives a rewind of its source turn.
+            chart_url=_snapshot_pinned_chart(case_id, body.get("chart_url")),
+            # The spec is the durable copy: self-contained JSON that outlives
+            # the PNG. The snapshot above is the fallback, not the other way
+            # round.
+            vega_spec=body.get("vega_spec"),
+            chart_kind=body.get("chart_kind"),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(pin), 201
+
+
+@app.delete("/api/cases/<case_id>/pins/<pin_id>")
+def delete_pin(case_id: str, pin_id: str):
+    if not pin_store.delete_pin(case_id, pin_id):
+        return jsonify({"error": "no such pin"}), 404
+    return ("", 204)
+
+
+@app.post("/api/cases/<case_id>/pins/<pin_id>/section")
+def put_pin_section(case_id: str, pin_id: str):
+    """Insert a pin into a report section, or lift it back out.
+
+    `section_key` null removes the association. The key is validated against
+    the report's own sections so a typo cannot strand a pin in a section that
+    will never render.
+    """
+    body = request.get_json(silent=True) or {}
+    section_key = body.get("section_key")
+    if section_key is not None:
+        folder = (_REPORTS_DIR / case_id).resolve()
+        valid = {sec["key"] for sec in list_report_sections(folder)}
+        if section_key not in valid:
+            return jsonify({"error": f"unknown section {section_key!r}"}), 400
+    if not pin_store.set_pin_section(case_id, pin_id, section_key):
+        return jsonify({"error": "no such pin"}), 404
+    return ("", 204)
+
+
+@app.post("/api/cases/<case_id>/synthesis")
+def post_synthesis(case_id: str):
+    """Synthesise the reviewer's selected pins.
+
+    `mode` is `story` (what these pins say read together) or `opportunities`
+    (what follow-ups they justify). Both return the same shape so the board
+    renders one component either way.
+
+    Runs the agent synchronously on its own event loop. That is fine here in
+    a way it would not be for a turn: this is one tool-less round with a
+    1200-token cap, not a multi-specialist fan-out, and the reviewer is
+    sitting on the button waiting for it.
+    """
+    body = request.get_json(silent=True) or {}
+    mode = (body.get("mode") or "story").strip()
+    if mode not in ("story", "opportunities"):
+        return jsonify({"error": f"unknown mode {mode!r}"}), 400
+
+    pin_ids = body.get("pin_ids") or []
+    if not pin_ids:
+        return jsonify({"error": "no pins selected"}), 400
+
+    # Resolve server-side rather than trusting posted pin bodies: the client
+    # may hold a stale copy, and a synthesis must be over what is actually
+    # pinned right now.
+    by_id = {p["pin_id"]: p for p in pin_store.list_pins(case_id)}
+    pins = [by_id[i] for i in pin_ids if i in by_id]
+    if not pins:
+        return jsonify({"error": "none of those pins exist on this case"}), 404
+
+    from agent_factories.synthesis_agent import build_synthesis_agent, render_pins
+    from agents import Runner
+
+    agent = build_synthesis_agent(_CLIENTS.model)
+    prompt = render_pins(pins, mode)
+
+    loop = asyncio.new_event_loop()
+    try:
+        result = loop.run_until_complete(
+            asyncio.wait_for(Runner.run(agent, prompt), timeout=90.0))
+    except asyncio.TimeoutError:
+        return jsonify({"error": "synthesis timed out"}), 504
+    except Exception as exc:  # noqa: BLE001
+        print(f"[server] synthesis failed: {type(exc).__name__}: {exc}")
+        return jsonify({"error": f"synthesis failed: {type(exc).__name__}"}), 502
+    finally:
+        try:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        finally:
+            loop.close()
+
+    out = result.final_output
+    return jsonify({
+        "mode": mode,
+        "story": getattr(out, "story", "") or "",
+        "opportunities": [
+            {"title": o.title, "rationale": o.rationale}
+            for o in (getattr(out, "opportunities", None) or [])
+        ],
+        "not_settled": list(getattr(out, "not_settled", None) or []),
+        "pin_ids": [p["pin_id"] for p in pins],
+    })
+
+
+@app.get("/api/cases/<case_id>/opportunities")
+def get_opportunities(case_id: str):
+    return jsonify({"opportunities": pin_store.list_opportunities(case_id)})
+
+
+@app.post("/api/cases/<case_id>/opportunities")
+def post_opportunity(case_id: str):
+    body = request.get_json(silent=True) or {}
+    title = (body.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "missing title"}), 400
+    opp = pin_store.add_opportunity(
+        case_id,
+        title=title,
+        body=(body.get("body") or "").strip(),
+        pin_ids=body.get("pin_ids") or [],
+    )
+    return jsonify(opp), 201
+
+
+@app.delete("/api/cases/<case_id>/opportunities/<opp_id>")
+def delete_opportunity(case_id: str, opp_id: str):
+    if not pin_store.delete_opportunity(case_id, opp_id):
+        return jsonify({"error": "no such opportunity"}), 404
     return ("", 204)
 
 
