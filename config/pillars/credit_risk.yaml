@@ -1,5 +1,5 @@
 pillar: credit_risk
-display_name: "Credit & Risk (Commercial / SBS)"
+display_name: "Credit & Risk (US SBS)"
 focus: "Delinquency risk, bureau scores, cross-BU exposure, internal model scores and score drivers, spend patterns, WCC flags, capacity & affordability"
 
 # NO `cut_off_date` HERE — DELIBERATELY. It is derived per case from the data
