@@ -303,6 +303,38 @@ class NodeTraceStore:
             self._log_failure("snapshot_session", exc)
             return -1
 
+    def case_activity(self) -> dict[str, dict]:
+        """Per-case review activity: when it was last asked, and how many
+        turns it holds.
+
+        Backs the Overview list. Read from `session_snapshot` rather than from
+        live sessions because the point is to describe cases NOBODY currently
+        has open — a session is only built when a case is first touched, and
+        building one per case just to read a date would restore every case's
+        RAM as a side effect.
+
+        Read-only, no lock, and never raises: an unavailable trace db means
+        an Overview without dates, not a broken page.
+        """
+        try:
+            rows = self._conn.execute(
+                "SELECT case_id, MAX(taken_at) AS last_at, "
+                "       MAX(qa_cache_n) AS turns "
+                "FROM session_snapshot GROUP BY case_id",
+            ).fetchall()
+        except Exception as exc:  # noqa: BLE001
+            self._log_failure("case_activity", exc)
+            return {}
+        out: dict[str, dict] = {}
+        for case_id, last_at, turns in rows:
+            if case_id is None:
+                continue
+            out[str(case_id)] = {
+                "last_qa_at": last_at,
+                "turns": int(turns or 0),
+            }
+        return out
+
     def load_latest_snapshot(self, case_id: str) -> dict | None:
         """Return the most recent snapshot for a case as restorable state, or
         None. Read-only (no lock). Decodes each JSON column defensively."""
