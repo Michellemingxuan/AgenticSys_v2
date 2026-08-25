@@ -32,6 +32,7 @@ routine redeploys.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -56,6 +57,24 @@ def _known_cases() -> list[str]:
         return []
     return sorted(p.name for p in reports.iterdir()
                   if p.is_dir() and not p.name.startswith("_"))
+
+
+class _Reason:
+    """Captures why `build_amem_manager` degraded.
+
+    The factory swallows every failure into a NullAmemManager so the app runs
+    regardless — right for the server, useless for a CLI whose whole job is to
+    tell you what is in the store. Without this the tool could only say
+    "disabled, or unreachable" and leave you to guess between causes that
+    include a third one it never mentioned: the manager failing to BUILD,
+    which is what a wrong backend looks like.
+    """
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict]] = []
+
+    def log(self, event: str, payload: dict) -> None:
+        self.events.append((event, payload))
 
 
 #: Records per `list_memories` page. The store is enumerated in pages because
@@ -107,6 +126,9 @@ def main() -> int:
     ap.add_argument("--all", action="store_true",
                     help="every case in the store or in reports/")
     ap.add_argument("--yes", action="store_true", help="skip the confirmation")
+    ap.add_argument("--backend", default=None,
+                    help="amem LLM backend; defaults to $LLM_BACKEND, the same "
+                         "way the server picks it")
     args = ap.parse_args()
 
     if not (args.list or args.purge):
@@ -115,15 +137,31 @@ def main() -> int:
         ap.error("--purge needs --case <id> or --all")
 
     cfg = AmemConfig.from_env()
+    # Read from the environment, NOT hardcoded: the server builds its manager
+    # with `LLM_BACKEND`, and a tool that always asks for "openai" builds a
+    # different manager than the one that wrote the memories. In a
+    # safechain-only deployment `create_openai_manager` cannot be constructed
+    # at all, so the tool reported "Amem is unavailable" in exactly the
+    # environment where leftovers accumulate.
+    backend = args.backend or os.environ.get("LLM_BACKEND", "openai")
     print(f"store       {cfg.store_url}")
     print(f"collection  {cfg.collection_name}")
     print(f"scope       org={cfg.org_id} user={cfg.user_id}")
+    print(f"backend     {backend}")
     print(f"enabled     {cfg.enabled}\n")
 
-    amem = build_amem_manager(cfg, backend="openai")
+    reason = _Reason()
+    amem = build_amem_manager(cfg, backend=backend, logger=reason)
     if type(amem).__name__ == "NullAmemManager":
-        print("Amem is unavailable (disabled, or the store is unreachable) — "
-              "nothing to inspect or purge.")
+        print("Amem is unavailable — nothing to inspect or purge.")
+        for event, payload in reason.events:
+            print(f"  {event}: {payload}")
+        if not cfg.enabled:
+            print("\n  AMEM_ENABLED is off. Set AMEM_ENABLED=1 to inspect the store.")
+        else:
+            print(f"\n  Check that {cfg.store_url} is reachable, and that "
+                  f"`--backend {backend}` is the one this deployment writes with "
+                  f"(override with --backend, or set LLM_BACKEND).")
         return 1
 
     known = set(_known_cases())

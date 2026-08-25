@@ -83,13 +83,66 @@ def test_a_failed_enumeration_is_none_not_empty(capsys):
 
 def _wire(monkeypatch, store, known, argv, deleter=None):
     monkeypatch.setattr(amem_purge.AmemConfig, "from_env", classmethod(lambda cls: CFG))
-    monkeypatch.setattr(amem_purge, "build_amem_manager", lambda cfg, backend: store)
+    monkeypatch.setattr(amem_purge, "build_amem_manager",
+                        lambda cfg, backend, logger=None: store)
     monkeypatch.setattr(amem_purge, "_known_cases", lambda: known)
     monkeypatch.setattr(amem_purge, "build_scope",
                         lambda cfg, case_id: SimpleNamespace(case_id=case_id))
     monkeypatch.setattr(amem_purge, "delete_case_memory",
                         deleter or (lambda *a, **k: SimpleNamespace(deleted=0, failed=0)))
     monkeypatch.setattr(sys, "argv", ["amem_purge.py", *argv])
+
+
+def test_the_backend_comes_from_the_environment(monkeypatch, capsys):
+    """The server builds its manager with `LLM_BACKEND`. A tool that hardcodes
+    "openai" asks for a different manager than the one that wrote the
+    memories — and in a safechain-only deployment cannot build one at all,
+    which reported "Amem is unavailable" in exactly the environment where
+    leftovers accumulate."""
+    seen = {}
+    store = _Store([_rec("111")])
+    monkeypatch.setenv("LLM_BACKEND", "safechain")
+    _wire(monkeypatch, store, known=["111"], argv=["--list"])
+    monkeypatch.setattr(
+        amem_purge, "build_amem_manager",
+        lambda cfg, backend, logger=None: (seen.update(backend=backend), store)[1])
+
+    amem_purge.main()
+    assert seen["backend"] == "safechain"
+    assert "backend     safechain" in capsys.readouterr().out
+
+
+def test_an_explicit_backend_flag_wins(monkeypatch):
+    seen = {}
+    store = _Store([_rec("111")])
+    monkeypatch.setenv("LLM_BACKEND", "safechain")
+    _wire(monkeypatch, store, known=["111"], argv=["--list", "--backend", "openai"])
+    monkeypatch.setattr(
+        amem_purge, "build_amem_manager",
+        lambda cfg, backend, logger=None: (seen.update(backend=backend), store)[1])
+
+    amem_purge.main()
+    assert seen["backend"] == "openai"
+
+
+def test_an_unavailable_store_reports_which_cause(monkeypatch, capsys):
+    """The factory swallows every failure into a NullAmemManager, so without
+    the captured reason the tool could only guess between causes."""
+    class _Null:
+        pass
+    _Null.__name__ = "NullAmemManager"
+
+    def _build(cfg, backend, logger=None):
+        if logger is not None:
+            logger.log("amem_unavailable", {"backend": backend, "error": "boom"})
+        return _Null()
+
+    _wire(monkeypatch, _Store([]), known=["111"], argv=["--list"])
+    monkeypatch.setattr(amem_purge, "build_amem_manager", _build)
+
+    assert amem_purge.main() == 1
+    out = capsys.readouterr().out
+    assert "amem_unavailable" in out and "boom" in out
 
 
 def test_a_case_with_no_reports_folder_is_flagged_as_an_orphan(monkeypatch, capsys):
