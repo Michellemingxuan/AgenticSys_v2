@@ -34,7 +34,7 @@ from tools.data_tools import _query_table_impl as query_table
 _WORKFLOW_DIR = Path(__file__).parent.parent / "skills" / "workflow"
 
 
-# Shared patterns with gateway/firewall_stack._sanitize_message + case_scrubber.
+# Shared patterns with llm/firewall_stack.sanitize_message.
 # Kept as module constants so they can be re-used by other redact-aware code
 # paths without duplicating the regex.
 _DIGIT_RUN_RE = re.compile(r"\d{6,}")
@@ -248,9 +248,8 @@ class DataManagerAgent:
     def _redact(text: str) -> str:
         """Apply the redact-skill patterns to a data payload.
 
-        Two regex layers (case_scrubber.scrub is case-id-specific and only
-        masks a known literal, so DataManager uses its own broader
-        `CASE-\\d+` pattern for general output):
+        Two regex layers. DataManager masks by pattern rather than by a
+        known literal, so it carries its own broader `CASE-\\d+` rule:
 
           - `CASE-\\d+`            → [CASE-ID]
           - 6+-digit runs          → ***MASKED***
