@@ -1794,8 +1794,89 @@ def _start_trace_viewer() -> None:
         print(f"[trace viewer] failed to start: {exc}")
 
 
+# ── Built frontend ──────────────────────────────────────────────────────────
+# Serving the SPA from Flask rather than from Vite, because the deployment
+# target cannot run Vite: it has Node 10, and Vite 6 needs 18+. `npm run dev`
+# dies on `import {` before it starts. Shipping the built `dist/` instead
+# means the server needs no Node at all.
+#
+# It also removes a discrepancy rather than working around it. `BASE = '/api'`
+# in the frontend is relative, so something must route it; in dev that is
+# `server.proxy` in vite.config.ts, which does NOT apply to `vite preview`
+# (that reads `preview.proxy`, unset here). Served from Flask the app is
+# same-origin, so no proxy is involved on any path — and the CORS allowance
+# stops mattering too.
+#
+# Build on a machine with a modern Node (`npm run build`) and ship `dist/`;
+# it is gitignored, so add it to the archive deliberately.
+_FRONTEND_DIST = Path(
+    os.environ.get("FRONTEND_DIST")
+    or (Path(__file__).resolve().parent.parent / "CaseReviewChat" / "dist")
+).expanduser()
+
+
+def _frontend_file(rel: str):
+    """Send `rel` from the build, or None when it isn't a real file there.
+
+    Returns a sentinel rather than raising, because the caller has to tell
+    "no such asset" from "unknown route" to decide about the SPA fallback —
+    which is why `send_from_directory` cannot simply be called directly.
+
+    Containment is verified HERE, on the resolved path, rather than trusting
+    that `..` was normalised out of the URL upstream: `Path(root) / "../x"`
+    happily resolves outside the build, and `.is_file()` would say yes.
+    Werkzeug does normalise, and `send_from_directory` has its own guard, but
+    neither is local to this join and both could change.
+    """
+    root = _FRONTEND_DIST.resolve()
+    try:
+        candidate = (root / rel).resolve()
+    except (OSError, ValueError):
+        return None
+    if not candidate.is_file() or root not in candidate.parents:
+        return None
+    return send_from_directory(root, candidate.relative_to(root))
+
+
+@app.get("/")
+def serve_index():
+    if not (_FRONTEND_DIST / "index.html").is_file():
+        # An explicit message beats Flask's bare 404: the usual cause is a
+        # deployment that shipped the source tree without running the build.
+        return (f"No frontend build at {_FRONTEND_DIST}. Run `npm run build` "
+                f"on a machine with Node 18+ and ship dist/, or point "
+                f"FRONTEND_DIST at it.", 404)
+    return send_from_directory(_FRONTEND_DIST, "index.html")
+
+
+@app.get("/<path:filename>")
+def serve_frontend(filename: str):
+    """Static assets, with an index.html fallback for unknown paths.
+
+    Registered last and guarded: `/api/...` rules are more specific so
+    Werkzeug prefers them anyway, but an explicit reject means a typo'd API
+    path returns 404 instead of silently serving the SPA — which would look
+    like a broken page rather than a wrong URL.
+    """
+    if filename.startswith("api/"):
+        abort(404)
+    hit = _frontend_file(filename)
+    if hit is not None:
+        return hit
+    # Unknown non-asset path: hand back the app. Harmless today (the UI keeps
+    # its state in query params, not the path) and correct if it ever routes.
+    if (_FRONTEND_DIST / "index.html").is_file():
+        return send_from_directory(_FRONTEND_DIST, "index.html")
+    abort(404)
+
+
 if __name__ == "__main__":
     _start_trace_viewer()
+    if (_FRONTEND_DIST / "index.html").is_file():
+        print(f"[server] frontend: {_FRONTEND_DIST}")
+    else:
+        print(f"[server] frontend: NOT FOUND at {_FRONTEND_DIST} "
+              f"(API still served; set FRONTEND_DIST or run `npm run build`)")
     print(f"[server] listening on http://{HOST}:{PORT}")
     # threaded=True so SSE streams + POST handlers don't block each other.
     # use_reloader=False because the bootstrap above is heavy and reloads cause double-init.
