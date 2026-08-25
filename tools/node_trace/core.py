@@ -303,6 +303,43 @@ class NodeTraceStore:
             self._log_failure("snapshot_session", exc)
             return -1
 
+    def turn_started_at(self, case_id: str) -> dict[str, float]:
+        """`{turn_id: epoch_seconds}` — when each turn of a case actually began.
+
+        The accurate answer to "when was this asked". The trace opens its
+        first node the moment the turn starts, so `MIN(started_at)` IS the
+        ask time — unlike the qa_cache's `asked_at` fallback, which is only
+        as good as the code path that wrote it, and unlike nothing at all,
+        which is what a restored thread used to show.
+
+        Covers HISTORY, which is the point: these rows outlive the session
+        that produced them, so a thread restored days later still carries its
+        real clock times. Coverage is not total — a turn run with
+        `NODE_TRACE_DISABLE=1`, or one whose rows have been purged, simply is
+        not here, and the caller falls back.
+
+        Read-only, no lock, and never raises: an unavailable trace db means a
+        thread without times, not a broken history endpoint. Mirrors
+        `case_activity` in all of that.
+        """
+        try:
+            rows = self._conn.execute(
+                "SELECT turn_id, turn_started_at FROM turn_summary "
+                "WHERE case_id = ?",
+                (case_id,),
+            ).fetchall()
+        except Exception as exc:  # noqa: BLE001
+            self._log_failure("turn_started_at", exc)
+            return {}
+        out: dict[str, float] = {}
+        for turn_id, started in rows:
+            if not turn_id or not started:
+                continue
+            epoch = _iso_to_epoch(str(started))
+            if epoch is not None:
+                out[str(turn_id)] = epoch
+        return out
+
     def case_activity(self) -> dict[str, dict]:
         """Per-case review activity: when it was last asked, and how many
         turns it holds.
@@ -457,6 +494,25 @@ class NodeTraceStore:
             file=sys.stderr,
         )
 
+
+
+def _iso_to_epoch(value: str) -> float | None:
+    """ISO-8601 (as node_trace writes it) -> epoch seconds, or None.
+
+    `started_at` is stored as text, and rows written by older builds or by a
+    hand-edited db need not parse. A None return drops that one turn's time
+    rather than failing the whole lookup.
+    """
+    from datetime import datetime, timezone
+    try:
+        dt = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    # Rows are written UTC-aware; treat a naive one as UTC rather than as
+    # local time, which would shift it by the server's offset.
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
 
 # ── Active-node + turn-scope contextvars ────────────────────────────────────
 

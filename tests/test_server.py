@@ -92,6 +92,41 @@ def test_store_cached_qa_evicts_oldest_entry(monkeypatch):
     assert "q2" not in sess.qa_cache
 
 
+def test_store_cached_qa_stamps_the_turns_ask_time():
+    """`/history` renders this beside the question; without it a restored
+    thread is a list of undated rows."""
+    sess = SimpleNamespace(qa_cache={}, _qa_turn_seq=0)
+    cache._store_cached_qa(sess, "q1", {"answer": "a"}, asked_at=1_700_000_000.0)
+
+    assert sess.qa_cache["q1"]["asked_at"] == 1_700_000_000.0
+
+
+def test_store_cached_qa_defaults_the_ask_time_to_now():
+    """A caller that passes none still produces a usable time — late by a
+    turn's duration (this runs at completion), but present."""
+    import time as _time
+    sess = SimpleNamespace(qa_cache={}, _qa_turn_seq=0)
+    before = _time.time()
+    cache._store_cached_qa(sess, "q1", {"answer": "a"})
+
+    assert before <= sess.qa_cache["q1"]["asked_at"] <= _time.time()
+
+
+def test_a_replay_is_dated_now_not_when_the_original_was_asked():
+    """The cache-hit path rebuilds the entry as `{**cached, ...}`. Inheriting
+    `asked_at` through that spread would date the turn the reviewer JUST
+    asked to the original question's clock — so it is assigned, never
+    `setdefault`."""
+    sess = SimpleNamespace(qa_cache={}, _qa_turn_seq=0)
+    cache._store_cached_qa(sess, "q1", {"answer": "a"}, asked_at=1_700_000_000.0)
+    cached = dict(sess.qa_cache["q1"])
+
+    cache._store_cached_qa(sess, "q1", {**cached, "replay_of": "t1"},
+                           asked_at=1_700_000_600.0)
+
+    assert sess.qa_cache["q1"]["asked_at"] == 1_700_000_600.0
+
+
 def test_case_session_emit_drops_oldest_when_subscriber_queue_full():
     import queue
 

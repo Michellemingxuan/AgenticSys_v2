@@ -982,9 +982,33 @@ def _spawn_turn(sess: CaseSession, turn_id: str, question: str) -> None:
     threading.Thread(target=_runner, daemon=True, name=f"turn-{turn_id[:8]}").start()
 
 
-def _history_messages(qa_cache: dict) -> list[dict]:
+def _history_messages(qa_cache: dict,
+                      turn_times: dict[str, float] | None = None) -> list[dict]:
     """Reconstruct the visible thread from qa_cache, ordered by turn_seq.
-    Two messages per turn: the reviewer question then the agent answer."""
+    Two messages per turn: the reviewer question then the agent answer.
+
+    Each message carries `timestamp` in epoch MILLISECONDS, which is what the
+    browser's `new Date(ts)` expects — Python's epoch seconds rendered
+    straight would date every turn to 1970. Omitted entirely when no time is
+    known, so the UI's "no timestamp -> render nothing" path is reached
+    rather than a zero being formatted as a real clock time.
+
+    Two sources, in order:
+
+      1. `turn_times` from node_trace — the ACCURATE one. The trace opens its
+         first node when the turn starts, so it is a true ask time, and its
+         rows outlive the session, which is what lets a thread restored days
+         later still carry real times.
+      2. the entry's own `asked_at`, stamped by `_store_cached_qa`. Covers
+         turns node_trace never saw (`NODE_TRACE_DISABLE=1`, or rows since
+         purged). Written at turn completion when the caller passes no start,
+         so it can run a turn-duration late.
+
+    Before either existed the endpoint sent no time at all, and the UI showed
+    a clock only for turns asked in that browser since the last history load
+    — so the same thread had times on some rows and not others depending on
+    nothing the reviewer could see.
+    """
     entries = sorted(
         (e for e in (qa_cache or {}).values() if isinstance(e, dict)),
         key=lambda e: e.get("turn_seq", 0))
@@ -993,12 +1017,18 @@ def _history_messages(qa_cache: dict) -> list[dict]:
         tid = e.get("turn_id_origin") or ""
         q = e.get("origin_question") or ""
         a = e.get("answer") or ""
+        secs = (turn_times or {}).get(tid)
+        if secs is None:
+            secs = e.get("asked_at")
+        stamp = {}
+        if isinstance(secs, (int, float)) and secs > 0:
+            stamp = {"timestamp": int(secs * 1000)}
         if q:
             out.append({"id": f"hist:{tid}:reviewer", "role": "reviewer",
-                        "text": q, "turn_id": tid})
+                        "text": q, "turn_id": tid, **stamp})
         if a:
             out.append({"id": f"hist:{tid}:agent", "role": "agent",
-                        "text": a, "turn_id": tid})
+                        "text": a, "turn_id": tid, **stamp})
     return out
 
 
@@ -1120,7 +1150,11 @@ def get_history(case_id: str):
         sess = _get_or_create_session(case_id)   # triggers restore
     except KeyError as exc:
         return jsonify({"error": str(exc)}), 404
-    return jsonify({"messages": _history_messages(sess.qa_cache)})
+    # node_trace is the accurate clock for turns it recorded, including ones
+    # from sessions long gone; the qa_cache stamp covers the rest.
+    turn_times = (_NODE_TRACE_STORE.turn_started_at(case_id)
+                  if _NODE_TRACE_STORE is not None else {})
+    return jsonify({"messages": _history_messages(sess.qa_cache, turn_times)})
 
 
 @app.post("/api/cases/<case_id>/cancel-turn")
