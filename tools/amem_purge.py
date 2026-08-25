@@ -10,7 +10,12 @@ memories written by code and data that are gone.
     python tools/amem_purge.py --list                 # what is in there (safe)
     python tools/amem_purge.py --list --case 3661...  # one case
     python tools/amem_purge.py --purge --case 3661... # delete that case
-    python tools/amem_purge.py --purge --all          # delete every known case
+    python tools/amem_purge.py --purge --all          # delete everything in scope
+
+`--list` enumerates THE STORE, not just this deployment's `reports/` folder. A
+leftover is by definition a case the current system has no folder for, so
+asking `reports/` alone could never find one. Anything the store holds without
+a matching folder is flagged ORPHAN, and `--purge --all` covers it.
 
 Dry-run by default: nothing is deleted without `--purge`, and `--purge --all`
 asks for confirmation unless `--yes` is given.
@@ -53,6 +58,45 @@ def _known_cases() -> list[str]:
                   if p.is_dir() and not p.name.startswith("_"))
 
 
+#: Records per `list_memories` page. The store is enumerated in pages because
+#: a single unbounded call would have to materialise every memory at once.
+_PAGE = 512
+
+
+def _store_cases(amem, cfg) -> dict[str, int] | None:
+    """Case ids the STORE holds for this org/user, counted.
+
+    Returns None when the store could not be enumerated — distinct from an
+    empty dict, which means the store answered and holds nothing. The caller
+    must not report "no leftovers" on the strength of a failed lookup.
+
+    Scoped to `cfg.org_id`/`cfg.user_id` deliberately. A shared Qdrant may hold
+    a colleague's memories under a different scope, and those are neither ours
+    to list nor ours to delete.
+    """
+    counts: dict[str, int] = {}
+    offset = 0
+    try:
+        while True:
+            batch = list(amem.list_memories(
+                limit=_PAGE, offset=offset, include_working=True) or [])
+            for rec in batch:
+                scope = getattr(rec, "scope", None)
+                if scope is None:
+                    continue
+                if (scope.org_id, scope.user_id) != (cfg.org_id, cfg.user_id):
+                    continue
+                if scope.case_id:
+                    counts[scope.case_id] = counts.get(scope.case_id, 0) + 1
+            # A short page is the last page; `offset` past the end returns [].
+            if len(batch) < _PAGE:
+                return counts
+            offset += len(batch)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  store enumeration failed — {type(exc).__name__}: {exc}")
+        return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -60,7 +104,8 @@ def main() -> int:
     ap.add_argument("--list", action="store_true", help="show records, delete nothing")
     ap.add_argument("--purge", action="store_true", help="actually delete")
     ap.add_argument("--case", help="one case id")
-    ap.add_argument("--all", action="store_true", help="every case in reports/")
+    ap.add_argument("--all", action="store_true",
+                    help="every case in the store or in reports/")
     ap.add_argument("--yes", action="store_true", help="skip the confirmation")
     args = ap.parse_args()
 
@@ -81,7 +126,22 @@ def main() -> int:
               "nothing to inspect or purge.")
         return 1
 
-    cases = [args.case] if args.case else _known_cases()
+    known = set(_known_cases())
+    orphans: set[str] = set()
+    if args.case:
+        cases = [args.case]
+    else:
+        stored = _store_cases(amem, cfg)
+        if stored is None:
+            # Say so rather than degrade quietly: a reports/-only listing
+            # cannot show leftovers, and silence here would read as "clean".
+            print("  ! could not enumerate the store — showing only cases this\n"
+                  "    deployment has a reports/ folder for. Leftovers from a\n"
+                  "    previous system would NOT appear below.\n")
+            cases = sorted(known)
+        else:
+            orphans = set(stored) - known
+            cases = sorted(known | set(stored))
     if not cases:
         print("No case ids found. Pass --case explicitly.")
         return 1
@@ -99,8 +159,13 @@ def main() -> int:
             continue
         counts[case_id] = len(recs)
         total += len(recs)
-        print(f"  {case_id:<20} {len(recs):>5} record(s)")
-    print(f"\n  {'TOTAL':<20} {total:>5} record(s)\n")
+        tag = "   ORPHAN — no reports/ folder" if case_id in orphans else ""
+        print(f"  {case_id:<20} {len(recs):>5} record(s){tag}")
+    print(f"\n  {'TOTAL':<20} {total:>5} record(s)")
+    if orphans:
+        print(f"  {len(orphans)} orphan case(s) — memory this deployment has "
+              f"no data for.")
+    print()
 
     if not args.purge:
         print("Dry run — nothing deleted. Add --purge to delete.")
@@ -110,7 +175,9 @@ def main() -> int:
         return 0
 
     if args.all and not args.yes:
-        print(f"About to delete {total} record(s) across {len(counts)} case(s).")
+        note = f", {len(orphans)} of them orphaned" if orphans else ""
+        print(f"About to delete {total} record(s) across "
+              f"{len(counts)} case(s){note}.")
         if input("Type 'delete' to confirm: ").strip() != "delete":
             print("Aborted.")
             return 1
