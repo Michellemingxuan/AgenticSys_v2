@@ -73,6 +73,19 @@ CREATE TABLE IF NOT EXISTS pins (
     chart_kind  TEXT,
     -- Which report section this pin has been inserted into, if any.
     section_key TEXT,
+    -- The question that produced this pin, captured at pin time.
+    --
+    -- Provenance used to be `turn_index`, which is POSITIONAL — the UI numbers
+    -- turns by their place in the thread — so rewinding an earlier turn
+    -- renumbered everything after it and a pin captured as "Turn 3" started
+    -- pointing at a different turn. Wrong provenance stated as fact is worse
+    -- than none. The question text is what a reviewer actually recognises and
+    -- it never renumbers.
+    question    TEXT,
+    -- Set when the pin's turn is rewound. The pin is KEPT: pinning is a
+    -- deliberate act and rewind is one click, so a rewind must not silently
+    -- destroy filed work — but it must stop presenting the pin as current.
+    retracted   INTEGER NOT NULL DEFAULT 0,
     created_at  REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS pins_by_case ON pins(case_id, created_at);
@@ -101,7 +114,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(pins)")}
     if not cols:
         return
-    for name, decl in (("vega_spec", "TEXT"), ("chart_kind", "TEXT")):
+    for name, decl in (("vega_spec", "TEXT"), ("chart_kind", "TEXT"),
+                       ("question", "TEXT"),
+                       ("retracted", "INTEGER NOT NULL DEFAULT 0")):
         if name not in cols:
             conn.execute(f"ALTER TABLE pins ADD COLUMN {name} {decl}")
 
@@ -142,6 +157,8 @@ def _row_to_pin(row: sqlite3.Row) -> dict[str, Any]:
         "chart_url": row["chart_url"],
         "vega_spec": json.loads(row["vega_spec"]) if row["vega_spec"] else None,
         "chart_kind": row["chart_kind"],
+        "question": row["question"],
+        "retracted": bool(row["retracted"]),
         "section_key": row["section_key"],
         "created_at": row["created_at"],
     }
@@ -160,7 +177,8 @@ def add_pin(case_id: str, *, kind: str, text: str = "", turn_id: str | None = No
             specialist: str | None = None, topic: str | None = None,
             chart_url: str | None = None,
             vega_spec: Any = None,
-            chart_kind: str | None = None) -> dict[str, Any]:
+            chart_kind: str | None = None,
+            question: str | None = None) -> dict[str, Any]:
     """Pin one insight or figure. Returns the stored pin.
 
     Figure pins are idempotent on ``(case, turn, specialist, topic)``: the
@@ -186,11 +204,12 @@ def add_pin(case_id: str, *, kind: str, text: str = "", turn_id: str | None = No
         conn.execute(
             "INSERT INTO pins (pin_id, case_id, kind, text, turn_id, turn_index, "
             "source, specialist, topic, chart_url, vega_spec, chart_kind, "
-            "section_key, created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NULL,?)",
+            "section_key, question, retracted, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NULL,?,0,?)",
             (pin_id, case_id, kind, text, turn_id, turn_index, source,
              specialist, topic, chart_url,
-             json.dumps(vega_spec) if vega_spec else None, chart_kind, created),
+             json.dumps(vega_spec) if vega_spec else None, chart_kind,
+             question, created),
         )
         row = conn.execute("SELECT * FROM pins WHERE pin_id = ?", (pin_id,)).fetchone()
     return _row_to_pin(row)
@@ -220,12 +239,58 @@ def set_pin_section(case_id: str, pin_id: str, section_key: str | None) -> bool:
     return updated > 0
 
 
+def retract_turns(case_id: str, turn_ids) -> int:
+    """Mark pins from rewound turns as retracted, and lift them out of any
+    report section. Returns how many were affected.
+
+    Deliberately NOT a delete. Pinning is an explicit "this matters" and
+    rewind is one click on a turn card, so deleting here would destroy filed
+    work as a side effect of a casual action — and a pin may already sit in a
+    report section, which is the actual deliverable. What a rewind MUST do is
+    stop the pin claiming to be current: its turn is gone, and because turn
+    numbers are positional the surviving label would point at a different turn
+    entirely.
+
+    Clearing `section_key` is the one destructive part, and it is the right
+    one: a retracted figure left sitting in a report section is the compliance
+    problem this whole surface exists to avoid.
+    """
+    ids = [t for t in (turn_ids or []) if t]
+    if not ids:
+        return 0
+    marks = ",".join("?" for _ in ids)
+    with closing(_connect()) as conn, conn:
+        return conn.execute(
+            f"UPDATE pins SET retracted = 1, section_key = NULL "
+            f"WHERE case_id = ? AND turn_id IN ({marks}) AND retracted = 0",
+            (case_id, *ids),
+        ).rowcount
+
+
+def delete_retracted(case_id: str) -> int:
+    """Remove every retracted pin for a case. Backs the board's one-click
+    cleanup — the deletion stays a choice the reviewer makes."""
+    with closing(_connect()) as conn, conn:
+        return conn.execute(
+            "DELETE FROM pins WHERE case_id = ? AND retracted = 1", (case_id,)
+        ).rowcount
+
+
+def delete_all_pins(case_id: str) -> int:
+    """Drop every pin for a case. Used by a FULL clear — "Clear this case" is
+    an explicit reset of everything, and finding the pins still there
+    afterwards would be the surprising outcome."""
+    with closing(_connect()) as conn, conn:
+        return conn.execute(
+            "DELETE FROM pins WHERE case_id = ?", (case_id,)).rowcount
+
+
 def pins_by_section(case_id: str) -> dict[str, list[dict[str, Any]]]:
     """Pins grouped by the report section they were inserted into."""
     out: dict[str, list[dict[str, Any]]] = {}
     for pin in list_pins(case_id):
         key = pin["section_key"]
-        if key:
+        if key and not pin["retracted"]:
             out.setdefault(key, []).append(pin)
     return out
 

@@ -223,3 +223,127 @@ def test_a_pin_whose_turn_was_rewound_can_still_be_deleted(store):
 
     assert store.delete_pin("c1", pin["pin_id"]) is True
     assert store.list_pins("c1") == []
+
+
+# ── retraction ───────────────────────────────────────────────────────────
+
+def test_rewinding_a_turn_retracts_its_pins_rather_than_deleting_them(store):
+    """Pinning is a deliberate "this matters"; rewind is one click on a turn
+    card. Deleting here would destroy filed work as a side effect of a casual
+    action, and the usual reason to rewind is to re-ask a question better."""
+    keep = store.add_pin("c1", kind="insight", text="from another turn",
+                         turn_id="t1")
+    gone = store.add_pin("c1", kind="figure", turn_id="t2", specialist="s",
+                         topic="tsr")
+
+    assert store.retract_turns("c1", ["t2"]) == 1
+
+    by_id = {p["pin_id"]: p for p in store.list_pins("c1")}
+    assert by_id[gone["pin_id"]]["retracted"] is True
+    assert by_id[keep["pin_id"]]["retracted"] is False
+    assert len(by_id) == 2, "nothing should have been deleted"
+
+
+def test_retraction_lifts_a_pin_out_of_its_report_section(store):
+    """The one destructive part, and the right one: a retracted figure left
+    sitting in a report section is the compliance problem."""
+    pin = store.add_pin("c1", kind="figure", turn_id="t2", specialist="s",
+                        topic="tsr")
+    store.set_pin_section("c1", pin["pin_id"], "modeling")
+    assert store.pins_by_section("c1")["modeling"]
+
+    store.retract_turns("c1", ["t2"])
+
+    assert store.pins_by_section("c1") == {}
+    assert store.list_pins("c1")[0]["section_key"] is None
+
+
+def test_a_retracted_pin_never_reappears_in_a_report_section(store):
+    """Belt and braces: even if `section_key` survived somehow, a retracted
+    pin must not be merged into the report."""
+    pin = store.add_pin("c1", kind="figure", turn_id="t2", specialist="s",
+                        topic="tsr")
+    store.set_pin_section("c1", pin["pin_id"], "bureau")
+    store.retract_turns("c1", ["t2"])
+    store.set_pin_section("c1", pin["pin_id"], "bureau")   # re-inserted
+
+    assert store.pins_by_section("c1") == {}
+
+
+def test_retraction_is_idempotent(store):
+    store.add_pin("c1", kind="insight", text="x", turn_id="t2")
+    assert store.retract_turns("c1", ["t2"]) == 1
+    assert store.retract_turns("c1", ["t2"]) == 0
+
+
+def test_retraction_ignores_empty_and_unknown_turn_ids(store):
+    store.add_pin("c1", kind="insight", text="x", turn_id="t1")
+    assert store.retract_turns("c1", []) == 0
+    assert store.retract_turns("c1", None) == 0
+    assert store.retract_turns("c1", ["no-such-turn"]) == 0
+    assert store.list_pins("c1")[0]["retracted"] is False
+
+
+def test_retraction_does_not_reach_across_cases(store):
+    store.add_pin("c1", kind="insight", text="mine", turn_id="t2")
+    store.add_pin("c2", kind="insight", text="theirs", turn_id="t2")
+
+    store.retract_turns("c1", ["t2"])
+
+    assert store.list_pins("c2")[0]["retracted"] is False
+
+
+def test_delete_retracted_removes_only_retracted_pins(store):
+    keep = store.add_pin("c1", kind="insight", text="live", turn_id="t1")
+    store.add_pin("c1", kind="insight", text="dead", turn_id="t2")
+    store.retract_turns("c1", ["t2"])
+
+    assert store.delete_retracted("c1") == 1
+    assert [p["pin_id"] for p in store.list_pins("c1")] == [keep["pin_id"]]
+
+
+def test_full_clear_deletes_every_pin(store):
+    """"Clear this case" is an explicit reset; finding the pins still there
+    afterwards would be the surprise."""
+    store.add_pin("c1", kind="insight", text="a", turn_id="t1")
+    store.add_pin("c1", kind="figure", turn_id="t2", specialist="s", topic="x")
+    store.add_pin("c2", kind="insight", text="other case", turn_id="t1")
+
+    assert store.delete_all_pins("c1") == 2
+    assert store.list_pins("c1") == []
+    assert len(store.list_pins("c2")) == 1
+
+
+def test_question_is_stored_as_stable_provenance(store):
+    """`turn_index` is positional and renumbers on rewind, so a pin captured
+    as "Turn 3" starts pointing at a different turn. The question does not."""
+    store.add_pin("c1", kind="figure", turn_id="t1", turn_index=3,
+                  specialist="s", topic="tsr",
+                  question="how did TSR and CDSS react?")
+
+    assert store.list_pins("c1")[0]["question"] == "how did TSR and CDSS react?"
+
+
+def test_columns_are_added_to_a_database_created_before_them(tmp_path, monkeypatch):
+    import importlib
+    import sqlite3
+
+    db = tmp_path / "legacy2.db"
+    con = sqlite3.connect(db)
+    con.executescript(
+        "CREATE TABLE pins (pin_id TEXT PRIMARY KEY, case_id TEXT NOT NULL,"
+        " kind TEXT NOT NULL, text TEXT NOT NULL DEFAULT '', turn_id TEXT,"
+        " turn_index INTEGER, source TEXT NOT NULL DEFAULT '', specialist TEXT,"
+        " topic TEXT, chart_url TEXT, section_key TEXT, created_at REAL NOT NULL);"
+        "INSERT INTO pins VALUES ('old','c1','insight','legacy',NULL,NULL,'',"
+        "NULL,NULL,NULL,NULL,0.0);"
+    )
+    con.commit(); con.close()
+
+    monkeypatch.setenv("PIN_DB", str(db))
+    import datalayer.pin_store as ps
+    importlib.reload(ps)
+
+    pin = ps.list_pins("c1")[0]
+    assert pin["question"] is None
+    assert pin["retracted"] is False       # NOT NULL DEFAULT 0 backfills

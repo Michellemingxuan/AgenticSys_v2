@@ -1327,6 +1327,24 @@ def post_rewind(case_id: str):
     if not is_partial:
         amem_purge = delete_case_memory(_AMEM, _AMEM_CFG, case_id=case_id,
                                         logger=sess.logger)
+
+    # Pins are treated differently by the two modes, on purpose.
+    #
+    # A PARTIAL rewind retracts: the pin is kept but stops claiming to be
+    # current, and is lifted out of any report section. Pinning is a deliberate
+    # "this matters" while rewind is one click on a turn card, so deleting here
+    # would destroy filed work as a side effect of a casual action — and the
+    # usual reason to rewind is to re-ask a question better, not to disown the
+    # finding. What it MUST NOT do is leave the pin looking current: turn
+    # numbers are positional, so dropping an earlier turn renumbers the rest
+    # and a pin captured as "Turn 3" would point at a different turn.
+    #
+    # A FULL clear deletes. "Clear this case" is an explicit reset of
+    # everything, and finding the pins still there would be the surprise.
+    if is_partial:
+        pins_affected = pin_store.retract_turns(case_id, remove_turn_ids)
+    else:
+        pins_affected = pin_store.delete_all_pins(case_id)
     # The `rewind` event is THE record of what a clear actually did, so it
     # carries the Amem outcome alongside the caches it already reported. Without
     # these fields a purge that never ran (store unreachable) was indistinguish-
@@ -1340,6 +1358,7 @@ def post_rewind(case_id: str):
         "trace_rows_cleared": trace_rows_cleared,
         "aborted_in_flight_turn": aborted_in_flight,
         "task_cancel_dispatched": cancelled_task,
+        "pins_retracted" if is_partial else "pins_deleted": pins_affected,
         **amem_purge.as_log_fields(),
     })
     return ("", 204)
@@ -1497,6 +1516,9 @@ def post_pin(case_id: str):
             # round.
             vega_spec=body.get("vega_spec"),
             chart_kind=body.get("chart_kind"),
+            # Stable provenance. `turn_index` is positional and renumbers on
+            # rewind, so the question text is what actually identifies a pin.
+            question=(body.get("question") or "").strip() or None,
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -1508,6 +1530,17 @@ def delete_pin(case_id: str, pin_id: str):
     if not pin_store.delete_pin(case_id, pin_id):
         return jsonify({"error": "no such pin"}), 404
     return ("", 204)
+
+
+@app.delete("/api/cases/<case_id>/pins/retracted")
+def delete_retracted_pins(case_id: str):
+    """Remove every retracted pin for a case.
+
+    Backs the board's one-click cleanup. Retraction keeps a rewound pin
+    visible-but-marked rather than deleting it; this is where the reviewer
+    chooses to let it go.
+    """
+    return jsonify({"deleted": pin_store.delete_retracted(case_id)})
 
 
 @app.post("/api/cases/<case_id>/pins/<pin_id>/section")
