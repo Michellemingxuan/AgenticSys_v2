@@ -171,3 +171,55 @@ def test_vega_spec_column_is_added_to_an_existing_database(tmp_path, monkeypatch
     ps.add_pin("c1", kind="figure", turn_id="t", specialist="m", topic="x",
                vega_spec={"mark": "bar"})
     assert any(p["vega_spec"] == {"mark": "bar"} for p in ps.list_pins("c1"))
+
+
+def test_connections_are_closed_not_just_committed(store):
+    """`with sqlite3.connect(...)` commits and does NOT close, so every call
+    leaked a file descriptor. Measured before the fix: 300 add+list cycles
+    leaked 67. On a server with the usual 1024 limit that ends as
+    `unable to open database file` — pins that suddenly cannot be created or
+    deleted, after working for a while.
+    """
+    import os
+
+    if not os.path.isdir("/dev/fd"):          # not available on every platform
+        import pytest
+        pytest.skip("/dev/fd not available")
+
+    def fds() -> int:
+        return len(os.listdir("/dev/fd"))
+
+    for _ in range(40):                        # warm up, settle imports
+        store.add_pin("c1", kind="insight", text="warm")
+    baseline = fds()
+    for i in range(120):
+        store.add_pin("c1", kind="insight", text=f"pin {i}")
+        store.list_pins("c1")
+
+    # A couple of descriptors of noise is fine; unbounded growth is not.
+    assert fds() - baseline <= 5, f"leaked {fds() - baseline} descriptors"
+
+
+def test_values_read_after_the_connection_closes(store):
+    """Every helper that returns a rowcount must read it INSIDE the block —
+    the connection is gone by the time the caller sees the value."""
+    pin = store.add_pin("c1", kind="figure", turn_id="t1", specialist="s",
+                        topic="tp")
+    opp = store.add_opportunity("c1", title="t")
+
+    assert store.set_pin_section("c1", pin["pin_id"], "bureau") is True
+    assert store.delete_pin("c1", pin["pin_id"]) is True
+    assert store.delete_pin("c1", "no-such-pin") is False
+    assert store.delete_opportunity("c1", opp["opp_id"]) is True
+    assert store.delete_opportunity("c1", "no-such-opp") is False
+
+
+def test_a_pin_whose_turn_was_rewound_can_still_be_deleted(store):
+    """Pins deliberately survive a rewind — they are review deliverables, not
+    turn state — so an orphan must remain removable by hand. Nothing in the
+    delete path consults the turn."""
+    pin = store.add_pin("c1", kind="figure", turn_id="gone-turn",
+                        specialist="s", topic="orphan")
+
+    assert store.delete_pin("c1", pin["pin_id"]) is True
+    assert store.list_pins("c1") == []

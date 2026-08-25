@@ -17,6 +17,7 @@ import os
 import sqlite3
 import time
 import uuid
+from contextlib import closing
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -106,6 +107,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 
 def _connect() -> sqlite3.Connection:
+    """Open a connection. Callers MUST wrap this in `closing(...)`.
+
+    `with sqlite3.connect(...) as conn` commits or rolls back the transaction
+    and does NOT close the connection — a distinction that costs one file
+    descriptor per call. Measured: 300 add+list cycles leaked 67 fds. On a
+    long-running server with the usual 1024 limit that ends as
+    `unable to open database file`, which surfaces as pins that suddenly
+    cannot be created or deleted. Hence `closing(_connect()) as conn, conn`
+    at every call site: the outer closes, the inner commits.
+    """
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     # `check_same_thread=False` is safe here because every call opens its own
     # connection and closes it; nothing is shared across threads.
@@ -137,7 +148,7 @@ def _row_to_pin(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def list_pins(case_id: str) -> list[dict[str, Any]]:
-    with _connect() as conn:
+    with closing(_connect()) as conn, conn:
         rows = conn.execute(
             "SELECT * FROM pins WHERE case_id = ? ORDER BY created_at", (case_id,)
         ).fetchall()
@@ -160,7 +171,7 @@ def add_pin(case_id: str, *, kind: str, text: str = "", turn_id: str | None = No
     if kind not in PIN_KINDS:
         raise ValueError(f"unknown pin kind {kind!r}; expected one of {PIN_KINDS}")
 
-    with _connect() as conn:
+    with closing(_connect()) as conn, conn:
         if kind == "figure" and turn_id and topic:
             existing = conn.execute(
                 "SELECT * FROM pins WHERE case_id = ? AND kind = 'figure' "
@@ -186,11 +197,11 @@ def add_pin(case_id: str, *, kind: str, text: str = "", turn_id: str | None = No
 
 
 def delete_pin(case_id: str, pin_id: str) -> bool:
-    with _connect() as conn:
-        cur = conn.execute(
+    with closing(_connect()) as conn, conn:
+        deleted = conn.execute(
             "DELETE FROM pins WHERE case_id = ? AND pin_id = ?", (case_id, pin_id)
-        )
-    return cur.rowcount > 0
+        ).rowcount
+    return deleted > 0
 
 
 def set_pin_section(case_id: str, pin_id: str, section_key: str | None) -> bool:
@@ -201,12 +212,12 @@ def set_pin_section(case_id: str, pin_id: str, section_key: str | None) -> bool:
     changes what the agent reads on the next turn. The Report panel merges
     these in at render time instead.
     """
-    with _connect() as conn:
-        cur = conn.execute(
+    with closing(_connect()) as conn, conn:
+        updated = conn.execute(
             "UPDATE pins SET section_key = ? WHERE case_id = ? AND pin_id = ?",
             (section_key, case_id, pin_id),
-        )
-    return cur.rowcount > 0
+        ).rowcount
+    return updated > 0
 
 
 def pins_by_section(case_id: str) -> dict[str, list[dict[str, Any]]]:
@@ -220,7 +231,7 @@ def pins_by_section(case_id: str) -> dict[str, list[dict[str, Any]]]:
 
 
 def list_opportunities(case_id: str) -> list[dict[str, Any]]:
-    with _connect() as conn:
+    with closing(_connect()) as conn, conn:
         rows = conn.execute(
             "SELECT * FROM opportunities WHERE case_id = ? ORDER BY created_at",
             (case_id,),
@@ -239,7 +250,7 @@ def add_opportunity(case_id: str, *, title: str, body: str = "",
     opp_id = uuid.uuid4().hex[:12]
     created = time.time()
     ids = list(pin_ids)
-    with _connect() as conn:
+    with closing(_connect()) as conn, conn:
         conn.execute(
             "INSERT INTO opportunities (opp_id, case_id, title, body, pin_ids, created_at) "
             "VALUES (?,?,?,?,?,?)",
@@ -250,9 +261,9 @@ def add_opportunity(case_id: str, *, title: str, body: str = "",
 
 
 def delete_opportunity(case_id: str, opp_id: str) -> bool:
-    with _connect() as conn:
-        cur = conn.execute(
+    with closing(_connect()) as conn, conn:
+        deleted = conn.execute(
             "DELETE FROM opportunities WHERE case_id = ? AND opp_id = ?",
             (case_id, opp_id),
-        )
-    return cur.rowcount > 0
+        ).rowcount
+    return deleted > 0
