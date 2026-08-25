@@ -452,8 +452,15 @@ class _SafeChainChatCompletions:
         # Build the model ASYNC (`await amodel(...)` does the token acquisition),
         # cached + reused. Run the chain via `ainvoke`: this build's
         # `SafeAzureChatOpenAI._agenerate` is a genuine async path (verified in
-        # the private env — cancellable in ~0s, and cancellation ABORTS the
-        # in-flight request rather than orphaning a worker thread). That is the
+        # the private env — cancellable in ~0s ON A FREE EVENT LOOP, and
+        # cancellation ABORTS the in-flight request rather than orphaning a
+        # worker thread). Read that caveat literally: `wait_for` cancels the
+        # task and then AWAITS it, so a cancel lands no sooner than the loop is
+        # free to run it. Any blocking call on the same loop — sync I/O, or a
+        # hidden first-use download — makes calls slow AND unkillable at once,
+        # which reads as "safechain is not cancellable" and is not. That cost
+        # several rounds of misdiagnosis on 2026-08-25; see
+        # .claude/memory/safechain_async_and_thread_occupation.md. That is the
         # fix for "stuck after rewind": the old sync `chain.invoke` in a thread
         # pool could not be interrupted, so a rewind/timeout left the thread
         # running its full 20-120s call, holding a pool slot and starving the
