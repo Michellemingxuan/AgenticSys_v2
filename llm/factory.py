@@ -91,6 +91,22 @@ def build_session_clients(
 
 
 
+# A NON-STRICT `response_format={"type": "json_object"}` HANGS on some safechain
+# builds — no error, no return, measured at >90s by tools/safechain_probe.py
+# (check R2b). The strict json_schema form returns fine on the same build, and
+# the non-strict form works in the private env, so this is a per-BUILD quirk,
+# not per-backend: a deployment that hits it opts out with LLM_JSON_OBJECT=0.
+#
+# Opting out costs server-side JSON enforcement, not correctness — the
+# `elif json_mode` branch below still force-parses and surfaces non-JSON as
+# {"raw": ..., "_json_parse_error": True} rather than the fail-open
+# {"response": ...} shape that once let out-of-scope questions pass screening.
+#
+# Default is ON, so no environment changes behavior without being told to.
+_SEND_JSON_OBJECT_FORMAT = os.environ.get(
+    "LLM_JSON_OBJECT", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
 class FirewalledChatShim:
     """Minimal LLMResult-style shim for ChatAgent's existing call sites.
 
@@ -147,7 +163,7 @@ class FirewalledChatShim:
                 {"role": "user", "content": user_message},
             ],
         }
-        if json_mode or output_type is not None:
+        if (json_mode or output_type is not None) and _SEND_JSON_OBJECT_FORMAT:
             kwargs["response_format"] = {"type": "json_object"}
 
         resp = await self._clients.firewalled_client.chat.completions.create(**kwargs)

@@ -373,6 +373,10 @@ class TurnRunner:
             turn_id=turn_id,
             case_id=sess.case_id,
         )
+        # Wall clock, not the timer's `perf_counter` start: this is stored in
+        # the qa_cache and rendered as a clock time beside the question in a
+        # restored thread, so it has to be an epoch a browser can format.
+        self.turn_started_at = time.time()
         # ── filled by phases ──────────────────────────────────────────────
         self.verdict = None
         self.cache_key = None
@@ -686,7 +690,7 @@ class TurnRunner:
                     "turn_id_origin": turn_id,
                     "answer": cached_text,
                     "replay_of": cached.get("turn_id_origin"),
-                })
+                }, asked_at=self.turn_started_at)
             except Exception as exc:  # noqa: BLE001
                 sess.logger.log("qa_cache_replay_store_failed", {
                     "turn_id": turn_id, "error": repr(exc),
@@ -1282,7 +1286,7 @@ class TurnRunner:
                             self.tool_calls, _degraded),
                         "no_replay": True,
                         "partial_answer": True,
-                    })
+                    }, asked_at=self.turn_started_at)
                 except Exception as exc:  # noqa: BLE001
                     sess.logger.log("qa_cache_fallback_store_failed", {
                         "turn_id": turn_id, "error": repr(exc),
@@ -1848,7 +1852,7 @@ class TurnRunner:
                 # cached-answer replay arrives with an empty reasoning trace
                 # and looks like a silent failure to the reviewer.
                 "tool_calls": _cacheable_tool_calls(tool_calls, _degraded_names),
-            })
+            }, asked_at=self.turn_started_at)
             sess.logger.log("qa_cache_store",
                             {"turn_id": turn_id, "norm_q": cache_key,
                              "answer_len": len(answer_text),

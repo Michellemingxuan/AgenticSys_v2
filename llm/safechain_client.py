@@ -70,12 +70,12 @@ from openai.types.chat.chat_completion_message_tool_call import (
 )
 from openai.types.completion_usage import CompletionUsage
 
-from llm.round_shaping import response_format_for_round
 from llm.firewall_stack import (
     FIREWALL_GUIDANCE,
     LLM_CALL_KIND,
     FirewallRejection,
     FirewallStack,
+    response_format_for_round,
     sanitize_message,
 )
 
@@ -183,18 +183,17 @@ def _tag_active_node(tag: str, **extra: Any) -> None:
 
 def _estimate_tokens(text: str, model: str) -> int:
     """tiktoken estimate with a robust fallback. Safechain doesn't return
-    usage objects, so this is the only token signal we have on that path."""
-    if not text:
-        return 0
-    try:
-        import tiktoken
-        try:
-            enc = tiktoken.encoding_for_model(model)
-        except KeyError:
-            enc = tiktoken.get_encoding("cl100k_base")
-        return len(enc.encode(text))
-    except Exception:
-        return max(1, len(text) // 4)
+    usage objects, so this is the only token signal we have on that path.
+
+    Delegates to `tools.node_trace.pricing.estimate_tokens`, which caches the
+    encoder AND its unavailability. This used to call tiktoken directly on
+    every round: tiktoken fetches its BPE file over the network on first use,
+    and where that host is unreachable each call blocked until the socket
+    timed out — twice per round, from inside a coroutine, pinning the event
+    loop. See the note in `pricing.py`.
+    """
+    from tools.node_trace.pricing import estimate_tokens
+    return estimate_tokens(text, model)
 
 
 class SafeChainAsyncOpenAI:
@@ -453,8 +452,15 @@ class _SafeChainChatCompletions:
         # Build the model ASYNC (`await amodel(...)` does the token acquisition),
         # cached + reused. Run the chain via `ainvoke`: this build's
         # `SafeAzureChatOpenAI._agenerate` is a genuine async path (verified in
-        # the private env — cancellable in ~0s, and cancellation ABORTS the
-        # in-flight request rather than orphaning a worker thread). That is the
+        # the private env — cancellable in ~0s ON A FREE EVENT LOOP, and
+        # cancellation ABORTS the in-flight request rather than orphaning a
+        # worker thread). Read that caveat literally: `wait_for` cancels the
+        # task and then AWAITS it, so a cancel lands no sooner than the loop is
+        # free to run it. Any blocking call on the same loop — sync I/O, or a
+        # hidden first-use download — makes calls slow AND unkillable at once,
+        # which reads as "safechain is not cancellable" and is not. That cost
+        # several rounds of misdiagnosis on 2026-08-25; see
+        # .claude/memory/safechain_async_and_thread_occupation.md. That is the
         # fix for "stuck after rewind": the old sync `chain.invoke` in a thread
         # pool could not be interrupted, so a rewind/timeout left the thread
         # running its full 20-120s call, holding a pool slot and starving the
@@ -709,7 +715,7 @@ def _bind_kwargs(tools: list[dict] | None, tool_choice: Any,
     # A round that MUST call a tool cannot emit the final structured answer, so
     # the schema is dead weight — and on this transport its mere presence is
     # what routes the call through OpenAI's auto-parse instead of `create`.
-    # See llm/round_shaping.py.
+    # See the "Per-round payload shaping" section of llm/firewall_stack.py.
     response_format = response_format_for_round(tool_choice, response_format)
     if response_format is not None:
         kwargs["response_format"] = response_format

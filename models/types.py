@@ -158,6 +158,33 @@ class DistillerOutput(BaseModel):
     knowledge_points: list[KnowledgePoint] = Field(default_factory=list)
 
 
+class ProposedOpportunity(BaseModel):
+    """One actionable follow-up the synthesis proposes from the pins."""
+
+    title: str = Field(description="Imperative, one line, e.g. 'Review RLI decline handling before a limit reduction'")
+    rationale: str = Field(default="", description="Why these pins support it, in one or two sentences")
+
+
+class PinSynthesis(BaseModel):
+    """Synthesis over a reviewer's selected pins.
+
+    Two modes share one schema so the UI renders one shape either way:
+    `story` carries the narrative for "Reconstruct the story", and
+    `opportunities` carries the proposals for "Propose opportunities". The
+    unused half comes back empty rather than absent.
+    """
+
+    story: str = Field(default="", description="What the selected pins say when read together")
+    opportunities: list[ProposedOpportunity] = Field(default_factory=list)
+    # The honest half. A synthesis that only asserts is worse than useless to
+    # a reviewer who has to defend it — this is where it says what the pins
+    # do NOT settle.
+    not_settled: list[str] = Field(
+        default_factory=list,
+        description="Questions these pins do not answer; what evidence is missing",
+    )
+
+
 class Resolution(BaseModel):
     pair: list[str]
     contradiction: str

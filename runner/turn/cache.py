@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 # Cap on the per-session Q->A cache (see `_store_cached_qa` below). Moved
 # here from `server.py` alongside the function that is its only consumer —
@@ -52,17 +53,30 @@ def _get_cached_qa(sess, cache_key: str | None) -> dict | None:
     return cached
 
 
-def _store_cached_qa(sess, cache_key: str | None, value: dict) -> int:
+def _store_cached_qa(sess, cache_key: str | None, value: dict,
+                     *, asked_at: float | None = None) -> int:
     """Store a QA-cache entry and evict oldest entries beyond the cap.
 
     Returns the number of entries evicted. The cache is a speed optimization,
     not the audit source, so bounding it avoids long sessions retaining every
     answer payload forever.
+
+    `asked_at` is the turn's WALL-CLOCK start, epoch seconds — what
+    `/history` shows beside each question so a restored thread is not a list
+    of undated rows. Callers pass their turn start; the default is now, which
+    on this path means turn COMPLETION and so runs a turn-duration late. That
+    is the acceptable fallback, not the intent — node_trace is the accurate
+    source (see `NodeTraceStore.turn_started_at`) and this only has to cover
+    turns it never saw.
     """
     if not cache_key:
         return 0
     sess._qa_turn_seq += 1
     value["turn_seq"] = sess._qa_turn_seq
+    # Assigned, never `setdefault`: a cache-hit replay builds `value` as
+    # `{**cached, ...}`, so an inherited `asked_at` would date the turn the
+    # reviewer just asked to the ORIGINAL question's clock.
+    value["asked_at"] = asked_at if asked_at is not None else time.time()
     sess.qa_cache[cache_key] = value
     evicted = 0
     while _QA_CACHE_MAX_ENTRIES > 0 and len(sess.qa_cache) > _QA_CACHE_MAX_ENTRIES:

@@ -8,7 +8,7 @@ through OpenAI's auto-parse instead of plain `create`.
 """
 import pytest
 
-from llm.round_shaping import forces_tool_call, response_format_for_round
+from llm.firewall_stack import forces_tool_call, response_format_for_round
 
 
 _SCHEMA = {"type": "json_schema", "json_schema": {"name": "FinalAnswer"}}

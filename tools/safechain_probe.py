@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import time
 import inspect
 import json
 import os
@@ -119,7 +120,7 @@ class ProbeShape(BaseModel):
 # so a run from a STALE COPY is obvious — this script is edited here but run on
 # a different machine, so "the check didn't appear" is far more often an
 # out-of-date file than a real skip.
-PROBE_REVISION = "r4 (adds R3 VCPT+MessagesPlaceholder)"
+PROBE_REVISION = "r5 (adds per-call latency)"
 
 PROBE_PROMPT = "Return color='blue' and count=7. Use exactly those values."
 
@@ -190,15 +191,27 @@ def exc_detail(e: BaseException) -> str:
             f" | args={[str(a)[:120] for a in getattr(e, 'args', [])][:3]}")
 
 
+# Wall-clock per live call, in call order. The probe answers "does this build
+# SUPPORT X"; these answer "how long does X take here", which is what you need
+# when the same build is fast on one host and slow on another. Without them a
+# comparison between two environments can only say "both work".
+CALL_TIMINGS: list[tuple[str, str, float]] = []
+
+
 async def attempt(model: str, check: str, coro_factory) -> tuple[bool, Any]:
     """Run one probe; never raise. Returns (ok, result_or_exception).
 
     Tolerates a SYNC callable: we're probing an API whose async-ness is one of
     the things under test, so a non-awaitable return is a finding to report,
     not a TypeError that aborts the probe.
+
+    Records elapsed wall-clock for every attempt, including failures — a call
+    that fails SLOWLY (an internal retry ladder exhausting itself) looks
+    nothing like one that fails fast, and the difference is the whole point.
     """
     if not selected(check):
         return False, None
+    t0 = time.perf_counter()
     try:
         produced = coro_factory()
         if not inspect.isawaitable(produced):
@@ -212,6 +225,28 @@ async def attempt(model: str, check: str, coro_factory) -> tuple[bool, Any]:
     except Exception as e:  # noqa: BLE001 - reporting a failure IS the output
         record(model, check, f"FAILED — {exc_detail(e)}")
         return False, e
+    finally:
+        CALL_TIMINGS.append(
+            (model, check, (time.perf_counter() - t0) * 1000.0))
+
+
+def print_timings(hdr) -> None:
+    """Per-call latency, plus the stats you actually compare across hosts.
+
+    Printed even when every check passed: "all OK at 2s/call" and "all OK at
+    40s/call" are the same verdict table and completely different findings.
+    """
+    if not CALL_TIMINGS:
+        return
+    hdr("LATENCY — compare these across environments")
+    for model, check, ms in CALL_TIMINGS:
+        line(f"{model} · {check}"[:54], f"{ms:8.0f} ms")
+    times = sorted(ms for _, _, ms in CALL_TIMINGS)
+    print()
+    line("live calls", len(times))
+    line("median", f"{times[len(times) // 2]:8.0f} ms")
+    line("min / max", f"{times[0]:.0f} ms / {times[-1]:.0f} ms")
+    line("total", f"{sum(times) / 1000.0:8.1f} s")
 
 
 # ── Q0: what is importable ──────────────────────────────────────────────────
@@ -718,6 +753,8 @@ async def main(args) -> None:
         except Exception:  # noqa: BLE001 - never let one model kill the run
             print(f"\n  !! unhandled while probing {model_id}:")
             traceback.print_exc()
+
+    print_timings(hdr)
 
     hdr(f"SUMMARY — paste this back  [probe {PROBE_REVISION}]")
     width = max((len(row[1]) for row in RESULTS), default=20)

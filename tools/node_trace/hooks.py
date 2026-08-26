@@ -44,24 +44,15 @@ from tools.node_trace.pricing import compute_cost
 
 
 def _estimate_tokens(text: str, model: str | None) -> int:
-    """tiktoken token estimate for backends that return NO usage object (e.g.
-    safechain, which explicitly doesn't). Approximate — rows built this way are
-    flagged ``tokens_estimated`` so the count is never mistaken for exact. Falls
-    back to a chars/4 heuristic if tiktoken is unavailable or the model name
-    isn't recognized."""
-    if not text:
-        return 0
-    try:
-        import tiktoken
-        try:
-            enc = (tiktoken.encoding_for_model(model) if model
-                   else tiktoken.get_encoding("cl100k_base"))
-        except Exception:  # noqa: BLE001 — unknown model repr → generic encoding
-            enc = tiktoken.get_encoding("cl100k_base")
-        return len(enc.encode(text))
-    except Exception:  # noqa: BLE001 — tiktoken missing → rough heuristic
-        return max(1, len(text) // 4)
+    """Token estimate for backends that return NO usage object (safechain).
 
+    Delegates to the shared, cached implementation in `pricing.py` — see the
+    note there on why calling tiktoken per round stalled the event loop in an
+    environment without network egress. Rows built this way stay flagged
+    `tokens_estimated` so the count is never mistaken for exact.
+    """
+    from tools.node_trace.pricing import estimate_tokens
+    return estimate_tokens(text, model)
 
 def _serialize_items(items: list[Any]) -> list[dict]:
     out: list[dict] = []

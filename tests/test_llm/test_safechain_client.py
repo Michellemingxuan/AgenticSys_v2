@@ -216,7 +216,8 @@ def test_bind_kwargs_passes_openai_shapes_through_untouched():
 def test_bind_kwargs_drops_the_schema_on_a_forced_tool_call():
     """`required` means the model must return a tool call, so it cannot emit
     the structured answer — and on this transport the schema's mere presence
-    routes the call through auto-parse. See llm/round_shaping.py."""
+    routes the call through auto-parse. See the "Per-round payload shaping"
+    section of llm/firewall_stack.py."""
     tools = [{"type": "function", "function": {"name": "f", "parameters": {}}}]
     rf = {"type": "json_schema", "json_schema": {"name": "S", "schema": {}}}
     out = _bind_kwargs(tools, "required", rf)

@@ -7,8 +7,13 @@ import json
 from time import perf_counter
 from typing import Any
 
-from llm.round_shaping import forces_tool_call
-from llm.firewall_stack import FIREWALL_GUIDANCE, FirewallRejection, FirewallStack, sanitize_message
+from llm.firewall_stack import (
+    FIREWALL_GUIDANCE,
+    FirewallRejection,
+    FirewallStack,
+    forces_tool_call,
+    sanitize_message,
+)
 
 
 def _redact_message(message: dict) -> dict:
@@ -52,7 +57,8 @@ class _FirewalledChatCompletions:
         # answer, so drop the schema — 6.8 KB of it, on the orchestrator's
         # dispatch round, describes fields the model is told to leave null.
         # Mirrored from the safechain path so a dev measurement means something
-        # about prod (openai/safechain parity). See llm/round_shaping.py.
+        # about prod (openai/safechain parity). See the "Per-round payload
+        # shaping" section of llm/firewall_stack.py.
         if kw.get("response_format") is not None and forces_tool_call(
                 kw.get("tool_choice")):
             kw = {k: v for k, v in kw.items() if k != "response_format"}

@@ -26,6 +26,7 @@ import json
 import math
 import os
 import queue
+import shutil
 import threading
 import time
 import uuid
@@ -96,6 +97,8 @@ from runner.config import (
 # (dependency is one-way: server -> runner), so there is no load cycle.
 from runner.turn.conductor import _TurnAborted
 from tools.data_tools import case_scope, init_tools
+from tools.fs_tools import list_report_sections
+from datalayer import pin_store
 
 
 # ── Configuration ───────────────────────────────────────────────────────────
@@ -349,6 +352,30 @@ def _prewarm_clients() -> None:
     print(f"[server] pre-warming LLM client (backend={backend}) …")
     _BOOT_LOGGER.log("llm_prewarm_start", {"backend": backend})
     t0 = time.time()
+
+    # Resolve the tiktoken encoder here, off the hot path. It downloads its
+    # BPE file on first use, so where that host is unreachable the lookup
+    # blocks until the socket times out. It used to happen inside the first
+    # traced LLM round — twice per round, from a coroutine, pinning the event
+    # loop and making a ~2s turn take ~30s. Now an environment without egress
+    # pays one timeout at boot and reports it, rather than paying it forever.
+    _tok_t0 = time.time()
+    from tools.node_trace.pricing import prewarm_encoder
+    _tok_ok = prewarm_encoder(MODEL)
+    _tok_ms = int((time.time() - _tok_t0) * 1000)
+    _BOOT_LOGGER.log("tokenizer_prewarm", {
+        "model": MODEL, "available": _tok_ok, "duration_ms": _tok_ms,
+    })
+    if not _tok_ok:
+        print(f"[server] tiktoken unavailable after {_tok_ms}ms — token counts "
+              f"will be estimated from text length. This affects trace/cost "
+              f"telemetry only, not answers. On an air-gapped host set "
+              f"TIKTOKEN_LOAD_TIMEOUT_S=0 to skip this probe; to restore exact "
+              f"counts, populate TIKTOKEN_CACHE_DIR "
+              f"(see tools/tiktoken_cache_fetch.py).")
+    elif _tok_ms > 2000:
+        print(f"[server] tiktoken encoder took {_tok_ms}ms to load "
+              f"(downloaded?) — consider setting TIKTOKEN_CACHE_DIR.")
 
     async def _warmup_call() -> None:
         # Minimal prompt that exercises: token acquisition + HTTP pool
@@ -955,9 +982,33 @@ def _spawn_turn(sess: CaseSession, turn_id: str, question: str) -> None:
     threading.Thread(target=_runner, daemon=True, name=f"turn-{turn_id[:8]}").start()
 
 
-def _history_messages(qa_cache: dict) -> list[dict]:
+def _history_messages(qa_cache: dict,
+                      turn_times: dict[str, float] | None = None) -> list[dict]:
     """Reconstruct the visible thread from qa_cache, ordered by turn_seq.
-    Two messages per turn: the reviewer question then the agent answer."""
+    Two messages per turn: the reviewer question then the agent answer.
+
+    Each message carries `timestamp` in epoch MILLISECONDS, which is what the
+    browser's `new Date(ts)` expects — Python's epoch seconds rendered
+    straight would date every turn to 1970. Omitted entirely when no time is
+    known, so the UI's "no timestamp -> render nothing" path is reached
+    rather than a zero being formatted as a real clock time.
+
+    Two sources, in order:
+
+      1. `turn_times` from node_trace — the ACCURATE one. The trace opens its
+         first node when the turn starts, so it is a true ask time, and its
+         rows outlive the session, which is what lets a thread restored days
+         later still carry real times.
+      2. the entry's own `asked_at`, stamped by `_store_cached_qa`. Covers
+         turns node_trace never saw (`NODE_TRACE_DISABLE=1`, or rows since
+         purged). Written at turn completion when the caller passes no start,
+         so it can run a turn-duration late.
+
+    Before either existed the endpoint sent no time at all, and the UI showed
+    a clock only for turns asked in that browser since the last history load
+    — so the same thread had times on some rows and not others depending on
+    nothing the reviewer could see.
+    """
     entries = sorted(
         (e for e in (qa_cache or {}).values() if isinstance(e, dict)),
         key=lambda e: e.get("turn_seq", 0))
@@ -966,12 +1017,18 @@ def _history_messages(qa_cache: dict) -> list[dict]:
         tid = e.get("turn_id_origin") or ""
         q = e.get("origin_question") or ""
         a = e.get("answer") or ""
+        secs = (turn_times or {}).get(tid)
+        if secs is None:
+            secs = e.get("asked_at")
+        stamp = {}
+        if isinstance(secs, (int, float)) and secs > 0:
+            stamp = {"timestamp": int(secs * 1000)}
         if q:
             out.append({"id": f"hist:{tid}:reviewer", "role": "reviewer",
-                        "text": q, "turn_id": tid})
+                        "text": q, "turn_id": tid, **stamp})
         if a:
             out.append({"id": f"hist:{tid}:agent", "role": "agent",
-                        "text": a, "turn_id": tid})
+                        "text": a, "turn_id": tid, **stamp})
     return out
 
 
@@ -1002,6 +1059,63 @@ def _canonicalize_case_id(endpoint, values):  # noqa: ARG001 — Flask signature
 @app.get("/api/cases")
 def get_cases():
     return jsonify(_split_cases(ALL_CASES))
+
+
+@app.get("/api/pillars")
+def get_pillars():
+    """Available pillars, and which one this server is running.
+
+    `active` is fixed at boot: `PILLAR` selects one config, which is then
+    baked into `_PILLAR_YAML`, the chat agent's `pillar_config`, and every
+    session's conversation identity. Switching at runtime would have to be a
+    per-session change, so the UI shows the others as unavailable rather than
+    offering a control that silently does nothing.
+    """
+    loader = PillarLoader()
+    out = []
+    for name in loader.list_pillars():
+        cfg = loader.load(name) or {}
+        out.append({
+            "id": name,
+            "display_name": cfg.get("display_name") or name,
+            "focus": cfg.get("focus") or "",
+        })
+    return jsonify({"active": PILLAR, "pillars": out})
+
+
+@app.get("/api/cases/overview")
+def get_cases_overview():
+    """Every case with the two dates a reviewer picks by.
+
+    `report_updated_at` is the newest mtime across the case's curated report
+    files; `last_qa_at` is when a question was last asked of it. Cases with
+    neither have simply never been opened, and are listed anyway — the point
+    of this page is to show what is waiting as much as what is done.
+    """
+    activity = (_NODE_TRACE_STORE.case_activity()
+                if _NODE_TRACE_STORE is not None else {})
+    rows = []
+    for case_id in ALL_CASES:
+        cid = str(case_id)
+        folder = _REPORTS_DIR / cid
+        sections = list_report_sections(folder) if folder.is_dir() else []
+        stamps = [(folder / sec["filename"]).stat().st_mtime
+                  for sec in sections if sec["filename"]]
+        act = activity.get(cid, {})
+        rows.append({
+            "case_id": cid,
+            "report_updated_at": (
+                time.strftime("%Y-%m-%d", time.localtime(max(stamps))) if stamps else None),
+            "report_sections": sum(1 for sec in sections if sec["markdown"]),
+            "last_qa_at": act.get("last_qa_at"),
+            "turns": act.get("turns", 0),
+            "pins": len(pin_store.list_pins(cid)),
+        })
+    # Most recently reviewed first; never-opened cases sink to the bottom
+    # rather than being hidden, since those are the ones needing attention.
+    rows.sort(key=lambda r: (r["last_qa_at"] or "", r["report_updated_at"] or ""),
+              reverse=True)
+    return jsonify({"cases": rows})
 
 
 @app.post("/api/cases/<case_id>/turn")
@@ -1036,7 +1150,11 @@ def get_history(case_id: str):
         sess = _get_or_create_session(case_id)   # triggers restore
     except KeyError as exc:
         return jsonify({"error": str(exc)}), 404
-    return jsonify({"messages": _history_messages(sess.qa_cache)})
+    # node_trace is the accurate clock for turns it recorded, including ones
+    # from sessions long gone; the qa_cache stamp covers the rest.
+    turn_times = (_NODE_TRACE_STORE.turn_started_at(case_id)
+                  if _NODE_TRACE_STORE is not None else {})
+    return jsonify({"messages": _history_messages(sess.qa_cache, turn_times)})
 
 
 @app.post("/api/cases/<case_id>/cancel-turn")
@@ -1243,6 +1361,24 @@ def post_rewind(case_id: str):
     if not is_partial:
         amem_purge = delete_case_memory(_AMEM, _AMEM_CFG, case_id=case_id,
                                         logger=sess.logger)
+
+    # Pins are treated differently by the two modes, on purpose.
+    #
+    # A PARTIAL rewind retracts: the pin is kept but stops claiming to be
+    # current, and is lifted out of any report section. Pinning is a deliberate
+    # "this matters" while rewind is one click on a turn card, so deleting here
+    # would destroy filed work as a side effect of a casual action — and the
+    # usual reason to rewind is to re-ask a question better, not to disown the
+    # finding. What it MUST NOT do is leave the pin looking current: turn
+    # numbers are positional, so dropping an earlier turn renumbers the rest
+    # and a pin captured as "Turn 3" would point at a different turn.
+    #
+    # A FULL clear deletes. "Clear this case" is an explicit reset of
+    # everything, and finding the pins still there would be the surprise.
+    if is_partial:
+        pins_affected = pin_store.retract_turns(case_id, remove_turn_ids)
+    else:
+        pins_affected = pin_store.delete_all_pins(case_id)
     # The `rewind` event is THE record of what a clear actually did, so it
     # carries the Amem outcome alongside the caches it already reported. Without
     # these fields a purge that never ran (store unreachable) was indistinguish-
@@ -1256,8 +1392,299 @@ def post_rewind(case_id: str):
         "trace_rows_cleared": trace_rows_cleared,
         "aborted_in_flight_turn": aborted_in_flight,
         "task_cancel_dispatched": cancelled_task,
+        "pins_retracted" if is_partial else "pins_deleted": pins_affected,
         **amem_purge.as_log_fields(),
     })
+    return ("", 204)
+
+
+@app.get("/api/cases/<case_id>/report")
+def get_report(case_id: str):
+    """Serve the curated case report — the same `reports/<case_id>/*.md`
+    files the report agent reads — for the UI's Case Report panel.
+
+    Returns every known section in reviewer-facing order, each with its
+    markdown inline. Inline rather than one request per section because the
+    whole report is ~75KB for a real case: a single response costs less than
+    ten round trips and spares the panel a loading state on every tab click.
+
+    Sections with no file on disk come back with `markdown: null` and are
+    rendered as unavailable — a case missing its Bureau report should say so
+    rather than quietly show nine tabs.
+
+    Reads through `tools.fs_tools` on purpose. That module's `is_report_file`
+    is the single definition of "a report file", and its docstring records
+    what happened last time the definition was copied instead of imported
+    (a `.MD` report that detection saw and the file list did not). This
+    endpoint is the fourth consumer, not a fourth literal.
+    """
+    folder = (_REPORTS_DIR / case_id).resolve()
+    try:
+        folder.relative_to(_REPORTS_DIR.resolve())
+    except ValueError:
+        abort(404)
+    if not folder.is_dir():
+        return jsonify({"error": f"no report folder for case {case_id}"}), 404
+
+    sections = list_report_sections(folder)
+    # Newest mtime across the section files actually present. Deliberately
+    # NOT called "generated": the reports carry no generation stamp of their
+    # own, and mtime is a poor proxy for one — a Drive/rsync copy rewrites it,
+    # so these files currently date to when they synced, not to when the
+    # report was produced. The UI labels it "Updated" for that reason. Give
+    # the reports a real stamp and this should read it instead.
+    #
+    # Taken per-file rather than from the folder: the folder's mtime moves
+    # whenever `charts/` is written during a turn, which would date the
+    # report to the last question asked.
+    stamps = [(folder / sec["filename"]).stat().st_mtime
+              for sec in sections if sec["filename"]]
+    updated_at = (
+        time.strftime("%Y-%m-%d", time.localtime(max(stamps))) if stamps else None
+    )
+    # Merge in any figures the reviewer inserted into a section. Attached as
+    # a `figures` list rather than spliced into the markdown: the markdown is
+    # the report agent's source text, and rewriting it would change what the
+    # agent reads on the next turn. The panel renders these below the prose.
+    by_section = pin_store.pins_by_section(case_id)
+    for sec in sections:
+        sec["figures"] = by_section.get(sec["key"], [])
+
+    return jsonify({
+        "case_id": case_id,
+        "updated_at": updated_at,
+        "sections": sections,
+    })
+
+
+def _snapshot_pinned_chart(case_id: str, chart_url: str | None) -> str | None:
+    """Copy a turn's chart into the case's durable `pins/` dir.
+
+    A pin is a review DELIVERABLE; the chart it points at is a per-turn
+    artifact that `rewind` deletes. Pinning a figure and then rewinding its
+    turn therefore left the pin alive with a 404 behind it — the report
+    rendered the browser's broken-image glyph, which reads as a corrupted
+    report rather than as retracted evidence.
+
+    Snapshotting at pin time makes the pin self-contained. Keyed by the source
+    FILENAME rather than the pin id, so two pins on the same chart share one
+    copy and re-pinning is idempotent.
+
+    Returns the durable URL, or the original one unchanged when there is
+    nothing to copy (already a snapshot, or the source is already gone) —
+    never raises, because failing to snapshot must not fail the pin.
+    """
+    if not chart_url:
+        return chart_url
+    marker = f"/api/cases/{case_id}/charts/"
+    if marker not in chart_url:
+        return chart_url          # already durable, or not ours to copy
+    filename = chart_url.rsplit("/", 1)[-1]
+    if not filename or "/" in filename or ".." in filename:
+        return chart_url
+    src = (_REPORTS_DIR / case_id / "charts" / filename).resolve()
+    dst_dir = (_REPORTS_DIR / case_id / "pins").resolve()
+    try:
+        src.relative_to((_REPORTS_DIR / case_id / "charts").resolve())
+    except ValueError:
+        return chart_url
+    if not src.is_file():
+        return chart_url          # nothing to snapshot; the guard in the UI copes
+    try:
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        dst = dst_dir / filename
+        if not dst.exists():
+            shutil.copy2(src, dst)
+    except OSError as exc:
+        print(f"[server] pin snapshot failed for {filename}: {exc}")
+        return chart_url
+    return f"/api/cases/{case_id}/pinned-figures/{filename}"
+
+
+@app.get("/api/cases/<case_id>/pinned-figures/<path:filename>")
+def get_pinned_figure(case_id: str, filename: str):
+    """Serve a snapshotted pin figure from `reports/<case_id>/pins/`.
+
+    Separate from `/charts/` on purpose: these outlive the turn that drew
+    them, which is the whole point of the snapshot.
+    """
+    if ".." in filename or filename.startswith("/") or "\\" in filename:
+        abort(404)
+    pins_dir = (_REPORTS_DIR / case_id / "pins").resolve()
+    if not pins_dir.exists():
+        abort(404)
+    mimetype = "image/svg+xml" if filename.endswith(".svg") else "image/png"
+    return send_from_directory(pins_dir, filename, mimetype=mimetype)
+
+
+@app.get("/api/cases/<case_id>/pins")
+def get_pins(case_id: str):
+    """Every pin on this case — insights and figures, oldest first."""
+    return jsonify({"pins": pin_store.list_pins(case_id)})
+
+
+@app.post("/api/cases/<case_id>/pins")
+def post_pin(case_id: str):
+    """Pin an insight or a figure.
+
+    Figure pins are idempotent on (turn, specialist, topic) in the store, so
+    the design's "Pin Figures" button — which pins a whole turn's figures at
+    once — can be clicked twice without duplicating cards.
+    """
+    body = request.get_json(silent=True) or {}
+    kind = (body.get("kind") or "").strip()
+    try:
+        pin = pin_store.add_pin(
+            case_id,
+            kind=kind,
+            text=(body.get("text") or "").strip(),
+            turn_id=body.get("turn_id"),
+            turn_index=body.get("turn_index"),
+            source=(body.get("source") or "").strip(),
+            specialist=body.get("specialist"),
+            topic=body.get("topic"),
+            # Snapshot so the pin survives a rewind of its source turn.
+            chart_url=_snapshot_pinned_chart(case_id, body.get("chart_url")),
+            # The spec is the durable copy: self-contained JSON that outlives
+            # the PNG. The snapshot above is the fallback, not the other way
+            # round.
+            vega_spec=body.get("vega_spec"),
+            chart_kind=body.get("chart_kind"),
+            # Stable provenance. `turn_index` is positional and renumbers on
+            # rewind, so the question text is what actually identifies a pin.
+            question=(body.get("question") or "").strip() or None,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(pin), 201
+
+
+@app.delete("/api/cases/<case_id>/pins/<pin_id>")
+def delete_pin(case_id: str, pin_id: str):
+    if not pin_store.delete_pin(case_id, pin_id):
+        return jsonify({"error": "no such pin"}), 404
+    return ("", 204)
+
+
+@app.delete("/api/cases/<case_id>/pins/retracted")
+def delete_retracted_pins(case_id: str):
+    """Remove every retracted pin for a case.
+
+    Backs the board's one-click cleanup. Retraction keeps a rewound pin
+    visible-but-marked rather than deleting it; this is where the reviewer
+    chooses to let it go.
+    """
+    return jsonify({"deleted": pin_store.delete_retracted(case_id)})
+
+
+@app.post("/api/cases/<case_id>/pins/<pin_id>/section")
+def put_pin_section(case_id: str, pin_id: str):
+    """Insert a pin into a report section, or lift it back out.
+
+    `section_key` null removes the association. The key is validated against
+    the report's own sections so a typo cannot strand a pin in a section that
+    will never render.
+    """
+    body = request.get_json(silent=True) or {}
+    section_key = body.get("section_key")
+    if section_key is not None:
+        folder = (_REPORTS_DIR / case_id).resolve()
+        valid = {sec["key"] for sec in list_report_sections(folder)}
+        if section_key not in valid:
+            return jsonify({"error": f"unknown section {section_key!r}"}), 400
+    if not pin_store.set_pin_section(case_id, pin_id, section_key):
+        return jsonify({"error": "no such pin"}), 404
+    return ("", 204)
+
+
+@app.post("/api/cases/<case_id>/synthesis")
+def post_synthesis(case_id: str):
+    """Synthesise the reviewer's selected pins.
+
+    `mode` is `story` (what these pins say read together) or `opportunities`
+    (what follow-ups they justify). Both return the same shape so the board
+    renders one component either way.
+
+    Runs the agent synchronously on its own event loop. That is fine here in
+    a way it would not be for a turn: this is one tool-less round with a
+    1200-token cap, not a multi-specialist fan-out, and the reviewer is
+    sitting on the button waiting for it.
+    """
+    body = request.get_json(silent=True) or {}
+    mode = (body.get("mode") or "story").strip()
+    if mode not in ("story", "opportunities"):
+        return jsonify({"error": f"unknown mode {mode!r}"}), 400
+
+    pin_ids = body.get("pin_ids") or []
+    if not pin_ids:
+        return jsonify({"error": "no pins selected"}), 400
+
+    # Resolve server-side rather than trusting posted pin bodies: the client
+    # may hold a stale copy, and a synthesis must be over what is actually
+    # pinned right now.
+    by_id = {p["pin_id"]: p for p in pin_store.list_pins(case_id)}
+    pins = [by_id[i] for i in pin_ids if i in by_id]
+    if not pins:
+        return jsonify({"error": "none of those pins exist on this case"}), 404
+
+    from agent_factories.synthesis_agent import build_synthesis_agent, render_pins
+    from agents import Runner
+
+    agent = build_synthesis_agent(_CLIENTS.model)
+    prompt = render_pins(pins, mode)
+
+    loop = asyncio.new_event_loop()
+    try:
+        result = loop.run_until_complete(
+            asyncio.wait_for(Runner.run(agent, prompt), timeout=90.0))
+    except asyncio.TimeoutError:
+        return jsonify({"error": "synthesis timed out"}), 504
+    except Exception as exc:  # noqa: BLE001
+        print(f"[server] synthesis failed: {type(exc).__name__}: {exc}")
+        return jsonify({"error": f"synthesis failed: {type(exc).__name__}"}), 502
+    finally:
+        try:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        finally:
+            loop.close()
+
+    out = result.final_output
+    return jsonify({
+        "mode": mode,
+        "story": getattr(out, "story", "") or "",
+        "opportunities": [
+            {"title": o.title, "rationale": o.rationale}
+            for o in (getattr(out, "opportunities", None) or [])
+        ],
+        "not_settled": list(getattr(out, "not_settled", None) or []),
+        "pin_ids": [p["pin_id"] for p in pins],
+    })
+
+
+@app.get("/api/cases/<case_id>/opportunities")
+def get_opportunities(case_id: str):
+    return jsonify({"opportunities": pin_store.list_opportunities(case_id)})
+
+
+@app.post("/api/cases/<case_id>/opportunities")
+def post_opportunity(case_id: str):
+    body = request.get_json(silent=True) or {}
+    title = (body.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "missing title"}), 400
+    opp = pin_store.add_opportunity(
+        case_id,
+        title=title,
+        body=(body.get("body") or "").strip(),
+        pin_ids=body.get("pin_ids") or [],
+    )
+    return jsonify(opp), 201
+
+
+@app.delete("/api/cases/<case_id>/opportunities/<opp_id>")
+def delete_opportunity(case_id: str, opp_id: str):
+    if not pin_store.delete_opportunity(case_id, opp_id):
+        return jsonify({"error": "no such opportunity"}), 404
     return ("", 204)
 
 
@@ -1367,8 +1794,89 @@ def _start_trace_viewer() -> None:
         print(f"[trace viewer] failed to start: {exc}")
 
 
+# ── Built frontend ──────────────────────────────────────────────────────────
+# Serving the SPA from Flask rather than from Vite, because the deployment
+# target cannot run Vite: it has Node 10, and Vite 6 needs 18+. `npm run dev`
+# dies on `import {` before it starts. Shipping the built `dist/` instead
+# means the server needs no Node at all.
+#
+# It also removes a discrepancy rather than working around it. `BASE = '/api'`
+# in the frontend is relative, so something must route it; in dev that is
+# `server.proxy` in vite.config.ts, which does NOT apply to `vite preview`
+# (that reads `preview.proxy`, unset here). Served from Flask the app is
+# same-origin, so no proxy is involved on any path — and the CORS allowance
+# stops mattering too.
+#
+# Build on a machine with a modern Node (`npm run build`) and ship `dist/`;
+# it is gitignored, so add it to the archive deliberately.
+_FRONTEND_DIST = Path(
+    os.environ.get("FRONTEND_DIST")
+    or (Path(__file__).resolve().parent.parent / "CaseReviewChat" / "dist")
+).expanduser()
+
+
+def _frontend_file(rel: str):
+    """Send `rel` from the build, or None when it isn't a real file there.
+
+    Returns a sentinel rather than raising, because the caller has to tell
+    "no such asset" from "unknown route" to decide about the SPA fallback —
+    which is why `send_from_directory` cannot simply be called directly.
+
+    Containment is verified HERE, on the resolved path, rather than trusting
+    that `..` was normalised out of the URL upstream: `Path(root) / "../x"`
+    happily resolves outside the build, and `.is_file()` would say yes.
+    Werkzeug does normalise, and `send_from_directory` has its own guard, but
+    neither is local to this join and both could change.
+    """
+    root = _FRONTEND_DIST.resolve()
+    try:
+        candidate = (root / rel).resolve()
+    except (OSError, ValueError):
+        return None
+    if not candidate.is_file() or root not in candidate.parents:
+        return None
+    return send_from_directory(root, candidate.relative_to(root))
+
+
+@app.get("/")
+def serve_index():
+    if not (_FRONTEND_DIST / "index.html").is_file():
+        # An explicit message beats Flask's bare 404: the usual cause is a
+        # deployment that shipped the source tree without running the build.
+        return (f"No frontend build at {_FRONTEND_DIST}. Run `npm run build` "
+                f"on a machine with Node 18+ and ship dist/, or point "
+                f"FRONTEND_DIST at it.", 404)
+    return send_from_directory(_FRONTEND_DIST, "index.html")
+
+
+@app.get("/<path:filename>")
+def serve_frontend(filename: str):
+    """Static assets, with an index.html fallback for unknown paths.
+
+    Registered last and guarded: `/api/...` rules are more specific so
+    Werkzeug prefers them anyway, but an explicit reject means a typo'd API
+    path returns 404 instead of silently serving the SPA — which would look
+    like a broken page rather than a wrong URL.
+    """
+    if filename.startswith("api/"):
+        abort(404)
+    hit = _frontend_file(filename)
+    if hit is not None:
+        return hit
+    # Unknown non-asset path: hand back the app. Harmless today (the UI keeps
+    # its state in query params, not the path) and correct if it ever routes.
+    if (_FRONTEND_DIST / "index.html").is_file():
+        return send_from_directory(_FRONTEND_DIST, "index.html")
+    abort(404)
+
+
 if __name__ == "__main__":
     _start_trace_viewer()
+    if (_FRONTEND_DIST / "index.html").is_file():
+        print(f"[server] frontend: {_FRONTEND_DIST}")
+    else:
+        print(f"[server] frontend: NOT FOUND at {_FRONTEND_DIST} "
+              f"(API still served; set FRONTEND_DIST or run `npm run build`)")
     print(f"[server] listening on http://{HOST}:{PORT}")
     # threaded=True so SSE streams + POST handlers don't block each other.
     # use_reloader=False because the bootstrap above is heavy and reloads cause double-init.
