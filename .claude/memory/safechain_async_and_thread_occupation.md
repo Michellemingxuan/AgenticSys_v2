@@ -1,3 +1,10 @@
+---
+name: safechain-async-and-thread-occupation
+description: "Stuck at team construction" / "input not captured" = orphaned safechain worker threads from cancelled turns exhausting the pool; fixed 2026-07-01 by native async `await chain.ainvoke(...)`. But cancellable is not the same as cancels promptly — any blocking call on the event loop makes calls slow AND unkillable at once.
+metadata:
+  type: project
+---
+
 # SafeChain model calling: `await amodel(...)` build + native async `chain.ainvoke`
 
 **RESOLVED (2026-07-01, prod-validated):** the LLM call is now `await chain.ainvoke(...)`, not sync `chain.invoke` in a thread pool. On this build `ainvoke` is genuinely native-async and cancellable, so a rewind/timeout ABORTS the in-flight call instead of orphaning a worker thread — which is what actually caused "stuck after interrupting + re-asking". Details in the "`ainvoke` IS correct" section below; the historical framing in the next paragraph is kept for context.

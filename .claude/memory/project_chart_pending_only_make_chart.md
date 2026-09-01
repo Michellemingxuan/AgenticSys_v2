@@ -1,5 +1,5 @@
 ---
-name: project-chart-pending-lifecycle
+name: project-chart-pending-only-make-chart
 description: chart_pending fires per-specialist DURING a turn from BOTH chart paths; the real `chart` events land at end-of-turn AFTER cross-specialist dedup, so any deduped-away chart orphans its placeholder unless `chart_cancelled` retracts it.
 metadata:
   type: project

@@ -1,5 +1,5 @@
 ---
-name: Date-format handling is load-bearing in this project
+name: project-date-format-sensitivity
 description: Date columns across the system come in many formats (private vs dev env, table by table); _date_key in tools/data_tools.py must keep parsing them all, and parsing failures are USER-VISIBLE (the specialist tool returns "no parseable values" which the LLM surfaces in the answer).
 type: project
 originSessionId: 04fae2a5-b572-455d-b934-90560dd718e8

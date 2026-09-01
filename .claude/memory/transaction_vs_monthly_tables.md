@@ -1,3 +1,10 @@
+---
+name: transaction-vs-monthly-tables
+description: Transaction-level tables (model_scores_transaction / score_drivers_transaction) answer per-txn and approve-deny questions; monthly tables answer trends. Filter day-grain `trans_dt` by default, `txn_date_time` only for within-day precision.
+metadata:
+  type: project
+---
+
 # Transaction-level vs monthly-level tables
 
 Two grains now exist for the modeling domain:

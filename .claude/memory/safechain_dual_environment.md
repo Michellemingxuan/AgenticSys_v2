@@ -1,5 +1,5 @@
 ---
-name: SafeChain in private environment, OpenAI API in dev
+name: safechain-dual-environment
 description: AgenticSys runs safechain in prod and the OpenAI API in dev; the safechain model is a real LangChain AzureChatOpenAI subclass, so the transport is native (measured, not assumed)
 type: project
 originSessionId: 797673ed-b57e-4e47-b7ca-2f717ff3fb69
@@ -75,3 +75,36 @@ Only the transport varies. `Agent`, `Runner.run`, agent factories, instruction c
 `llm/safechain_client.py` converts OpenAI-wire messages to LangChain messages, binds the SDK's kwargs, and converts the `AIMessage` back to a `ChatCompletion`. safechain imports are lazy so dev tests still collect. See [[feedback_openai_safechain_parity]] before changing either transport.
 
 **Open item:** `runner/turn/conductor.py` still carries a no-tools-retry workaround that exists only because the old text protocol could not enforce `tool_choice="required"`. Native enforcement is now proven, so it can go — deliberately left in place until a prod run validates the rewrite.
+
+## Per-HOST differences (measured 2026-08-31 on the ailabs edge host)
+
+Same safechain package version and same config files as the private env, yet the
+wire behavior differs — so treat these as properties of the **host/gateway**, not
+of the package. `tools/safechain_probe.py <model>` is the instrument; run it in
+BOTH environments and diff, and note the probe defaults to `gpt-4o`, which is **not
+defined in either registry** — pass `gpt-4.1` or it fails at build with
+`ConfigValidationError` before testing anything.
+
+- **`embeddings` is not exposed.** `SafeChainAsyncOpenAI._UNSUPPORTED_ENDPOINTS`
+  lists it, so `.embeddings` raises `AttributeError` by design. Consequence for
+  Amem in [[amem-deployment]].
+- **A NON-STRICT `response_format` HANGS on this host** — probe check `R2b`:
+  `strict tools + NON-strict response_format → TIMEOUT (>90s)` while
+  `strict tools + strict response_format → OK`. No error, no return. The private
+  env tolerates the same shape, which is why it only ever appears on the server.
+  Escape hatch: `LLM_JSON_OBJECT=0` gates the `{"type": "json_object"}` kwarg off
+  in `llm/factory.py` (default ON, so no environment changes behavior unsilently).
+  This qualifies the "the RESPONSE schema may be non-strict" rule above — true on
+  the private build, not universally.
+
+  **This was NOT the cause of the 2026-08-25 screen stall.** It fits the symptoms
+  well enough that a whole investigation went down this path; the actual cause was
+  a blocking call on the event loop (see [[safechain-async-and-thread-occupation]]).
+  Recorded here so the correlation is not re-litigated as causation.
+
+  Watch for the transport history when dating this class of bug: before
+  `b97375c` (2026-07-29) the client folded `tools` / `tool_choice` /
+  `response_format` into a single combined **prompt string** (the "text protocol"),
+  so those kwargs never reached the wire at all. The same source line in
+  `llm/factory.py` therefore produces a completely different request before and
+  after that commit — a build can contain the code and still not send it.
