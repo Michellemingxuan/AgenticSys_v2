@@ -33,6 +33,14 @@ from tools.node_trace._io import open_db
 _DEFAULT_DB = Path(os.path.expanduser(os.path.expandvars(
     os.environ.get("NODE_TRACE_DB", "logs/node_traces.db")
 )))
+# Mount prefix when this viewer is served behind a path-stripping proxy
+# (e.g. /apps/CaseReviewQA/trace). Templates hardcode ROOT-absolute links —
+# `/chat/<id>`, `/turn/...` — which escape any mount and land in whatever app
+# owns the domain root. Every such link is emitted as `{{ base }}/...`, so an
+# unset value reproduces today's behavior exactly. Flask's routes stay at `/`:
+# the proxy strips the prefix on the way in, this adds it back on the way out.
+_BASE = os.environ.get("TRACE_VIEWER_BASE", "").rstrip("/")
+
 _SGT = timezone(timedelta(hours=8))   # Singapore is UTC+8 (no DST)
 
 # Slowness thresholds for the table-cell color highlight.
@@ -156,7 +164,7 @@ _FAVICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
   <path d="M24.4 5.2c.35 2.4 1.95 4 4.35 4.35-2.4.35-4 1.95-4.35 4.35-.35-2.4-1.95-4-4.35-4.35 2.4-.35 4-1.95 4.35-4.35z"
         fill="#7FC4FF"/>
 </svg>"""
-_FAVICON = '<link rel="icon" type="image/svg+xml" href="/favicon.svg">'
+_FAVICON = '<link rel="icon" type="image/svg+xml" href="{{ base }}/favicon.svg">'
 _REFRESH_BADGE = """
 {% if refresh_secs %}
 <div style="position:fixed; top:8px; right:8px; background:#fef3c7; color:#92400e;
@@ -296,7 +304,7 @@ _INDEX = """
 <html><head><meta charset="utf-8">""" + _REFRESH_META + """<title>AgenticSys Monitor</title>""" + _FAVICON + _STYLE + """</head>
 <body>""" + _REFRESH_BADGE + """
   <h1>AgenticSys Monitor <span class="muted">· agent run traces · {{ db }}</span></h1>
-  <nav><a href="/">conversations</a></nav>
+  <nav><a href="{{ base }}/">conversations</a></nav>
   <h2>Conversations ({{ chats|length }})</h2>
   <table>
     <thead><tr>
@@ -310,12 +318,12 @@ _INDEX = """
       <tr>
         <td>
           {% if c.latest_turn_id %}
-            <a href="/turn/{{ c.chat_id }}/{{ c.latest_turn_id }}">{{ c.chat_id }}</a>
+            <a href="{{ base }}/turn/{{ c.chat_id }}/{{ c.latest_turn_id }}">{{ c.chat_id }}</a>
             <span class="muted" style="font-size:11px;">
-              · <a href="/chat/{{ c.chat_id }}" style="color:#6b7280;">all turns</a>
+              · <a href="{{ base }}/chat/{{ c.chat_id }}" style="color:#6b7280;">all turns</a>
             </span>
           {% else %}
-            <a href="/chat/{{ c.chat_id }}">{{ c.chat_id }}</a>
+            <a href="{{ base }}/chat/{{ c.chat_id }}">{{ c.chat_id }}</a>
           {% endif %}
         </td>
         <td>{{ c.case_id }}</td>
@@ -337,8 +345,8 @@ _CHAT = """
 <body>""" + _REFRESH_BADGE + """
   <h1>Conversation: {{ chat_id }}</h1>
   <nav>
-    <a href="/">← conversations</a>
-    <a href="/state/{{ chat_id }}">cross-turn state →</a>
+    <a href="{{ base }}/">← conversations</a>
+    <a href="{{ base }}/state/{{ chat_id }}">cross-turn state →</a>
   </nav>
   <h2>Turns ({{ turns|length }})</h2>
   <table>
@@ -357,7 +365,7 @@ _CHAT = """
     <tbody>
     {% for t in turns %}
       <tr>
-        <td><a href="/turn/{{ chat_id }}/{{ t.turn_id }}">{{ t.turn_id }}</a></td>
+        <td><a href="{{ base }}/turn/{{ chat_id }}/{{ t.turn_id }}">{{ t.turn_id }}</a></td>
         <td class="muted">{{ t.started_at_sg }}</td>
         <td class="q-cell" title="{{ t.question or '' }}">{{ t.question or "—" }}</td>
         <td class="right {{ dur_class(t.duration_s) }}">{{ "%.1fs"|format(t.duration_s or 0) }}</td>
@@ -433,8 +441,8 @@ _STATE = """
 <body>""" + _REFRESH_BADGE + """
   <h1>Cross-turn state: {{ chat_id }}</h1>
   <nav>
-    <a href="/">← conversations</a>
-    <a href="/chat/{{ chat_id }}">← turns</a>
+    <a href="{{ base }}/">← conversations</a>
+    <a href="{{ base }}/chat/{{ chat_id }}">← turns</a>
   </nav>
 
   <p class="muted">
@@ -454,7 +462,7 @@ _STATE = """
     <tbody>
     {% for s in snapshots %}
       <tr>
-        <td><a href="/turn/{{ chat_id }}/{{ s.turn_id }}">{{ s.turn_id }}</a></td>
+        <td><a href="{{ base }}/turn/{{ chat_id }}/{{ s.turn_id }}">{{ s.turn_id }}</a></td>
         <td class="muted">{{ s.taken_at_sg }}</td>
         <td class="right">{{ s.qa_cache_n }}</td>
         <td class="right">{{ s.kb_specialists_n }}</td>
@@ -498,9 +506,9 @@ _TURN = _NODE_DETAIL_MACRO + """
     {% endif %}
   </h1>
   <nav>
-    <a href="/">← conversations</a>
-    <a href="/chat/{{ chat_id }}">turns list</a>
-    <a href="/state/{{ chat_id }}">cross-turn state</a>
+    <a href="{{ base }}/">← conversations</a>
+    <a href="{{ base }}/chat/{{ chat_id }}">turns list</a>
+    <a href="{{ base }}/state/{{ chat_id }}">cross-turn state</a>
   </nav>
 
   {% if sibling_turns and sibling_turns|length > 1 %}
@@ -508,7 +516,7 @@ _TURN = _NODE_DETAIL_MACRO + """
     <span class="label">Turns in this chat ({{ sibling_turns|length }}):</span>
     {% for t in sibling_turns %}
       <a class="turn-pill {{ 'current' if t.turn_id == turn_id else '' }}"
-         href="/turn/{{ chat_id }}/{{ t.turn_id }}"
+         href="{{ base }}/turn/{{ chat_id }}/{{ t.turn_id }}"
          title="{{ t.question or t.turn_id }} · {{ t.started_at_sg }} · {{ '%.1fs'|format(t.duration_s or 0) }}">
         <span class="tid">{{ t.turn_id[:8] }}</span>
         <span>{{ (t.question or '(no question captured)')[:60] }}{% if (t.question or '')|length > 60 %}…{% endif %}</span>
@@ -790,7 +798,7 @@ def index():
             if latest else ""
         )
     return render_template_string(
-        _INDEX, chats=chats, db=str(_db()), refresh_secs=_refresh_secs(),
+        _INDEX, base=_BASE, chats=chats, db=str(_db()), refresh_secs=_refresh_secs(),
     )
 
 
@@ -818,9 +826,9 @@ def chat(chat_id: str):
         t["question"] = _question_for_turn(conn, chat_id, t["turn_id"])
         t["server_run_id"] = _server_run_for_turn(conn, chat_id, t["turn_id"])
     if not rows:
-        return redirect("/")
+        return redirect(f"{_BASE}/")
     return render_template_string(
-        _CHAT, chat_id=chat_id, turns=rows, dur_class=_dur_class,
+        _CHAT, base=_BASE, chat_id=chat_id, turns=rows, dur_class=_dur_class,
         refresh_secs=_refresh_secs(),
     )
 
@@ -994,7 +1002,7 @@ def turn(chat_id: str, turn_id: str):
     except sqlite3.OperationalError:
         rows = []
     if not rows:
-        return redirect("/")
+        return redirect(f"{_BASE}/")
 
     for r in rows:
         _decorate(r)
@@ -1090,6 +1098,7 @@ def turn(chat_id: str, turn_id: str):
 
     return render_template_string(
         _TURN,
+        base=_BASE,
         chat_id=chat_id, turn_id=turn_id,
         question=this_question,
         tree=tree, flat_rows=flat_rows,
@@ -1134,7 +1143,7 @@ def state(chat_id: str):
             else:
                 latest[dst_key] = "(empty)"
     return render_template_string(
-        _STATE, chat_id=chat_id, snapshots=snaps, latest=latest,
+        _STATE, base=_BASE, chat_id=chat_id, snapshots=snaps, latest=latest,
         refresh_secs=_refresh_secs(),
     )
 
