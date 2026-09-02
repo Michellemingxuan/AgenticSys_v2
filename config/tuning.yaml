@@ -228,3 +228,12 @@ knowledge_base:
   # names no pattern ("any others like that?") still resolves.
   # [env: KNOWLEDGE_BASE_HISTORY_TURNS]
   history_turns: 5
+
+  # Workers in the knowledge base's OWN thread pool — never the shared one, so
+  # a wedged retrieval cannot starve the orchestrator (this repo's "stuck at
+  # team construction" outage). 1 also serialises access to a client that
+  # caches a safechain model and is not known to be thread-safe, and keeps
+  # parallel specialists from earning a 429 between them. Raise only if the
+  # client is confirmed thread-safe AND the backend is not rate-limiting.
+  # [env: KNOWLEDGE_BASE_MAX_CONCURRENCY]
+  max_concurrency: 1

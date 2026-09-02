@@ -63,7 +63,9 @@ import importlib
 import inspect
 import json
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
 from agents import RunContextWrapper, function_tool
@@ -95,6 +97,43 @@ _CLIENT_OVERRIDE: Callable[..., Any] | None = None
 # Modules loaded from a loose .py path, keyed by path — executing a script once
 # per specialist call would re-pay its import cost on every question.
 _PATH_MODULES: dict[str, Any] = {}
+
+# The knowledge base gets its OWN small thread pool, never the shared default
+# `to_thread` one. Two reasons, both observed rather than theoretical:
+#
+#   1. A sync call that overruns cannot be cancelled. `wait_for` gives up and we
+#      answer "unavailable", but the thread keeps working — and the client
+#      RETRIES internally on 429, so overruns are expected, not exceptional.
+#      On the shared pool those orphans accumulate until the orchestrator
+#      cannot get a thread, which is this repo's documented "stuck at team
+#      construction" outage. Confined here, a wedged knowledge base degrades
+#      only the knowledge base.
+#   2. The client caches a safechain model across calls and is not known to be
+#      thread-safe. One worker serialises access, and under rate limiting that
+#      is what you want anyway — parallel specialists calling it at once is how
+#      you earn the 429 in the first place.
+#
+# Raise `max_concurrency` only if the client is confirmed thread-safe AND the
+# backend is not rate-limiting.
+_MAX_CONCURRENCY = max(1, int(os.environ.get("KNOWLEDGE_BASE_MAX_CONCURRENCY", "1")))
+_EXECUTOR: Any = None
+_EXECUTOR_LOCK = threading.Lock()
+
+
+def _executor():
+    """The knowledge base's own worker pool, built on first use."""
+    global _EXECUTOR
+    if _EXECUTOR is None:
+        with _EXECUTOR_LOCK:
+            if _EXECUTOR is None:
+                _EXECUTOR = ThreadPoolExecutor(
+                    max_workers=_MAX_CONCURRENCY, thread_name_prefix="kb-client")
+    return _EXECUTOR
+
+
+async def _off_loop(fn: Callable[[], Any]) -> Any:
+    """Run a blocking callable on the knowledge base's own pool."""
+    return await asyncio.get_running_loop().run_in_executor(_executor(), fn)
 
 
 def set_knowledge_base_client(fn: Callable[..., Any] | None) -> None:
@@ -130,8 +169,8 @@ def _load_module_from_path(path: str):
     return module
 
 
-def _resolve_client() -> Callable[..., Any] | None:
-    """Return the configured ``answer_question`` callable, or None.
+def _resolve_client() -> tuple[Callable[..., Any] | None, str]:
+    """Return ``(callable, problem)`` for the configured entry point.
 
     ``KNOWLEDGE_BASE_CLIENT`` takes either form:
 
@@ -142,12 +181,20 @@ def _resolve_client() -> Callable[..., Any] | None:
     omitted. Resolved per call rather than at import: the env may be set after
     this module is imported (server bootstrap, notebook), and a missing package
     must degrade to "unavailable" rather than break the import graph.
+
+    ``problem`` carries WHY resolution failed, because the failures are not
+    interchangeable and one of them used to masquerade as another. Importing the
+    target RUNS the module: a real client does `load_dotenv`, imports safechain,
+    and may build a model at module scope. Any of that can raise — and reporting
+    it as "KNOWLEDGE_BASE_CLIENT is unset" (which this did) sends whoever is
+    debugging to the config, which is correct, while the actual exception is
+    swallowed. Cheap to distinguish; expensive to guess.
     """
     if _CLIENT_OVERRIDE is not None:
-        return _CLIENT_OVERRIDE
+        return _CLIENT_OVERRIDE, ""
     spec = (os.environ.get("KNOWLEDGE_BASE_CLIENT") or "").strip()
     if not spec:
-        return None
+        return None, "KNOWLEDGE_BASE_CLIENT is unset"
     # rpartition, not partition: a Windows-style or absolute path may itself
     # contain no colon, but splitting from the RIGHT keeps `/a/b.py:fn` intact.
     target, sep, attr = spec.rpartition(":")
@@ -159,10 +206,18 @@ def _resolve_client() -> Callable[..., Any] | None:
             module = _load_module_from_path(target)
         else:
             module = importlib.import_module(target)
-    except Exception:  # noqa: BLE001 — a bad config must not kill the turn
-        return None
-    fn = getattr(module, attr, None) if module is not None else None
-    return fn if callable(fn) else None
+    except Exception as exc:  # noqa: BLE001 — a bad config must not kill the turn
+        return None, (f"importing {target!r} raised "
+                      f"{type(exc).__name__}: {str(exc)[:300]}")
+    if module is None:
+        return None, f"{target!r} could not be loaded as a Python module"
+    fn = getattr(module, attr, None)
+    if fn is None:
+        return None, (f"{target!r} imported, but has no attribute {attr!r} — "
+                      f"check the name after the ':'")
+    if not callable(fn):
+        return None, f"{target}:{attr} is not callable"
+    return fn, ""
 
 
 def _client_kwargs(fn: Callable[..., Any], *, json_path: str, question: str,
@@ -442,9 +497,20 @@ async def _call_client(fn: Callable[..., Any], kwargs: dict) -> Any:
     `.claude/memory/safechain_async_and_thread_occupation.md`). So it goes to a
     worker thread, and the whole thing runs under a timeout.
     """
-    coro = fn(**kwargs) if inspect.iscoroutinefunction(fn) else asyncio.to_thread(
-        lambda: fn(**kwargs))
+    coro = (fn(**kwargs) if inspect.iscoroutinefunction(fn)
+            else _off_loop(lambda: fn(**kwargs)))
     return await asyncio.wait_for(coro, timeout=_TIMEOUT_S)
+
+
+def _looks_rate_limited(exc: Exception) -> bool:
+    """429 is not a fault to fix, it is a backend asking for less traffic.
+
+    Worth separating from a generic failure: the response is to lower
+    concurrency or widen the timeout, not to debug the client. Matched on the
+    message because the client wraps the HTTP error in its own retry logic and
+    the status code does not survive as a typed attribute."""
+    text = f"{type(exc).__name__} {exc}".lower()
+    return "429" in text or "rate limit" in text or "too many requests" in text
 
 
 _UNAVAILABLE_NOTE = (
@@ -533,19 +599,38 @@ async def knowledge_base_search(ctx: RunContextWrapper, question: str,
                     "`target_pattern`; an empty call retrieves nothing",
         })
 
-    fn = _resolve_client()
     json_path = _json_path()
-    if fn is None or not json_path:
-        missing = "KNOWLEDGE_BASE_CLIENT" if fn is None else "KNOWLEDGE_BASE_JSON"
-        out = {
-            "status": "unavailable",
-            "note": f"the knowledge base is not configured here ({missing} is "
-                    f"unset). {_UNAVAILABLE_NOTE}",
-        }
+    if not json_path:
+        out = {"status": "unavailable",
+               "note": f"the knowledge base is not configured here "
+                       f"(KNOWLEDGE_BASE_JSON is unset). {_UNAVAILABLE_NOTE}"}
         if logger is not None:
             logger.log("tool_result", {"tool": "knowledge_base_search",
                                        "status": "unavailable",
-                                       "missing": missing})
+                                       "missing": "KNOWLEDGE_BASE_JSON"})
+        return json.dumps(out)
+
+    # Resolution goes OFF THE LOOP and under the timeout, because importing the
+    # target EXECUTES it: a real client's module scope does `load_dotenv`,
+    # imports safechain, and may build a model — seconds of blocking work, some
+    # of it network I/O. Run inline it would freeze every concurrent specialist
+    # and make the turn uncancellable while it ran, which is the exact failure
+    # shape in `.claude/memory/safechain_async_and_thread_occupation.md`. The
+    # module is cached after the first success, so this is paid once.
+    try:
+        fn, problem = await asyncio.wait_for(
+            _off_loop(_resolve_client), timeout=_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        fn, problem = None, (f"importing the client did not finish within "
+                             f"{_TIMEOUT_S:.0f}s")
+    if fn is None:
+        out = {"status": "unavailable",
+               "note": f"the knowledge base client could not be loaded: "
+                       f"{problem}. {_UNAVAILABLE_NOTE}"}
+        if logger is not None:
+            logger.log("tool_result", {"tool": "knowledge_base_search",
+                                       "status": "unresolved",
+                                       "problem": problem})
         return json.dumps(out)
 
     history = build_conversation_history(
@@ -575,7 +660,8 @@ async def knowledge_base_search(ctx: RunContextWrapper, question: str,
     except asyncio.TimeoutError:
         out = {"status": "unavailable",
                "note": f"the knowledge base did not respond within "
-                       f"{_TIMEOUT_S:.0f}s. {_UNAVAILABLE_NOTE}"}
+                       f"{_TIMEOUT_S:.0f}s (it may be retrying against a "
+                       f"rate-limited backend). {_UNAVAILABLE_NOTE}"}
         if logger is not None:
             logger.log("tool_result", {"tool": "knowledge_base_search",
                                        "status": "timeout",
@@ -587,12 +673,15 @@ async def knowledge_base_search(ctx: RunContextWrapper, question: str,
         # Deliberately NOT an "error" key: `grounding._classify_scalar` reads
         # that as a rejected data call and quarantines the specialist's whole
         # answer. A KB miss is a missing OPTION, not a broken measurement.
-        out = {"status": "unavailable",
-               "note": f"the knowledge base lookup failed "
-                       f"({type(exc).__name__}). {_UNAVAILABLE_NOTE}"}
+        rate_limited = _looks_rate_limited(exc)
+        detail = ("the knowledge base is rate-limited (429) and its retries did "
+                  "not clear it" if rate_limited else
+                  f"the knowledge base lookup failed ({type(exc).__name__})")
+        out = {"status": "unavailable", "note": f"{detail}. {_UNAVAILABLE_NOTE}"}
         if logger is not None:
             logger.log("tool_result", {"tool": "knowledge_base_search",
-                                       "status": "failed",
+                                       "status": "rate_limited" if rate_limited
+                                                 else "failed",
                                        "exc_type": type(exc).__name__,
                                        "message": str(exc)[:300]})
         return json.dumps(out)

@@ -54,6 +54,7 @@ _MAP = {
     "knowledge_base.text_chars": "KNOWLEDGE_BASE_TEXT_CHARS",
     "knowledge_base.answer_chars": "KNOWLEDGE_BASE_ANSWER_CHARS",
     "knowledge_base.history_turns": "KNOWLEDGE_BASE_HISTORY_TURNS",
+    "knowledge_base.max_concurrency": "KNOWLEDGE_BASE_MAX_CONCURRENCY",
 }
 
 _DEFAULT_PATH = Path(__file__).resolve().parent / "tuning.yaml"

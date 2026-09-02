@@ -116,9 +116,10 @@ question in different words.
   `config/tuning.yaml`). Say "not applicable" and move on — it is a complete
   answer to the comparison, not a failure, so do not apologise for it or
   speculate about what the KB would have returned.
-- `status: "unavailable"` with a `note` means the KB is ON but was not
-  reachable, not fully configured, or timed out — a fault, not a setting. Say
-  so plainly and answer from this case's data.
+- `status: "unavailable"` with a `note` means the KB is ON but did not
+  answer — a fault or a busy backend, not a setting. The note says which:
+  a client that could not be loaded, a 429 rate limit its retries did not
+  clear, or a timeout. Say so plainly and answer from this case's data.
 - An empty `similar_cases` is a RESULT: "no comparable prior case was found for
   this framing" is a legitimate, useful answer.
 

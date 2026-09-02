@@ -12,6 +12,8 @@ losing the case_ids.
 import asyncio
 import json
 import pathlib
+import threading
+import time
 import types
 
 import pytest
@@ -98,7 +100,7 @@ def test_missing_client_while_enabled_is_unavailable(monkeypatch):
     kb.set_knowledge_base_client(None)
     out = _invoke("anything")
     assert out["status"] == "unavailable"
-    assert "KNOWLEDGE_BASE_CLIENT" in out["note"]
+    assert "KNOWLEDGE_BASE_CLIENT is unset" in out["note"]
 
 
 def test_client_exception_is_reported_not_raised():
@@ -296,13 +298,15 @@ def test_client_resolves_from_the_environment(monkeypatch):
     """Production wires the platform client by config, not by import."""
     monkeypatch.setenv("KNOWLEDGE_BASE_CLIENT", "json:dumps")
     kb.set_knowledge_base_client(None)
-    assert kb._resolve_client() is json.dumps
+    assert kb._resolve_client()[0] is json.dumps
 
 
 def test_bad_client_spec_degrades_to_unavailable(monkeypatch):
     monkeypatch.setenv("KNOWLEDGE_BASE_CLIENT", "no_such_module_xyz:answer_question")
     kb.set_knowledge_base_client(None)
-    assert kb._resolve_client() is None
+    fn, problem = kb._resolve_client()
+    assert fn is None
+    assert "ModuleNotFoundError" in problem
     out = _invoke("q")
     assert out["status"] == "unavailable"
 
@@ -358,15 +362,15 @@ def test_a_loose_script_is_executed_once_not_per_call(tmp_path, monkeypatch):
     script.write_text(_SCRIPT)
     monkeypatch.setenv("KNOWLEDGE_BASE_CLIENT", f"{script}:answer_question")
 
-    first = kb._resolve_client()
-    assert kb._resolve_client() is first          # cached module, same function
+    first, _ = kb._resolve_client()
+    assert kb._resolve_client()[0] is first       # cached module, same function
 
 
 def test_attr_defaults_to_answer_question(tmp_path, monkeypatch):
     script = tmp_path / "kb_client.py"
     script.write_text(_SCRIPT)
     monkeypatch.setenv("KNOWLEDGE_BASE_CLIENT", str(script))
-    assert kb._resolve_client() is not None
+    assert kb._resolve_client()[0] is not None
 
 
 # ── signature binding ───────────────────────────────────────────────────────
@@ -673,6 +677,7 @@ def test_the_switch_is_wired_to_the_tuning_yaml():
         "knowledge_base.max_bullets": "KNOWLEDGE_BASE_MAX_BULLETS",
         "knowledge_base.text_chars": "KNOWLEDGE_BASE_TEXT_CHARS",
         "knowledge_base.history_turns": "KNOWLEDGE_BASE_HISTORY_TURNS",
+        "knowledge_base.max_concurrency": "KNOWLEDGE_BASE_MAX_CONCURRENCY",
     }.items():
         assert _MAP[dotted] == env_name
 
@@ -781,3 +786,169 @@ def test_real_search_text_survives_and_carries_the_target_pattern(real_payload):
     out = summarize_kb_result(real_payload)
     assert "revolving balance" not in out["retrieval_query"].lower()
     assert "revolving balance" in out["search_text"].lower()
+
+
+# ── resolution failures must name themselves ────────────────────────────────
+#
+# From a real private-env failure: KNOWLEDGE_BASE_CLIENT was SET, the client's
+# module raised while being imported (it does `load_dotenv`, imports safechain
+# and builds a model at module scope), the bare `except` swallowed it, and the
+# tool reported "KNOWLEDGE_BASE_CLIENT is unset". That sent the debugging to the
+# config, which was fine, while the real exception went unseen. Every distinct
+# way resolution can fail now says which one it was.
+
+def _write_module(tmp_path, name: str, body: str) -> str:
+    path = tmp_path / f"{name}.py"
+    path.write_text(body)
+    return str(path)
+
+
+def test_an_import_that_raises_is_reported_with_its_exception(tmp_path, monkeypatch):
+    script = _write_module(tmp_path, "boom_at_import",
+                           "raise RuntimeError('safechain auth failed at import')\n")
+    monkeypatch.setenv("KNOWLEDGE_BASE_CLIENT", f"{script}:answer_question")
+
+    out = _invoke("q", "p")
+    assert out["status"] == "unavailable"
+    assert "RuntimeError" in out["note"]
+    assert "safechain auth failed at import" in out["note"]
+    # The failure it must NOT be mistaken for.
+    assert "is unset" not in out["note"]
+
+
+def test_a_missing_attribute_names_the_attribute(tmp_path, monkeypatch):
+    script = _write_module(tmp_path, "wrong_name", "def retrieve(**kw):\n    return {}\n")
+    monkeypatch.setenv("KNOWLEDGE_BASE_CLIENT", f"{script}:answer_question")
+
+    out = _invoke("q", "p")
+    assert out["status"] == "unavailable"
+    assert "answer_question" in out["note"]
+    assert "no attribute" in out["note"]
+
+
+def test_a_non_callable_attribute_is_reported(tmp_path, monkeypatch):
+    script = _write_module(tmp_path, "not_callable", "answer_question = 42\n")
+    monkeypatch.setenv("KNOWLEDGE_BASE_CLIENT", f"{script}:answer_question")
+    assert "not callable" in _invoke("q", "p")["note"]
+
+
+def test_unset_still_says_unset(monkeypatch):
+    monkeypatch.setenv("KNOWLEDGE_BASE_ENABLED", "1")
+    monkeypatch.delenv("KNOWLEDGE_BASE_CLIENT", raising=False)
+    kb.set_knowledge_base_client(None)
+    assert "KNOWLEDGE_BASE_CLIENT is unset" in _invoke("q", "p")["note"]
+
+
+def test_resolution_failures_are_logged_with_the_reason(tmp_path, monkeypatch):
+    script = _write_module(tmp_path, "boom_logged", "raise ValueError('nope')\n")
+    monkeypatch.setenv("KNOWLEDGE_BASE_CLIENT", f"{script}:answer_question")
+    events = []
+    logger = types.SimpleNamespace(log=lambda n, p: events.append((n, p)))
+
+    _invoke("q", "p", ctx=_ctx(logger=logger))
+
+    result = [p for n, p in events if n == "tool_result"][0]
+    assert result["status"] == "unresolved"
+    assert "ValueError" in result["problem"]
+
+
+def test_the_import_runs_off_the_event_loop(tmp_path, monkeypatch):
+    """Importing the client EXECUTES it — `load_dotenv`, safechain imports, maybe
+    a model build. On the loop that would freeze every concurrent specialist and
+    make the turn uncancellable, the failure shape safechain already taught us."""
+    script = _write_module(
+        tmp_path, "records_thread",
+        "import threading\n"
+        "IMPORT_THREAD = threading.current_thread().name\n"
+        "def answer_question(**kw):\n"
+        "    return {'answer': '', 'retrieval_query': '',\n"
+        "            'matched_clusters': [], 'relevant_bullets': []}\n")
+    monkeypatch.setenv("KNOWLEDGE_BASE_CLIENT", f"{script}:answer_question")
+
+    out = _invoke("q", "p")
+    assert out["status"] == "ok"
+    module = kb._PATH_MODULES[script]
+    assert module.IMPORT_THREAD != "MainThread", \
+        "the client module was imported on the event loop's thread"
+
+
+def test_a_hanging_import_times_out_instead_of_wedging_the_turn(tmp_path, monkeypatch):
+    script = _write_module(tmp_path, "slow_import",
+                           "import time\ntime.sleep(5)\n"
+                           "def answer_question(**kw):\n    return {}\n")
+    monkeypatch.setenv("KNOWLEDGE_BASE_CLIENT", f"{script}:answer_question")
+    monkeypatch.setattr(kb, "_TIMEOUT_S", 0.3)
+
+    out = _invoke("q", "p")
+    assert out["status"] == "unavailable"
+    assert "did not finish within" in out["note"]
+
+
+# ── rate limiting and thread confinement ────────────────────────────────────
+#
+# Reported from the private env: the retrieval client hits 429 and retries
+# internally. That makes an overrun EXPECTED, which changes two things — a 429
+# must be distinguishable from a broken client, and an overrunning call must
+# not be able to consume the threads the orchestrator needs.
+
+@pytest.mark.parametrize("message", [
+    "429 Too Many Requests",
+    "Rate limit reached for embeddings",
+    "HTTP 429: too many requests, retry after 20s",
+])
+def test_a_429_is_named_rather_than_reported_as_a_generic_failure(message):
+    def _throttled(**kwargs):
+        raise RuntimeError(message)
+
+    kb.set_knowledge_base_client(_throttled)
+    events = []
+    logger = types.SimpleNamespace(log=lambda n, p: events.append((n, p)))
+    out = _invoke("q", "p", ctx=_ctx(logger=logger))
+
+    assert out["status"] == "unavailable"
+    assert "rate-limited" in out["note"]
+    result = [p for n, p in events if n == "tool_result"][0]
+    assert result["status"] == "rate_limited"
+    assert result["message"]                      # the original text is kept
+
+
+def test_a_non_429_failure_is_still_reported_as_failed():
+    kb.set_knowledge_base_client(
+        lambda **kw: (_ for _ in ()).throw(ValueError("bad json path")))
+    events = []
+    logger = types.SimpleNamespace(log=lambda n, p: events.append((n, p)))
+    out = _invoke("q", "p", ctx=_ctx(logger=logger))
+
+    assert "rate-limited" not in out["note"]
+    assert [p for n, p in events if n == "tool_result"][0]["status"] == "failed"
+
+
+def test_the_client_runs_on_its_own_pool_not_the_shared_one():
+    """A retrieval that overruns cannot be cancelled — the thread keeps going.
+    On the shared `to_thread` pool those orphans accumulate until the
+    orchestrator cannot get a worker. Confined to a named pool, a wedged
+    knowledge base degrades only the knowledge base."""
+    seen = {}
+
+    def _client(**kwargs):
+        seen["thread"] = threading.current_thread().name
+        return _PAYLOAD
+
+    kb.set_knowledge_base_client(_client)
+    _invoke("q", "p")
+    assert seen["thread"].startswith("kb-client")
+
+
+def test_the_timeout_note_points_at_the_rate_limiter(monkeypatch):
+    """When the client is retrying against a 429 backend, "did not respond" on
+    its own sends the reader looking for a network fault."""
+    monkeypatch.setattr(kb, "_TIMEOUT_S", 0.1)
+
+    def _slow(**kwargs):
+        time.sleep(3)
+        return _PAYLOAD
+
+    kb.set_knowledge_base_client(_slow)
+    out = _invoke("q", "p")
+    assert out["status"] == "unavailable"
+    assert "rate-limited backend" in out["note"]
