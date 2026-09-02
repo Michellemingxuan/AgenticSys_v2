@@ -37,8 +37,9 @@ def test_build_specialist_agent_returns_agent():
     pillar_block = prompt.split("§ PILLAR CONTEXT", 1)[1].split("§ WORKFLOW", 1)[0]
     assert not re.search(r"\b20\d\d-\d\d-\d\d\b", pillar_block), \
         "a hard-coded cut-off date reappeared in the pillar context block"
-    # 14 data tools + make_chart + get_chart_guidance + kb_list_topics + kb_lookup
-    assert len(agent.tools) == 18
+    # 14 data tools + make_chart + get_chart_guidance + kp_list_topics +
+    # kp_lookup + knowledge_base_search
+    assert len(agent.tools) == 19
     assert {t.name for t in agent.tools} == {
         "list_available_tables", "get_table_schema", "search_columns",
         "query_table", "batch_query_table", "join_table", "sequence_join",
@@ -46,7 +47,8 @@ def test_build_specialist_agent_returns_agent():
         "aggregate_column", "batch_aggregate",
         "summarize_trend", "batch_summarize_trend", "summarize_by_group",
         "make_chart", "get_chart_guidance",
-        "kb_list_topics", "kb_lookup",
+        "kp_list_topics", "kp_lookup",
+        "knowledge_base_search",
     }
     assert agent.model_settings.parallel_tool_calls is True
     # data_viz.md is NOT composed inline anymore — its content lives

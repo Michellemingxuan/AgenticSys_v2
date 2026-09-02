@@ -447,7 +447,7 @@ _STATE = """
 
   <p class="muted">
     Snapshots are taken at end-of-turn after distillers drain, after
-    qa_cache + specialist_kb are updated. Rewind drops
+    qa_cache + specialist_kps are updated. Rewind drops
     all snapshots for this chat (same lifetime as the trace rows).
   </p>
 
@@ -456,8 +456,8 @@ _STATE = """
     <thead><tr>
       <th>turn_id</th><th>taken (SGT)</th>
       <th class="right">qa_cache</th>
-      <th class="right">KB specialists</th>
-      <th class="right">KB KPs</th>
+      <th class="right">KP specialists</th>
+      <th class="right">KPs</th>
     </tr></thead>
     <tbody>
     {% for s in snapshots %}
@@ -479,8 +479,8 @@ _STATE = """
       <pre>{{ latest.qa_cache_pretty }}</pre>
     </details>
     <details>
-      <summary><strong>specialist_kb</strong> · {{ latest.kb_specialists_n }} specialists, {{ latest.kb_kps_n }} knowledge points</summary>
-      <pre>{{ latest.kb_pretty }}</pre>
+      <summary><strong>specialist_kps</strong> · {{ latest.kb_specialists_n }} specialists, {{ latest.kb_kps_n }} knowledge points</summary>
+      <pre>{{ latest.kps_pretty }}</pre>
     </details>
   {% else %}
     <p class="muted">No snapshots yet. Restart the server and run a turn to populate.</p>
@@ -613,8 +613,8 @@ _TURN = _NODE_DETAIL_MACRO + """
           <td class="right">{{ snapshot.qa_cache_n }} entries</td>
           <td class="muted">conversation cache of prior Q→A; serves replays on near-duplicate questions</td>
         </tr>
-        <tr class="clickable" data-node-id="xt-kb">
-          <td><strong>specialist_kb</strong></td>
+        <tr class="clickable" data-node-id="xt-kps">
+          <td><strong>specialist_kps</strong></td>
           <td class="right">{{ snapshot.kb_kps_n }} KPs / {{ snapshot.kb_specialists_n }} specialists</td>
           <td class="muted">distilled knowledge points; preface each specialist's next prompt</td>
         </tr>
@@ -642,10 +642,10 @@ _TURN = _NODE_DETAIL_MACRO + """
         <p class="muted" style="margin:0 0 12px;">{{ snapshot.qa_cache_n }} entries · cached at {{ snapshot.taken_at_sg }}</p>
         <pre>{{ snapshot.qa_cache_pretty }}</pre>
       </div>
-      <div class="node-detail" id="node-detail-xt-kb">
-        <h3 style="margin:0 0 6px;">specialist_kb</h3>
+      <div class="node-detail" id="node-detail-xt-kps">
+        <h3 style="margin:0 0 6px;">specialist_kps</h3>
         <p class="muted" style="margin:0 0 12px;">{{ snapshot.kb_specialists_n }} specialists · {{ snapshot.kb_kps_n }} knowledge points</p>
-        <pre>{{ snapshot.kb_pretty }}</pre>
+        <pre>{{ snapshot.kps_pretty }}</pre>
       </div>
     {% endif %}
   </div>
@@ -1052,7 +1052,7 @@ def turn(chat_id: str, turn_id: str):
         snapshot = dict(snap_row)
         snapshot["taken_at_sg"] = _iso_to_sgt(snapshot.get("taken_at"))
         for src, dst in (("qa_cache_json", "qa_cache_pretty"),
-                         ("specialist_kb_json", "kb_pretty")):
+                         ("specialist_kb_json", "kps_pretty")):
             raw = snapshot.get(src)
             if raw:
                 try:
@@ -1131,7 +1131,7 @@ def state(chat_id: str):
     if snaps:
         latest = dict(snaps[0])
         for src_key, dst_key in (("qa_cache_json", "qa_cache_pretty"),
-                                 ("specialist_kb_json", "kb_pretty")):
+                                 ("specialist_kb_json", "kps_pretty")):
             raw = latest.get(src_key)
             if raw:
                 try:

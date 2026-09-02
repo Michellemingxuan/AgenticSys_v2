@@ -74,7 +74,7 @@ def _strip_row(row: dict) -> dict:
     `Merchant Name` cells on case 366132845011 carry trailing spaces. Filters
     already tolerated it (`_apply_filter` compares stripped), but the padding
     survived into OUTPUT: group labels, chart axes, quoted merchant names in
-    findings, and KB claims all rendered ragged, and two spellings of the same
+    findings, and KP claims all rendered ragged, and two spellings of the same
     merchant could not be compared as strings.
 
     Fixed here rather than in each tool: one boundary, and every consumer —

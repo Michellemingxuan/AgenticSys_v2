@@ -2,7 +2,7 @@
 
 `_active_kps` supersedes on exact string equality, so `tsr_cdss_trajectory`
 does not supersede `cdss_tsr_trajectory` — both sit in the digest as separate
-cached topics and `kb_lookup` on the original returns the stale claim while the
+cached topics and `kp_lookup` on the original returns the stale claim while the
 fresh one hides under a name the specialist has no reason to guess. Observed 9x
 on one topic across 40 turns in case 366132845011.
 
@@ -17,7 +17,7 @@ from agent_factories.agent_tools.distiller_pass import (
     _snap_topic,
     _topic_key,
 )
-from tools.kb_tools import _active_kps
+from tools.kp_tools import _active_kps
 
 
 # ── the snap ──────────────────────────────────────────────────────────────
@@ -69,9 +69,9 @@ def test_snapped_topic_supersedes_instead_of_forking_the_digest():
 def test_narrow_path_snaps_a_reworded_sub_question():
     # `_slug_topic` builds the slug from the sub-question's wording, so a
     # re-ask in a different order would otherwise fork the topic.
-    kb = {"spend_payments": [{"topic": "total_spend_payment_status",
+    kps = {"spend_payments": [{"topic": "total_spend_payment_status",
                               "claim": "old", "captured_at_seq": 1}]}
-    ctx = SimpleNamespace(logger=None, _distiller=object(), _specialist_kb=kb,
+    ctx = SimpleNamespace(logger=None, _distiller=object(), _specialist_kps=kps,
                           _turn_id="t2", _turn_seq=2, _node_trace_store=None)
     narrow = SimpleNamespace(findings="Spend is $4,120; 2 payments missed.", evidence=[])
 
@@ -79,8 +79,8 @@ def test_narrow_path_snaps_a_reworded_sub_question():
         ctx, "spend_payments", "what is the payment status and total spend", narrow))
 
     assert n == 1
-    assert kb["spend_payments"][-1]["topic"] == "total_spend_payment_status"
-    assert len(_active_kps(kb["spend_payments"])) == 1
+    assert kps["spend_payments"][-1]["topic"] == "total_spend_payment_status"
+    assert len(_active_kps(kps["spend_payments"])) == 1
 
 
 # ── the distiller path, end to end ────────────────────────────────────────
@@ -96,9 +96,9 @@ def test_distiller_emitting_a_permuted_slug_is_snapped_and_logged(monkeypatch):
         def log(self, event, payload):
             events.append((event, payload))
 
-    kb = {"modeling": [{"topic": "cdss_tsr_trajectory", "claim": "old",
+    kps = {"modeling": [{"topic": "cdss_tsr_trajectory", "claim": "old",
                         "captured_at_seq": 1, "captured_at_turn": "t1"}]}
-    ctx = SimpleNamespace(logger=_Logger(), _distiller=object(), _specialist_kb=kb,
+    ctx = SimpleNamespace(logger=_Logger(), _distiller=object(), _specialist_kps=kps,
                           _turn_id="t2", _turn_seq=2, _node_trace_store=None,
                           case_folder=None, _catalog=None)
 
@@ -127,9 +127,9 @@ def test_distiller_emitting_a_permuted_slug_is_snapped_and_logged(monkeypatch):
     # The prompt carried the existing slug...
     assert "cdss_tsr_trajectory" in seen_input[0]
     # ...and the snap fixed it anyway when the distiller ignored it.
-    assert kb["modeling"][-1]["topic"] == "cdss_tsr_trajectory"
-    assert len(_active_kps(kb["modeling"])) == 1
-    assert _active_kps(kb["modeling"])[0]["claim"] == "fresh"
+    assert kps["modeling"][-1]["topic"] == "cdss_tsr_trajectory"
+    assert len(_active_kps(kps["modeling"])) == 1
+    assert _active_kps(kps["modeling"])[0]["claim"] == "fresh"
     # Visible in the JSONL so drift frequency stays auditable.
     assert any(e == "distiller_topic_snapped"
                and p.get("emitted") == "tsr_cdss_trajectory"
@@ -145,11 +145,11 @@ def test_distiller_input_lists_existing_slugs_for_reuse():
     import agent_factories.agent_tools.distiller_pass as dp
 
     src = inspect.getsource(dp._distill_and_persist)
-    assert "Topic slugs already in this specialist's KB" in src
+    assert "Topic slugs already in this specialist's KP" in src
     assert "reuse " in src and "EXACTLY" in src
     # Only the ACTIVE set — superseded entries share their slug with the
     # active one, so listing them would just repeat names.
-    assert "_active_kps(kb.get(name, []))" in src
+    assert "_active_kps(kps.get(name, []))" in src
     # The prompt is bounded so a long case can't crowd out the payload...
     assert "existing_topics[-_MAX_EXISTING_TOPICS:]" in src
 
@@ -161,11 +161,11 @@ def test_snap_checks_every_topic_even_those_cut_from_the_prompt():
     import agent_factories.agent_tools.distiller_pass as dp
 
     oldest = "cdss_tsr_trajectory"
-    kb = {"modeling": [{"topic": oldest, "claim": "old", "captured_at_seq": 0}] + [
+    kps = {"modeling": [{"topic": oldest, "claim": "old", "captured_at_seq": 0}] + [
         {"topic": f"filler_topic_{i}", "claim": "x", "captured_at_seq": i + 1}
         for i in range(dp._MAX_EXISTING_TOPICS + 10)]}
 
-    active = [kp["topic"] for kp in _active_kps(kb["modeling"])]
+    active = [kp["topic"] for kp in _active_kps(kps["modeling"])]
     assert oldest not in active[-dp._MAX_EXISTING_TOPICS:]   # off the prompt
     assert _snap_topic("tsr_cdss_trajectory", active) == oldest   # still snapped
 

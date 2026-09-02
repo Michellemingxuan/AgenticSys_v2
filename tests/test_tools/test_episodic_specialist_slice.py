@@ -3,11 +3,11 @@ from tools.episodic import select_specialist_episodic, render_specialist_block
 
 
 def test_compose_preserves_new_question_marker_and_order():
-    out = _compose_specialist_input("[EP mine]", "[KB digest]", "sub-q?")
-    assert out == "[EP mine]\n\n[KB digest]\n\n--- New question ---\nsub-q?"
-    # KB-only (no episodic) must be BYTE-IDENTICAL to the prior format:
-    assert _compose_specialist_input("", "[KB digest]", "sub-q?") == \
-        "[KB digest]\n\n--- New question ---\nsub-q?"
+    out = _compose_specialist_input("[EP mine]", "[KP digest]", "sub-q?")
+    assert out == "[EP mine]\n\n[KP digest]\n\n--- New question ---\nsub-q?"
+    # KP-only (no episodic) must be BYTE-IDENTICAL to the prior format:
+    assert _compose_specialist_input("", "[KP digest]", "sub-q?") == \
+        "[KP digest]\n\n--- New question ---\nsub-q?"
     # No preface at all → just the question (unchanged):
     assert _compose_specialist_input("", "", "sub-q?") == "sub-q?"
 

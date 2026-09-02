@@ -1,7 +1,7 @@
 """Layer-5 input builders for the agent_tool wrapper.
 
 Assembles the input message passed to a wrapped specialist Agent: the episodic
-slice, KB digest, and directed-variable prefixes composed ahead of the
+slice, KP digest, and directed-variable prefixes composed ahead of the
 sub-question, plus the transcript compaction that trims older tool-result
 payloads from a reused specialist history.
 """
@@ -28,15 +28,15 @@ def _format_agent_case_summary_block(summary: str) -> str:
             + summary + "\n]")
 
 
-def _compose_specialist_input(episodic_block: str, kb_digest: str,
+def _compose_specialist_input(episodic_block: str, kp_digest: str,
                               sub_question: str, directed_block: str = "",
                               case_summary_block: str = "") -> str:
     """Prepend the agent case summary (older accumulated findings), episodic
-    slice, KB digest, and directed-variable block (each non-empty, in that
+    slice, KP digest, and directed-variable block (each non-empty, in that
     order) before the sub-question. Directed variables sit last (nearest the
     question) as the most question-specific prefix. Byte-identical to the prior
     behavior when directed_block and case_summary_block are empty."""
-    prefixes = [p for p in (case_summary_block, episodic_block, kb_digest,
+    prefixes = [p for p in (case_summary_block, episodic_block, kp_digest,
                             directed_block) if p]
     if not prefixes:
         return sub_question
@@ -78,21 +78,21 @@ def _render_directed_variables(
 
 def assemble_specialist_input(app_ctx, name, redacted_in, concepts, catalog,
                               data_hints, logger) -> tuple[str, int]:
-    """Layer 5 — build a specialist's first-call input: episodic + KB digest +
-    directed variables + sub-question. Returns (contextual_in, kb_digest_n_kps)."""
-    from tools.kb_tools import _active_kps, _format_kb_digest
+    """Layer 5 — build a specialist's first-call input: episodic + KP digest +
+    directed variables + sub-question. Returns (contextual_in, kp_digest_n_kps)."""
+    from tools.kp_tools import _active_kps, _format_kp_digest
     from tools.episodic import (
         EPISODIC_TURNS, render_specialist_block, select_specialist_episodic,
     )
-    kb_digest, kps_for_name = "", []
-    kb_obj = getattr(app_ctx, "_specialist_kb", None)
+    kp_digest, kps_for_name = "", []
+    kp_obj = getattr(app_ctx, "_specialist_kps", None)
     # report_agent retrieves from curated report files via fs_grep /
-    # fs_read_file, not the KB — so it gets no KB digest (and never the
-    # cross-specialist topics, which it can't kb_lookup anyway). Its own
+    # fs_read_file, not the KP — so it gets no KP digest (and never the
+    # cross-specialist topics, which it can't kp_lookup anyway). Its own
     # episodic slice (prior report drafts) is still injected below.
-    if name != "report_agent" and isinstance(kb_obj, dict):
-        kps_for_name = kb_obj.get(name, [])
-        kb_digest = _format_kb_digest(kps_for_name, full_kb=kb_obj, self_name=name)
+    if name != "report_agent" and isinstance(kp_obj, dict):
+        kps_for_name = kp_obj.get(name, [])
+        kp_digest = _format_kp_digest(kps_for_name, full_kps=kp_obj, self_name=name)
     try:
         _recs = getattr(app_ctx, "_episodic_records", None) or []
         _episodic_block = render_specialist_block(
@@ -119,7 +119,7 @@ def assemble_specialist_input(app_ctx, name, redacted_in, concepts, catalog,
                             "error": repr(_dv_exc)})
     # Agent-specific case summary: this specialist's own condensed older
     # findings (built durably every consolidate tick, once it has run in >
-    # EPISODIC_TURNS turns). Injected when present; report_agent has no KB/case
+    # EPISODIC_TURNS turns). Injected when present; report_agent has no KP/case
     # memory of its own.
     _agent_summary_block = ""
     if name != "report_agent":
@@ -138,9 +138,9 @@ def assemble_specialist_input(app_ctx, name, redacted_in, concepts, catalog,
                     logger.log("agent_case_summary_load_failed",
                                {"specialist": name, "error": repr(_cs_exc)})
     contextual_in = _compose_specialist_input(
-        _episodic_block, kb_digest, redacted_in, _directed_block,
+        _episodic_block, kp_digest, redacted_in, _directed_block,
         case_summary_block=_agent_summary_block)
-    return contextual_in, (len(_active_kps(kps_for_name)) if kb_digest else 0)
+    return contextual_in, (len(_active_kps(kps_for_name)) if kp_digest else 0)
 
 
 def _compact_specialist_history(

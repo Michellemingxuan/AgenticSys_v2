@@ -12,9 +12,9 @@ from runner.turn import conductor
 
 
 class _Sess:
-    def __init__(self, kb=None):
+    def __init__(self, kps=None):
         self.events = []
-        self.specialist_kb = kb or {}
+        self.specialist_kps = kps or {}
         self.case_id = "CASE-1"
         self.logger = types.SimpleNamespace(log=lambda *a, **k: None)
 
@@ -63,7 +63,7 @@ def test_the_reason_is_carried_through(monkeypatch):
 def test_a_chart_that_exists_is_emitted_and_not_retracted(monkeypatch):
     sess = _Sess()
     monkeypatch.setattr(conductor, "_collect_turn_charts",
-                        lambda kb, turn_id, case_id: [
+                        lambda kps, turn_id, case_id: [
                             {"specialist": "bureau", "topic": "fico_trend"}])
     monkeypatch.setattr(conductor, "_find_kp", lambda *a, **k: {"claim": "c"})
     monkeypatch.setattr(conductor, "_build_chart_payload",

@@ -3,7 +3,7 @@
 Adds a ``make_chart`` function tool to each domain specialist so it can
 explicitly render a chart when a finding is more interpretable as a graph
 than as prose + numbers. The tool writes a KnowledgePoint-shaped entry
-into ``app_ctx._specialist_kb[<specialist_name>]`` with ``image_path``
+into ``app_ctx._specialist_kps[<specialist_name>]`` with ``image_path``
 populated, so the existing ``_collect_turn_charts`` path in server.py
 embeds the chart under "Supporting charts" in the agent's answer — same
 mechanism the auto-distiller pipeline uses, no new collection / serving
@@ -11,7 +11,7 @@ code needed.
 
 Per-specialist binding: each specialist gets its own tool instance via
 ``build_make_chart_tool(specialist_name)``. The factory closes over the
-specialist's name so the tool knows which KB list to append to without
+specialist's name so the tool knows which KP list to append to without
 needing the caller to identify themselves at invocation time. (We can't
 read the calling agent's name from ``RunContextWrapper`` reliably — the
 SDK doesn't surface it — so factory binding is the cleanest path.)
@@ -84,7 +84,7 @@ async def get_chart_guidance(ctx: RunContextWrapper) -> str:  # noqa: ARG001
 
 
 def build_make_chart_tool(specialist_name: str):
-    """Return a ``function_tool`` bound to ``specialist_name`` for KB writes.
+    """Return a ``function_tool`` bound to ``specialist_name`` for KP writes.
 
     STRICT. `points` arrives as a JSON STRING rather than `list[dict]`,
     because a strict schema rejects open-ended object arrays — the same reason
@@ -208,14 +208,14 @@ def build_make_chart_tool(specialist_name: str):
             )
 
         app_ctx: Any = ctx.context if ctx else None
-        kb = getattr(app_ctx, "_specialist_kb", None)
+        kps = getattr(app_ctx, "_specialist_kps", None)
         case_folder = getattr(app_ctx, "case_folder", None)
         turn_id = getattr(app_ctx, "_turn_id", None)
         turn_seq = getattr(app_ctx, "_turn_seq", None)
         logger = getattr(app_ctx, "logger", None)
         emit_event = getattr(app_ctx, "_emit_event", None)
 
-        if kb is None or case_folder is None:
+        if kps is None or case_folder is None:
             # Test paths or legacy callers without a full session — we
             # can't render or persist. Surface a clear error so the LLM
             # doesn't pretend a chart exists.
@@ -267,7 +267,7 @@ def build_make_chart_tool(specialist_name: str):
         # pipeline (server-side `_collect_turn_charts` + `chart` SSE
         # event) picks it up.
         if kind == "table":
-            kb.setdefault(specialist_name, []).append(kp_dict)
+            kps.setdefault(specialist_name, []).append(kp_dict)
             n_cols = len(y_fields) if y_fields else len(points[0]) if points else 0
             if logger is not None:
                 logger.log("make_chart_tool_invoked", {
@@ -301,7 +301,7 @@ def build_make_chart_tool(specialist_name: str):
                             p[th_key] = th_val
 
         # NB: the Vega-Lite spec is NOT stored on the KP — it roughly
-        # duplicates `numbers` and would bloat the KB / distilled memory that
+        # duplicates `numbers` and would bloat the KP / distilled memory that
         # flows across turns. It is regenerated on demand at emit time in
         # `finalize._build_chart_payload`. See that helper for the rationale.
 
@@ -323,7 +323,7 @@ def build_make_chart_tool(specialist_name: str):
             )
 
         kp_dict["image_path"] = img_path
-        kb.setdefault(specialist_name, []).append(kp_dict)
+        kps.setdefault(specialist_name, []).append(kp_dict)
 
         if logger is not None:
             logger.log("make_chart_tool_invoked", {

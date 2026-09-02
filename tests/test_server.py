@@ -1,7 +1,7 @@
 """Tests for server.py helpers that are testable without booting the Flask app.
 
 Importing server.py runs heavy bootstrap (data source resolution, catalog,
-firewall stack), so we only target pure helpers — e.g., the KB-warmth hint
+firewall stack), so we only target pure helpers — e.g., the KP-warmth hint
 and bounded session-memory helpers.
 """
 
@@ -24,14 +24,14 @@ import server  # noqa: E402
 from runner.turn import cache  # noqa: E402
 from runner.turn import conductor  # noqa: E402
 from runner.turn import finalize  # noqa: E402
-from runner.turn.input_assembly import _format_kb_warmth_hint  # noqa: E402
+from runner.turn.input_assembly import _format_kp_warmth_hint  # noqa: E402
 
 
-# ── KB-warmth hint ──────────────────────────────────────────────────────────
+# ── KP-warmth hint ──────────────────────────────────────────────────────────
 
 
-def test_format_kb_warmth_hint_lists_warm_specialists():
-    kb = {
+def test_format_kp_warmth_hint_lists_warm_specialists():
+    kps = {
         "spend_payments": [{"topic": "a", "claim": "x"},
                            {"topic": "b", "claim": "y"},
                            {"topic": "c", "claim": "z"}],
@@ -39,8 +39,8 @@ def test_format_kb_warmth_hint_lists_warm_specialists():
                      {"topic": "e", "claim": "v"}],
         "bureau": [],  # empty → must NOT appear in the hint
     }
-    hint = _format_kb_warmth_hint(kb)
-    assert hint.startswith("[KB-warmth —")
+    hint = _format_kp_warmth_hint(kps)
+    assert hint.startswith("[KP-warmth —")
     assert "spend_payments (3 KPs)" in hint
     assert "modeling (2 KPs)" in hint
     assert "bureau" not in hint
@@ -51,27 +51,27 @@ def test_format_kb_warmth_hint_lists_warm_specialists():
     assert "- d: w" in hint
 
 
-def test_format_kb_warmth_hint_preserves_full_claim_and_marks_truncation():
+def test_format_kp_warmth_hint_preserves_full_claim_and_marks_truncation():
     """Claims up to the (raised) limit appear in full — a two-metric claim is
     no longer cut mid-fact at 120 chars; only genuinely over-long claims are
     truncated, and then with a visible '…'."""
     from runner.turn.input_assembly import _KB_WARMTH_CLAIM_CHARS
     mid = "M" * 200                               # under the limit -> shown whole
     long = "L" * (_KB_WARMTH_CLAIM_CHARS + 50)    # over the limit -> clipped + "…"
-    kb = {"modeling": [{"topic": "mid", "claim": mid},
+    kps = {"modeling": [{"topic": "mid", "claim": mid},
                        {"topic": "long", "claim": long}]}
-    hint = _format_kb_warmth_hint(kb)
+    hint = _format_kp_warmth_hint(kps)
     assert mid in hint                                       # full 200 chars (old 120 would cut)
     assert ("L" * _KB_WARMTH_CLAIM_CHARS) + "…" in hint      # truncated at limit + ellipsis
     assert long not in hint                                  # not shown in full
 
 
-def test_format_kb_warmth_hint_empty_when_no_warm_specialists():
-    """Empty KB or all-empty values → empty hint, so the orchestrator's
+def test_format_kp_warmth_hint_empty_when_no_warm_specialists():
+    """Empty KP or all-empty values → empty hint, so the orchestrator's
     prompt isn't cluttered on the first turn or after /rewind."""
-    assert _format_kb_warmth_hint({}) == ""
-    assert _format_kb_warmth_hint({"x": [], "y": []}) == ""
-    assert _format_kb_warmth_hint(None) == ""
+    assert _format_kp_warmth_hint({}) == ""
+    assert _format_kp_warmth_hint({"x": [], "y": []}) == ""
+    assert _format_kp_warmth_hint(None) == ""
 
 
 # ── Bounded session memory ──────────────────────────────────────────────────
@@ -309,7 +309,7 @@ def test_prewarm_swallows_failures(monkeypatch):
 def test_collect_turn_charts_filters_by_turn_and_image_path():
     """Only KPs with `captured_at_turn == turn_id` AND a non-empty
     `image_path` are surfaced as charts to embed."""
-    kb = {
+    kps = {
         "spend_payments": [
             # In this turn, has chart — should appear
             {"topic": "trend", "captured_at_turn": "t-now",
@@ -325,7 +325,7 @@ def test_collect_turn_charts_filters_by_turn_and_image_path():
              "image_path": "/abs/foo/charts/t-now-delinq.png"},
         ],
     }
-    charts = finalize._collect_turn_charts(kb, "t-now", "CASE-1")
+    charts = finalize._collect_turn_charts(kps, "t-now", "CASE-1")
     topics = {c["topic"] for c in charts}
     assert topics == {"trend", "delinq"}
     # URL points at the Flask route, not the on-disk path.
@@ -338,7 +338,7 @@ def test_collect_turn_charts_dedupes_same_topic_per_specialist():
     """When both `make_chart` and the auto-distiller produce a chart for
     the same (specialist, topic) in one turn, only the latest entry
     surfaces — so the reviewer sees one chart per topic, not two."""
-    kb = {
+    kps = {
         "spend_payments": [
             # Earlier (e.g. make_chart explicit): same topic, same turn
             {"topic": "monthly_trend", "captured_at_turn": "t-now",
@@ -351,7 +351,7 @@ def test_collect_turn_charts_dedupes_same_topic_per_specialist():
              "image_path": "/abs/case/charts/t-now-merchants.png"},
         ],
     }
-    charts = finalize._collect_turn_charts(kb, "t-now", "C1")
+    charts = finalize._collect_turn_charts(kps, "t-now", "C1")
     topics = sorted(c["topic"] for c in charts)
     assert topics == ["merchants", "monthly_trend"]
     # The dedup target carries the LATEST image_path (the v2 one).
@@ -363,7 +363,7 @@ def test_collect_turn_charts_does_not_dedupe_when_no_fingerprint():
     """Two specialists with the same topic but NO fingerprintable content
     (no viz/numbers) both appear — same topic name ≠ same figure, and there is
     no data to compare, so nothing is deduped."""
-    kb = {
+    kps = {
         "spend_payments": [
             {"topic": "x", "captured_at_turn": "t",
              "image_path": "/abs/case/charts/t-x-sp.png"},
@@ -373,7 +373,7 @@ def test_collect_turn_charts_does_not_dedupe_when_no_fingerprint():
              "image_path": "/abs/case/charts/t-x-mod.png"},
         ],
     }
-    charts = finalize._collect_turn_charts(kb, "t", "C")
+    charts = finalize._collect_turn_charts(kps, "t", "C")
     specialists = sorted(c["specialist"] for c in charts)
     assert specialists == ["modeling", "spend_payments"]
 
@@ -384,20 +384,20 @@ def test_collect_turn_charts_dedupes_same_figure_across_specialists():
     content fingerprint, not topic name. Different data is NOT deduped."""
     numbers = [{"period": "2024-11", "value": 300},
                {"period": "2024-12", "value": 500}]
-    kb = {
+    kps = {
         # dispatch order: spend_payments first → it wins the dedup.
         "spend_payments": [_kp("monthly_spend_trend", "trend", ["value"], numbers)],
         "modeling": [_kp("spend_amount_trend", "trend", ["value"], list(numbers))],
     }
-    charts = finalize._collect_turn_charts(kb, "t-now", "CASE-D")
+    charts = finalize._collect_turn_charts(kps, "t-now", "CASE-D")
     assert len(charts) == 1
     assert charts[0]["specialist"] == "spend_payments"
 
     # Different data → two distinct figures, both kept.
-    kb["modeling"] = [_kp("tsr_trend", "trend", ["value"],
+    kps["modeling"] = [_kp("tsr_trend", "trend", ["value"],
                           [{"period": "2024-11", "value": 10},
                            {"period": "2024-12", "value": 20}])]
-    assert len(finalize._collect_turn_charts(kb, "t-now", "CASE-D")) == 2
+    assert len(finalize._collect_turn_charts(kps, "t-now", "CASE-D")) == 2
 
 
 def test_collect_turn_charts_never_dedupes_flat_series():
@@ -406,11 +406,11 @@ def test_collect_turn_charts_never_dedupes_flat_series():
     apart, so they are NEVER deduped. Both survive."""
     flat_a = [{"period": "2024-11", "value": 0}, {"period": "2024-12", "value": 0}]
     flat_b = [{"period": "2024-11", "value": 0}, {"period": "2024-12", "value": 0}]
-    kb = {
+    kps = {
         "modeling": [_kp("dead_feature_a", "trend", ["value"], flat_a)],
         "spend_payments": [_kp("dead_feature_b", "trend", ["value"], flat_b)],
     }
-    assert len(finalize._collect_turn_charts(kb, "t-now", "C")) == 2
+    assert len(finalize._collect_turn_charts(kps, "t-now", "C")) == 2
 
 
 def test_collect_turn_charts_never_dedupes_when_x_field_absent():
@@ -420,11 +420,11 @@ def test_collect_turn_charts_never_dedupes_when_x_field_absent():
     # x_field is "period" (from _kp) but the rows key it as "month".
     a = [{"month": "2024-01", "value": 1}, {"month": "2024-02", "value": 2}]
     b = [{"month": "2024-07", "value": 1}, {"month": "2024-08", "value": 2}]
-    kb = {
+    kps = {
         "modeling": [_kp("m_a", "trend", ["value"], a)],
         "spend_payments": [_kp("m_b", "trend", ["value"], b)],
     }
-    assert len(finalize._collect_turn_charts(kb, "t-now", "C")) == 2
+    assert len(finalize._collect_turn_charts(kps, "t-now", "C")) == 2
 
 
 def test_collect_turn_charts_surfaces_table_kps_without_image():
@@ -433,7 +433,7 @@ def test_collect_turn_charts_surfaces_table_kps_without_image():
     rows as an HTML table card in the Plots panel — otherwise small
     datasets the specialist deliberately routed through `kind='table'`
     would silently disappear."""
-    kb = {
+    kps = {
         "spend_payments": [
             # Plot-style KP — has image_path, surfaces with URL.
             {"topic": "trend", "captured_at_turn": "t-now",
@@ -449,7 +449,7 @@ def test_collect_turn_charts_surfaces_table_kps_without_image():
              "viz": {"kind": "trend"}},
         ],
     }
-    charts = finalize._collect_turn_charts(kb, "t-now", "C1")
+    charts = finalize._collect_turn_charts(kps, "t-now", "C1")
     topics = sorted(c["topic"] for c in charts)
     assert topics == ["tiny_summary", "trend"]
     trend = next(c for c in charts if c["topic"] == "trend")
@@ -458,7 +458,7 @@ def test_collect_turn_charts_surfaces_table_kps_without_image():
     assert table["url"] == ""  # no PNG; the row data flows via the SSE payload
 
 
-def test_collect_turn_charts_handles_empty_or_invalid_kb():
+def test_collect_turn_charts_handles_empty_or_invalid_kps():
     assert finalize._collect_turn_charts({}, "t1", "C") == []
     assert finalize._collect_turn_charts(None, "t1", "C") == []
     assert finalize._collect_turn_charts({"x": "not a list"}, "t1", "C") == []
@@ -504,7 +504,7 @@ def test_find_kp_returns_latest_matching_topic_in_turn():
     """_find_kp matches on (specialist, topic, captured_at_turn) and returns
     the LATEST occurrence — chronological iteration means the last appended
     entry wins, mirroring _collect_turn_charts's dedup convention."""
-    kb = {
+    kps = {
         "modeling": [
             _kp("score_vs_dpd", "trend_dual", ["score", "dpd"],
                 [{"period": "2024-10", "score": 700, "dpd": 1}]),
@@ -519,7 +519,7 @@ def test_find_kp_returns_latest_matching_topic_in_turn():
                 [], turn="t-prev"),
         ],
     }
-    found = cache._find_kp(kb, "modeling", "score_vs_dpd", "t-now")
+    found = cache._find_kp(kps, "modeling", "score_vs_dpd", "t-now")
     assert found is not None
     # Latest in-turn entry wins (last appended for the same key).
     assert len(found["numbers"]) == 2
@@ -527,21 +527,21 @@ def test_find_kp_returns_latest_matching_topic_in_turn():
 
 
 def test_find_kp_returns_none_when_no_match():
-    kb = {"modeling": [_kp("a", "trend", ["v"])]}
-    assert cache._find_kp(kb, "modeling", "missing", "t-now") is None
-    assert cache._find_kp(kb, "other_spec", "a", "t-now") is None
+    kps = {"modeling": [_kp("a", "trend", ["v"])]}
+    assert cache._find_kp(kps, "modeling", "missing", "t-now") is None
+    assert cache._find_kp(kps, "other_spec", "a", "t-now") is None
     assert cache._find_kp({}, "modeling", "a", "t-now") is None
     assert cache._find_kp(None, "modeling", "a", "t-now") is None
 
 
 def test_chart_payload_carries_trend_dual_kind_and_regenerated_spec():
-    """End-to-end shape: build a KB with a `trend_dual` KP, run the same
+    """End-to-end shape: build a KP with a `trend_dual` KP, run the same
     collect + payload-build logic the conductor runs before
     sess.emit('chart', ...), and verify the payload carries both `kind ==
     'trend_dual'` AND a REGENERATED Vega-Lite spec with `resolve.scale.y ==
     'independent'` (the signal it's a dual-axis chart). The spec is rebuilt
     from viz+numbers — it is NOT stored on the KP."""
-    kb = {"modeling": [
+    kps = {"modeling": [
         _kp("score_vs_dpd", "trend_dual", ["score", "dpd"],
             [{"period": "2024-10", "score": 700, "dpd": 1},
              {"period": "2024-11", "score": 720, "dpd": 0},
@@ -549,10 +549,10 @@ def test_chart_payload_carries_trend_dual_kind_and_regenerated_spec():
              {"period": "2025-01", "score": 710, "dpd": 2}])
     ]}
 
-    charts = finalize._collect_turn_charts(kb, "t-now", "CASE-A")
+    charts = finalize._collect_turn_charts(kps, "t-now", "CASE-A")
     assert len(charts) == 1
     c = charts[0]
-    kp = cache._find_kp(kb, c["specialist"], c["topic"], "t-now")
+    kp = cache._find_kp(kps, c["specialist"], c["topic"], "t-now")
     payload = finalize._build_chart_payload(kp, c)
 
     assert payload["kind"] == "trend_dual"
@@ -570,15 +570,15 @@ def test_chart_payload_carries_trend_grid_kind_and_vconcat_spec():
     """Same end-to-end check for `trend_grid` — the payload kind reaches
     the frontend as 'trend_grid' AND the regenerated vega_spec is a
     `vconcat` of N single-series panels sharing the x-axis."""
-    kb = {"modeling": [
+    kps = {"modeling": [
         _kp("credit_risk_panel", "trend_grid", ["tsr", "cdss", "txn_count"],
             [{"period": "2024-10", "tsr": 700, "cdss": 680, "txn_count": 42},
              {"period": "2024-11", "tsr": 720, "cdss": 690, "txn_count": 47}])
     ]}
 
-    charts = finalize._collect_turn_charts(kb, "t-now", "CASE-B")
+    charts = finalize._collect_turn_charts(kps, "t-now", "CASE-B")
     c = charts[0]
-    kp = cache._find_kp(kb, c["specialist"], c["topic"], "t-now")
+    kp = cache._find_kp(kps, c["specialist"], c["topic"], "t-now")
     payload = finalize._build_chart_payload(kp, c)
 
     assert payload["kind"] == "trend_grid"
@@ -593,13 +593,13 @@ def test_chart_payload_kind_string_unknown_falls_back_to_empty():
     """Defensive: if a KP somehow lacks a `viz` block (legacy data, distiller
     edge case), the enrichment path returns kind='' rather than crashing.
     The frontend should treat empty kind as 'just show the PNG'."""
-    kb = {"modeling": [{
+    kps = {"modeling": [{
         "topic": "legacy", "captured_at_turn": "t",
         "image_path": "/abs/charts/t-legacy.png",
         # No `viz`, no `numbers`.
     }]}
-    charts = finalize._collect_turn_charts(kb, "t", "C")
-    kp = cache._find_kp(kb, "modeling", "legacy", "t")
+    charts = finalize._collect_turn_charts(kps, "t", "C")
+    kp = cache._find_kp(kps, "modeling", "legacy", "t")
     payload = finalize._build_chart_payload(kp, charts[0])
     assert payload["kind"] == ""
     # No viz → nothing to regenerate → no interactive spec.
@@ -791,9 +791,9 @@ def test_chart_payload_carries_table_kind_and_numbers():
     == 'table') must produce a chart payload with `kind == 'table'`,
     a populated `numbers` list, and an empty `url` (no PNG rendered).
     This mirrors server.py:1703-1724 — the same logic run after the
-    KB drain each turn."""
+    KP drain each turn."""
     rows = [{"a": 1, "b": "x"}, {"a": 2, "b": "y"}]
-    kb = {
+    kps = {
         "spend_payments": [{
             "topic": "march_declines",
             "captured_at_turn": "t-now",
@@ -806,10 +806,10 @@ def test_chart_payload_carries_table_kind_and_numbers():
     }
 
     # Collect, then build the payload via the same helper the conductor runs.
-    charts = finalize._collect_turn_charts(kb, "t-now", "CASE-T")
+    charts = finalize._collect_turn_charts(kps, "t-now", "CASE-T")
     assert len(charts) == 1
     c = charts[0]
-    kp = cache._find_kp(kb, c["specialist"], c["topic"], "t-now")
+    kp = cache._find_kp(kps, c["specialist"], c["topic"], "t-now")
     payload = finalize._build_chart_payload(kp, c)
 
     assert payload["kind"] == "table"
@@ -836,7 +836,7 @@ def test_chart_payload_survives_a_later_distiller_kp_on_the_same_topic():
     image where a one-row table belonged.
     """
     rows = [{"payment_date": "2025-04-28", "amount": 105818.60}]
-    kb = {
+    kps = {
         "spend_payments": [
             # 1. The specialist's explicit chart — the renderable KP.
             {
@@ -860,10 +860,10 @@ def test_chart_payload_survives_a_later_distiller_kp_on_the_same_topic():
         ]
     }
 
-    charts = finalize._collect_turn_charts(kb, "t-now", "CASE-R")
+    charts = finalize._collect_turn_charts(kps, "t-now", "CASE-R")
     assert len(charts) == 1
     c = charts[0]
-    kp = cache._find_kp(kb, c["specialist"], c["topic"], "t-now")
+    kp = cache._find_kp(kps, c["specialist"], c["topic"], "t-now")
     payload = finalize._build_chart_payload(kp, c)
 
     # The renderable KP wins, so the panel gets a table — not a broken <img>.
@@ -877,13 +877,13 @@ def test_find_kp_still_returns_latest_when_no_kp_backs_a_chart():
     """The chart-backing preference is a tie-break, not a filter: when no
     KP for the topic backs a chart, `_find_kp` keeps its plain latest-wins
     behaviour so non-chart callers are unaffected."""
-    kb = {
+    kps = {
         "modeling": [
             {"topic": "a", "captured_at_turn": "t", "claim": "first"},
             {"topic": "a", "captured_at_turn": "t", "claim": "second"},
         ]
     }
-    found = cache._find_kp(kb, "modeling", "a", "t")
+    found = cache._find_kp(kps, "modeling", "a", "t")
     assert found is not None and found["claim"] == "second"
 
 

@@ -34,7 +34,7 @@ lists all 9 months, NOT just the 3 anchor periods named in the claim.
 **Charts and thresholds are now the specialist's responsibility** (via
 `make_chart`). The distiller does NOT need to produce chart specs or
 carry threshold values. Focus on extracting claims and caching numbers
-for KB warmth.
+for KP warmth.
 
 ---
 
@@ -61,7 +61,7 @@ Put the metric name IN the slug (not `model_scores_trend` — use
 `cdss_score_trend` and `tsr_score_trend` separately).
 
 **Reuse an existing slug EXACTLY when the question is the same.** The input
-lists the slugs already in this specialist's KB. A re-capture of one of those
+lists the slugs already in this specialist's KP cache. A re-capture of one of those
 topics must come back under the identical string — that is what supersedes the
 old entry. A near-miss is NOT a match: `tsr_cdss_trajectory` does not supersede
 `cdss_trajectory_tsr`, it forks a second topic, and follow-up lookups then
@@ -100,7 +100,7 @@ call with real data). You do NOT need to produce chart-ready `viz` specs.
 
 Set `viz: null` unless the KP represents a categorical breakdown or
 comparison that the specialist didn't chart. The `numbers` field is still
-useful for KB warmth — follow-up questions can reference cached values.
+useful for KP warmth — follow-up questions can reference cached values.
 
 ## `source_call`
 

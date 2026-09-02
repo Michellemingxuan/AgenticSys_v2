@@ -45,8 +45,8 @@ python -m tests.test_consistency.evaluate \
 Report three separate memory measures:
 
 - QA-cache hit rate: full answer replay for exact or recognized near-duplicates.
-- KB-context exposure rate: a specialist received distilled prior knowledge.
-- KB-lookup hit rate: successful `kb_lookup` calls divided by all such calls.
+- KP-context exposure rate: a specialist received distilled prior knowledge.
+- KP-lookup hit rate: successful `kp_lookup` calls divided by all such calls.
 
 Also compare warm versus cold tokens, LLM calls, latency, and answer quality.
 A high hit rate is not automatically good if the answer becomes stale or the

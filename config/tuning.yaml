@@ -21,7 +21,7 @@ memory:
   # [env: AMEM_CONSOLIDATE_EVERY_N]
   consolidate_every_n_turns: 10
 
-  # K1 — compact trigger. specialist_kb ACCUMULATES KPs in RAM across turns;
+  # K1 — compact trigger. specialist_kps ACCUMULATES KPs in RAM across turns;
   # once it grows past this many, we pay ONE Amem hybrid search to compact it
   # down to active_kp_keep (K2) most-relevant KPs, then it accumulates again.
   # So this is the ceiling, not a per-turn cap. e.g. 5 → compact once >5 KPs.
@@ -105,7 +105,7 @@ timeouts:
   report_agent_s: 150
 
   # Second-pass distiller (KP extraction) per specialist. A timeout here costs
-  # BOTH next-turn KB warmth AND this turn's charts — auto-distill is the
+  # BOTH next-turn KP warmth AND this turn's charts — auto-distill is the
   # primary chart path — so it is deliberately generous.
   # DELIBERATELY smaller than one worst-case call (40 + 140 = 180). The
   # distiller is fire-and-forget and what really bounds it is
@@ -160,7 +160,71 @@ timeouts:
   amem_read_s: 1.5
   amem_write_s: 5.0
 
-  # The batched relevance search that compacts the KP working set. Fires only
+  # The batched relevance search that compacts the KP cache working set. Fires only
   # at compaction (~every few turns), so it can afford to be generous.
   # [env: AMEM_ACTIVE_LOAD_TIMEOUT_S]
   amem_active_load_s: 6.0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Knowledge base — retrieval of PRIOR CASES that resemble this one
+# (`knowledge_base_search`, backed by the internal clustered case-report KB).
+#
+# NOT the same thing as the knowledge-POINT cache above: KB = other cases,
+# KP = this case. See skills/helper/knowledge_base.md.
+# ─────────────────────────────────────────────────────────────────────────────
+
+knowledge_base:
+  # The master switch.  [env: KNOWLEDGE_BASE_ENABLED]
+  #   false → OFF. `knowledge_base_search` answers "not applicable" without
+  #           calling anything, and the specialist is told to say exactly that
+  #           for the comparison part of the question.
+  #   true  → ON. `client` and `json_path` below must both be set; if they
+  #           aren't, calls report "unavailable", which is a misconfiguration
+  #           you want to SEE rather than a quiet no-op.
+  #   unset → AUTO: on when a client and a json_path are configured, off
+  #           otherwise. Dev with nothing wired therefore reads as "off",
+  #           not as "broken".
+  enabled: true
+
+  # The platform's entry point, as `<module-or-file>:<callable>`. Either an
+  # importable package or a loose .py handed over by the KB team — the callable
+  # is bound by introspection, so no wrapper module is needed.
+  #   tests.doubles.knowledge_base_sim:answer_question  ← the dev simulation
+  #   /abs/path/kb_answer.py:answer_question     ← a delivered script
+  # [env: KNOWLEDGE_BASE_CLIENT]
+  client: "tests.doubles.knowledge_base_sim:answer_question"
+
+  # Absolute path to the aggregated cluster file the client retrieves over
+  # (…/aggregated_rank_top_common_unique.json). Relative paths resolve against
+  # the server's working directory, which is a known outage shape here — use an
+  # absolute one.  [env: KNOWLEDGE_BASE_JSON]
+  json_path: "/tmp/aggregated.json"
+
+  # Ceiling on one retrieval. A specialist's whole answer targets ~20s, so this
+  # cannot be generous: on expiry the call degrades to "unavailable" and the
+  # specialist answers from the case's own data.  [env: KNOWLEDGE_BASE_TIMEOUT_S]
+  timeout_s: 20
+
+  # How much of the result reaches the specialist's context. A measured real
+  # payload is ~15KB raw and ~10KB after these caps. They trim supporting
+  # detail only — every matched case_id is returned regardless, so lowering
+  # them never hides a similar case. Bullets are taken ROUND-ROBIN across
+  # clusters, so a lower max_bullets thins each cluster evenly rather than
+  # dropping the lowest-ranked one (which real data shows can be the most
+  # on-target). `rationale` gets half of text_chars — it is the KB's
+  # commentary on its own selection, the least load-bearing field.
+  # [env: KNOWLEDGE_BASE_MAX_CLUSTERS / _MAX_BULLETS / _TEXT_CHARS]
+  max_clusters: 5
+  max_bullets: 12
+  text_chars: 1000
+
+  # The KB's own grounded synthesis — its own budget, because it runs ~2100
+  # chars in practice and is the single most useful field. Trimming it to one
+  # bullet's length cut it mid-argument.  [env: KNOWLEDGE_BASE_ANSWER_CHARS]
+  answer_chars: 1600
+
+  # Turns of this session's conversation passed to the KB, so a follow-up that
+  # names no pattern ("any others like that?") still resolves.
+  # [env: KNOWLEDGE_BASE_HISTORY_TURNS]
+  history_turns: 5

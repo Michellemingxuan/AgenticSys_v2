@@ -1,4 +1,4 @@
-"""Batched load of the RAM specialist_kb dict from Amem (the durable source of
+"""Batched load of the RAM specialist_kps dict from Amem (the durable source of
 truth), at turn start. One case-scoped query — no per-step DB round-trips, no
 dependency on Amem semantic search (metadata/case_id filter only).
 
@@ -15,7 +15,7 @@ import os
 from .config import AmemConfig
 from .scope import build_scope
 
-# Accumulate-then-compact working-set control. specialist_kb accumulates KPs in
+# Accumulate-then-compact working-set control. specialist_kps accumulates KPs in
 # RAM across turns; only when it crosses ACTIVE_KP_THRESHOLD (K1) do we pay one
 # hybrid search to compact it to the ACTIVE_KP_KEEP (K2 << K1) most-relevant KPs,
 # then it accumulates again. This hysteresis makes the expensive Amem search
@@ -41,10 +41,10 @@ def kp_seq(kp: dict) -> int:
         return -1
 
 
-def max_kp_seq(kb: dict) -> int:
-    """Highest `captured_at_seq` across a `{agent: [kp, ...]}` KB, or -1."""
+def max_kp_seq(kps: dict) -> int:
+    """Highest `captured_at_seq` across a `{agent: [kp, ...]}` KP, or -1."""
     best = -1
-    for kps in (kb or {}).values():
+    for kps in (kps or {}).values():
         for kp in kps or []:
             if isinstance(kp, dict):
                 best = max(best, kp_seq(kp))
@@ -59,7 +59,7 @@ def _identity(agent: str, kp: dict) -> tuple:
 
 
 def merge_recent_kps(compacted: dict, previous: dict, *, keep: int = ACTIVE_KP_KEEP) -> dict:
-    """Union a relevance-compacted KB with the newest `keep` KPs of the
+    """Union a relevance-compacted KP with the newest `keep` KPs of the
     pre-compaction working set.
 
     Amem's hybrid search ranks on embedding + keyword similarity ONLY — there
@@ -102,7 +102,7 @@ def merge_recent_kps(compacted: dict, previous: dict, *, keep: int = ACTIVE_KP_K
 def load_case_kps(amem, cfg: AmemConfig, *, case_id: str) -> dict:
     """Return `{agent_id: [kp_dict, ...]}` reconstructed from the case's durable
     per-specialist conversation records. Chronological (oldest-first) so the
-    existing "latest KP per topic = active" logic in kb_tools holds. The
+    existing "latest KP per topic = active" logic in kp_tools holds. The
     orchestrator turn record is skipped (it carries no per-specialist KP set).
     Never raises → `{}` on error/empty."""
     try:
@@ -136,7 +136,7 @@ def load_case_kps(amem, cfg: AmemConfig, *, case_id: str) -> dict:
 
 async def load_active_kps(amem, cfg: AmemConfig, *, case_id: str, question: str,
                           limit: int = ACTIVE_KP_KEEP) -> dict:
-    """Relevance-scoped subset of a case's KPs, for KBs too large to hold whole.
+    """Relevance-scoped subset of a case's KPs, for KPs too large to hold whole.
 
     Retrieves the most relevant conversation records for *question* via Amem
     hybrid search and reconstructs `{agent_id: [kp, ...]}` from their

@@ -39,7 +39,7 @@ Where a case has no `cm11` column, filter to a single month and count rows.
 
 # Balance ≠ spend ≠ payment
 
-**Balance is ALWAYS a live query** — `aggregate_column('crossbu_cards', 'balance', op='sum')` (or per-card `query_table`). NEVER answer balance from `kb_lookup`, a cached card-count, a prior-turn KP, or any other metric: a count of cards says nothing about how much is owed. If this run produced no `balance` tool-result, emit a `data_gap` — never a fabricated or estimated amount.
+**Balance is ALWAYS a live query** — `aggregate_column('crossbu_cards', 'balance', op='sum')` (or per-card `query_table`). NEVER answer balance from `kp_lookup`, a cached card-count, a prior-turn KP, or any other metric: a count of cards says nothing about how much is owed. If this run produced no `balance` tool-result, emit a `data_gap` — never a fabricated or estimated amount.
 
 | Concept | Column | Table | Owner |
 |---|---|---|---|

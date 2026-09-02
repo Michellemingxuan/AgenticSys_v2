@@ -157,7 +157,7 @@ def _chart_signature(kp: dict) -> tuple | None:
     return (kind, frozenset(pairs))
 
 
-def _collect_turn_charts(specialist_kb: dict, turn_id: str, case_id: str) -> list[dict]:
+def _collect_turn_charts(specialist_kps: dict, turn_id: str, case_id: str) -> list[dict]:
     """Find every KP captured in this turn that surfaces in the Plots panel.
 
     Two kinds of KP qualify:
@@ -175,11 +175,11 @@ def _collect_turn_charts(specialist_kb: dict, turn_id: str, case_id: str) -> lis
     SAME figure (e.g. modeling and spend_payments both charting the monthly
     spend trend) surface it only once. First occurrence wins.
     """
-    if not isinstance(specialist_kb, dict):
+    if not isinstance(specialist_kps, dict):
         return []
     by_key: dict[tuple[str, str], dict] = {}
     kp_by_key: dict[tuple[str, str], dict] = {}
-    for spec_name, kps in specialist_kb.items():
+    for spec_name, kps in specialist_kps.items():
         if not isinstance(kps, list):
             continue
         for kp in kps:
@@ -199,7 +199,7 @@ def _collect_turn_charts(specialist_kb: dict, turn_id: str, case_id: str) -> lis
             if img_path:
                 entry["url"] = f"/api/cases/{case_id}/charts/{Path(img_path).name}"
             # Latest wins per (specialist, topic). Iteration order over
-            # the KB's chronological list means the last appended entry
+            # the KP's chronological list means the last appended entry
             # naturally overwrites the earlier one for the same key.
             by_key[(spec_name, topic)] = entry
             kp_by_key[(spec_name, topic)] = kp
@@ -229,7 +229,7 @@ def _build_chart_payload(kp: dict | None, chart: dict) -> dict:
     The Vega-Lite spec is REGENERATED here via ``kp_to_vega_spec(kp)`` rather
     than read off the KP. We deliberately do NOT persist ``vega_spec`` on the
     KP: it roughly duplicates ``numbers`` plus a lot of Vega scaffolding, and
-    the KP flows into ``specialist_kb`` → distilled memory → cross-turn
+    the KP flows into ``specialist_kps`` → distilled memory → cross-turn
     context, so storing it there bloats everything downstream. Regeneration
     is cheap and keeps the interactive-chart contract intact. Returns ``None``
     for the spec on non-viz-able KPs (e.g. ``table`` kind, empty numbers),

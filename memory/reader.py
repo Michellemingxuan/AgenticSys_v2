@@ -4,7 +4,7 @@
 Read-only and defensive — returns "" on disabled/empty/error so the caller
 simply omits the block. (The old semantic-read helpers retrieve_context /
 search_kp were removed: relevance-scoping now happens once at load time via
-load_active_kps, and kb_lookup is a pure RAM cache — see the memory design.)"""
+load_active_kps, and kp_lookup is a pure RAM cache — see the memory design.)"""
 from __future__ import annotations
 
 from .config import AmemConfig

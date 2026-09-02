@@ -249,7 +249,7 @@ async def test_causal_question_redispatches_modeling_anchored(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_invalidate_specialist_distillation_cancels_and_wipes():
-    """Re-dispatch KB hygiene — GENERAL, keyed on the re-dispatched specialist +
+    """Re-dispatch KP hygiene — GENERAL, keyed on the re-dispatched specialist +
     turn_id (NOT specific to any one question): cancel that specialist's in-flight
     distill/autochart tasks and drop its this-turn KPs; leave OTHER specialists
     and PRIOR turns untouched."""
@@ -268,7 +268,7 @@ async def test_invalidate_specialist_distillation_cancels_and_wipes():
     d_other = asyncio.create_task(_long(), name="distill-spend_payments")
     ctx = types.SimpleNamespace(
         _pending_distillers=[d_x, a_x, d_other],
-        _specialist_kb={
+        _specialist_kps={
             "modeling": [
                 {"topic": "drivers_wrong_window", "captured_at_turn": turn},   # this-turn phase-1 (stale)
                 {"topic": "prior_kp", "captured_at_turn": "older-turn"},       # prior turn (keep)
@@ -286,8 +286,8 @@ async def test_invalidate_specialist_distillation_cancels_and_wipes():
     assert ctx._pending_distillers == [d_other]          # other specialist's task kept
     assert not d_other.done()
     assert stats["kps_removed"] == 1
-    assert [kp["topic"] for kp in ctx._specialist_kb["modeling"]] == ["prior_kp"]
-    assert [kp["topic"] for kp in ctx._specialist_kb["spend_payments"]] == ["spend_spike"]
+    assert [kp["topic"] for kp in ctx._specialist_kps["modeling"]] == ["prior_kp"]
+    assert [kp["topic"] for kp in ctx._specialist_kps["spend_payments"]] == ["spend_spike"]
 
     d_other.cancel()
     try:
@@ -298,12 +298,12 @@ async def test_invalidate_specialist_distillation_cancels_and_wipes():
 
 @pytest.mark.asyncio
 async def test_invalidate_specialist_distillation_tolerates_missing_state():
-    """No pending list / no KB entry → graceful no-op for any specialist."""
+    """No pending list / no KP entry → graceful no-op for any specialist."""
     import types
     import server
     from runner.turn import review
 
-    ctx = types.SimpleNamespace()  # no _pending_distillers, no _specialist_kb
+    ctx = types.SimpleNamespace()  # no _pending_distillers, no _specialist_kps
     stats = await review._invalidate_specialist_distillation(ctx, "anything", "t")
     assert stats == {"tasks_cancelled": 0, "kps_removed": 0}
 

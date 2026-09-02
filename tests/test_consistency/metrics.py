@@ -125,16 +125,16 @@ def extract_trace_metrics(trace_rows: list[dict]) -> dict:
 
     calls, outputs = _tool_transcript(trace_rows)
     data_tools = sorted({name for name in calls.values() if name in DATA_TOOLS})
-    kb_ids = [cid for cid, name in calls.items() if name == "kb_lookup"]
-    miss_markers = ("not found", "not in the cached working set", "kb is empty")
-    kb_hits = kb_misses = kb_unknown = 0
-    for cid in kb_ids:
+    kp_ids = [cid for cid, name in calls.items() if name == "kp_lookup"]
+    miss_markers = ("not found", "not in the cached working set", "no knowledge points cached")
+    kp_hits = kp_misses = kp_unknown = 0
+    for cid in kp_ids:
         if cid not in outputs:
-            kb_unknown += 1
+            kp_unknown += 1
         elif any(marker in outputs[cid].lower() for marker in miss_markers):
-            kb_misses += 1
+            kp_misses += 1
         else:
-            kb_hits += 1
+            kp_hits += 1
 
     cached_input = _sum("cached_input_tokens")
     prompt_tokens = _sum("prompt_tokens")
@@ -162,13 +162,13 @@ def extract_trace_metrics(trace_rows: list[dict]) -> dict:
             row.get("node") == "cache_replay" and "cache_hit" in _tags(row)
             for row in trace_rows
         ),
-        "kb_context_exposures": sum(
-            1 for row in trace_rows if "kb_digest_present" in _tags(row)
+        "kp_context_exposures": sum(
+            1 for row in trace_rows if "kp_digest_present" in _tags(row)
         ),
-        "kb_lookup_calls": len(kb_ids),
-        "kb_lookup_hits": kb_hits,
-        "kb_lookup_misses": kb_misses,
-        "kb_lookup_unknown": kb_unknown,
+        "kp_lookup_calls": len(kp_ids),
+        "kp_lookup_hits": kp_hits,
+        "kp_lookup_misses": kp_misses,
+        "kp_lookup_unknown": kp_unknown,
         "data_tools": data_tools,
     }
 
@@ -391,8 +391,8 @@ def aggregate_runs(runs: list[dict]) -> dict:
         any_team = any(teams)
         any_tools = any(tools)
         any_subqueries = any(subqueries)
-        kb_calls = sum(int(row.get("kb_lookup_calls") or 0) for row in rows)
-        kb_hits = sum(int(row.get("kb_lookup_hits") or 0) for row in rows)
+        kp_calls = sum(int(row.get("kp_lookup_calls") or 0) for row in rows)
+        kp_hits = sum(int(row.get("kp_lookup_hits") or 0) for row in rows)
         outliers = _outlier_indexes(latencies)
         questions.append({
             "mode": mode,
@@ -434,11 +434,11 @@ def aggregate_runs(runs: list[dict]) -> dict:
             "qa_cache_hit_rate": (
                 sum(bool(row.get("qa_cache_hit")) for row in rows) / len(rows)
             ),
-            "kb_context_exposure_rate": (
-                sum(bool(row.get("kb_context_exposures")) for row in rows)
+            "kp_context_exposure_rate": (
+                sum(bool(row.get("kp_context_exposures")) for row in rows)
                 / len(rows)
             ),
-            "kb_lookup_hit_rate": kb_hits / kb_calls if kb_calls else None,
+            "kp_lookup_hit_rate": kp_hits / kp_calls if kp_calls else None,
             "provenance_completeness": statistics.mean(
                 float(row["provenance_completeness"])
                 for row in rows if row.get("provenance_completeness") is not None

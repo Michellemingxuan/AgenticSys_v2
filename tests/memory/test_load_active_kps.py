@@ -1,4 +1,4 @@
-"""Relevance-scoped subset load for large KBs (load_active_kps).
+"""Relevance-scoped subset load for large KPs (load_active_kps).
 
 Triggered by the conductor only when a case exceeds ACTIVE_KP_THRESHOLD KPs;
 here we test the loader in isolation against the Amem double.

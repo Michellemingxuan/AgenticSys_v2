@@ -30,7 +30,7 @@ async def test_auto_chart_emits_chart_pending_before_render(tmp_path):
     ctx = SimpleNamespace(
         logger=_Logger(),
         case_folder=case_folder,
-        _specialist_kb={},
+        _specialist_kps={},
         _turn_id="t-auto",
         _catalog=None,
         _emit_event=lambda evt, payload: emits.append((evt, payload)),
@@ -52,8 +52,8 @@ async def test_auto_chart_emits_chart_pending_before_render(tmp_path):
     assert n >= 1, "auto-chart should have rendered at least one chart"
 
     # A KP was persisted; grab its topic — the pending event must match it.
-    assert ctx._specialist_kb.get("modeling"), "auto-chart should persist a KP"
-    topic = ctx._specialist_kb["modeling"][0]["topic"]
+    assert ctx._specialist_kps.get("modeling"), "auto-chart should persist a KP"
+    topic = ctx._specialist_kps["modeling"][0]["topic"]
 
     pending = [p for (e, p) in emits if e == "chart_pending"]
     assert pending, f"auto-chart emitted no chart_pending; events={emits}"
@@ -82,7 +82,7 @@ async def test_auto_chart_no_emit_hook_does_not_crash(tmp_path):
     ctx = SimpleNamespace(
         logger=_Logger(),
         case_folder=case_folder,
-        _specialist_kb={},
+        _specialist_kps={},
         _turn_id="t-noemit",
         _catalog=None,
         # no _emit_event attribute at all

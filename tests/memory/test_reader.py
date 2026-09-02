@@ -1,6 +1,6 @@
 """load_case_summary — the sole Amem read helper (the semantic-read helpers
 retrieve_context / search_kp were removed; relevance-scoping now happens at load
-time via load_active_kps, and kb_lookup is RAM-only)."""
+time via load_active_kps, and kp_lookup is RAM-only)."""
 from memory.config import AmemConfig
 from memory import reader
 from tests.memory._fake_amem import FakeAmem, FakeRecord

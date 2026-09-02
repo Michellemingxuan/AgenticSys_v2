@@ -1,6 +1,6 @@
 """Durable per-specialist memory: write one conversation record per specialist
 (KPs as atomic_facts + structured KPs + tool_calls in metadata), and reload the
-specialist_kb dict from Amem via a case-scoped batched query."""
+specialist_kps dict from Amem via a case-scoped batched query."""
 import asyncio
 from types import SimpleNamespace
 
@@ -57,11 +57,11 @@ def test_load_case_kps_roundtrip_and_grouping():
         _rec("fraud", [{"topic": "dev", "claim": "device X", "captured_at_turn": "t1"}], "1"),
         _rec("risk", [{"topic": "tsr", "claim": "new", "captured_at_turn": "t2"}], "2"),
     ]
-    kb = load_case_kps(fake, CFG, case_id="c1")
-    assert set(kb) == {"risk", "fraud"}                         # grouped by agent
+    kps = load_case_kps(fake, CFG, case_id="c1")
+    assert set(kps) == {"risk", "fraud"}                         # grouped by agent
     # chronological order preserved so "latest per topic" (new) is last
-    assert [k["claim"] for k in kb["risk"]] == ["old", "new"]
-    assert kb["fraud"][0]["claim"] == "device X"
+    assert [k["claim"] for k in kps["risk"]] == ["old", "new"]
+    assert kps["fraud"][0]["claim"] == "device X"
 
 
 def test_load_case_kps_skips_orchestrator_and_empty():

@@ -32,7 +32,7 @@ def _make_ctx(tmp_path: Path, capture_emits: list | None = None) -> SimpleNamesp
     return SimpleNamespace(
         logger=_Logger(),
         case_folder=case_folder,
-        _specialist_kb={},
+        _specialist_kps={},
         _turn_id="abc123",
         _emit_event=emit_fn,
     )
@@ -52,9 +52,9 @@ def _good_points():
 @pytest.mark.asyncio
 async def test_make_chart_writes_png_and_persists_kp(tmp_path):
     """Happy path: tool renders the PNG and writes a KP into
-    ``_specialist_kb[<specialist>]`` with image_path populated. The
+    ``_specialist_kps[<specialist>]`` with image_path populated. The
     Vega-Lite spec is NOT stored on the KP — it's regenerated at emit time
-    (finalize._build_chart_payload) to keep the KB lean."""
+    (finalize._build_chart_payload) to keep the KP lean."""
     tool = build_make_chart_tool("spend_payments")
     ctx = _make_ctx(tmp_path)
 
@@ -75,10 +75,10 @@ async def test_make_chart_writes_png_and_persists_kp(tmp_path):
     assert "monthly_spend_trend" in out
 
     # KP persisted under the specialist's key.
-    kb = ctx._specialist_kb
-    assert "spend_payments" in kb
-    assert len(kb["spend_payments"]) == 1
-    kp = kb["spend_payments"][0]
+    kps = ctx._specialist_kps
+    assert "spend_payments" in kps
+    assert len(kps["spend_payments"]) == 1
+    kp = kps["spend_payments"][0]
 
     # Required KP fields all present.
     assert kp["topic"] == "monthly_spend_trend"
@@ -116,7 +116,7 @@ async def test_make_chart_rejects_bad_kind(tmp_path):
     assert "[make_chart error]" in out
     assert "kind" in out
     # Nothing written.
-    assert ctx._specialist_kb == {}
+    assert ctx._specialist_kps == {}
 
 
 @pytest.mark.asyncio
@@ -196,7 +196,7 @@ async def test_make_chart_returns_error_on_bad_axes(tmp_path):
     )
     assert "[make_chart error]" in out
     assert "renderer" in out.lower()
-    assert ctx._specialist_kb == {}
+    assert ctx._specialist_kps == {}
 
 
 @pytest.mark.asyncio
@@ -205,7 +205,7 @@ async def test_make_chart_no_session_returns_clear_error():
     tool = build_make_chart_tool("modeling")
     ctx = SimpleNamespace(
         logger=_Logger(), case_folder=None,
-        _specialist_kb=None, _turn_id=None,
+        _specialist_kps=None, _turn_id=None,
     )
     out = await tool.on_invoke_tool(
         RunContextWrapper(ctx),
@@ -248,7 +248,7 @@ async def test_make_chart_multi_series_renders_one_chart_with_all_fields(tmp_pat
     # Surfaces the multi-series count.
     assert "× 2 series" in out
 
-    kp = ctx._specialist_kb["spend_payments"][0]
+    kp = ctx._specialist_kps["spend_payments"][0]
     assert kp["viz"] == {
         "kind": "trend", "x_field": "period",
         "y_fields": ["spend", "payment"],
@@ -283,12 +283,12 @@ async def test_make_chart_share_kind_rejects_multi_series(tmp_path):
     )
     assert "[make_chart error]" in out
     assert "single-series" in out
-    assert ctx._specialist_kb == {}
+    assert ctx._specialist_kps == {}
 
 
 @pytest.mark.asyncio
-async def test_make_chart_factory_isolates_specialist_kbs(tmp_path):
-    """Two specialists' tools must write into their own KB list, never
+async def test_make_chart_factory_isolates_specialist_kps(tmp_path):
+    """Two specialists' tools must write into their own KP list, never
     cross-contaminate each other's namespace."""
     tool_a = build_make_chart_tool("alpha")
     tool_b = build_make_chart_tool("beta")
@@ -302,9 +302,9 @@ async def test_make_chart_factory_isolates_specialist_kbs(tmp_path):
     await tool_a.on_invoke_tool(RunContextWrapper(ctx), json.dumps(payload))
     await tool_b.on_invoke_tool(RunContextWrapper(ctx), json.dumps(payload))
 
-    assert set(ctx._specialist_kb.keys()) == {"alpha", "beta"}
-    assert len(ctx._specialist_kb["alpha"]) == 1
-    assert len(ctx._specialist_kb["beta"]) == 1
+    assert set(ctx._specialist_kps.keys()) == {"alpha", "beta"}
+    assert len(ctx._specialist_kps["alpha"]) == 1
+    assert len(ctx._specialist_kps["beta"]) == 1
 
 
 @pytest.mark.asyncio
@@ -345,7 +345,7 @@ async def test_trend_dual_requires_exactly_two_y_fields(tmp_path):
     )
     assert "[make_chart error]" in out_three
     assert "trend_grid" in out_three  # points the model at the right alternative
-    assert ctx._specialist_kb == {}
+    assert ctx._specialist_kps == {}
 
 
 @pytest.mark.asyncio
@@ -386,7 +386,7 @@ async def test_trend_grid_requires_two_to_six_y_fields(tmp_path):
     )
     assert "[make_chart error]" in out_seven
     assert "between 2 and 6" in out_seven  # mentions the actual bounds
-    assert ctx._specialist_kb == {}
+    assert ctx._specialist_kps == {}
 
 
 @pytest.mark.asyncio
@@ -418,7 +418,7 @@ async def test_make_chart_trend_dual_end_to_end(tmp_path):
     assert "[chart created]" in out
     assert "× 2 series" in out
 
-    kp = ctx._specialist_kb["modeling"][0]
+    kp = ctx._specialist_kps["modeling"][0]
     assert kp["viz"] == {
         "kind": "trend_dual", "x_field": "period",
         "y_fields": ["score", "dpd"],
@@ -458,7 +458,7 @@ async def test_make_chart_trend_grid_end_to_end(tmp_path):
     assert "[chart created]" in out
     assert "× 3 series" in out
 
-    kp = ctx._specialist_kb["modeling"][0]
+    kp = ctx._specialist_kps["modeling"][0]
     assert kp["viz"]["kind"] == "trend_grid"
     assert kp["viz"]["y_fields"] == ["tsr", "cdss", "txn_count"]
     img = Path(kp["image_path"])
@@ -583,7 +583,7 @@ async def test_make_chart_table_kind_skips_render_and_persists_kp(tmp_path):
     assert "[chart created]" in out
     assert "table" in out  # tool surfaces the kind in its return message
 
-    kp = ctx._specialist_kb["modeling"][0]
+    kp = ctx._specialist_kps["modeling"][0]
     assert kp["viz"]["kind"] == "table"
     assert kp["numbers"] == rows
     # No image rendered.
@@ -610,7 +610,7 @@ async def test_make_chart_table_kind_accepts_one_row(tmp_path):
         }),
     )
     assert "[chart created]" in out
-    assert ctx._specialist_kb["modeling"][0]["numbers"] == [
+    assert ctx._specialist_kps["modeling"][0]["numbers"] == [
         {"month": "2025-07", "score": 642},
     ]
 
@@ -635,7 +635,7 @@ async def test_make_chart_table_kind_accepts_empty_y_fields(tmp_path):
     )
     assert "[make_chart error]" not in out
     # KP persisted with the table viz + numbers
-    kp = ctx._specialist_kb["modeling"][0]
+    kp = ctx._specialist_kps["modeling"][0]
     assert kp["viz"]["kind"] == "table"
     assert kp["numbers"]
 
@@ -656,7 +656,8 @@ def test_every_tool_a_specialist_can_call_is_strict():
     from agent_factories.specialist_agent import build_specialist_agent  # noqa: F401
     from tools.data_viz_tools import build_make_chart_tool, get_chart_guidance
     from tools import data_tools as dtools
-    from tools.kb_tools import kb_lookup, kb_list_topics
+    from tools.knowledge_base import knowledge_base_search
+    from tools.kp_tools import kp_lookup, kp_list_topics
 
     tools = [
         dtools.query_table, dtools.batch_query_table, dtools.join_table,
@@ -664,7 +665,8 @@ def test_every_tool_a_specialist_can_call_is_strict():
         dtools.batch_aggregate, dtools.summarize_trend, dtools.batch_summarize_trend,
         dtools.summarize_by_group, dtools.get_table_schema, dtools.search_columns,
         dtools.list_available_tables, dtools.score_driver_values,
-        get_chart_guidance, kb_lookup, kb_list_topics,
+        get_chart_guidance, kp_lookup, kp_list_topics,
+        knowledge_base_search,
         build_make_chart_tool("spend_payments"),
     ]
     not_strict = [t.name for t in tools if getattr(t, "strict_json_schema", None) is not True]

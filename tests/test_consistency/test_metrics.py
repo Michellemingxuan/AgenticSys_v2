@@ -35,13 +35,13 @@ def test_event_metrics_extract_team_subqueries_and_provenance():
 def test_trace_metrics_counts_leaf_tokens_retry_and_memory():
     rows = [
         {"id": 1, "parent_id": None, "node": "specialist.modeling",
-         "depth": 0, "tags": '["kb_digest_present"]', "outcome": "ok"},
+         "depth": 0, "tags": '["kp_digest_present"]', "outcome": "ok"},
         {"id": 2, "parent_id": 1, "node": "specialist.modeling.round_1",
          "depth": 1, "prompt_tokens": 100, "completion_tokens": 10,
          "total_tokens": 110, "cached_input_tokens": 20, "outcome": "ok",
          "output_json": {"choices": [{"message": {"tool_calls": [
              {"type": "function", "id": "kb1",
-              "function": {"name": "kb_lookup", "arguments": "{}"}}
+              "function": {"name": "kp_lookup", "arguments": "{}"}}
          ]}}]}},
         {"id": 3, "parent_id": None, "node": "specialist.modeling.retry",
          "depth": 0, "tags": '["retry"]', "outcome": "ok"},
@@ -58,8 +58,8 @@ def test_trace_metrics_counts_leaf_tokens_retry_and_memory():
     assert out["total_tokens"] == 165
     assert out["retry_count"] == 1
     assert out["qa_cache_hit"] is True
-    assert out["kb_context_exposures"] == 1
-    assert out["kb_lookup_hits"] == 1
+    assert out["kp_context_exposures"] == 1
+    assert out["kp_lookup_hits"] == 1
 
 
 def test_content_score_uses_scope_and_answer_contract():
@@ -98,8 +98,8 @@ def test_aggregate_consistency_latency_retry_and_memory():
         "team_unique": ["modeling"], "data_tools": ["query_table"],
         "measured_tools": [], "subqueries": {"modeling": "check tsr trend"},
         "total_tokens": 100, "llm_call_count": 3, "retried": False,
-        "qa_cache_hit": False, "kb_context_exposures": 0,
-        "kb_lookup_calls": 0, "kb_lookup_hits": 0,
+        "qa_cache_hit": False, "kp_context_exposures": 0,
+        "kp_lookup_calls": 0, "kp_lookup_hits": 0,
         "provenance_completeness": 1.0, "automated_content_score": 90,
     }
     runs = [

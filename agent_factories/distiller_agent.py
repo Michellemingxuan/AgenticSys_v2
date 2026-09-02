@@ -3,7 +3,7 @@
 After each specialist run, the agent_tool wrapper invokes this agent
 on the SpecialistOutput to pull out atomic, quantitative claims that future
 turns might revisit. The points land in
-``CaseSession.specialist_kb[<specialist_name>]`` and are prepended (as a
+``CaseSession.specialist_kps[<specialist_name>]`` and are prepended (as a
 digest) to the specialist's sub-question on subsequent calls — so the
 specialist sees what it already knows and can answer follow-ups without
 re-running expensive `summarize_trend` / `aggregate_column` queries.
@@ -15,7 +15,7 @@ inline:
 - A separate, narrowly-scoped agent with a strict output schema is more
   faithful (less paraphrasing) and cheaper to iterate on.
 - Failures in distillation (timeout, malformed output) degrade gracefully
-  to "no KB update this turn"; the specialist's answer is unaffected.
+  to "no KP update this turn"; the specialist's answer is unaffected.
 """
 from __future__ import annotations
 

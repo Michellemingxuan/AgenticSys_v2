@@ -89,7 +89,7 @@ def test_merge_orders_each_agent_oldest_to_newest_for_supersession():
 
     merged = merge_recent_kps(compacted, previous, keep=20)
 
-    from tools.kb_tools import _active_kps
+    from tools.kp_tools import _active_kps
     assert [kp["captured_at_seq"] for kp in merged["modeling"]] == [2, 7]
     assert [kp["captured_at_seq"] for kp in _active_kps(merged["modeling"])] == [7]
 
@@ -155,9 +155,9 @@ def test_distiller_direct_insert_stamps_the_seq():
     # protection (seq -1 = oldest) and gets dropped at the next compaction.
     from agent_factories.agent_tools.distiller_pass import _distill_and_persist
 
-    kb: dict = {}
+    kps: dict = {}
     ctx = SimpleNamespace(
-        logger=None, _distiller=object(), _specialist_kb=kb,
+        logger=None, _distiller=object(), _specialist_kps=kps,
         _turn_id="t-9", _turn_seq=9, _node_trace_store=None,
     )
     narrow = SimpleNamespace(findings="3 accounts are 30+ DPD.", evidence=[])
@@ -165,8 +165,8 @@ def test_distiller_direct_insert_stamps_the_seq():
     n = asyncio.run(_distill_and_persist(ctx, "bureau", "how many are 30+ DPD?", narrow))
 
     assert n == 1
-    assert kb["bureau"][0]["captured_at_seq"] == 9
-    assert kb["bureau"][0]["captured_at_turn"] == "t-9"
+    assert kps["bureau"][0]["captured_at_seq"] == 9
+    assert kps["bureau"][0]["captured_at_turn"] == "t-9"
 
 
 def test_make_chart_and_auto_chart_stamp_the_seq():
@@ -189,10 +189,10 @@ def test_assemble_input_stamps_turn_seq_and_reconciles_the_counter():
     src = inspect.getsource(conductor.TurnRunner._assemble_input)
     # KPs created this turn get the seq this turn will be assigned.
     assert "_turn_seq=" in src
-    # _qa_turn_seq is per-SESSION but the KB is per-CASE: KPs seeded from Amem
+    # _qa_turn_seq is per-SESSION but the KP is per-CASE: KPs seeded from Amem
     # can carry higher seqs from an earlier session and would otherwise pin the
     # OLDEST KPs as "newest".
-    assert "max_kp_seq(kb)" in src
+    assert "max_kp_seq(kps)" in src
     # Compaction unions rather than replaces.
     assert "merge_recent_kps(" in src
-    assert "kb = compacted" not in src
+    assert "kps = compacted" not in src

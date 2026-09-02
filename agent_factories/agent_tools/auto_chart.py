@@ -118,17 +118,17 @@ async def _auto_chart_from_tool_outputs(
     """
 
     logger = getattr(app_ctx, "logger", None)
-    kb = getattr(app_ctx, "_specialist_kb", None)
+    kps = getattr(app_ctx, "_specialist_kps", None)
     case_folder = getattr(app_ctx, "case_folder", None)
     turn_id = getattr(app_ctx, "_turn_id", None)
     turn_seq = getattr(app_ctx, "_turn_seq", None)
     catalog = getattr(app_ctx, "_catalog", None)
     emit_event = getattr(app_ctx, "_emit_event", None)
 
-    if kb is None or case_folder is None:
+    if kps is None or case_folder is None:
         if logger:
             logger.log("auto_chart_skipped", {
-                "specialist": name, "reason": "no_kb_or_case_folder"})
+                "specialist": name, "reason": "no_kp_or_case_folder"})
         return 0
 
     try:
@@ -175,7 +175,7 @@ async def _auto_chart_from_tool_outputs(
     try:
         charts_rendered = _render_auto_charts(
             trend_series, group_series, name, charts_dir,
-            kb, turn_id, catalog, logger, emit_event, turn_seq,
+            kps, turn_id, catalog, logger, emit_event, turn_seq,
             app_ctx=app_ctx,
         )
     except Exception as exc:  # noqa: BLE001
@@ -197,7 +197,7 @@ async def _auto_chart_from_tool_outputs(
 
 def _render_auto_charts(
     trend_series, group_series, name, charts_dir,
-    kb, turn_id, catalog, logger, emit_event=None, turn_seq=None,
+    kps, turn_id, catalog, logger, emit_event=None, turn_seq=None,
     app_ctx=None,
 ) -> int:
 
@@ -423,12 +423,12 @@ def _render_auto_charts(
                 "confidence": "high",
             }
             # vega_spec is regenerated at emit time (finalize._build_chart_payload),
-            # not stored on the KP — keeps the KB / distilled memory lean.
+            # not stored on the KP — keeps the KP / distilled memory lean.
             _emit_pending(topic, kind)
             img_path = render_chart(kp_dict, charts_dir, turn_id=turn_id, logger=logger)
             if img_path:
                 kp_dict["image_path"] = img_path
-                kb.setdefault(name, []).append(kp_dict)
+                kps.setdefault(name, []).append(kp_dict)
                 charts_rendered += 1
 
     # ── Group/bar charts ──
@@ -473,12 +473,12 @@ def _render_auto_charts(
             "confidence": "high",
         }
         # vega_spec is regenerated at emit time (finalize._build_chart_payload),
-        # not stored on the KP — keeps the KB / distilled memory lean.
+        # not stored on the KP — keeps the KP / distilled memory lean.
         _emit_pending(topic_slug, "share")
         img_path = render_chart(kp_dict, charts_dir, turn_id=turn_id, logger=logger)
         if img_path:
             kp_dict["image_path"] = img_path
-            kb.setdefault(name, []).append(kp_dict)
+            kps.setdefault(name, []).append(kp_dict)
             charts_rendered += 1
 
     return charts_rendered

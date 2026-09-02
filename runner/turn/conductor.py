@@ -713,9 +713,9 @@ class TurnRunner:
         )
         self.orchestrator = orchestrator
         case_folder = _REPORTS_DIR / sess.case_id
-        # AppContext is per-turn, but two of its attributes (`_specialist_kb` and
+        # AppContext is per-turn, but two of its attributes (`_specialist_kps` and
         # `_distiller`) need to outlive a single turn. We pass:
-        #   • specialist_kb: a SHARED REFERENCE to the session's KB dict — mutating
+        #   • specialist_kps: a SHARED REFERENCE to the session's KP dict — mutating
         #     it from inside agent_tool persists to the next turn automatically.
         #   • distiller: the orchestrator's distiller_agent (stateless), used by
         #     agent_tool for second-pass KP extraction.
@@ -738,7 +738,7 @@ class TurnRunner:
         # from the earlier lazy `import server`; fixed here.)
         _amem = getattr(sess, "amem", None)
         _amem_cfg = getattr(sess, "amem_cfg", None)
-        # Accumulate-then-compact working set. specialist_kb persists across
+        # Accumulate-then-compact working set. specialist_kps persists across
         # turns (restored from the node_trace snapshot on reopen) and grows as
         # the distiller adds KPs. We touch Amem only to: (a) SEED an empty set
         # once (cheap list, e.g. fresh case / cleared snapshot), or (b) COMPACT
@@ -748,10 +748,10 @@ class TurnRunner:
         # ~3s search fires only ~every (K1-K2)/kps_per_turn turns.
         if _amem is not None and _amem_cfg is not None and sess.case_id:
             try:
-                kb = sess.specialist_kb if isinstance(sess.specialist_kb, dict) else {}
-                if not kb:
-                    kb = load_case_kps(_amem, _amem_cfg, case_id=sess.case_id)
-                # `_qa_turn_seq` counts turns in THIS SESSION; the KB it stamps
+                kps = sess.specialist_kps if isinstance(sess.specialist_kps, dict) else {}
+                if not kps:
+                    kps = load_case_kps(_amem, _amem_cfg, case_id=sess.case_id)
+                # `_qa_turn_seq` counts turns in THIS SESSION; the KP it stamps
                 # is per-CASE and durable, so KPs seeded from Amem (or restored
                 # from a snapshot whose qa_cache didn't survive) can carry seq
                 # values from earlier sessions that outrank anything this
@@ -759,10 +759,10 @@ class TurnRunner:
                 # the OLDEST KPs as "newest" in the compaction below. Move the
                 # counter above whatever we loaded. Skipped numbers are
                 # harmless: episodic ordering is relative, not contiguous.
-                _seen_seq = max_kp_seq(kb)
+                _seen_seq = max_kp_seq(kps)
                 if _seen_seq > getattr(sess, "_qa_turn_seq", 0):
                     sess._qa_turn_seq = _seen_seq
-                n = sum(len(v) for v in kb.values())
+                n = sum(len(v) for v in kps.values())
                 if n > ACTIVE_KP_THRESHOLD:
                     compacted = await load_active_kps(
                         _amem, _amem_cfg, case_id=sess.case_id,
@@ -772,7 +772,7 @@ class TurnRunner:
                         # Union, don't replace: Amem ranks on similarity with no
                         # recency term, so a bare swap can discard the KPs the
                         # previous turn just produced. Result is bounded at ~2*K2.
-                        merged = merge_recent_kps(compacted, kb, keep=ACTIVE_KP_KEEP)
+                        merged = merge_recent_kps(compacted, kps, keep=ACTIVE_KP_KEEP)
                         n_relevance = sum(len(v) for v in compacted.values())
                         n_after = sum(len(v) for v in merged.values())
                         sess.logger.log("active_kp_compacted", {
@@ -781,15 +781,15 @@ class TurnRunner:
                             "n_relevance": n_relevance,
                             "n_recent_kept": n_after - n_relevance,
                             "k1": ACTIVE_KP_THRESHOLD, "k2": ACTIVE_KP_KEEP})
-                        kb = merged
-                sess.specialist_kb = kb
+                        kps = merged
+                sess.specialist_kps = kps
             except Exception:
                 pass
         ctx = AppContext(
             gateway=sess.gateway,
             case_folder=case_folder,
             logger=sess.logger,
-            _specialist_kb=sess.specialist_kb,
+            _specialist_kps=sess.specialist_kps,
             _distiller=getattr(orchestrator, "distiller_agent", None),
             _turn_id=turn_id,
             # The seq this turn will be assigned when `_store_cached_qa` bumps
@@ -811,7 +811,7 @@ class TurnRunner:
             int((time.perf_counter() - timer_t0) * 1000),
         )
 
-        # Phase 3 — KB-warmth signal. When specialists have accumulated KPs from
+        # Phase 3 — KP-warmth signal. When specialists have accumulated KPs from
         # earlier turns, prepend a one-line hint to the user question so the
         # orchestrator's team_construction step has a runtime signal that nudges
         # toward reusing warm specialists on in-domain follow-ups. The hint is
@@ -847,14 +847,14 @@ class TurnRunner:
 
         # Each turn starts fresh — no accumulated conversation history.
         # Follow-up context is carried by:
-        #   - KB warmth hint (which specialists have cached data)
-        #   - specialist_kb (accessible via kb_lookup/kb_list_topics tools)
+        #   - KP warmth hint (which specialists have cached data)
+        #   - specialist_kps (accessible via kp_lookup/kp_list_topics tools)
         #   - qa_cache (exact-match replay for duplicate questions)
         # This keeps input size constant across turns instead of growing.
         self.turn_timer.record(
             "memory_framing",
             int((time.perf_counter() - timer_t0) * 1000),
-            warmth_hint_present=bool(sess.specialist_kb and any(sess.specialist_kb.values())),
+            warmth_hint_present=bool(sess.specialist_kps and any(sess.specialist_kps.values())),
         )
 
         # Cooperative-cancellation checkpoint #2 (pre-orchestrator). Catches
@@ -883,8 +883,8 @@ class TurnRunner:
         orch_perf_t0 = time.perf_counter()
         sess.logger.log("turn_phase_orchestrator_starting", {
             "turn_id": turn_id,
-            "warmth_hint_present": bool(sess.specialist_kb and any(sess.specialist_kb.values())),
-            "n_specialists_warm": sum(1 for kps in sess.specialist_kb.values() if kps),
+            "warmth_hint_present": bool(sess.specialist_kps and any(sess.specialist_kps.values())),
+            "n_specialists_warm": sum(1 for kps in sess.specialist_kps.values() if kps),
         })
 
         # Retry loop: on ``ModelBehaviorError`` (typically a malformed FinalAnswer
@@ -893,7 +893,7 @@ class TurnRunner:
         # `_synthesize_fallback_answer` salvage path. Re-running re-invokes
         # specialists, but the per-specialist conversation history persists in
         # ``ctx._specialist_histories`` so warm specialists return faster on the
-        # second pass, and the KB ``ctx._specialist_kb`` keeps round-1 KPs
+        # second pass, and the KP ``ctx._specialist_kps`` keeps round-1 KPs
         # available to the orchestrator's prompt.
         #
         # Frontend coordination: an ``orchestrator_retry`` SSE event fires
@@ -912,7 +912,7 @@ class TurnRunner:
         while True:
             if _orch_attempt > 0:
                 # Reset per-attempt SSE-emit state and the structured payload
-                # accumulator. The cross-attempt state (specialist_kb,
+                # accumulator. The cross-attempt state (specialist_kps,
                 # specialist_histories on ctx) is intentionally preserved —
                 # warm specialists return faster on retry.
                 self.call_index_by_id.clear()
@@ -1035,7 +1035,7 @@ class TurnRunner:
                 # round IS synthesis, both with real durations + full I/O.
 
                 # No conversation history accumulation — each turn starts
-                # fresh. Follow-up context lives in specialist_kb + warmth hint.
+                # fresh. Follow-up context lives in specialist_kps + warmth hint.
 
                 # Guard: if orchestrator emitted zero tool calls (skipped
                 # specialists entirely), retry — a model-behaviour flake where
@@ -1522,7 +1522,7 @@ class TurnRunner:
         records = getattr(self.ctx, "_specialist_turn_records", None) or {}
         team_dispatch: list[dict] = []
         for name, rec in records.items():
-            kps = kps_for_agent_turn(sess.specialist_kb, name, self.turn_id)
+            kps = kps_for_agent_turn(sess.specialist_kps, name, self.turn_id)
             await write_specialist_memory(
                 amem, cfg, case_id=sess.case_id, turn_id=self.turn_id,
                 session_id=sess.session_id, agent_id=name,
@@ -1573,7 +1573,7 @@ class TurnRunner:
         """Emit this turn's charts, then retract every placeholder left over.
 
         `chart_pending` fires per specialist DURING the turn; `chart` is emitted
-        only once the KB is drained. Any pending pair with no chart behind it is
+        only once the KP is drained. Any pending pair with no chart behind it is
         a card that spins forever, and the frontend cannot detect that on its
         own — nothing else in the stream says the placeholder is dead.
 
@@ -1592,9 +1592,9 @@ class TurnRunner:
         chart_payloads: list[dict] = []
         try:
             turn_charts = _collect_turn_charts(
-                sess.specialist_kb, turn_id, sess.case_id)
+                sess.specialist_kps, turn_id, sess.case_id)
             for c in turn_charts or []:
-                kp = _find_kp(sess.specialist_kb, c["specialist"],
+                kp = _find_kp(sess.specialist_kps, c["specialist"],
                               c["topic"], turn_id)
                 chart_payloads.append(_build_chart_payload(kp, c))
             for p in chart_payloads:
@@ -1807,7 +1807,7 @@ class TurnRunner:
             n_pending_unfinished=sum(1 for t in pending if not t.done()) if pending else 0,
         )
 
-        # Collect and emit charts from the KB (now populated by the drain).
+        # Collect and emit charts from the KP (now populated by the drain).
         timer_t0 = time.perf_counter()
         chart_payloads = self._emit_charts_and_retract_pending(
             turn_id, reason="superseded_by_identical_chart",
@@ -1860,7 +1860,7 @@ class TurnRunner:
                              "entries_evicted": evicted_cache_entries})
             # Snapshot CaseSession's cross-turn state to the trace DB so the
             # viewer can show what the conversation "remembers" at end of turn:
-            # qa_cache, specialist_kb (with all KnowledgePoints).
+            # qa_cache, specialist_kps (with all KnowledgePoints).
             # Failures are swallowed by the store; never breaks the turn.
             if _NODE_TRACE_STORE is not None:
                 _conv = getattr(sess, "conversation_id", "") or sess.logger.session_id
@@ -1869,7 +1869,7 @@ class TurnRunner:
                     case_id=sess.case_id,
                     turn_id=turn_id,
                     qa_cache=sess.qa_cache,
-                    specialist_kb=sess.specialist_kb,
+                    specialist_kps=sess.specialist_kps,
                     conversation_id=_conv,
                     server_run_id=SERVER_RUN_ID,
                     user_id=getattr(sess, "user_id", ""),

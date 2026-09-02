@@ -223,9 +223,9 @@ class CaseSession:
     # KnowledgePoint dicts produced by the distiller agent after each
     # specialist run. Older entries are RETAINED for audit when a newer KP
     # supersedes them; the active set is "latest per topic" (filter happens in
-    # agent_tool._format_kb_digest). Cleared by /rewind alongside
+    # agent_tool._format_kp_digest). Cleared by /rewind alongside
     # qa_cache so a session reset wipes everything.
-    specialist_kb: dict = field(default_factory=dict)
+    specialist_kps: dict = field(default_factory=dict)
     # Amem session identity (metadata only; reads stay case-scoped/cross-session).
     # Rotated on full rewind / clear-history so prior sessions become immutable.
     session_id: str = ""
@@ -420,7 +420,7 @@ print(f"[server] {len(ALL_CASES)} cases available: {ALL_CASES[:5]}{'...' if len(
 
 
     # (Each turn starts fresh — no accumulated conversation history.
-    #  Follow-up context lives in specialist_kb + KB warmth hint.)
+    #  Follow-up context lives in specialist_kps + KP warmth hint.)
 
 
 def _json_safe(obj):
@@ -580,7 +580,7 @@ def _sync_case_catalog(case_id: str, gateway, catalog, logger) -> None:
 
 
 def _restore_session_state(sess, case_id: str) -> None:
-    """Restore a case's cross-turn RAM (qa_cache, specialist_kb)
+    """Restore a case's cross-turn RAM (qa_cache, specialist_kps)
     from the latest durable snapshot, so a server restart is invisible.
     Best-effort; never raises."""
     if _NODE_TRACE_STORE is None:
@@ -593,14 +593,14 @@ def _restore_session_state(sess, case_id: str) -> None:
         return
     try:
         sess.qa_cache = snap.get("qa_cache") or {}
-        sess.specialist_kb = snap.get("specialist_kb") or {}
+        sess.specialist_kps = snap.get("specialist_kps") or {}
         sess._qa_turn_seq = max(
             (e.get("turn_seq", 0) for e in sess.qa_cache.values()
              if isinstance(e, dict)), default=0)
         sess.logger.log("session_restored", {
             "case_id": case_id,
             "qa_entries": len(sess.qa_cache),
-            "kb_specialists": len(sess.specialist_kb)})
+            "kp_specialists": len(sess.specialist_kps)})
     except Exception:
         pass
 
@@ -1162,7 +1162,7 @@ def post_cancel_turn(case_id: str):
     """Interrupt the in-flight turn AND fully rewind — as if the
     stopped question was never asked.
 
-    Clears: specialist_kb (current turn's KPs) and qa_cache (so re-asking
+    Clears: specialist_kps (current turn's KPs) and qa_cache (so re-asking
     doesn't replay). Cancels the running task via
     aggressive task.cancel() + cooperative signal.
     """
@@ -1194,8 +1194,8 @@ def post_cancel_turn(case_id: str):
     n_cached = len(sess.qa_cache)
     sess.qa_cache.clear()
     sess._qa_turn_seq = 0   # episodic ordering counter rewinds with qa_cache (spec §4)
-    n_kb_total = sum(len(v) for v in sess.specialist_kb.values())
-    sess.specialist_kb.clear()
+    n_kp_total = sum(len(v) for v in sess.specialist_kps.values())
+    sess.specialist_kps.clear()
     with sess.subscribers_lock:
         sess.event_buffer.clear()  # don't replay events from the wiped turn(s)
 
@@ -1221,7 +1221,7 @@ def post_cancel_turn(case_id: str):
         "case_id": case_id,
         "task_cancel_dispatched": cancelled_task,
         "qa_cache_cleared": n_cached,
-        "kb_entries_cleared": n_kb_total,
+        "kp_entries_cleared": n_kp_total,
         "charts_cleared": n_charts_cleared,
         **amem_purge.as_log_fields(),
     })
@@ -1258,17 +1258,17 @@ def post_rewind(case_id: str):
             if sess.qa_cache[key].get("turn_id_origin") in removed_set:
                 del sess.qa_cache[key]
                 n_cached += 1
-        # Drop KB entries produced during the removed turns.
-        n_kb_total = 0
-        for spec_name in list(sess.specialist_kb):
-            before = len(sess.specialist_kb[spec_name])
-            sess.specialist_kb[spec_name] = [
-                kp for kp in sess.specialist_kb[spec_name]
+        # Drop KP entries produced during the removed turns.
+        n_kp_total = 0
+        for spec_name in list(sess.specialist_kps):
+            before = len(sess.specialist_kps[spec_name])
+            sess.specialist_kps[spec_name] = [
+                kp for kp in sess.specialist_kps[spec_name]
                 if kp.get("captured_at_turn") not in removed_set
             ]
-            n_kb_total += before - len(sess.specialist_kb[spec_name])
-        n_kb_specialists = sum(
-            1 for kps in sess.specialist_kb.values() if kps
+            n_kp_total += before - len(sess.specialist_kps[spec_name])
+        n_kp_specialists = sum(
+            1 for kps in sess.specialist_kps.values() if kps
         )
         amem_purge = delete_turns(_AMEM, _AMEM_CFG, case_id=case_id,
                                   turn_ids=remove_turn_ids, logger=sess.logger)
@@ -1279,7 +1279,7 @@ def post_rewind(case_id: str):
                 _NODE_TRACE_STORE.snapshot_session(
                     chat_id=sess.conversation_id, case_id=case_id,
                     turn_id=f"rewind-{_max_seq}",
-                    qa_cache=sess.qa_cache, specialist_kb=sess.specialist_kb,
+                    qa_cache=sess.qa_cache, specialist_kps=sess.specialist_kps,
                     conversation_id=sess.conversation_id,
                     server_run_id=SERVER_RUN_ID, user_id=sess.user_id,
                     pillar_id=sess.pillar_id)
@@ -1290,9 +1290,9 @@ def post_rewind(case_id: str):
         n_cached = len(sess.qa_cache)
         sess.qa_cache.clear()
         sess._qa_turn_seq = 0   # episodic ordering counter rewinds with qa_cache (spec §4)
-        n_kb_specialists = len(sess.specialist_kb)
-        n_kb_total = sum(len(v) for v in sess.specialist_kb.values())
-        sess.specialist_kb.clear()
+        n_kp_specialists = len(sess.specialist_kps)
+        n_kp_total = sum(len(v) for v in sess.specialist_kps.values())
+        sess.specialist_kps.clear()
         sess.session_id = f"case-{case_id}-{uuid.uuid4().hex[:6]}"
 
     # Drop replay-buffer frames for the rewound turn(s) so a later (re)connect
@@ -1387,8 +1387,8 @@ def post_rewind(case_id: str):
     sess.logger.log("rewind", {
         "message_id": msg_id, "case_id": case_id,
         "qa_cache_entries_cleared": n_cached,
-        "kb_specialists_cleared": n_kb_specialists,
-        "kb_kps_cleared": n_kb_total,
+        "kp_specialists_cleared": n_kp_specialists,
+        "kp_kps_cleared": n_kp_total,
         "trace_rows_cleared": trace_rows_cleared,
         "aborted_in_flight_turn": aborted_in_flight,
         "task_cancel_dispatched": cancelled_task,

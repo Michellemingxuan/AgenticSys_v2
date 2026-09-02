@@ -382,8 +382,8 @@ async def test_agent_tool_success_does_not_record_error():
 
 # ── Knowledge-base + distiller tests ────────────────────────────────────────
 #
-# These cover the cross-turn KB plumbing wired in Phase 1 of the memory
-# rework: agent_tool reads a KB digest before each call, runs a distiller
+# These cover the cross-turn KP plumbing wired in Phase 1 of the memory
+# rework: agent_tool reads a KP digest before each call, runs a distiller
 # agent on the SpecialistOutput after, and persists new KnowledgePoints to a
 # session-scoped dict that survives across turns.
 
@@ -394,8 +394,8 @@ from agent_factories.agent_tools.specialist_input_tool import (
 from agent_factories.agent_tools.distiller_pass import _distill_and_persist
 
 
-def _make_kb_ctx(distiller=None, kb=None):
-    """AppContext-shaped stand-in carrying the KB + distiller fields."""
+def _make_kp_ctx(distiller=None, kps=None):
+    """AppContext-shaped stand-in carrying the KP + distiller fields."""
     from types import SimpleNamespace
 
     class _Logger:
@@ -409,11 +409,11 @@ def _make_kb_ctx(distiller=None, kb=None):
         logger=_Logger(),
         _specialist_histories={},
         _specialist_errors=[],
-        _specialist_kb=kb if kb is not None else {},
+        _specialist_kps=kps if kps is not None else {},
         _distiller=distiller,
         _turn_id="turn-test-1",
         # Distillation now fires fire-and-forget; tests that assert on the
-        # KB must await the tasks collected here before inspecting it.
+        # KP must await the tasks collected here before inspecting it.
         _pending_distillers=[],
     )
 
@@ -443,9 +443,9 @@ def test_compact_specialist_history_elides_old_tool_outputs_only():
 
 
 @pytest.mark.asyncio
-async def test_agent_tool_prepends_kb_digest_when_no_intra_turn_history():
+async def test_agent_tool_prepends_kp_digest_when_no_intra_turn_history():
     """First call within a turn (no `_specialist_histories[name]`) must see
-    the cross-turn KB digest prepended to its sub-question."""
+    the cross-turn KP digest prepended to its sub-question."""
     from agents import RunContextWrapper
 
     inner_agent = Agent(name="inner", instructions="x", tools=[])
@@ -456,9 +456,9 @@ async def test_agent_tool_prepends_kb_digest_when_no_intra_turn_history():
         return type("R", (), {"final_output": "ok",
                               "to_input_list": lambda self_: []})()
 
-    ctx = _make_kb_ctx(
+    ctx = _make_kp_ctx(
         distiller=None,  # no distiller wired → no second pass
-        kb={"modeling": [
+        kps={"modeling": [
             {"topic": "delinquency_breaches",
              "claim": "times_30_dpd reached 3 in 2024-Q4 (risky > 1).",
              "confidence": "high"},
@@ -475,8 +475,8 @@ async def test_agent_tool_prepends_kb_digest_when_no_intra_turn_history():
     assert len(captured_inputs) == 1
     forwarded = captured_inputs[0]
     assert isinstance(forwarded, str)
-    # The KB preface must be present along with the new question.
-    assert "[KB" in forwarded
+    # The KP preface must be present along with the new question.
+    assert "[KP" in forwarded
     assert "delinquency_breaches" in forwarded
     assert "show me the delinquency trajectory" in forwarded
     # Section divider keeps the digest distinguishable from the question.
@@ -484,7 +484,7 @@ async def test_agent_tool_prepends_kb_digest_when_no_intra_turn_history():
 
 
 @pytest.mark.asyncio
-async def test_agent_tool_skips_kb_digest_on_intra_turn_followup():
+async def test_agent_tool_skips_kp_digest_on_intra_turn_followup():
     """Second call within the same turn already has the digest in the
     `_specialist_histories` transcript; re-prepending would double it."""
     from agents import RunContextWrapper
@@ -499,9 +499,9 @@ async def test_agent_tool_skips_kb_digest_on_intra_turn_followup():
                               lambda self_: [{"role": "user", "content": "prior"},
                                              {"role": "assistant", "content": "ans"}]})()
 
-    ctx = _make_kb_ctx(
+    ctx = _make_kp_ctx(
         distiller=None,
-        kb={"modeling": [{"topic": "x", "claim": "stale", "confidence": "high"}]},
+        kps={"modeling": [{"topic": "x", "claim": "stale", "confidence": "high"}]},
     )
     # Simulate that this specialist was already called once this turn —
     # the prior transcript already contains the digest from that first call.
@@ -528,9 +528,9 @@ async def test_agent_tool_skips_kb_digest_on_intra_turn_followup():
 
 
 @pytest.mark.asyncio
-async def test_distiller_persists_knowledge_points_to_session_kb():
+async def test_distiller_persists_knowledge_points_to_session_kps():
     """After a successful specialist run, the distiller's knowledge_points
-    must land in `_specialist_kb[name]` keyed by specialist."""
+    must land in `_specialist_kps[name]` keyed by specialist."""
     from agents import RunContextWrapper
     from models.types import KnowledgePoint, DistillerOutput
 
@@ -568,7 +568,7 @@ async def test_distiller_persists_knowledge_points_to_session_kb():
             return fake_specialist_result
         return distiller_result
 
-    ctx = _make_kb_ctx(distiller=distiller, kb={})
+    ctx = _make_kp_ctx(distiller=distiller, kps={})
 
     import asyncio as _asyncio
     with patch("agent_factories.agent_tools.agent_tool.Runner.run", new=_fake_run):
@@ -587,8 +587,8 @@ async def test_distiller_persists_knowledge_points_to_session_kb():
     # Specialist's payload still flows back to the orchestrator.
     assert "[FAILED" not in out
     # Both KPs persisted under the right specialist key.
-    assert "spend_payments" in ctx._specialist_kb
-    persisted = ctx._specialist_kb["spend_payments"]
+    assert "spend_payments" in ctx._specialist_kps
+    persisted = ctx._specialist_kps["spend_payments"]
     assert len(persisted) == 2
     topics = {kp["topic"] for kp in persisted}
     assert topics == {"monthly_spend_trend", "top_merchant"}
@@ -601,7 +601,7 @@ async def test_distiller_persists_knowledge_points_to_session_kb():
 @pytest.mark.asyncio
 async def test_distiller_failure_does_not_break_specialist_response():
     """When the distiller errors out, the specialist's payload still
-    returns to the orchestrator and the KB simply doesn't grow this turn."""
+    returns to the orchestrator and the KP simply doesn't grow this turn."""
     from agents import RunContextWrapper
 
     distiller = Agent(name="distiller", instructions="x", tools=[])
@@ -619,7 +619,7 @@ async def test_distiller_failure_does_not_break_specialist_response():
         # Distiller raises — must not affect the specialist's path.
         raise RuntimeError("distiller blew up")
 
-    ctx = _make_kb_ctx(distiller=distiller, kb={})
+    ctx = _make_kp_ctx(distiller=distiller, kps={})
 
     import asyncio as _asyncio
     with patch("agent_factories.agent_tools.agent_tool.Runner.run", new=_fake_run):
@@ -635,8 +635,8 @@ async def test_distiller_failure_does_not_break_specialist_response():
 
     # Specialist answer still flows.
     assert "[FAILED" not in out
-    # KB didn't grow.
-    assert ctx._specialist_kb == {}
+    # KP didn't grow.
+    assert ctx._specialist_kps == {}
     # Failure was logged.
     assert any(e[0] == "distiller_failed" for e in ctx.logger.events)
 

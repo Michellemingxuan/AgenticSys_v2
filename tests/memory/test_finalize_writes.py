@@ -24,7 +24,7 @@ def _runner_stub(fake, turn_seq=10):
     r.verdict = SimpleNamespace(redacted_question="Why held?")
     sess = SimpleNamespace(logger=SimpleNamespace(log=lambda *a, **k: None),
         case_id="c1", session_id="s1", _qa_turn_seq=turn_seq,
-                           specialist_kb={"risk": [
+                           specialist_kps={"risk": [
                                {"claim": "FICO < 620", "captured_at_turn": "t1"}]})
     r.sess = sess
     r.ctx = SimpleNamespace(

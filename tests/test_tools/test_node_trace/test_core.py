@@ -173,13 +173,15 @@ def test_snapshot_session_persists_and_counts(tmp_path):
     from collections import OrderedDict
     store = NodeTraceStore(str(tmp_path / "traces.db"))
     qa = OrderedDict([("q1", {"answer": "a1"}), ("q2", {"answer": "a2"})])
-    kb = {"spend_payments": [{"topic": "t", "claim": "c"}], "modeling": []}
+    kps = {"spend_payments": [{"topic": "t", "claim": "c"}], "modeling": []}
     row_id = store.snapshot_session(
         chat_id="C", case_id="X", turn_id="T",
-        qa_cache=qa, specialist_kb=kb,
+        qa_cache=qa, specialist_kps=kps,
     )
     assert row_id > 0
     conn = sqlite3.connect(str(tmp_path / "traces.db"))
+    # `kb_*` COLUMN names are the pre-rename spelling and stay that way so
+    # existing trace DBs need no migration (see the schema note in core.py).
     row = conn.execute(
         "SELECT qa_cache_n, kb_specialists_n, kb_kps_n "
         "FROM session_snapshot WHERE id = ?",
@@ -214,7 +216,7 @@ def test_snapshot_stores_clean_episodic_projection_not_raw_qa_cache(tmp_path):
     }
     row_id = store.snapshot_session(
         chat_id="C", case_id="X", turn_id="T",
-        qa_cache=qa, specialist_kb={},
+        qa_cache=qa, specialist_kps={},
     )
     conn = sqlite3.connect(str(tmp_path / "traces.db"))
     (qa_n, qa_json) = conn.execute(
@@ -238,11 +240,11 @@ def test_delete_chat_drops_snapshots_too(tmp_path):
     store = NodeTraceStore(str(tmp_path / "traces.db"))
     store.snapshot_session(
         chat_id="A", case_id="x", turn_id="t",
-        qa_cache={}, specialist_kb={},
+        qa_cache={}, specialist_kps={},
     )
     store.snapshot_session(
         chat_id="B", case_id="x", turn_id="t",
-        qa_cache={}, specialist_kb={},
+        qa_cache={}, specialist_kps={},
     )
     store.delete_chat("A")
     conn = sqlite3.connect(str(tmp_path / "traces.db"))

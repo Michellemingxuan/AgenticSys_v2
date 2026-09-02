@@ -114,14 +114,14 @@ class KnowledgePoint(BaseModel):
 
     Produced by a second-pass `distiller` agent after each specialist run
     (see `agent_factories/distiller_agent.py`). Stored in
-    `CaseSession.specialist_kb[<specialist_name>]`. Read back into the
+    `CaseSession.specialist_kps[<specialist_name>]`. Read back into the
     specialist's sub-question on subsequent calls so the specialist can
     answer follow-ups without re-running the same `summarize_trend` /
     `aggregate_column` queries.
 
     Supersession: when a new KP arrives with the same `topic`, the
     `_active_kps` filter (in agent_tool) keeps only the latest one.
-    Older entries are RETAINED in the KB list as an audit trail — never
+    Older entries are RETAINED in the KP list as an audit trail — never
     mutated, never deleted — so the case logger can reconstruct what was
     believed at any point in the session.
 

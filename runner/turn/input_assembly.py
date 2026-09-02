@@ -1,11 +1,11 @@
-"""Layer 1 — orchestrator user-message assembly (episodic + KB warmth + question)."""
+"""Layer 1 — orchestrator user-message assembly (episodic + KP warmth + question)."""
 from __future__ import annotations
 
 from tools.episodic import (
     EPISODIC_TURNS, build_records, render_orchestrator_block, select_episodic,
 )
 
-# Char budget for each KP claim in the orchestrator's KB-warmth digest. This is
+# Char budget for each KP claim in the orchestrator's KP-warmth digest. This is
 # a FALLBACK view: when Amem hybrid retrieval is available the orchestrator gets
 # full, un-clipped claims instead (see assemble_orchestrator_input). 300
 # preserves whole distiller one-liners (~150-250 chars, incl. both metrics and
@@ -21,25 +21,25 @@ def _clip_claim(claim: str | None) -> str:
     return claim[:_KB_WARMTH_CLAIM_CHARS].rstrip() + "…"
 
 
-def _format_kb_warmth_hint(specialist_kb: dict) -> str:
-    """Build the `[KB-warmth: …]` preface the orchestrator sees on every turn
+def _format_kp_warmth_hint(specialist_kps: dict) -> str:
+    """Build the `[KP-warmth: …]` preface the orchestrator sees on every turn
     after the first one.
 
-    Lists each specialist with non-empty KB, its topic names, and one-line
+    Lists each specialist with non-empty KP, its topic names, and one-line
     claims — the orchestrator uses this for:
       1. Routing: reuse warm specialists for in-domain follow-ups.
       2. Sub-question framing: reference cached data in the sub-question so
          the specialist (or the orchestrator itself) can skip re-querying.
-         E.g. "TSR breached threshold in 2024-08..2024-10 (per KB). What
+         E.g. "TSR breached threshold in 2024-08..2024-10 (per KP). What
          strategy actions coincided with those months?"
 
     Returns "" when no specialist has any KPs (e.g. first turn).
     """
-    if not isinstance(specialist_kb, dict) or not specialist_kb:
+    if not isinstance(specialist_kps, dict) or not specialist_kps:
         return ""
     lines: list[str] = []
-    for name in sorted(specialist_kb):
-        kps = specialist_kb[name]
+    for name in sorted(specialist_kps):
+        kps = specialist_kps[name]
         if not kps:
             continue
         active: dict[str, dict] = {}
@@ -58,7 +58,7 @@ def _format_kb_warmth_hint(specialist_kb: dict) -> str:
     if not lines:
         return ""
     return (
-        "[KB-warmth — cached specialist knowledge from prior turns. "
+        "[KP-warmth — cached specialist knowledge from prior turns. "
         "Use topic details to anchor sub-questions and avoid redundant queries:\n"
         + "\n".join(lines)
         + "\n"
@@ -85,7 +85,7 @@ def _format_case_summary_block(summary: str) -> str:
 
 
 def _compose_framed_question(*parts: str) -> str:
-    """Order: case summary (older) -> episodic (recent) -> KB warmth (topics) ->
+    """Order: case summary (older) -> episodic (recent) -> KP warmth (topics) ->
     question. Skip empties."""
     return "\n\n".join(p for p in parts if p)
 
@@ -120,16 +120,16 @@ def assemble_orchestrator_input(sess, verdict, ctx, case_summary: str = "") -> s
 
     Composition (broad -> specific): case summary (condensed older context, only
     past the episodic window) -> episodic (recent turns verbatim, for coreference)
-    -> KB-warmth (specialist topics + claims) -> question. Returns the framed
+    -> KP-warmth (specialist topics + claims) -> question. Returns the framed
     question string. Side effect: sets ctx._episodic_records.
     """
-    warmth_hint = _format_kb_warmth_hint(sess.specialist_kb)
+    warmth_hint = _format_kp_warmth_hint(sess.specialist_kps)
     if warmth_hint:
-        sess.logger.log("kb_warmth_hint_emitted", {
+        sess.logger.log("kp_warmth_hint_emitted", {
             "turn_id": getattr(ctx, "_turn_id", None),
             "warm_specialists": [
                 {"name": n, "n_kps": len(kps)}
-                for n, kps in sess.specialist_kb.items() if kps
+                for n, kps in sess.specialist_kps.items() if kps
             ],
             "hint_length": len(warmth_hint),
         })

@@ -36,7 +36,7 @@ class _FakeSess:
     def __init__(self, qa_cache):
         self.events = []
         self.qa_cache = qa_cache
-        self.specialist_kb = {}
+        self.specialist_kps = {}
         self.case_id = "case-1"
         # Real CaseSession carries this; `_store_cached_qa` bumps it to order
         # episodic records. The replay path stores an entry too (so a replayed

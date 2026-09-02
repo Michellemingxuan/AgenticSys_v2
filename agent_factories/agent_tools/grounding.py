@@ -2,7 +2,7 @@
 
 A specialist that fails HARD is already quarantined by `_record_failure`. A
 specialist that SUCCEEDS on a broken tool result is not — it emits a well-formed
-SpecialistOutput with fabricated numbers, which then flows into the KB, Amem,
+SpecialistOutput with fabricated numbers, which then flows into the KP, Amem,
 and the next turn's episodic context. This module is the detector for that case.
 
 Pure: no I/O, no LLM, no project imports. Reads a completed run's own item list,
@@ -219,7 +219,7 @@ def scan_tool_errors(result) -> list[dict]:
     `[{"tool", "call_id", "reason", "excerpt"}, ...]` in transcript order.
 
     FAILS OPEN. This is the one check here with teeth — a hit quarantines the
-    run from the KB, Amem and the chart channels (`_SkipPersistence`) — and its
+    run from the KP, Amem and the chart channels (`_SkipPersistence`) — and its
     call site in `agent_tool` is not itself guarded, so an exception raised here
     would propagate into the AgentsException handler and record the specialist
     as a HARD FAILURE. A crash in the detector would then destroy the very
@@ -267,7 +267,7 @@ def scan_tool_errors(result) -> list[dict]:
 # `rows_matching_filter: 1` with the row populated ($105,818.60 on 2025-04-28,
 # INSUFFICIENT FUNDS), and the answer said "No payment returns were found;
 # there are zero records in the payments table with Return Flag == 1". One row
-# in, zero reported. The distiller then wrote that into the KB as a
+# in, zero reported. The distiller then wrote that into the KP as a
 # high-confidence knowledge point, so every later turn inherited it as fact.
 #
 # Nothing existing could see it: the tool did not fail, no filter matched zero,

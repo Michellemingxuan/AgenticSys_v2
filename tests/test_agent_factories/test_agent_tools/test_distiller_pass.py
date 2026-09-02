@@ -10,7 +10,7 @@ from agent_factories.agent_tools.distiller_pass import _distill_and_persist
 
 def test_slug_topic_is_readable_and_deterministic():
     """Narrow-output KPs get a readable topic from the sub-question, not an
-    opaque hash — same question → same slug (KB dedup), empty → hash fallback."""
+    opaque hash — same question → same slug (KP dedup), empty → hash fallback."""
     from agent_factories.agent_tools.distiller_pass import _slug_topic
     t = _slug_topic("what is the total spend and payment status", "spend_payments")
     assert t == "total_spend_payment_status"
@@ -25,24 +25,24 @@ def test_slug_topic_is_readable_and_deterministic():
 
 
 def test_distill_and_persist_noop_when_distiller_unwired():
-    """Tests / legacy paths without _distiller or _specialist_kb must behave
-    like the legacy single-turn flow — no errors, no KB updates."""
+    """Tests / legacy paths without _distiller or _specialist_kps must behave
+    like the legacy single-turn flow — no errors, no KP updates."""
     from types import SimpleNamespace
 
     ctx_no_distiller = SimpleNamespace(
-        logger=None, _specialist_kb={}, _distiller=None, _turn_id=None,
+        logger=None, _specialist_kps={}, _distiller=None, _turn_id=None,
     )
     n = asyncio.run(
         _distill_and_persist(ctx_no_distiller, "x", "q", "out")
     )
     assert n == 0
-    assert ctx_no_distiller._specialist_kb == {}
+    assert ctx_no_distiller._specialist_kps == {}
 
 
 def test_distill_and_persist_skips_report_agent():
     """report_agent returns ReportDraft (narrative), not SpecialistOutput —
     running the distiller on it costs ~20s for trivial KPs. The wrapper
-    must short-circuit so neither the distiller LLM call nor the KB write
+    must short-circuit so neither the distiller LLM call nor the KP write
     happens for report_agent. The distiller mock is asserted untouched."""
     from types import SimpleNamespace
 
@@ -61,7 +61,7 @@ def test_distill_and_persist_skips_report_agent():
 
     ctx = SimpleNamespace(
         logger=_MockLogger(),
-        _specialist_kb={},
+        _specialist_kps={},
         _distiller=_MockDistiller(),
         _turn_id="t-1",
     )
@@ -70,7 +70,7 @@ def test_distill_and_persist_skips_report_agent():
     )
     assert n == 0
     assert distiller_calls == []
-    assert ctx._specialist_kb == {}
+    assert ctx._specialist_kps == {}
     # The skip is observable in the JSONL so perf regressions are auditable.
     assert any(e == "distiller_skipped" and p.get("specialist") == "report_agent"
                for e, p in logged_events)
@@ -99,7 +99,7 @@ def test_salvage_recovers_the_complete_kps_before_the_cut():
 
 
 def test_salvage_ignores_a_kp_missing_its_claim():
-    """A KP can close syntactically and still be unusable — the KB digest
+    """A KP can close syntactically and still be unusable — the KP digest
     renders a claimless point as a blank line."""
     from agent_factories.agent_tools.distiller_pass import _salvage_truncated_kps
 

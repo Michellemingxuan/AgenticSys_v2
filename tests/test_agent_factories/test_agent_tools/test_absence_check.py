@@ -5,7 +5,7 @@ Measured, case 11854808010. The specialist issued exactly the right call —
 `rows_matching_filter: 1` with the row populated ($105,818.60 on 2025-04-28,
 INSUFFICIENT FUNDS), and the answer said "No payment returns were found; there
 are zero records in the payments table with Return Flag == 1". One row in, zero
-reported, and the distiller wrote that into the KB as a high-confidence
+reported, and the distiller wrote that into the KP as a high-confidence
 knowledge point so every later turn inherited it as fact.
 
 Nothing existing could see it: no tool failed, no filter matched zero, and the
@@ -103,7 +103,7 @@ def test_phrasings_the_specialists_actually_use():
 
 def test_scan_tool_errors_fails_open_on_a_broken_transcript():
     """`scan_tool_errors` is the one check with teeth — a hit quarantines the
-    run from the KB — and its call site is unguarded, so an exception here
+    run from the KP — and its call site is unguarded, so an exception here
     would record the specialist as a HARD FAILURE and destroy the answer it was
     checking. "Could not run" must mean "no evidence of a problem"."""
     from agent_factories.agent_tools.grounding import scan_tool_errors

@@ -42,6 +42,18 @@ _MAP = {
     "timeouts.amem_read_s": "AMEM_READ_TIMEOUT_S",
     "timeouts.amem_write_s": "AMEM_WRITE_TIMEOUT_S",
     "timeouts.amem_active_load_s": "AMEM_ACTIVE_LOAD_TIMEOUT_S",
+    # Knowledge base (prior-case retrieval). `enabled` is the master switch;
+    # an empty `client` / `json_path` is left as the empty string on purpose,
+    # so "configured but blank" and "absent" behave identically.
+    "knowledge_base.enabled": "KNOWLEDGE_BASE_ENABLED",
+    "knowledge_base.client": "KNOWLEDGE_BASE_CLIENT",
+    "knowledge_base.json_path": "KNOWLEDGE_BASE_JSON",
+    "knowledge_base.timeout_s": "KNOWLEDGE_BASE_TIMEOUT_S",
+    "knowledge_base.max_clusters": "KNOWLEDGE_BASE_MAX_CLUSTERS",
+    "knowledge_base.max_bullets": "KNOWLEDGE_BASE_MAX_BULLETS",
+    "knowledge_base.text_chars": "KNOWLEDGE_BASE_TEXT_CHARS",
+    "knowledge_base.answer_chars": "KNOWLEDGE_BASE_ANSWER_CHARS",
+    "knowledge_base.history_turns": "KNOWLEDGE_BASE_HISTORY_TURNS",
 }
 
 _DEFAULT_PATH = Path(__file__).resolve().parent / "tuning.yaml"

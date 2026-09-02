@@ -3,7 +3,7 @@
 Runs every seed question in a suite (``questions.json``) **k** times through the
 PRODUCTION reviewer pipeline — ``runner.turn.conductor.TurnRunner``, the exact
 spine ``server.py`` drives (screen → orchestrator retry loop → server-side
-coherence review + re-dispatch → distiller/KB → finalize) — captures the
+coherence review + re-dispatch → distiller/KP → finalize) — captures the
 reviewer-facing answer (the ``final`` SSE event) and wall-clock latency, and
 appends one row per response to a CSV. Built to exercise the LLM (gpt-4.1) under
 load — e.g. answer consistency and response-time spread when the private env is
@@ -12,8 +12,8 @@ busy.
 NOTE: this drives ``TurnRunner``, NOT the legacy ``Orchestrator.run()``
 single-shot path — so the numbers reflect what a reviewer actually gets,
 including the safechain dispatch enforcement + retries, coherence review, and
-distiller/KB. Each response uses a FRESH ``_HarnessSession`` so repeated seed
-questions stay independent (no KB / qa_cache / history bleed).
+distiller/KP. Each response uses a FRESH ``_HarnessSession`` so repeated seed
+questions stay independent (no KP / qa_cache / history bleed).
 
   * only repeats each *seed* question (follow-up chains are skipped), and
   * adds a ``--concurrency`` knob and per-response timing → CSV.
@@ -93,7 +93,7 @@ from llm.factory import FirewalledChatShim, build_session_clients
 from llm.firewall_stack import FirewallStack
 from logger.event_logger import EventLogger
 # Drive the PRODUCTION pipeline spine (screen → orchestrator retry loop →
-# coherence review + re-dispatch → distiller/KB → finalize), the same one
+# coherence review + re-dispatch → distiller/KP → finalize), the same one
 # `server.py` uses — NOT the legacy `Orchestrator.run()` single-shot path. This
 # makes the harness's consistency + latency numbers reflect what a reviewer
 # actually gets, including the safechain dispatch enforcement + retries.
@@ -125,7 +125,7 @@ class _HarnessSession:
     Importing the real ``CaseSession`` would boot ``server.py`` (which rebinds
     ``init_tools`` to its OWN gateway/catalog, defeating the harness's explicit
     backend/case setup), so we build a lightweight stand-in. A FRESH session per
-    response keeps runs independent — no KB / qa_cache / history bleed across the
+    response keeps runs independent — no KP / qa_cache / history bleed across the
     repeated seed questions.
     """
 
@@ -140,7 +140,7 @@ class _HarnessSession:
         self.logger = logger
         # Per-turn state — fresh so each response is independent.
         self.qa_cache: dict = {}
-        self.specialist_kb: dict = {}
+        self.specialist_kps: dict = {}
         self._qa_turn_seq = 0
         self.cancel_in_flight = threading.Event()
         # Captured SSE events. The reviewer-facing answer is the `final` event's

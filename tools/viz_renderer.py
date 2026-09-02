@@ -11,7 +11,7 @@ this module produces:
     for inline embedding in the agent's markdown answer, and
   * a minimal Vega-Lite v5 spec (``kp_to_vega_spec``) for interactive
     frontends. This is NOT stored on the KP — it is regenerated on demand
-    at emit time (``finalize._build_chart_payload``) so the KB / distilled
+    at emit time (``finalize._build_chart_payload``) so the KP / distilled
     memory that flows across turns stays lean.
 
 Failures (matplotlib import error on a stripped image, malformed numbers,
@@ -764,7 +764,7 @@ def render_chart(
     # counter so we don't silently overwrite the earlier render. The
     # downstream `_collect_turn_charts` still dedupes by topic — see
     # caller comments — so the new filename also surfaces a side-by-
-    # side render only when the KB carries distinct topics. The PNG
+    # side render only when the KP carries distinct topics. The PNG
     # preservation here is for forensics: when the distiller bug
     # recurs, the missing chart's PNG is still on disk to recover.
     out_dir_path = out_dir

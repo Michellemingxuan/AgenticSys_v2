@@ -2,12 +2,12 @@ from agent_factories.agent_tools.specialist_input_tool import _compose_specialis
 
 def test_compose_no_regression_without_directed_block():
     # byte-identical to the 3-arg behavior when directed_block omitted
-    out = _compose_specialist_input("EPI", "KB", "the question")
-    assert out == "EPI\n\nKB\n\n--- New question ---\nthe question"
+    out = _compose_specialist_input("EPI", "KP", "the question")
+    assert out == "EPI\n\nKP\n\n--- New question ---\nthe question"
 
 def test_compose_places_directed_block_last():
-    out = _compose_specialist_input("EPI", "KB", "the question", "DIR")
-    assert out == "EPI\n\nKB\n\nDIR\n\n--- New question ---\nthe question"
+    out = _compose_specialist_input("EPI", "KP", "the question", "DIR")
+    assert out == "EPI\n\nKP\n\nDIR\n\n--- New question ---\nthe question"
 
 def test_compose_directed_only():
     out = _compose_specialist_input("", "", "q", "DIR")

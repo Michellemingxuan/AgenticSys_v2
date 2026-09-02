@@ -1,5 +1,5 @@
 """Distiller second-pass: extract reusable KnowledgePoints from a specialist's
-output and persist them to the session KB, filling `numbers` from parsed tool
+output and persist them to the session KP, filling `numbers` from parsed tool
 outputs. Fire-and-forget; scheduled by agent_tool._runner. Extracted from
 tools/agent_tool.py (see the decomposition design spec)."""
 from __future__ import annotations
@@ -21,12 +21,12 @@ from agent_factories.agent_tools.series_extract import _parse_series_from_tool_o
 # Wall-clock budget for the second-pass distiller. Distillation is purely
 # text-extraction; should be fast. If it stalls, log + skip — the specialist
 # answer is already in flight to the orchestrator and we degrade gracefully
-# to "no KB update this turn."
+# to "no KP update this turn."
 #
 # Bumped 30s → 60s after observing real-world timeouts on chunky
 # specialists (spend_payments returning ~8 chartable claims at once,
 # case 366132845011 turn around 06:20). The distiller timing out kills
-# BOTH KB warmth for the next turn AND charts for the current turn (the
+# BOTH KP warmth for the next turn AND charts for the current turn (the
 # auto-distiller is the primary chart-generation path; make_chart is
 # specialist-explicit and proves unreliable when the LLM forgets). 60s
 # is still under the slowest specialist budget (240s) so end-of-turn
@@ -92,7 +92,7 @@ def _salvage_truncated_kps(exc: Exception) -> list[dict]:
                     kp = json.loads(text[obj_start:i + 1])
                 except (json.JSONDecodeError, ValueError):
                     break
-                # A KP without a claim is not usable knowledge, and the KB
+                # A KP without a claim is not usable knowledge, and the KP
                 # digest renders it as a blank line.
                 if isinstance(kp, dict) and kp.get("topic") and kp.get("claim"):
                     out.append(kp)
@@ -121,7 +121,7 @@ _SERIES_KEYWORDS = frozenset({
 
 # Narrow-output KPs skip the distiller LLM, so they don't get an LLM-named
 # topic. Derive a readable, deterministic topic from the sub-question instead
-# of an opaque `{name}_q_<hash>` — so kb_lookup and the KB digest stay
+# of an opaque `{name}_q_<hash>` — so kp_lookup and the KP digest stay
 # meaningful. Stopwords are dropped so the slug carries the actual metric.
 _TOPIC_STOPWORDS = frozenset({
     "the", "a", "an", "is", "are", "was", "were", "did", "do", "does", "what",
@@ -134,7 +134,7 @@ _TOPIC_STOPWORDS = frozenset({
 
 def _slug_topic(sub_question: str, name: str, max_tokens: int = 5) -> str:
     """Readable, deterministic topic slug from a sub-question (narrow-output
-    path). Same sub-question → same slug, so KB dedup still works; falls back to
+    path). Same sub-question → same slug, so KP dedup still works; falls back to
     the old name-scoped hash only when no usable tokens remain."""
     toks = re.findall(r"[a-z0-9]+", (sub_question or "").lower())
     keep = [t for t in toks if t not in _TOPIC_STOPWORDS and len(t) > 1]
@@ -150,7 +150,7 @@ def _topic_key(topic: str) -> frozenset:
     `cdss_tsr_trajectory` and `tsr_cdss_trajectory` are the same topic said two
     ways, but `_active_kps` keys on the exact string — so the second one does
     NOT supersede the first. Both then sit in the digest as separate cached
-    topics, and `kb_lookup("cdss_tsr_trajectory")` returns the STALE claim while
+    topics, and `kp_lookup("cdss_tsr_trajectory")` returns the STALE claim while
     the fresh one hides under a name the specialist has no reason to guess.
     Observed 9x on one topic in case 366132845011.
     """
@@ -204,25 +204,25 @@ async def _distill_and_persist(
     tool_outputs: str = "",
 ) -> int:
     """Run the distiller agent on a successful SpecialistOutput, append any
-    extracted KnowledgePoints to the session KB. Returns count added.
+    extracted KnowledgePoints to the session KP. Returns count added.
 
     Failures are logged and non-fatal: the specialist's answer is already
-    flowing to the orchestrator regardless. The session KB just doesn't get
+    flowing to the orchestrator regardless. The session KP just doesn't get
     a new entry this turn — the specialist will still answer the next
     question, just without the new fact in its preface digest.
     """
     distiller = getattr(app_ctx, "_distiller", None)
-    kb = getattr(app_ctx, "_specialist_kb", None)
+    kps = getattr(app_ctx, "_specialist_kps", None)
     logger = getattr(app_ctx, "logger", None)
     node_store = getattr(app_ctx, "_node_trace_store", None)
 
-    if distiller is None or kb is None:
+    if distiller is None or kps is None:
         if logger is not None:
             logger.log("distiller_skipped", {
                 "specialist": name,
                 "reason": "not_wired",
                 "distiller_none": distiller is None,
-                "kb_none": kb is None,
+                "kp_none": kps is None,
             })
         return 0
 
@@ -234,18 +234,18 @@ async def _distill_and_persist(
             })
         return 0
 
-    # Narrow outputs → direct KB insertion with a node trace entry
+    # Narrow outputs → direct KP insertion with a node trace entry
     # so it's visible in the trace viewer.
     if _is_narrow_output(specialist_output, sub_question):
         findings = getattr(specialist_output, "findings", "") or ""
         # `_slug_topic` derives the slug from the sub-question's wording, so a
         # re-asked question phrased in a different order yields a permuted slug
         # — same snap as the distiller path.
-        from tools.kb_tools import _active_kps as _active
+        from tools.kp_tools import _active_kps as _active
         kp_dict = {
             "topic": _snap_topic(
                 _slug_topic(sub_question, name),
-                [kp.get("topic") for kp in _active(kb.get(name, []))
+                [kp.get("topic") for kp in _active(kps.get(name, []))
                  if isinstance(kp, dict) and kp.get("topic")]),
             "claim": findings,
             "numbers": [],
@@ -258,7 +258,7 @@ async def _distill_and_persist(
         turn_seq = getattr(app_ctx, "_turn_seq", None)
         if turn_seq is not None:
             kp_dict["captured_at_seq"] = turn_seq
-        sess_list = kb.setdefault(name, [])
+        sess_list = kps.setdefault(name, [])
         sess_list.append(kp_dict)
         if logger is not None:
             logger.log("distiller_direct_kp", {
@@ -307,18 +307,18 @@ async def _distill_and_persist(
     )
 
     # Existing slugs for THIS specialist, so a re-capture of a topic already in
-    # the KB reuses its exact slug and supersedes it (rather than forking a
+    # the KP reuses its exact slug and supersedes it (rather than forking a
     # near-identical name that `_active_kps` treats as a separate topic). Only
     # the active set — superseded entries share their slug with the active one
     # by definition. Bounded so a long case can't crowd out the payload.
-    from tools.kb_tools import _active_kps
-    existing_topics = [kp.get("topic") for kp in _active_kps(kb.get(name, []))
+    from tools.kp_tools import _active_kps
+    existing_topics = [kp.get("topic") for kp in _active_kps(kps.get(name, []))
                        if isinstance(kp, dict) and kp.get("topic")]
     # The PROMPT is truncated to the most recent slugs; `_snap_topic` below
     # still checks the full list — it's a pure set comparison, so there is no
     # reason to let an older topic drift just because it fell off the prompt.
     existing_block = (
-        "\n--- Topic slugs already in this specialist's KB ---\n"
+        "\n--- Topic slugs already in this specialist's KP ---\n"
         + ", ".join(existing_topics[-_MAX_EXISTING_TOPICS:])
         + "\nIf a KP you emit answers the SAME question as one of these, reuse "
           "that slug EXACTLY (it supersedes the old entry). Only invent a new "
@@ -391,7 +391,7 @@ async def _distill_and_persist(
     turn_id = getattr(app_ctx, "_turn_id", None)
     turn_seq = getattr(app_ctx, "_turn_seq", None)
     case_folder = getattr(app_ctx, "case_folder", None)
-    sess_list = kb.setdefault(name, [])
+    sess_list = kps.setdefault(name, [])
     added_topics: list[str] = []
     n_with_charts = 0
     n_nulls_filled = 0
@@ -450,7 +450,7 @@ async def _distill_and_persist(
             })
 
         # Charts are now the SPECIALIST's responsibility (via make_chart
-        # tool call with real data). The distiller only handles KB warmth
+        # tool call with real data). The distiller only handles KP warmth
         # (claims/topics for follow-up questions). No chart rendering here.
 
         sess_list.append(kp_dict)
@@ -464,7 +464,7 @@ async def _distill_and_persist(
         logger.log("distiller_kps_added", {
             "specialist": name,
             "n_added": len(added_topics),
-            "kb_size_now": len(sess_list),
+            "kp_size_now": len(sess_list),
             "topics": added_topics,
             "n_with_charts": sum(1 for k in sess_list[-len(added_topics):]
                                  if k.get("image_path")),

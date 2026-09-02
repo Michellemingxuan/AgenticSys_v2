@@ -119,7 +119,7 @@ def render_orchestrator_block(records: list[dict]) -> str:
             'antecedent for any follow-up that carries no subject of its own '
             '("think harder", "go deeper", "why is that?", "what contradicts '
             'it?", "are you sure?"). Resolve those against the first record — '
-            'never against an older turn, and never against the KB-warmth block '
+            'never against an older turn, and never against the KP-warmth block '
             'below, which is undated. A record marked "partial_answer": true is '
             'one where synthesis FAILED and the answer was assembled from '
             'whatever the specialists had returned — treat it as incomplete, '

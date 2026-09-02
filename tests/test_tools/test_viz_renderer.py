@@ -145,7 +145,7 @@ def test_render_chart_filename_collision_writes_dup_suffix(tmp_path):
     case-366132845011-815159: distiller put both CDSS and TSR under
     'model_scores_trend' and the second render overwrote the first),
     the renderer must write the second to a `__dup2.png` filename
-    instead of silently overwriting. The KB dedup still strips the
+    instead of silently overwriting. The KP dedup still strips the
     second downstream, but the PNG is preserved for forensics + the
     `viz_render_filename_collision` event lands in the JSONL."""
     logged: list = []
@@ -232,7 +232,7 @@ def test_kp_to_vega_spec_emits_minimal_lite_v5_for_trend():
     # Text layer carries the value field — vega-embed renders these
     # next to each point.
     assert spec["layer"][1]["encoding"]["text"]["field"] == "value"
-    # Spec must roundtrip cleanly through JSON for storage in the KB / logs.
+    # Spec must roundtrip cleanly through JSON for storage in the KP / logs.
     assert json.loads(json.dumps(spec)) == spec
 
 

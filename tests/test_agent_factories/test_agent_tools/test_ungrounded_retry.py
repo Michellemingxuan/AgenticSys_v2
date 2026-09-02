@@ -4,7 +4,7 @@ quarantined if the retry doesn't fix it.
 The hard-failure path (`[FAILED ...]`) is covered in test_agent_tool.py. This
 file covers the SILENT one: `Runner.run` returns a well-formed SpecialistOutput
 whose numbers came from a tool call that errored. Left alone, that answer flows
-into the KB, Amem and next turn's episodic context, so one broken call poisons
+into the KP, Amem and next turn's episodic context, so one broken call poisons
 every later turn — see agent_factories/agent_tools/grounding.py.
 """
 import json
@@ -184,7 +184,7 @@ async def test_degraded_run_reaches_no_cross_turn_channel():
     ])
 
     assert ctx._specialist_turn_records == {}, "must not reach Amem"
-    assert ctx._pending_distillers == [], "must not reach the KB or auto-chart"
+    assert ctx._pending_distillers == [], "must not reach the KP or auto-chart"
 
 
 @pytest.mark.asyncio

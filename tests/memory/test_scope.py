@@ -26,7 +26,7 @@ def test_base_metadata_omits_none():
 
 
 def test_kps_for_turn_filters_by_captured_turn():
-    kb = {
+    kps = {
         "risk": [
             {"claim": "A", "captured_at_turn": "t1"},
             {"claim": "B", "captured_at_turn": "t2"},
@@ -34,26 +34,26 @@ def test_kps_for_turn_filters_by_captured_turn():
         ],
         "fraud": [{"claim": "C", "captured_at_turn": "t1"}],
     }
-    assert sorted(kps_for_turn(kb, "t1")) == ["A", "C"]
-    assert kps_for_turn(kb, "t2") == ["B"]
-    assert kps_for_turn(kb, "tX") == []
+    assert sorted(kps_for_turn(kps, "t1")) == ["A", "C"]
+    assert kps_for_turn(kps, "t2") == ["B"]
+    assert kps_for_turn(kps, "tX") == []
 
 
 def test_kps_for_agent_turn_returns_full_dicts_for_one_agent():
-    kb = {
+    kps = {
         "risk": [
             {"claim": "A", "captured_at_turn": "t1", "topic": "x"},
             {"claim": "B", "captured_at_turn": "t2", "topic": "y"},
         ],
         "fraud": [{"claim": "C", "captured_at_turn": "t1", "topic": "z"}],
     }
-    assert kps_for_agent_turn(kb, "risk", "t1") == [
+    assert kps_for_agent_turn(kps, "risk", "t1") == [
         {"claim": "A", "captured_at_turn": "t1", "topic": "x"}
     ]
-    assert kps_for_agent_turn(kb, "risk", "t2") == [
+    assert kps_for_agent_turn(kps, "risk", "t2") == [
         {"claim": "B", "captured_at_turn": "t2", "topic": "y"}
     ]
     # different agent's KPs never leak in
-    assert kps_for_agent_turn(kb, "fraud", "t2") == []
+    assert kps_for_agent_turn(kps, "fraud", "t2") == []
     # unknown agent -> empty list, no KeyError
-    assert kps_for_agent_turn(kb, "unknown", "t1") == []
+    assert kps_for_agent_turn(kps, "unknown", "t1") == []

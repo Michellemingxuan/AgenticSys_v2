@@ -60,17 +60,17 @@ def test_agent_case_summary_block_and_compose_order():
     assert _format_agent_case_summary_block("") == ""
     b = _format_agent_case_summary_block("modeling saw TSR peak 39.6")
     assert "CASE SUMMARY" in b and "39.6" in b
-    out = _compose_specialist_input("EPI", "KB", "the question", "DIR", case_summary_block=b)
-    assert out.index("CASE SUMMARY") < out.index("EPI") < out.index("KB") \
+    out = _compose_specialist_input("EPI", "KP", "the question", "DIR", case_summary_block=b)
+    assert out.index("CASE SUMMARY") < out.index("EPI") < out.index("KP") \
         < out.index("DIR") < out.index("the question")
     # backward compatible: no case summary / directed -> unchanged shape
-    assert _compose_specialist_input("EPI", "KB", "q") == "EPI\n\nKB\n\n--- New question ---\nq"
+    assert _compose_specialist_input("EPI", "KP", "q") == "EPI\n\nKP\n\n--- New question ---\nq"
 
 
 def test_assemble_specialist_input_injects_agent_case_summary():
     fake = FakeAmem()
     fake.listed = [FakeRecord(id="a1", content="modeling's condensed findings", level="case")]
-    app_ctx = SimpleNamespace(_specialist_kb={}, _episodic_records=[],
+    app_ctx = SimpleNamespace(_specialist_kps={}, _episodic_records=[],
                               _amem=fake, _amem_cfg=CFG, _case_id="c1")
     out, _ = assemble_specialist_input(
         app_ctx, "modeling", "the sub-question", None, None, None, None)

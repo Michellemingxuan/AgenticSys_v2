@@ -16,7 +16,7 @@ different times:
   or **per tool call** (specialist), from compact side-channels.
 
 The message list carries the conversation; everything else a tool needs
-(gateway, KB, logger, …) rides on `AppContext` (`models/app_context.py`), passed
+(gateway, KP cache, logger, …) rides on `AppContext` (`models/app_context.py`), passed
 as `Runner.run(..., context=ctx)`.
 
 ## Side-by-side: what's in each, and where it's built
@@ -26,7 +26,7 @@ as `Runner.run(..., context=ctx)`.
 | **System prompt — builder** | `agent_factories/orchestrator_agent.py` → `_compose_orchestrator_instructions` | `agent_factories/specialist_agent.py` → `_compose_instructions` |
 | **System prompt — sections** | `§ PROTOCOL` (round rules + tool-use gate) · `§ SYNTHESIS` (`skills/workflow/synthesis.md`) · `§ R1 REFERENCE` (`team_construction.md` + `data_catalog.md`) · pillar concept-glossary · **TEAM ROSTER** (auto-generated from each specialist's domain `.md` × the data catalog) | `§ DOMAIN IDENTITY` (name · tables · interpretation guide · risk signals) · `§ DOMAIN EXPERTISE` (`skills/domain/<name>.md` body) · `§ PILLAR CONTEXT` (cut-off date · glossary · focus) · `§ WORKFLOW` (`skills/workflow/data_query.md`, the six-tool playbook) |
 | **User message — builder** | `runner/turn/input_assembly.py` → `assemble_orchestrator_input(sess, verdict, ctx)` | `agent_factories/agent_tools/specialist_input_tool.py` → `assemble_specialist_input(...)` |
-| **User message — pieces (in order)** | `[EPISODIC]` recent **whole turns** (coreference) · `[KB-warmth]` which specialists are warm · the **redacted question** | `[EPISODIC]` this specialist's **own** prior sub-answers · `[KB]` digest of its cached topic names (+ `kb_lookup` nudge) · `§ DIRECTED VARIABLES` (catalog-resolved columns for the passed `concepts`) · `--- New question ---` + the **sub-question** |
+| **User message — pieces (in order)** | `[EPISODIC]` recent **whole turns** (coreference) · `[KP-warmth]` which specialists are warm · the **redacted question** | `[EPISODIC]` this specialist's **own** prior sub-answers · `[KP]` digest of its cached topic names (+ `kp_lookup` nudge) · `§ DIRECTED VARIABLES` (catalog-resolved columns for the passed `concepts`) · `--- New question ---` + the **sub-question** |
 | **Built when** | once per **turn** (fresh graph each turn) | once per **tool call** (first call this turn; warm follow-ups reuse the stored transcript) |
 | **Per-round system-prompt switch** | full → **synthesis** (drops `§ R1 REFERENCE`, ~23k→~10k chars) via `_dynamic_instructions`, keyed on `AppContext._domain_specialists_called` | full → **synthesis** (drops `§ DATA QUERY`/`§ CROSS-DOMAIN`) via `_dynamic_instructions`, keyed on a per-`ctx` call counter |
 | **Driven by** | `TurnRunner` (`runner/turn/conductor.py`) → `Runner.run_streamed(orchestrator_agent, …)` | `agent_tool._runner` (`agent_factories/agent_tools/agent_tool.py`) → `Runner.run(specialist, …)` |
@@ -41,7 +41,7 @@ We follow **one case, two turns**, to see how turn 1's answer flows into turn
   → the orchestrator dispatched the **`bureau`** specialist → answer:
   *"FICO fell 712 → 648; steepest drop **Aug–Oct 2024**."* Two things were saved:
   the Q→A landed in `qa_cache` (→ episodic), and a distilled `fico_trend`
-  KnowledgePoint landed in `bureau`'s KB.
+  KnowledgePoint landed in `bureau`'s KP cache.
 - **Turn 2 (the new question):** *"**Did the internal model scores spike in
   those same months?**"* — note "those same months" is a coreference to turn 1.
 
@@ -79,7 +79,7 @@ When a specialist lists `concepts you can direct`, pass `concepts=[...]` naming 
 
 ### Turn 2 · Orchestrator user message (built per turn, `assemble_orchestrator_input`)
 
-`[EPISODIC] ⊕ [KB-warmth] ⊕ redacted question`. Turn 1's FICO answer **and** its
+`[EPISODIC] ⊕ [KP-warmth] ⊕ redacted question`. Turn 1's FICO answer **and** its
 `Aug–Oct 2024` window are visible here — that's how the orchestrator resolves
 "those same months" (real):
 
@@ -88,7 +88,7 @@ When a specialist lists `concepts you can direct`, pass `concepts=[...]` naming 
 [{"turn_id": "turn-1", "question": "What is the FICO score trend for this case?", "sub_answers": [{"specialist": "bureau", "sub_question": "FICO score trend over the window", "sub_answer": "fico_score 712 -> 648 (-64); steepest drop Aug-Oct 2024."}], "final_answer": "FICO fell from 712 to 648 over the 18-month window; steepest drop Aug-Oct 2024."}]
 ]
 
-[KB-warmth — cached specialist knowledge from prior turns. Use topic details to anchor sub-questions and avoid redundant queries:
+[KP-warmth — cached specialist knowledge from prior turns. Use topic details to anchor sub-questions and avoid redundant queries:
   bureau (2 KPs):
     - fico_trend: fico_score declined 712 -> 648 over 18 months, steepest Aug-Oct 2024
     - derogs: derog_count rose from 1 to 4 in the final quarter
@@ -123,15 +123,15 @@ it's `modeling`'s identity + playbook.
 ### Turn 2 · Modeling specialist user message (built per call, `assemble_specialist_input`)
 
 `modeling` has **never run this session**, so its *own* episodic slice and *own*
-KB block are empty — but it still (a) sees `bureau`'s FICO finding via the
-**cross-specialist KB pointer** (`kb_lookup`), (b) gets the exact `output_score`
+KP digest block are empty — but it still (a) sees `bureau`'s FICO finding via the
+**cross-specialist KP pointer** (`kp_lookup`), (b) gets the exact `output_score`
 columns + thresholds from **directed variables**, and (c) receives the
 window-anchored sub-question (real):
 
 ```
-[KB — other specialists' cached topics (use kb_lookup(topic) to retrieve without re-querying):
+[KP — other specialists' cached topics (use kp_lookup(topic) to retrieve without re-querying):
   bureau: fico_trend, derogs]
-Call kb_lookup(topic) to get cached data before re-querying. Call kb_list_topics() to see all cached claims.
+Call kp_lookup(topic) to get cached data before re-querying. Call kp_list_topics() to see all cached claims.
 
 § DIRECTED VARIABLES (for this question — from the data catalog)
 [output_score] credit_loss_prob — ML model score predicting likelihood of default in next 18 months; risky > 10
@@ -205,19 +205,19 @@ returns it to the orchestrator as the specialist's tool output.
 
 ```
 Turn 1  bureau answers "FICO 712→648, steepest Aug-Oct 2024"
-          │  saved to → qa_cache (episodic)  +  bureau KB (fico_trend)
+          │  saved to → qa_cache (episodic)  +  bureau KP (fico_trend)
           ▼
-Turn 2  orchestrator user message  = [EPISODIC turn-1 FICO] + [KB-warmth bureau] + "…those same months?"
+Turn 2  orchestrator user message  = [EPISODIC turn-1 FICO] + [KP-warmth bureau] + "…those same months?"
           │  resolves "those same months" = Aug-Oct 2024  (from episodic)
           │  routes to modeling, concepts=[output_score]   (from roster)
           ▼
-        modeling user message  = [KB: bureau fico_trend]  +  §DIRECTED VARIABLES(output_score)
+        modeling user message  = [KP: bureau fico_trend]  +  §DIRECTED VARIABLES(output_score)
                                  +  "…rise in Aug-Oct 2024 — the months FICO fell?"
 ```
 
 One turn-1 finding (FICO's Aug–Oct 2024 drop) reaches the turn-2 specialist
 **three** ways: as episodic context the orchestrator used to anchor the window,
-as a cross-specialist KB pointer the specialist can `kb_lookup`, and as the
+as a cross-specialist KP pointer the specialist can `kp_lookup`, and as the
 window folded into its sub-question — without ever re-running `bureau`.
 
 ## Per-round dynamics (why the context changes each round)
@@ -243,8 +243,8 @@ three compact side-channels re-attached each turn:
 
 | Channel | Holds | Feeds |
 |---|---|---|
-| `qa_cache` → episodic | recent Q→A pairs | both agents' `[EPISODIC]` blocks |
-| `AppContext._specialist_kb` (aliases `CaseSession.specialist_kb`) | distilled KnowledgePoints, **persists across turns by reference** | orchestrator `[KB-warmth]`, specialist `[KB digest]`, `kb_lookup` |
+| `qa_cache` → episodic | recent Q→A pairs | both agents' `[EPISODIC]` blocks, and `knowledge_base_search`'s `conversation_history` (so *"any others like that?"* resolves inside the knowledge base too) |
+| `AppContext._specialist_kps` (aliases `CaseSession.specialist_kps`) | distilled KnowledgePoints, **persists across turns by reference** | orchestrator `[KP-warmth]`, specialist `[KP digest]`, `kp_lookup` |
 | `_specialist_histories` | a specialist's within-turn transcript | warm follow-up calls (per turn only) |
 
 ## File reference

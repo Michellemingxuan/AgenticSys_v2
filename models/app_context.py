@@ -40,11 +40,11 @@ class AppContext:
     # Per-specialist KNOWLEDGE BASE — survives across turns within a case
     # session. Keyed by specialist name; each value is a chronological list of
     # KnowledgePoint dicts (Pydantic-dumped). The list is owned by
-    # `CaseSession.specialist_kb` in the server; this attribute holds the
+    # `CaseSession.specialist_kps` in the server; this attribute holds the
     # SAME dict by reference, so writes the agent_tool makes here persist
     # to the next turn's AppContext automatically. None when not wired (e.g.
     # tests that don't set up a session).
-    _specialist_kb: dict[str, list] | None = None
+    _specialist_kps: dict[str, list] | None = None
     # Distiller agent (built once at orchestrator construction, shared across
     # all specialists). The agent_tool wrapper invokes it after each
     # specialist run to extract KnowledgePoints. None disables distillation
@@ -57,15 +57,15 @@ class AppContext:
     # Sequence number this turn will be assigned in the session's episodic
     # ordering (``CaseSession._qa_turn_seq`` + 1 — the counter is bumped at
     # end of turn by `_store_cached_qa`). Stamped onto every KP created this
-    # turn as `captured_at_seq`, giving the KB a SORTABLE age marker that
+    # turn as `captured_at_seq`, giving the KP a SORTABLE age marker that
     # `_turn_id` (random hex) cannot provide. None outside a session.
     _turn_seq: int | None = None
     # Fire-and-forget distiller tasks. Each agent_tool wrapper schedules
     # distillation as an asyncio.Task here BEFORE returning the specialist's
     # payload to the orchestrator — so the orchestrator gets the answer
     # without waiting on the distiller round-trip. Server.py awaits all
-    # pending tasks at end of turn so the KB is fully populated before the
-    # NEXT turn starts (and its KB-warmth digest reflects this turn's KPs).
+    # pending tasks at end of turn so the KP is fully populated before the
+    # NEXT turn starts (and its KP-warmth digest reflects this turn's KPs).
     _pending_distillers: list = field(default_factory=list)
     # Server-side SSE-emit hook. When wired by `server.py` at turn start,
     # tools running inside `Runner.run` can publish typed events out to the
@@ -101,7 +101,7 @@ class AppContext:
     # Specialists whose run STILL rested on a failed tool call after the
     # grounding retry (see agent_factories/agent_tools/grounding.py). Their
     # answer is returned to the orchestrator with a degraded banner, but is
-    # kept OUT of every cross-turn channel — distiller/KB, Amem, the qa_cache
+    # kept OUT of every cross-turn channel — distiller/KP, Amem, the qa_cache
     # tool_calls that feed episodic, and the intra-turn dedup cache — so a
     # wrong answer this turn cannot ground the next one.
     # Keyed by specialist name; each value: list of the grounding error dicts.

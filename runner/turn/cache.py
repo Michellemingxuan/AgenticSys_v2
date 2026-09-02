@@ -109,7 +109,7 @@ def _kp_backs_a_chart(kp: dict) -> bool:
     return isinstance(viz, dict) and viz.get("kind") == "table"
 
 
-def _find_kp(specialist_kb: dict, specialist: str, topic: str,
+def _find_kp(specialist_kps: dict, specialist: str, topic: str,
              turn_id: str) -> dict | None:
     """Return the KP for (specialist, topic) captured in this turn, or None.
 
@@ -129,9 +129,9 @@ def _find_kp(specialist_kb: dict, specialist: str, topic: str,
     So: latest CHART-BACKING KP wins; fall back to the latest overall when
     none backs a chart, which keeps every non-chart caller unchanged.
     """
-    if not isinstance(specialist_kb, dict):
+    if not isinstance(specialist_kps, dict):
         return None
-    kps = specialist_kb.get(specialist) or []
+    kps = specialist_kps.get(specialist) or []
     found: dict | None = None
     found_charted: dict | None = None
     for kp in kps:

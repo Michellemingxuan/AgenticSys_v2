@@ -235,7 +235,7 @@ def _markdown(summary: dict) -> str:
         "",
         "| Mode | Question | Team exact | Tool Jaccard | Subquery similarity | "
         "Median / p95 latency | Retry | Tokens mean | LLM calls mean | "
-        "QA cache hit | KB lookup hit | Provenance | Auto content |",
+        "QA cache hit | KP lookup hit | Provenance | Auto content |",
         "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for q in summary["questions"]:
@@ -247,7 +247,7 @@ def _markdown(summary: dict) -> str:
             f"{lat['median']:.2f}s / {lat['p95']:.2f}s "
             f"({lat['outlier_count']} outliers) | {pct(q['retry_rate'])} | "
             f"{q['tokens']['mean']:.0f} | {q['llm_calls']['mean']:.1f} | "
-            f"{pct(q['qa_cache_hit_rate'])} | {pct(q['kb_lookup_hit_rate'])} | "
+            f"{pct(q['qa_cache_hit_rate'])} | {pct(q['kp_lookup_hit_rate'])} | "
             f"{pct(q['provenance_completeness'])} | "
             f"{num(q['automated_content_score'])} |"
         )

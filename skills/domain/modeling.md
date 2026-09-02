@@ -76,7 +76,7 @@ cut-off). Resolve the referent by the wording:
   bucket that crossed the threshold, near the cut-off), NOT the global peak. If
   you answer with the historical peak here, you have mis-resolved "recently".
 - **"the biggest / the spike"** (unqualified) → the global peak.
-- If a PRIOR turn already established the TSR/CDSS trend (it is in your KB /
+- If a PRIOR turn already established the TSR/CDSS trend (it is in your KP cache /
   warmth hint), reuse those detected spikes to pin the window — don't re-derive
   "recently" as a blind last-N-months guess, and don't silently collapse it onto
   the global peak. Then pull that window's transactions for the driver step.
@@ -148,7 +148,7 @@ For concept-scoped questions ("spending features?", "delinquency signals?", "ris
 
 **Total: 2 rounds.** Do NOT schema in R1 → trend in R2 → query_table in R3.
 
-**KB relevance filter.** When the KB holds cached data from a prior turn (e.g. TSR/CDSS trajectories), only reference it if it directly answers the current concept question. 
+**KP relevance filter.** When the KP cache holds data from a prior turn (e.g. TSR/CDSS trajectories), only reference it if it directly answers the current concept question. 
 
 ## Concept → variable selection
 

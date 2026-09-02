@@ -185,7 +185,7 @@ def _annotate_payload(payload, *, degraded_notice: str | None = None,
 
 
 class _SkipPersistence(Exception):
-    """Internal signal: this run must not reach the KB / Amem / chart channels.
+    """Internal signal: this run must not reach the KP / Amem / chart channels.
 
     Raised (and caught silently) inside the persistence block rather than
     wrapping that block in an `if` so the degraded path shares the existing
@@ -488,15 +488,15 @@ def agent_tool(
                     "Emit FinalAnswer NOW from the specialist + report_agent outputs.]"
                 )
 
-        # KB digest preface — the specialist's accumulated knowledge from
+        # KP digest preface — the specialist's accumulated knowledge from
         # earlier turns. Only prepend on the FIRST call within this turn (no
         # intra-turn `prior` exists yet); on subsequent within-turn calls the
         # `prior` transcript already carries the digest from the first call's
         # input message, so re-prepending would duplicate it.
         contextual_in = redacted_in
-        kb_digest_n_kps = 0
+        kp_digest_n_kps = 0
         if not prior:
-            contextual_in, kb_digest_n_kps = assemble_specialist_input(
+            contextual_in, kp_digest_n_kps = assemble_specialist_input(
                 app_ctx, name, redacted_in, concepts, catalog, data_hints, logger)
 
         # Inject the case folder file list for report_agent so it can decide
@@ -533,7 +533,7 @@ def agent_tool(
             "specialist_context_prepare",
             int((time.perf_counter() - runner_started) * 1000),
             has_prior=bool(prior),
-            kb_digest_prepended=contextual_in != redacted_in,
+            kp_digest_prepended=contextual_in != redacted_in,
             sub_question_chars=len(redacted_in),
             run_input_items=len(run_input) if isinstance(run_input, list) else 1,
         )
@@ -567,9 +567,9 @@ def agent_tool(
                     label = node_label if _attempt == 0 else f"{node_label}.retry"
                     async with _open_node(node_store, label, depth=0):
                         if _attempt == 0:
-                            if kb_digest_n_kps:
-                                attach_tag("kb_digest_present")
-                                attach_extra(n_kps_in_digest=kb_digest_n_kps)
+                            if kp_digest_n_kps:
+                                attach_tag("kp_digest_present")
+                                attach_extra(n_kps_in_digest=kp_digest_n_kps)
                             if prior:
                                 attach_tag("warm_specialist")
                         else:
@@ -849,11 +849,11 @@ def agent_tool(
         # SpecialistOutput. We FIRE AND FORGET so the orchestrator receives
         # the specialist's payload immediately (no distiller round-trip on
         # the critical path). Server.py awaits all pending distillers at
-        # end-of-turn so the KB is fully populated before the next turn's
+        # end-of-turn so the KP is fully populated before the next turn's
         # warmth digest is built.
         #
         # A DEGRADED run skips this whole block. The distiller would mint
-        # KnowledgePoints from unsupported numbers straight into specialist_kb
+        # KnowledgePoints from unsupported numbers straight into specialist_kps
         # (→ next turn's warmth digest), and the turn record would be written
         # durably to Amem (→ every later session for this case). Auto-chart is
         # skipped for the same reason — a chart is a claim, and this run has no
@@ -887,7 +887,7 @@ def agent_tool(
                     "tool_calls": _extract_tool_calls(result),
                 }
             # Fire TWO parallel async tasks:
-            # 1. Distiller: extract claims into KB for follow-ups
+            # 1. Distiller: extract claims into KP for follow-ups
             # 2. Auto-chart: render charts from tool outputs (no LLM needed)
             task = asyncio.create_task(
                 _distill_and_persist(

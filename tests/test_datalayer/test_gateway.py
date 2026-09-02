@@ -171,7 +171,7 @@ def test_gateway_error_uses_neutral_path_token():
 # Real exports pad string columns to fixed width — 8,587 of 8,888 `Merchant
 # Name` cells on case 366132845011. Filters already compared stripped, but the
 # padding reached OUTPUT: ragged chart labels, padded merchant names quoted in
-# findings and KB claims, and two spellings of one merchant that don't compare
+# findings and KP claims, and two spellings of one merchant that don't compare
 # equal as strings.
 
 def test_from_case_folders_trims_padded_cells(tmp_path):

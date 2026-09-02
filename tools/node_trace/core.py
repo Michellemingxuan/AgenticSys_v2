@@ -62,8 +62,14 @@ CREATE INDEX IF NOT EXISTS idx_node      ON node_trace(node);
 CREATE INDEX IF NOT EXISTS idx_started   ON node_trace(started_at);
 
 -- End-of-turn snapshot of CaseSession's cross-turn state: qa_cache,
--- specialist_kb. Lets the viewer show what the
+-- specialist_kps. Lets the viewer show what the
 -- conversation "remembers" at each point. Cleared by delete_chat (rewind).
+--
+-- The `kb_*` / `*_kb_json` COLUMN names below predate the rename of the
+-- in-session knowledge-point cache (KB -> KP, which freed "knowledge base"
+-- for the internal clustered case-report KB). They are deliberately NOT
+-- renamed: existing trace DBs on the server would need a migration and the
+-- viewer reads rows by column name. Python-side names are the KP ones.
 CREATE TABLE IF NOT EXISTS session_snapshot (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   chat_id       TEXT NOT NULL,
@@ -75,7 +81,7 @@ CREATE TABLE IF NOT EXISTS session_snapshot (
   kb_kps_n            INTEGER,
   -- RETIRED, always 0 / NULL. Raw chat history was once threaded into each
   -- orchestrator call; that was removed (every turn now starts fresh, and
-  -- cross-turn context arrives via case summary + episodic block + KB warmth
+  -- cross-turn context arrives via case summary + episodic block + KP warmth
   -- hint). The columns are kept so existing trace DBs need no migration.
   input_history_items INTEGER,
   input_history_chars INTEGER,
@@ -247,7 +253,7 @@ class NodeTraceStore:
         case_id: str,
         turn_id: str,
         qa_cache: Any,
-        specialist_kb: Any,
+        specialist_kps: Any,
         conversation_id: str | None = None,
         server_run_id: str | None = None,
         user_id: str | None = None,
@@ -261,13 +267,14 @@ class NodeTraceStore:
         """
         try:
             qa_n = len(qa_cache) if qa_cache is not None else 0
+            # Local names mirror the legacy COLUMN names (see schema note).
             kb_specialists_n = (
-                sum(1 for v in specialist_kb.values() if v)
-                if isinstance(specialist_kb, dict) else 0
+                sum(1 for v in specialist_kps.values() if v)
+                if isinstance(specialist_kps, dict) else 0
             )
             kb_kps_n = (
-                sum(len(v or []) for v in specialist_kb.values())
-                if isinstance(specialist_kb, dict) else 0
+                sum(len(v or []) for v in specialist_kps.values())
+                if isinstance(specialist_kps, dict) else 0
             )
             # Store the clean episodic projection the next turn actually
             # injects (question → sub-answers → final answer), NOT the raw
@@ -279,7 +286,7 @@ class NodeTraceStore:
                 build_records(qa_cache, window=qa_n),
                 default=str,
             ) if qa_cache else None
-            kb_json = json.dumps(specialist_kb, default=str) if specialist_kb else None
+            kps_json = json.dumps(specialist_kps, default=str) if specialist_kps else None
             qa_raw_json = json.dumps(qa_cache, default=str) if qa_cache else None
             with self._lock:
                 cur = self._conn.execute(
@@ -294,7 +301,7 @@ class NodeTraceStore:
                     (chat_id, case_id, turn_id, _now_iso(),
                      qa_n, kb_specialists_n, kb_kps_n,
                      0, 0,
-                     qa_json, kb_json, None,
+                     qa_json, kps_json, None,
                      qa_raw_json,
                      conversation_id, server_run_id, user_id, pillar_id),
                 )
@@ -384,7 +391,7 @@ class NodeTraceStore:
             ).fetchone()
             if row is None:
                 return None
-            chat_id, qa_raw, kb_json = row
+            chat_id, qa_raw, kps_json = row
 
             def _load(blob, default):
                 if not blob:
@@ -397,7 +404,7 @@ class NodeTraceStore:
             return {
                 "chat_id": chat_id,
                 "qa_cache": _load(qa_raw, {}),
-                "specialist_kb": _load(kb_json, {}),
+                "specialist_kps": _load(kps_json, {}),
             }
         except Exception as exc:  # noqa: BLE001
             self._log_failure("load_latest_snapshot", exc)

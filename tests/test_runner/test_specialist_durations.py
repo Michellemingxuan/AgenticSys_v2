@@ -229,7 +229,7 @@ def test_framed_question_tells_the_orchestrator_intoop_is_a_column():
     data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
     try:
         sess = MagicMock()
-        sess.specialist_kb = {}
+        sess.specialist_kps = {}
         sess.qa_cache = {}
         verdict = ScreenVerdict(
             passed=True, redacted_question="how is intoop",
@@ -251,7 +251,7 @@ def test_a_question_naming_no_variable_gets_no_hint():
     from models.types import ScreenVerdict
     from runner.turn.input_assembly import assemble_orchestrator_input
 
-    sess = MagicMock(); sess.specialist_kb = {}; sess.qa_cache = {}
+    sess = MagicMock(); sess.specialist_kps = {}; sess.qa_cache = {}
     framed = assemble_orchestrator_input(
         sess, ScreenVerdict(passed=True, redacted_question="how is the customer"),
         MagicMock())
@@ -273,7 +273,7 @@ def test_the_hint_names_the_specialist_that_owns_the_table():
     gw.set_case("366132845011")
     data_tools.init_tools(gw, DataCatalog(profile_dir="config/data_profiles"))
     try:
-        sess = MagicMock(); sess.specialist_kb = {}; sess.qa_cache = {}
+        sess = MagicMock(); sess.specialist_kps = {}; sess.qa_cache = {}
         framed = assemble_orchestrator_input(
             sess,
             ScreenVerdict(passed=True, redacted_question="how is intoop",

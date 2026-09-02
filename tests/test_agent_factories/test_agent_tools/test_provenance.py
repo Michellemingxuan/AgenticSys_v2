@@ -99,7 +99,7 @@ def test_provenance_reports_an_explicit_base():
 
 
 def test_provenance_skips_non_data_tools():
-    r = _Calls([("kb_lookup", {"topic": "t"}),
+    r = _Calls([("kp_lookup", {"topic": "t"}),
                 ("make_chart", {"topic": "t"}),
                 ("get_chart_guidance", {})])
     assert measured_over(r) == []
@@ -162,7 +162,7 @@ def test_scope_line_covers_every_table_touched():
 
 
 def test_scope_line_is_empty_without_data_calls():
-    assert scope_line(_Calls([("kb_lookup", {"topic": "t"})])) == ""
+    assert scope_line(_Calls([("kp_lookup", {"topic": "t"})])) == ""
 
 
 def test_measured_over_keeps_the_threshold_in_a_multi_filter_call():

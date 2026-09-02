@@ -25,7 +25,8 @@ from tools.data_tools import (
     transaction_detail,
 )
 from tools.data_viz_tools import build_make_chart_tool, get_chart_guidance
-from tools.kb_tools import kb_list_topics, kb_lookup
+from tools.knowledge_base import knowledge_base_search
+from tools.kp_tools import kp_list_topics, kp_lookup
 
 _WORKFLOW_DIR = Path(__file__).parent.parent / "skills" / "workflow"
 _BASE_INSTRUCTIONS = _load_skill(_WORKFLOW_DIR / "data_query.md").body
@@ -96,8 +97,8 @@ def _compose_instructions(skill: DomainSkill, pillar: dict) -> str:
 
 def build_specialist_agent(skill: DomainSkill, pillar: dict, model) -> Agent:
     # Per-specialist make_chart binding so the chart-creation tool knows
-    # which KB list to append into when invoked. Charts created via this
-    # tool are stored on the same KB the auto-distiller writes to and are
+    # which KP list to append into when invoked. Charts created via this
+    # tool are stored on the same KP the auto-distiller writes to and are
     # surfaced via the same `_collect_turn_charts` path in server.py.
     make_chart = build_make_chart_tool(skill.name)
 
@@ -148,7 +149,10 @@ def build_specialist_agent(skill: DomainSkill, pillar: dict, model) -> Agent:
                aggregate_column, batch_aggregate,
                summarize_trend, batch_summarize_trend, summarize_by_group,
                make_chart, get_chart_guidance,
-               kb_list_topics, kb_lookup],
+               kp_list_topics, kp_lookup,
+               # PRIOR cases, not this one — see tools/knowledge_base.py
+               # for why it is a sibling of kp_lookup and not a data tool.
+               knowledge_base_search],
         output_type=AgentOutputSchema(SpecialistOutput, strict_json_schema=False),
         model=model,
         # Force the specialist to actually query the data on each invocation.
