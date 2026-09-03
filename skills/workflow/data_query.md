@@ -244,9 +244,12 @@ Rules for what comes back:
   plainly, in one clause, with no apology and no speculation about what the
   knowledge base might have said — then answer the rest from this case's
   data. Do not retry; the answer will not change.
-- `status: "unavailable"` (a fault: misconfigured, unreachable, timed out)
-  and an empty `similar_cases` are both RESULTS: say so, and answer from this
-  case's data. Re-ask at most ONCE, on a different axis of similarity.
+- `status: "unavailable"` (a fault: misconfigured, unreachable, timed out,
+  or rate-limited) and an empty `similar_cases` are both RESULTS: say so, and
+  answer from this case's data. Re-ask at most ONCE, and only on a different
+  axis of similarity — never the same question again. When the note says
+  **rate-limited**, do not re-ask at all this turn: the answer will not
+  change, and asking again is what the service is objecting to.
 
 ## 1.1 Round budget (targets below; hard cap 10, and hitting it kills your answer)
 

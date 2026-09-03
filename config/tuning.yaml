@@ -237,3 +237,11 @@ knowledge_base:
   # client is confirmed thread-safe AND the backend is not rate-limiting.
   # [env: KNOWLEDGE_BASE_MAX_CONCURRENCY]
   max_concurrency: 1
+
+  # After a 429, stop calling for this long — NOT a retry, the opposite. A
+  # multi-specialist turn is exactly when we would otherwise pile onto a
+  # service that just asked for less traffic: one 429 answers for all of
+  # them instead of each burning its own timeout to learn the same thing. A
+  # successful call clears it immediately. 0 disables.
+  # [env: KNOWLEDGE_BASE_RATE_LIMIT_COOLDOWN_S]
+  rate_limit_cooldown_s: 60

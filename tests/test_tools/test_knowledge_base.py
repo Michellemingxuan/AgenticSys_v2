@@ -77,9 +77,11 @@ def _clean_env(monkeypatch):
     monkeypatch.setenv("KNOWLEDGE_BASE_JSON", "/fake/aggregated.json")
     kb.set_knowledge_base_client(None)
     kb._PATH_MODULES.clear()
+    kb._close_rate_limit_breaker()
     yield
     kb.set_knowledge_base_client(None)
     kb._PATH_MODULES.clear()
+    kb._close_rate_limit_breaker()
 
 
 # ── unavailable: the failure mode that must NEVER invent a case ─────────────
@@ -678,6 +680,8 @@ def test_the_switch_is_wired_to_the_tuning_yaml():
         "knowledge_base.text_chars": "KNOWLEDGE_BASE_TEXT_CHARS",
         "knowledge_base.history_turns": "KNOWLEDGE_BASE_HISTORY_TURNS",
         "knowledge_base.max_concurrency": "KNOWLEDGE_BASE_MAX_CONCURRENCY",
+        "knowledge_base.rate_limit_cooldown_s":
+            "KNOWLEDGE_BASE_RATE_LIMIT_COOLDOWN_S",
     }.items():
         assert _MAP[dotted] == env_name
 
@@ -952,3 +956,102 @@ def test_the_timeout_note_points_at_the_rate_limiter(monkeypatch):
     out = _invoke("q", "p")
     assert out["status"] == "unavailable"
     assert "rate-limited backend" in out["note"]
+
+
+# ── the post-429 cooldown ───────────────────────────────────────────────────
+#
+# NOT a retry — the opposite. A rate limit is the backend asking for less
+# traffic, and a multi-specialist turn is exactly when we would otherwise give
+# it more: four specialists asking the same throttled service in one round,
+# each burning its own timeout to learn the same thing.
+
+def test_one_429_stops_the_next_call_from_being_made():
+    calls = []
+
+    def _throttled(**kwargs):
+        calls.append(kwargs)
+        raise RuntimeError("429 Too Many Requests")
+
+    kb.set_knowledge_base_client(_throttled)
+    first = _invoke("q", "p")
+    second = _invoke("q", "p")
+
+    assert first["status"] == "unavailable"
+    assert second["status"] == "unavailable"
+    assert len(calls) == 1, "the second call reached a service that said stop"
+    assert "not calling it again" in second["note"]
+    assert "Do NOT retry this turn" in second["note"]
+
+
+def test_the_cooldown_reports_how_long_is_left():
+    kb.set_knowledge_base_client(
+        lambda **kw: (_ for _ in ()).throw(RuntimeError("429")))
+    _invoke("q", "p")
+    events = []
+    logger = types.SimpleNamespace(log=lambda n, p: events.append((n, p)))
+    _invoke("q", "p", ctx=_ctx(logger=logger))
+
+    result = [p for n, p in events if n == "tool_result"][0]
+    assert result["status"] == "rate_limited_cooldown"
+    assert 0 < result["cooldown_remaining_s"] <= kb._RATE_LIMIT_COOLDOWN_S
+
+
+def test_the_cooldown_expires(monkeypatch):
+    monkeypatch.setattr(kb, "_RATE_LIMIT_COOLDOWN_S", 0.2)
+    calls = []
+
+    def _flaky(**kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("429 rate limit")
+        return _PAYLOAD
+
+    kb.set_knowledge_base_client(_flaky)
+    assert _invoke("q", "p")["status"] == "unavailable"
+    assert _invoke("q", "p")["status"] == "unavailable"      # still cooling
+    time.sleep(0.25)
+    assert _invoke("q", "p")["status"] == "ok"               # resumed
+    assert len(calls) == 2
+
+
+def test_a_success_clears_the_breaker(monkeypatch):
+    monkeypatch.setattr(kb, "_RATE_LIMIT_COOLDOWN_S", 0.2)
+    kb.set_knowledge_base_client(
+        lambda **kw: (_ for _ in ()).throw(RuntimeError("429")))
+    _invoke("q", "p")
+    assert kb._cooling_off() > 0
+
+    time.sleep(0.25)
+    kb.set_knowledge_base_client(lambda **kw: _PAYLOAD)
+    assert _invoke("q", "p")["status"] == "ok"
+    assert kb._cooling_off() == 0, "a working call must resume normal service"
+
+
+def test_a_non_429_failure_does_not_open_the_breaker():
+    """Only an explicit rate limit means "send less". A broken client should
+    keep reporting itself broken, not go quiet for a minute."""
+    calls = []
+
+    def _broken(**kwargs):
+        calls.append(1)
+        raise ValueError("malformed json_path")
+
+    kb.set_knowledge_base_client(_broken)
+    _invoke("q", "p")
+    _invoke("q", "p")
+    assert len(calls) == 2
+    assert kb._cooling_off() == 0
+
+
+def test_the_cooldown_can_be_disabled(monkeypatch):
+    monkeypatch.setattr(kb, "_RATE_LIMIT_COOLDOWN_S", 0)
+    calls = []
+
+    def _throttled(**kwargs):
+        calls.append(1)
+        raise RuntimeError("429")
+
+    kb.set_knowledge_base_client(_throttled)
+    _invoke("q", "p")
+    _invoke("q", "p")
+    assert len(calls) == 2

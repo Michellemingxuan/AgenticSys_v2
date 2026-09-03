@@ -116,6 +116,40 @@ _PATH_MODULES: dict[str, Any] = {}
 # Raise `max_concurrency` only if the client is confirmed thread-safe AND the
 # backend is not rate-limiting.
 _MAX_CONCURRENCY = max(1, int(os.environ.get("KNOWLEDGE_BASE_MAX_CONCURRENCY", "1")))
+
+# After a 429, stop calling for this long. NOT a retry — the opposite.
+#
+# A rate limit is the backend asking for less traffic, and a multi-specialist
+# turn is precisely when we would otherwise give it more: four specialists ask
+# the same throttled service in the same round, each burning its own timeout to
+# discover the same thing. One 429 answers for all of them.
+#
+# We deliberately do NOT retry on top of this. The client already retries
+# internally, so a retry here multiplies someone else's backoff — the same
+# amplification as fanning a throttled batch out into per-document calls — and
+# it would spend a specialist's whole ~20s budget waiting. 0 disables.
+_RATE_LIMIT_COOLDOWN_S = float(
+    os.environ.get("KNOWLEDGE_BASE_RATE_LIMIT_COOLDOWN_S", "60"))
+_rate_limited_until = 0.0
+
+
+def _cooling_off() -> float:
+    """Seconds left in the post-429 cooldown; 0.0 when clear."""
+    return max(0.0, _rate_limited_until - time.monotonic())
+
+
+def _open_rate_limit_breaker() -> None:
+    global _rate_limited_until
+    if _RATE_LIMIT_COOLDOWN_S > 0:
+        _rate_limited_until = time.monotonic() + _RATE_LIMIT_COOLDOWN_S
+
+
+def _close_rate_limit_breaker() -> None:
+    """A successful call proves the throttle lifted — resume immediately."""
+    global _rate_limited_until
+    _rate_limited_until = 0.0
+
+
 _EXECUTOR: Any = None
 _EXECUTOR_LOCK = threading.Lock()
 
@@ -599,6 +633,20 @@ async def knowledge_base_search(ctx: RunContextWrapper, question: str,
                     "`target_pattern`; an empty call retrieves nothing",
         })
 
+    # Post-429 cooldown, checked before resolution so a throttled backend costs
+    # nothing at all on the following calls.
+    cooling = _cooling_off()
+    if cooling:
+        out = {"status": "unavailable",
+               "note": f"the knowledge base is rate-limited (429); not calling "
+                       f"it again for {cooling:.0f}s. Do NOT retry this turn. "
+                       f"{_UNAVAILABLE_NOTE}"}
+        if logger is not None:
+            logger.log("tool_result", {"tool": "knowledge_base_search",
+                                       "status": "rate_limited_cooldown",
+                                       "cooldown_remaining_s": round(cooling, 1)})
+        return json.dumps(out)
+
     json_path = _json_path()
     if not json_path:
         out = {"status": "unavailable",
@@ -674,8 +722,10 @@ async def knowledge_base_search(ctx: RunContextWrapper, question: str,
         # that as a rejected data call and quarantines the specialist's whole
         # answer. A KB miss is a missing OPTION, not a broken measurement.
         rate_limited = _looks_rate_limited(exc)
-        detail = ("the knowledge base is rate-limited (429) and its retries did "
-                  "not clear it" if rate_limited else
+        if rate_limited:
+            _open_rate_limit_breaker()
+        detail = ("the knowledge base is rate-limited (429) and its own retries "
+                  "did not clear it — do NOT retry this turn" if rate_limited else
                   f"the knowledge base lookup failed ({type(exc).__name__})")
         out = {"status": "unavailable", "note": f"{detail}. {_UNAVAILABLE_NOTE}"}
         if logger is not None:
@@ -686,6 +736,7 @@ async def knowledge_base_search(ctx: RunContextWrapper, question: str,
                                        "message": str(exc)[:300]})
         return json.dumps(out)
 
+    _close_rate_limit_breaker()      # it answered; the throttle has lifted
     result = summarize_kb_result(
         payload, self_case_id=getattr(app_ctx, "_case_id", None))
     if logger is not None:
