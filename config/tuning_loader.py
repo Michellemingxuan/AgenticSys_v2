@@ -12,6 +12,7 @@ module that reads these values is imported.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 try:
@@ -43,8 +44,8 @@ _MAP = {
     "timeouts.amem_write_s": "AMEM_WRITE_TIMEOUT_S",
     "timeouts.amem_active_load_s": "AMEM_ACTIVE_LOAD_TIMEOUT_S",
     # Knowledge base (prior-case retrieval). `enabled` is the master switch;
-    # an empty `client` / `json_path` is left as the empty string on purpose,
-    # so "configured but blank" and "absent" behave identically.
+    # an empty `client` / `json_path` is skipped entirely rather than written
+    # as "", so a blank key leaves the variable free for .env or the shell.
     "knowledge_base.enabled": "KNOWLEDGE_BASE_ENABLED",
     "knowledge_base.client": "KNOWLEDGE_BASE_CLIENT",
     "knowledge_base.json_path": "KNOWLEDGE_BASE_JSON",
@@ -71,21 +72,51 @@ def _dig(data, dotted: str):
 
 def apply_tuning(path: str | os.PathLike | None = None) -> dict[str, str]:
     """Set os.environ defaults from the tuning YAML (setdefault: an existing env
-    var wins). Never raises. Returns the {ENV_NAME: value} actually applied."""
+    var wins). Never raises. Returns the {ENV_NAME: value} actually applied.
+
+    LOUD on failure. Every way this can fail is otherwise invisible — the
+    process starts, every knob silently holds its code default, and the symptom
+    surfaces much later as a feature that "isn't configured". A parse error is
+    the worst of them because it is TOTAL: one bad line discards the whole file,
+    timeouts and memory knobs included. It is also easy to write by accident —
+
+        client: /abs/path/kb.py: answer_question    # the ": " makes it invalid
+        client: "/abs/path/kb.py:answer_question"   # quoted, fine
+
+    — which is exactly the edit someone makes on the server. So say so on
+    stderr rather than returning an empty dict nobody looks at.
+    """
     applied: dict[str, str] = {}
-    if yaml is None:
-        return applied
     p = Path(path) if path else _DEFAULT_PATH
+    if yaml is None:
+        print(f"[tuning] PyYAML is not installed — {p} IGNORED; every knob "
+              f"falls back to its code default.", file=sys.stderr)
+        return applied
+    if not p.exists():
+        print(f"[tuning] {p} not found — every knob falls back to its code "
+              f"default.", file=sys.stderr)
+        return applied
     try:
         data = yaml.safe_load(p.read_text()) or {}
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 — bad config must not stop boot
+        print(f"[tuning] {p} FAILED TO PARSE ({type(exc).__name__}: {exc}). "
+              f"The WHOLE file is ignored and every knob — timeouts and memory "
+              f"included — falls back to its code default. Fix the YAML and "
+              f"restart.", file=sys.stderr)
         return applied
     for dotted, env_name in _MAP.items():
         val = _dig(data, dotted)
         if val is None:
             continue
+        text = str(val).strip()
+        if not text:
+            # An empty value means "not configured", and WRITING it would make
+            # the variable present-but-empty: that reads as unset to consumers
+            # while blocking every later supplier (`os.environ.setdefault`, a
+            # second `load_dotenv`), which is a confusing way to be unset.
+            continue
         if env_name in os.environ:
             continue                       # inline / .env already set it → wins
-        os.environ[env_name] = str(val)
-        applied[env_name] = str(val)
+        os.environ[env_name] = text
+        applied[env_name] = text
     return applied

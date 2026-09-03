@@ -63,6 +63,26 @@ except ImportError:
 from config.tuning_loader import apply_tuning as _apply_tuning
 _apply_tuning()
 
+# One boot line for the knowledge base. "Enabled but unconfigured" is
+# otherwise invisible until a specialist calls the tool mid-turn and the
+# reviewer reads "no comparable-case lookup was available" — by which point
+# the turn is spent. Imported here (after apply_tuning, before the agent
+# factories) because the module reads its caps at import time.
+from tools.knowledge_base import is_enabled as _kb_is_enabled
+_kb_client = (os.environ.get("KNOWLEDGE_BASE_CLIENT") or "").strip()
+_kb_json = (os.environ.get("KNOWLEDGE_BASE_JSON") or "").strip()
+if not _kb_is_enabled():
+    print("[server] knowledge base: OFF — specialists answer "
+          "'not applicable' for prior-case comparisons")
+elif _kb_client and _kb_json:
+    print(f"[server] knowledge base: ON via {_kb_client}")
+else:
+    _kb_missing = ", ".join(
+        name for name, value in (("KNOWLEDGE_BASE_CLIENT", _kb_client),
+                                 ("KNOWLEDGE_BASE_JSON", _kb_json)) if not value)
+    print(f"[server] knowledge base: ENABLED BUT UNCONFIGURED — {_kb_missing} "
+          f"is empty; every lookup will report 'unavailable'")
+
 from flask import Flask, Response, abort, jsonify, request, send_from_directory
 from flask_cors import CORS
 
