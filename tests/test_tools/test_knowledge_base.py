@@ -11,7 +11,9 @@ losing the case_ids.
 
 import asyncio
 import json
+import os
 import pathlib
+import sys
 import threading
 import time
 import types
@@ -952,3 +954,86 @@ def test_the_timeout_note_points_at_the_rate_limiter(monkeypatch):
     out = _invoke("q", "p")
     assert out["status"] == "unavailable"
     assert "rate-limited backend" in out["note"]
+
+
+# ── a delivered script imports its siblings ─────────────────────────────────
+#
+# From the private env: `ModuleNotFoundError: No module named 'embeddings'`,
+# for a file sitting right next to the retrieval script that worked standalone.
+# Running a script puts its own directory on sys.path[0]; loading it by file
+# path adds nothing, so every sibling import fails.
+
+def _two_file_client(tmp_path):
+    """A retrieval script plus the sibling module it imports — the real shape."""
+    (tmp_path / "embeddings.py").write_text(
+        "class EmbeddingService:\n"
+        "    def embed(self, texts):\n"
+        "        return [[0.1] * 3 for _ in texts]\n")
+    (tmp_path / "retrieval.py").write_text(
+        "from embeddings import EmbeddingService\n"
+        "SERVICE = EmbeddingService()\n"
+        "def answer_question(json_path, question, conversation_history=None,\n"
+        "                    target_pattern=''):\n"
+        "    SERVICE.embed([question])\n"
+        "    return {'answer': 'from the two-file client',\n"
+        "            'retrieval_query': question, 'matched_clusters': [],\n"
+        "            'relevant_bullets': [{'cluster_key': 'c',\n"
+        "                                  'pattern_type': 'common',\n"
+        "                                  'case_id': 'case_7', 'text': 'point',\n"
+        "                                  'similarity': 0.5}]}\n")
+    return str(tmp_path / "retrieval.py")
+
+
+def test_a_client_can_import_its_sibling_modules(tmp_path, monkeypatch):
+    script = _two_file_client(tmp_path)
+    monkeypatch.setenv("KNOWLEDGE_BASE_CLIENT", f"{script}:answer_question")
+
+    out = _invoke("any similar cases?", "some pattern")
+
+    assert out["status"] == "ok", out.get("note")
+    assert out["similar_cases"] == ["case_7"]
+
+
+def test_the_client_directory_is_appended_never_prepended(tmp_path, monkeypatch):
+    """Their tree may hold a config.py / models.py / tools.py. Prepending would
+    let it shadow ours for the rest of the process; appending resolves their
+    siblings and leaves every name this repo owns alone."""
+    script = _two_file_client(tmp_path)
+    monkeypatch.setenv("KNOWLEDGE_BASE_CLIENT", f"{script}:answer_question")
+    before = list(sys.path)
+
+    _invoke("q", "p")
+
+    added = [p for p in sys.path if p not in before]
+    assert added == [str(tmp_path)]
+    assert sys.path.index(str(tmp_path)) > 0
+    # Anything this repo already resolves keeps resolving to this repo.
+    import config.tuning_loader as tl
+    assert tl.__file__.startswith(os.getcwd())
+
+
+def test_a_genuinely_missing_sibling_still_reports_clearly(tmp_path, monkeypatch):
+    (tmp_path / "retrieval.py").write_text("from not_there import Thing\n")
+    monkeypatch.setenv("KNOWLEDGE_BASE_CLIENT",
+                       f"{tmp_path / 'retrieval.py'}:answer_question")
+
+    out = _invoke("q", "p")
+    assert out["status"] == "unavailable"
+    assert "ModuleNotFoundError" in out["note"]
+    assert "not_there" in out["note"]
+
+
+def test_a_failed_import_leaves_no_husk_in_sys_modules(tmp_path, monkeypatch):
+    """A half-executed module left in sys.modules would be found by the NEXT
+    import and used as if it had loaded. (A SUCCESSFUL load stays registered,
+    as any imported module does — this is only about the failed one.)"""
+    script = tmp_path / "retrieval.py"
+    script.write_text("raise RuntimeError('boom')\n")
+    monkeypatch.setenv("KNOWLEDGE_BASE_CLIENT", f"{script}:answer_question")
+
+    assert _invoke("q", "p")["status"] == "unavailable"
+
+    husks = [name for name, mod in list(sys.modules.items())
+             if name.startswith("_kb_client_")
+             and getattr(mod, "__file__", None) == str(script)]
+    assert husks == []

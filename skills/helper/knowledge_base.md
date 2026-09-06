@@ -149,6 +149,11 @@ is the master switch (`false` → the "not applicable" path above; unset →
 on only when a client and a json_path are configured). An inline env var
 still overrides the file.
 
+A delivered script may import its siblings (`retrieval.py` doing
+`from embeddings import EmbeddingService`); point `KNOWLEDGE_BASE_CLIENT` at
+the entry-point file and its directory is put on the path for you, so the
+whole folder can be dropped in as-is.
+
 The platform's client is
 `answer_question(json_path, question, conversation_history, target_pattern)`,
 resolved from the environment at call time — an installed package (`pkg.module:answer_question`) or a loose

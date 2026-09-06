@@ -63,6 +63,7 @@ import importlib
 import inspect
 import json
 import os
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -151,7 +152,22 @@ def _load_module_from_path(path: str):
 
     A script dropped into the repo (or onto the server) is not an installed
     package, so `import_module` cannot see it. Loading it by file path means the
-    handover needs no packaging, no sys.path surgery, and no wrapper module.
+    handover needs no packaging and no wrapper module.
+
+    Its DIRECTORY goes on sys.path first, because a delivered script imports its
+    siblings — `retrieval.py` doing `from embeddings import EmbeddingService`.
+    That resolves when you run the script directly, since Python puts the
+    script's own directory on `sys.path[0]`, and fails under
+    `spec_from_file_location`, which adds nothing. The symptom is a
+    `ModuleNotFoundError` for a file sitting right next to the one that works
+    standalone.
+
+    APPENDED, not prepended — the opposite of what running a script does, and
+    deliberately. Their directory may hold a `config.py`, `models.py`,
+    `logger.py` or `tools.py`, and prepending would let it shadow ours for the
+    rest of the process. Appending resolves their siblings while leaving every
+    name this repo already owns untouched.
+
     Cached: the module is executed once, not once per specialist call.
     """
     cached = _PATH_MODULES.get(path)
@@ -159,12 +175,24 @@ def _load_module_from_path(path: str):
         return cached
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location(
-        f"_kb_client_{abs(hash(path))}", path)
+    resolved = os.path.abspath(path)
+    parent = os.path.dirname(resolved)
+    if parent and parent not in sys.path:
+        sys.path.append(parent)
+
+    name = f"_kb_client_{abs(hash(resolved))}"
+    spec = importlib.util.spec_from_file_location(name, resolved)
     if spec is None or spec.loader is None:
         return None
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # Registered BEFORE exec: a module that imports itself, uses dataclasses, or
+    # pickles anything expects to find itself in sys.modules while it runs.
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(name, None)      # a failed import must leave no husk
+        raise
     _PATH_MODULES[path] = module
     return module
 
