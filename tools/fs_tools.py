@@ -199,7 +199,7 @@ def list_report_sections(folder: Path) -> list[dict]:
 
 # Curated case-report .md files often carry raw numeric values that are 6+
 # digits long (card limits, balances, spend / payment totals). The boundary
-# redaction layer in llm.firewall_stack masks any `\d{6,}` run, which
+# redaction layer in llm.firewall_stack masks any `\d{13,}` run, which
 # accidentally turns e.g. `174897.36` → `***MASKED***.36` even though the
 # value is a perfectly displayable dollar amount the reviewer needs to see.
 #

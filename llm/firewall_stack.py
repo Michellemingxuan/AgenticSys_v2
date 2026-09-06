@@ -41,7 +41,24 @@ LLM_CALL_KIND: contextvars.ContextVar[str] = contextvars.ContextVar(
 
 
 _CASE_ID_RE = re.compile(r"CASE-\d+")
-_DIGIT_RUN_RE = re.compile(r"\d{10,}")
+# 13+, not 10+. A knowledge-base `case_id` is an 11-12 digit run
+# (`402906382014`), so a 10+ rule masked the very identifier the
+# prior-case lookup exists to return — twice over: once on the way INTO the
+# specialist, so it never saw the id, and again in the final answer, so the
+# reviewer got a similar case they could not look up. 13 clears case ids
+# while still masking a 15-digit card number.
+#
+# This is a LENGTH heuristic and nothing more: any 10-12 digit value now
+# passes, not only case ids. The tighter alternative — allow-listing exactly
+# the ids the knowledge base returned this turn — was considered and not
+# taken; revisit it if a 10-12 digit identifier that should stay masked
+# turns up somewhere else.
+#
+# Scope: this is the firewall's rule, on LLM messages and final answers. The
+# data layer keeps its own stricter `\d{6,}` masking on table values
+# (`datalayer/adapter.py`, `agent_factories/data_manager_agent.py`,
+# `tools/fs_tools.py`) — untouched, because none of them is on this path.
+_DIGIT_RUN_RE = re.compile(r"\d{13,}")
 
 
 FIREWALL_GUIDANCE = (
@@ -53,7 +70,7 @@ FIREWALL_GUIDANCE = (
 
 
 def sanitize_message(message: str) -> str:
-    """Mask identifiers: long digit runs (6+ digits) and CASE-\\d+ tokens."""
+    """Mask identifiers: long digit runs (13+ digits) and CASE-\\d+ tokens."""
     masked = _CASE_ID_RE.sub("[CASE-ID]", message)
     return _DIGIT_RUN_RE.sub("***MASKED***", masked)
 
