@@ -119,9 +119,7 @@ question in different words.
 - `status: "unavailable"` with a `note` means the KB is ON but did not
   answer — a fault or a busy backend, not a setting. The note says which:
   a client that could not be loaded, a 429 rate limit its retries did not
-  clear, or a timeout. Say so plainly and answer from this case's data. On a
-  rate limit, do NOT re-ask this turn — the tool stops calling the backend
-  for a cooldown anyway, and asking again is what it is objecting to.
+  clear, or a timeout. Say so plainly and answer from this case's data.
 - An empty `similar_cases` is a RESULT: "no comparable prior case was found for
   this framing" is a legitimate, useful answer.
 
